@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::types::{AiProvider, ApiStyle, MatchedSignal, ProviderFingerprint};
+use crate::types::{AiProvider, ApiStyle, FingerprintInput, MatchedSignal, ProviderFingerprint};
 
 /// Raw score accumulator before normalization.
 #[derive(Debug, Default)]
@@ -114,6 +114,7 @@ pub fn apply_conflict_penalties(scores: &mut HashMap<AiProvider, ScoreAccumulato
 pub fn build_provider_fingerprint(
     provider: AiProvider,
     accumulator: ScoreAccumulator,
+    input: &FingerprintInput,
 ) -> ProviderFingerprint {
     let confidence = compute_confidence(&accumulator);
     ProviderFingerprint {
@@ -121,7 +122,7 @@ pub fn build_provider_fingerprint(
         confidence,
         signals: accumulator.signals,
         inferred_api_style: infer_api_style(provider),
-        suggested_method: suggest_method(provider),
+        suggested_method: suggest_method(input),
     }
 }
 
@@ -137,13 +138,31 @@ fn infer_api_style(provider: AiProvider) -> ApiStyle {
     }
 }
 
-fn suggest_method(provider: AiProvider) -> Option<String> {
-    match provider {
-        AiProvider::Ollama => Some("POST".into()),
-        AiProvider::Anthropic => Some("POST".into()),
-        AiProvider::Bedrock => Some("POST".into()),
-        AiProvider::Gemini => Some("POST".into()),
-        _ => Some("POST".into()),
+/// Suggest the HTTP method to use against the endpoint.
+///
+/// Prefers the observed request method (a request-pattern signal); otherwise
+/// infers it from the endpoint path — listing endpoints (`/models`, `/api/tags`,
+/// `/api/ps`) are `GET`, while inference endpoints (chat/messages/generate/
+/// invoke/generateContent) are `POST`.
+fn suggest_method(input: &FingerprintInput) -> Option<String> {
+    if let Some(method) = input.method.as_deref() {
+        let method = method.trim();
+        if !method.is_empty() {
+            return Some(method.to_uppercase());
+        }
+    }
+
+    let url = input.url.to_lowercase();
+    let path = url.split('?').next().unwrap_or(&url);
+    let is_listing = path.ends_with("/models")
+        || path.ends_with("/v1/models")
+        || path.ends_with("/api/tags")
+        || path.ends_with("/api/ps");
+
+    if is_listing {
+        Some("GET".into())
+    } else {
+        Some("POST".into())
     }
 }
 
@@ -194,6 +213,51 @@ mod tests {
             }],
         };
         assert!(compute_confidence(&acc) >= 0.72);
+    }
+
+    #[test]
+    fn suggest_method_observed_wins_then_path_inference() {
+        let acc = || ScoreAccumulator {
+            raw_weight: 0.5,
+            signals: vec![],
+        };
+
+        // Observed method wins (and is uppercased).
+        let observed = FingerprintInput {
+            url: "https://api.openai.com/v1/chat/completions".into(),
+            method: Some("get".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            build_provider_fingerprint(AiProvider::OpenAi, acc(), &observed)
+                .suggested_method
+                .as_deref(),
+            Some("GET")
+        );
+
+        // No method: inference endpoints -> POST.
+        let chat = FingerprintInput {
+            url: "https://api.openai.com/v1/chat/completions".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            build_provider_fingerprint(AiProvider::OpenAi, acc(), &chat)
+                .suggested_method
+                .as_deref(),
+            Some("POST")
+        );
+
+        // No method: listing endpoints -> GET.
+        let models = FingerprintInput {
+            url: "https://api.openai.com/v1/models".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            build_provider_fingerprint(AiProvider::OpenAi, acc(), &models)
+                .suggested_method
+                .as_deref(),
+            Some("GET")
+        );
     }
 
     #[test]
