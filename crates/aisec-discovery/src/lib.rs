@@ -3,6 +3,7 @@
 //! Crawls websites, extracts links, and detects REST APIs, OpenAPI specs,
 //! GraphQL endpoints, and AI/LLM service routes.
 
+pub mod browser;
 pub mod client;
 pub mod config;
 pub mod crawler;
@@ -13,6 +14,7 @@ pub mod retry;
 pub mod types;
 pub mod url_policy;
 
+pub use browser::{BrowserCapture, BrowserConfig, BrowserCrawler, CapturedRequest, WaitUntil};
 pub use client::HttpClient;
 pub use config::{DiscoveryConfig, RetryConfig};
 pub use engine::{DiscoveryEngine, SurfaceDiscovery};

@@ -2,8 +2,9 @@ use std::time::Instant;
 
 use aisec_core::AisecResult;
 use async_trait::async_trait;
-use tracing::{info, instrument};
+use tracing::{info, instrument, warn};
 
+use crate::browser::{BrowserConfig, BrowserCrawler};
 use crate::client::HttpClient;
 use crate::config::DiscoveryConfig;
 use crate::crawler::Crawler;
@@ -97,6 +98,49 @@ impl DiscoveryEngine {
             },
             errors,
         })
+    }
+
+    /// Run standard HTTP discovery, then augment it with a real browser
+    /// (Playwright/Chromium) pass that renders the SPA and captures network
+    /// traffic. Captured API requests are merged into the report as endpoints.
+    ///
+    /// Browser failures (e.g. Node/Playwright not installed) are non-fatal: the
+    /// HTTP discovery report is still returned with the failure recorded in
+    /// `errors`, so callers degrade gracefully.
+    #[instrument(skip(self, browser_config), fields(seed = %seed_url))]
+    pub async fn discover_with_browser(
+        &self,
+        seed_url: &str,
+        browser_config: BrowserConfig,
+    ) -> AisecResult<DiscoveryReport> {
+        // Validate up-front under the same SSRF policy as HTTP discovery.
+        validate_target_url(seed_url, &self.config)?;
+
+        let mut report = self.discover(seed_url).await?;
+
+        let crawler = BrowserCrawler::new(browser_config);
+        match crawler.capture(seed_url).await {
+            Ok(capture) => {
+                info!(
+                    captured = capture.requests.len(),
+                    exported = capture.endpoints.len(),
+                    "browser capture merged into discovery report"
+                );
+                report.endpoints.extend(capture.endpoints);
+                report.errors.extend(capture.errors);
+                report.endpoints =
+                    DiscoveryReport::dedupe_endpoints(std::mem::take(&mut report.endpoints));
+            }
+            Err(err) => {
+                warn!(error = %err.client_message(), "browser capture failed; returning HTTP-only report");
+                report
+                    .errors
+                    .push(format!("browser capture failed: {}", err.client_message()));
+            }
+        }
+
+        let _ = crawler.close().await;
+        Ok(report)
     }
 }
 
