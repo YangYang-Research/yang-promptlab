@@ -18,10 +18,12 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
-tokio = { workspace = true }
+# `process` (spawn Node Playwright runner), `io-util` (async stdin/stdout pipes),
+# and `fs` (storageState vault files) are required by this crate.
+tokio = { workspace = true, features = ["process", "io-util", "fs"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["process", "io-util", "fs"] }
