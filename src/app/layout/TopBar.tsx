@@ -1,0 +1,47 @@
+import { useLocation } from "react-router-dom";
+
+import { useAppStore } from "@/app/store/AppStore";
+import { routeTitles } from "@/app/router/nav";
+import { SearchInput } from "@/shared/components";
+
+export function TopBar() {
+  const location = useLocation();
+  const { ui, dispatch, backendConnected, backendVersion, projects, stats } = useAppStore();
+
+  const title = routeTitles[location.pathname] ?? "AISec";
+  const selectedProject = projects.find((p) => p.id === ui.selectedProjectId);
+
+  return (
+    <header className="topbar">
+      <div className="topbar__left">
+        <h2 className="topbar__title">{title}</h2>
+        {selectedProject && location.pathname !== "/projects" && (
+          <span className="topbar__context">{selectedProject.name}</span>
+        )}
+      </div>
+
+      <div className="topbar__center">
+        <SearchInput
+          value={ui.searchQuery}
+          onChange={(query) => dispatch({ type: "SET_SEARCH", query })}
+          placeholder="Search findings, targets, projects…"
+        />
+      </div>
+
+      <div className="topbar__right">
+        {stats.runningScans > 0 && (
+          <span className="topbar__status topbar__status--running">
+            {stats.runningScans} scan{stats.runningScans > 1 ? "s" : ""} running
+          </span>
+        )}
+        <span
+          className={`topbar__connection ${backendConnected ? "topbar__connection--online" : ""}`}
+          title={backendConnected ? `Backend v${backendVersion}` : "Backend offline — mock data"}
+        >
+          <span className="topbar__connection-dot" />
+          {backendConnected ? "Connected" : "Mock mode"}
+        </span>
+      </div>
+    </header>
+  );
+}

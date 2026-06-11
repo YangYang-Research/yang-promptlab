@@ -1,0 +1,20 @@
+[plugin]
+id = "com.aisec.sample.report-markdown"
+name = "Markdown Summary Report"
+version = "1.0.0"
+api_version = "1"
+plugin_type = "report"
+language = "javascript"
+description = "Renders a Markdown executive summary from findings"
+author = "AISec"
+
+[runtime]
+type = "subprocess"
+entry = "plugin.js"
+interpreter = "node"
+
+[capabilities]
+log = true
+
+[hooks]
+render_report = "render_report"

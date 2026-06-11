@@ -1,0 +1,256 @@
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
+
+use crate::category::AttackCategory;
+use crate::lifecycle::AttackPhase;
+use crate::payload::MutatorKind;
+
+/// Target surface type for attack routing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetKind {
+    LlmApi,
+    Chatbot,
+    Agent,
+    Rag,
+    Mcp,
+}
+
+/// Endpoint under test.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttackTarget {
+    pub url: String,
+    pub kind: TargetKind,
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+    pub auth_token: Option<String>,
+    /// JSON body template with `{{payload}}` placeholder for injection.
+    pub body_template: Option<String>,
+    pub method: Option<String>,
+}
+
+impl AttackTarget {
+    pub fn llm_api(url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            kind: TargetKind::LlmApi,
+            headers: HashMap::new(),
+            auth_token: None,
+            body_template: Some(
+                r#"{"model":"gpt-4o","messages":[{"role":"user","content":"{{payload}}"}]}"#
+                    .into(),
+            ),
+            method: Some("POST".into()),
+        }
+    }
+
+    pub fn with_auth(mut self, token: impl Into<String>) -> Self {
+        self.auth_token = Some(token.into());
+        self
+    }
+
+    pub fn with_header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.insert(key.into(), value.into());
+        self
+    }
+}
+
+/// Resource limits for a single attack run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttackBudget {
+    pub max_payloads: usize,
+    pub max_mutations_per_payload: usize,
+    pub timeout_ms: u64,
+}
+
+impl Default for AttackBudget {
+    fn default() -> Self {
+        Self {
+            max_payloads: 20,
+            max_mutations_per_payload: 3,
+            timeout_ms: 30_000,
+        }
+    }
+}
+
+/// Runtime context passed through the attack lifecycle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttackContext {
+    pub scan_id: String,
+    pub probe_id: String,
+    pub target_id: Option<String>,
+    pub target: AttackTarget,
+    pub budget: AttackBudget,
+    #[serde(default)]
+    pub metadata: HashMap<String, serde_json::Value>,
+}
+
+impl AttackContext {
+    pub fn new(scan_id: impl Into<String>, probe_id: impl Into<String>, target: AttackTarget) -> Self {
+        Self {
+            scan_id: scan_id.into(),
+            probe_id: probe_id.into(),
+            target_id: None,
+            target,
+            budget: AttackBudget::default(),
+            metadata: HashMap::new(),
+        }
+    }
+}
+
+/// Payload format for transport encoding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PayloadFormat {
+    Plain,
+    JsonTemplate,
+    MultiTurn,
+}
+
+/// Attack payload definition.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttackPayload {
+    pub id: String,
+    pub name: String,
+    pub category: AttackCategory,
+    pub content: String,
+    pub format: PayloadFormat,
+    #[serde(default)]
+    pub metadata: HashMap<String, serde_json::Value>,
+}
+
+impl AttackPayload {
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        category: AttackCategory,
+        content: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            category,
+            content: content.into(),
+            format: PayloadFormat::Plain,
+            metadata: HashMap::new(),
+        }
+    }
+}
+
+/// Planned attack steps produced during the planning phase.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttackPlan {
+    pub attack_id: String,
+    pub category: AttackCategory,
+    pub mutators: Vec<MutatorKind>,
+    pub payload_ids: Vec<String>,
+    pub notes: Option<String>,
+}
+
+/// Raw response from target transport.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttackResponse {
+    pub status: u16,
+    pub headers: HashMap<String, String>,
+    pub body: String,
+    pub duration_ms: u64,
+}
+
+/// Severity of a successful attack evaluation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FindingSeverity {
+    Info,
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+/// Evaluation outcome for a single payload attempt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttackEvaluation {
+    pub success: bool,
+    pub confidence: f32,
+    pub severity: Option<FindingSeverity>,
+    pub indicators: Vec<String>,
+    pub summary: String,
+    pub evidence: Option<serde_json::Value>,
+}
+
+impl AttackEvaluation {
+    pub fn negative(summary: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            confidence: 0.0,
+            severity: None,
+            indicators: vec![],
+            summary: summary.into(),
+            evidence: None,
+        }
+    }
+
+    pub fn positive(
+        severity: FindingSeverity,
+        confidence: f32,
+        summary: impl Into<String>,
+        indicators: Vec<String>,
+    ) -> Self {
+        Self {
+            success: true,
+            confidence,
+            severity: Some(severity),
+            indicators,
+            summary: summary.into(),
+            evidence: None,
+        }
+    }
+}
+
+/// Single payload execution record.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PayloadAttempt {
+    pub payload_id: String,
+    pub payload_name: String,
+    pub mutated_content: String,
+    pub mutators_applied: Vec<MutatorKind>,
+    pub response: AttackResponse,
+    pub evaluation: AttackEvaluation,
+}
+
+/// Full result of running one attack through its lifecycle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttackExecutionResult {
+    pub attack_id: String,
+    pub category: AttackCategory,
+    pub probe_id: String,
+    pub scan_id: String,
+    pub phase: AttackPhase,
+    pub attempts: Vec<PayloadAttempt>,
+    pub best: Option<AttackEvaluation>,
+    pub started_at: OffsetDateTime,
+    pub completed_at: OffsetDateTime,
+    pub error: Option<String>,
+}
+
+impl AttackExecutionResult {
+    pub fn any_success(&self) -> bool {
+        self.attempts.iter().any(|a| a.evaluation.success)
+    }
+
+    pub fn successful_attempts(&self) -> impl Iterator<Item = &PayloadAttempt> {
+        self.attempts.iter().filter(|a| a.evaluation.success)
+    }
+}
+
+/// Aggregated orchestration output across multiple attacks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestrationReport {
+    pub scan_id: String,
+    pub results: Vec<AttackExecutionResult>,
+    pub findings_count: usize,
+    pub started_at: OffsetDateTime,
+    pub completed_at: OffsetDateTime,
+}

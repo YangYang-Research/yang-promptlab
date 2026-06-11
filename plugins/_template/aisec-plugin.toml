@@ -1,0 +1,32 @@
+[plugin]
+id = "com.example.my-plugin"
+name = "My AISec Plugin"
+version = "0.1.0"
+api_version = "1"
+plugin_type = "discovery"   # discovery | attack | judge | report
+language = "python"         # python | javascript
+description = "Short description of what this plugin does"
+author = "Your Name"
+
+[runtime]
+type = "subprocess"
+entry = "plugin.py"         # or plugin.js for JavaScript
+interpreter = "python3"     # or "node"
+min_aisec = "0.1.0"
+
+[capabilities]
+log = true
+finding_emit = false
+probe_mutate = false
+http_request = false
+filesystem_read = []
+filesystem_write = false
+
+[hooks]
+discover = "discover"       # discovery plugins
+# execute_attack = "execute_attack"  # attack plugins
+# evaluate = "evaluate"              # judge plugins
+# render_report = "render_report"    # report plugins
+
+[permissions.rationale]
+log = "Structured logging during execution"

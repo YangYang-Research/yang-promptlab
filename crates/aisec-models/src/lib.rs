@@ -1,0 +1,30 @@
+//! AISec Local Model Manager.
+//!
+//! GGUF model registry, HuggingFace downloads with resume, SHA256 verification,
+//! hardware/GPU detection, and llama.cpp runtime integration.
+
+pub mod download;
+pub mod error;
+pub mod hardware;
+pub mod manager;
+pub mod registry;
+pub mod runtime;
+pub mod types;
+pub mod verify;
+
+pub use download::{DownloadManager, DownloadOptions, HuggingFaceClient, huggingface_url};
+pub use error::{ModelError, ModelResult};
+pub use hardware::detect_hardware;
+pub use manager::LocalModelManager;
+pub use registry::ModelRegistry;
+pub use runtime::{InferenceRuntime, LlamaCppConfig, LlamaCppRuntime, MockInferenceRuntime};
+pub use types::*;
+pub use verify::VerificationEngine;
+
+/// Create a model manager with default vault at `~/.aisec/models` or `./data/models`.
+pub fn default_manager() -> ModelResult<LocalModelManager> {
+    let vault = std::env::var("AISEC_MODEL_VAULT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("./data/models"));
+    LocalModelManager::new(vault)
+}

@@ -1,0 +1,27 @@
+[package]
+name = "aisec-auth"
+description = "Authentication engine for AISec (Playwright login recording, session replay, token extraction)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+aisec-core = { workspace = true }
+aisec-storage = { workspace = true }
+async-trait = { workspace = true }
+base64 = "0.22"
+jsonwebtoken = "9"
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true }

@@ -1,0 +1,13 @@
+[package]
+name = "aisec-integration-tests"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+aisec-core = { workspace = true }
+aisec-auth = { workspace = true }
+aisec-storage = { workspace = true }
+tempfile = "3"
+tokio = { workspace = true }
+uuid = { workspace = true }

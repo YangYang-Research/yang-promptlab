@@ -1,0 +1,25 @@
+[package]
+name = "aisec-payload"
+description = "AISec payload engine — static library, mutations, generation pipeline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+storage = ["dep:aisec-storage"]
+
+[dependencies]
+aisec-core = { workspace = true }
+aisec-storage = { workspace = true, optional = true }
+base64 = "0.22"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

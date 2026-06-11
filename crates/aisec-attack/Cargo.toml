@@ -1,0 +1,31 @@
+[package]
+name = "aisec-attack"
+description = "AISec attack framework — payload execution, mutation, orchestration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+storage = ["dep:aisec-storage"]
+
+[dependencies]
+aisec-core = { workspace = true }
+aisec-payload = { workspace = true }
+aisec-storage = { workspace = true, optional = true }
+async-trait = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+reqwest = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+wiremock = "0.6"

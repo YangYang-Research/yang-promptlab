@@ -1,0 +1,29 @@
+[package]
+name = "aisec-discovery"
+description = "Attack-surface discovery engine for AISec (crawl, API, GraphQL, OpenAPI, AI endpoints)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+aisec-core = { workspace = true }
+async-trait = { workspace = true }
+dashmap = { workspace = true }
+regex = { workspace = true }
+reqwest = { workspace = true }
+scraper = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+wiremock = "0.6"
+serde_json = { workspace = true }

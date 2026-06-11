@@ -1,0 +1,53 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/aisec-core",
+    "crates/aisec-attack",
+    "crates/aisec-payload",
+    "crates/aisec-models",
+    "crates/aisec-judge",
+    "crates/aisec-report",
+    "crates/aisec-fingerprint",
+    "crates/aisec-plugin-host",
+    "crates/aisec-auth",
+    "crates/aisec-discovery",
+    "crates/aisec-storage",
+    "src-tauri",
+    "tests/integration",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Proprietary"
+authors = ["AISec"]
+rust-version = "1.77"
+
+[workspace.dependencies]
+aisec-attack = { path = "crates/aisec-attack" }
+aisec-payload = { path = "crates/aisec-payload" }
+aisec-models = { path = "crates/aisec-models" }
+aisec-judge = { path = "crates/aisec-judge" }
+aisec-report = { path = "crates/aisec-report" }
+aisec-fingerprint = { path = "crates/aisec-fingerprint" }
+aisec-plugin-host = { path = "crates/aisec-plugin-host" }
+aisec-auth = { path = "crates/aisec-auth" }
+aisec-core = { path = "crates/aisec-core" }
+aisec-discovery = { path = "crates/aisec-discovery" }
+aisec-storage = { path = "crates/aisec-storage" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+async-trait = "0.1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros", "uuid", "time", "json"] }
+time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "charset"] }
+scraper = "0.23"
+regex = "1"
+url = "2"
+dashmap = "6"

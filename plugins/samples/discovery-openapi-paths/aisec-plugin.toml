@@ -1,0 +1,26 @@
+[plugin]
+id = "com.aisec.sample.discovery-openapi"
+name = "OpenAPI Path Discovery"
+version = "1.0.0"
+api_version = "1"
+plugin_type = "discovery"
+language = "python"
+description = "Probes common OpenAPI and AI endpoint paths"
+author = "AISec"
+
+[runtime]
+type = "subprocess"
+entry = "plugin.py"
+interpreter = "python3"
+min_aisec = "0.1.0"
+
+[capabilities]
+finding_emit = true
+log = true
+
+[hooks]
+discover = "discover"
+
+[permissions.rationale]
+finding_emit = "Emit discovered endpoints as findings"
+log = "Structured logging during discovery"

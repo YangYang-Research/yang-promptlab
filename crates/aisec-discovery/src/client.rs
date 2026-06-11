@@ -1,0 +1,155 @@
+use std::sync::Arc;
+
+use aisec_core::{AisecError, AisecResult};
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::{Client, Method, Response, StatusCode};
+use tracing::instrument;
+
+use crate::config::DiscoveryConfig;
+use crate::retry::{is_retryable_status, with_reqwest_retry};
+use crate::types::HttpSnapshot;
+
+/// Shared HTTP client with timeouts, size limits, and retry semantics.
+#[derive(Clone)]
+pub struct HttpClient {
+    inner: Client,
+    config: Arc<DiscoveryConfig>,
+}
+
+impl HttpClient {
+    pub fn new(config: DiscoveryConfig) -> AisecResult<Self> {
+        let config = Arc::new(config);
+        let inner = Client::builder()
+            .user_agent(config.user_agent.clone())
+            .timeout(config.request_timeout)
+            .redirect(reqwest::redirect::Policy::limited(5))
+            .build()
+            .map_err(|err| AisecError::config(format!("failed to build HTTP client: {err}")))?;
+
+        Ok(Self { inner, config })
+    }
+
+    pub fn config(&self) -> &DiscoveryConfig {
+        &self.config
+    }
+
+    #[instrument(skip(self), fields(url = %url))]
+    pub async fn get(&self, url: &str) -> AisecResult<HttpSnapshot> {
+        self.request(Method::GET, url, None).await
+    }
+
+    #[instrument(skip(self, body), fields(url = %url))]
+    pub async fn post_json(&self, url: &str, body: &str) -> AisecResult<HttpSnapshot> {
+        self.request(Method::POST, url, Some(body)).await
+    }
+
+    async fn request(
+        &self,
+        method: Method,
+        url: &str,
+        json_body: Option<&str>,
+    ) -> AisecResult<HttpSnapshot> {
+        let label = format!("{method} {url}");
+        let config = self.config.clone();
+        let client = self.inner.clone();
+        let method_clone = method.clone();
+        let url = url.to_string();
+        let body = json_body.map(str::to_string);
+
+        let response = with_reqwest_retry(&label, &config.retry, || {
+            let client = client.clone();
+            let method = method_clone.clone();
+            let url = url.clone();
+            let body = body.clone();
+            async move {
+                let mut req = client.request(method, &url);
+                if let Some(payload) = body {
+                    req = req
+                        .header("Content-Type", "application/json")
+                        .body(payload);
+                }
+                req.send().await
+            }
+        })
+        .await
+        .map_err(|err| AisecError::internal(format!("HTTP request failed: {err}")))?;
+
+        let status = response.status();
+        if is_retryable_status(status.as_u16()) {
+            return Err(AisecError::internal(format!(
+                "HTTP {} after retries",
+                status.as_u16()
+            )));
+        }
+
+        self.snapshot(response).await
+    }
+
+    async fn snapshot(&self, response: Response) -> AisecResult<HttpSnapshot> {
+        let url = response.url().to_string();
+        let status = response.status().as_u16();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|err| AisecError::internal(format!("failed to read body: {err}")))?;
+
+        if bytes.len() > self.config.max_body_bytes {
+            return Err(AisecError::invalid_input(format!(
+                "response body exceeds max_body_bytes ({})",
+                self.config.max_body_bytes
+            )));
+        }
+
+        let body = String::from_utf8_lossy(&bytes).into_owned();
+
+        Ok(HttpSnapshot {
+            url,
+            status,
+            content_type,
+            body,
+        })
+    }
+
+    pub fn default_headers(&self) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_str(&self.config.user_agent)
+                .unwrap_or_else(|_| HeaderValue::from_static("AISec-Discovery")),
+        );
+        headers
+    }
+}
+
+impl HttpSnapshot {
+    pub fn is_success(&self) -> bool {
+        (200..300).contains(&self.status)
+    }
+
+    pub fn is_json(&self) -> bool {
+        self.content_type
+            .as_deref()
+            .is_some_and(|ct| ct.contains("json"))
+    }
+
+    pub fn status_code(&self) -> StatusCode {
+        StatusCode::from_u16(self.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_client_with_defaults() {
+        let client = HttpClient::new(DiscoveryConfig::default()).expect("client");
+        assert_eq!(client.config().worker_count, 8);
+    }
+}
