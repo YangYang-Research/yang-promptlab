@@ -19,5 +19,6 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+aisec-storage = { workspace = true }
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

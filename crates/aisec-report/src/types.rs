@@ -138,6 +138,15 @@ pub struct ReportFinding {
     pub severity: Severity,
     pub category: String,
     pub description: String,
+    /// The attack payload that was sent to the target.
+    #[serde(default)]
+    pub payload: Option<String>,
+    /// The target/model response that was captured.
+    #[serde(default)]
+    pub response: Option<String>,
+    /// Judge confidence score in `[0.0, 1.0]`.
+    #[serde(default)]
+    pub confidence: Option<f32>,
     pub evidence: Option<String>,
     pub recommendation: Option<String>,
     pub compliance_refs: Vec<String>,
