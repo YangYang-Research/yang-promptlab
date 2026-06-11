@@ -205,6 +205,7 @@ name = "aisec-report"
 version = "0.1.0"
 dependencies = [
  "aisec-core",
+ "aisec-storage",
  "async-trait",
  "printpdf",
  "serde",

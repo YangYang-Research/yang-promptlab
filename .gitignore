@@ -16,6 +16,9 @@ logs/
 # Local model vault (downloaded GGUF files)
 /data/
 
+# Generated reports
+/reports/
+
 # IDE
 .idea/
 .vscode/
