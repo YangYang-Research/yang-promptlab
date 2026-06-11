@@ -88,7 +88,7 @@ mod tests {
     #[tokio::test]
     async fn builds_json_body_from_template() {
         let transport = MockTransport::ok(r#"{"choices":[{"message":{"content":"ok"}}]}"#);
-        let runner = PayloadRunner::new(transport);
+        let runner = PayloadRunner::new(&transport);
         let ctx = AttackContext::new(
             "scan-1",
             "probe-1",

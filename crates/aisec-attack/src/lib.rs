@@ -12,6 +12,8 @@ pub mod lifecycle;
 pub mod orchestrator;
 pub mod payload;
 pub mod registry;
+#[cfg(feature = "storage")]
+pub mod scanner;
 pub mod traits;
 pub mod transport;
 pub mod types;
@@ -24,6 +26,8 @@ pub use lifecycle::{AttackLifecycle, AttackPhase, LifecycleEvent};
 pub use orchestrator::{AttackOrchestrator, OrchestratorConfig};
 pub use payload::{MutatorConfig, PayloadMutator, PayloadRunner};
 pub use registry::AttackRegistry;
+#[cfg(feature = "storage")]
+pub use scanner::{PromptInjectionScanner, ScanContext, ScanSummary};
 pub use traits::Attack;
 pub use transport::{HttpTransport, MockTransport, TargetTransport, TransportRequest, TransportResponse};
 pub use types::*;
