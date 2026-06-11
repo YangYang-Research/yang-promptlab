@@ -13,6 +13,9 @@ src-tauri/gen/
 *.log
 logs/
 
+# Local model vault (downloaded GGUF files)
+/data/
+
 # IDE
 .idea/
 .vscode/

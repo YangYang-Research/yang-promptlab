@@ -1,9 +1,13 @@
 mod llama_cpp;
+#[cfg(feature = "llama")]
+mod llama_inproc;
 mod mock;
 
 use async_trait::async_trait;
 
 pub use llama_cpp::{LlamaCppConfig, LlamaCppRuntime};
+#[cfg(feature = "llama")]
+pub use llama_inproc::{LlamaInProcessRuntime, LlamaModelConfig};
 pub use mock::MockInferenceRuntime;
 
 use crate::error::ModelResult;
