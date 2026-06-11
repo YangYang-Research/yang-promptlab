@@ -31,3 +31,4 @@ logs/
 
 # Build artifacts
 *.local
+reports/

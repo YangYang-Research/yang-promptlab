@@ -120,12 +120,20 @@ dependencies = [
 name = "aisec-integration-tests"
 version = "0.1.0"
 dependencies = [
+ "aisec-attack",
  "aisec-auth",
  "aisec-core",
+ "aisec-discovery",
+ "aisec-fingerprint",
+ "aisec-judge",
+ "aisec-report",
  "aisec-storage",
+ "serde_json",
  "tempfile",
  "tokio",
+ "tracing",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
