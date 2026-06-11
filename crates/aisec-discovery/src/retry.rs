@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::time::Duration;
 
 use aisec_core::AisecResult;
 use tracing::{debug, warn};
@@ -93,6 +92,7 @@ mod tests {
     use aisec_core::AisecError;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn retries_until_success() {

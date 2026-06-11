@@ -12,7 +12,7 @@ async fn main() {
     let config = DiscoveryConfig {
         max_depth: 2,
         max_pages: 20,
-        worker_count: 1, // TODO: use 4+ after crawler deadlock fix (see DISCOVERY_VERIFICATION_REPORT.md)
+        worker_count: 4,
         request_timeout: Duration::from_secs(10),
         allow_private_network: true,
         same_origin_only: true,
@@ -44,6 +44,8 @@ async fn main() {
         EndpointKind::GraphQl,
         EndpointKind::AiEndpoint,
         EndpointKind::RestApi,
+        EndpointKind::Form,
+        EndpointKind::JavaScript,
         EndpointKind::Link,
     ] {
         let eps = report.endpoints_by_kind(kind);
