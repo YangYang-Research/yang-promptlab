@@ -74,12 +74,14 @@ name = "aisec-desktop"
 version = "0.1.0"
 dependencies = [
  "aisec-core",
+ "aisec-report",
  "aisec-storage",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tempfile",
+ "time",
  "tokio",
  "tracing",
 ]

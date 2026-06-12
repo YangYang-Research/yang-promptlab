@@ -6,6 +6,7 @@
 
 pub mod commands;
 pub mod db;
+pub mod dto;
 pub mod error;
 pub mod logging;
 pub mod state;
@@ -53,7 +54,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 .map_err(crate::error::CommandError::from)?;
 
             // 3. Store Database + repository manager inside AppState for commands.
-            app.manage(AppState::new(database, log_guard));
+            app.manage(AppState::new(database, data_dir, log_guard));
 
             tracing::info!("AISec backend integration ready (database + repositories)");
             Ok(())
@@ -61,7 +62,18 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
         .invoke_handler(tauri::generate_handler![
             commands::health,
             commands::app_info,
-            commands::db_health
+            commands::db_health,
+            commands::domain::project_create,
+            commands::domain::project_list,
+            commands::domain::project_get,
+            commands::domain::project_delete,
+            commands::domain::target_create,
+            commands::domain::target_list,
+            commands::domain::scan_create,
+            commands::domain::scan_list,
+            commands::domain::finding_list,
+            commands::domain::report_generate,
+            commands::domain::report_list,
         ])
         .build(tauri::generate_context!())?;
 

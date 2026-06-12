@@ -44,7 +44,7 @@ async fn database_is_accessible_via_app_state() {
     let dir = tempfile::tempdir().unwrap();
     let db = open_database(&dir.path().join("aisec.db")).await.unwrap();
     let guard = init_logging(LogOptions::bootstrap("aisec-it")).unwrap();
-    let state = AppState::new(db, guard);
+    let state = AppState::new(db, dir.path().to_path_buf(), guard);
 
     let before = state.repositories().projects().list().await.unwrap().len();
     state
