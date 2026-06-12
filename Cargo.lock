@@ -74,6 +74,7 @@ name = "aisec-desktop"
 version = "0.1.0"
 dependencies = [
  "aisec-core",
+ "aisec-discovery",
  "aisec-report",
  "aisec-storage",
  "serde",

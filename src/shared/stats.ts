@@ -1,9 +1,9 @@
 import type {
   DashboardStats,
-  DiscoveryJob,
   Finding,
   LocalModel,
   Project,
+  ScanRun,
   Severity,
   Target,
 } from "@/shared/types";
@@ -12,7 +12,7 @@ export function computeDashboardStats(
   projects: Project[],
   targets: Target[],
   findings: Finding[],
-  discoveryJobs: DiscoveryJob[],
+  scans: ScanRun[],
   models: LocalModel[],
 ): DashboardStats {
   return {
@@ -20,7 +20,7 @@ export function computeDashboardStats(
     targets: targets.length,
     openFindings: findings.filter((f) => f.status === "open" || f.status === "confirmed").length,
     criticalFindings: findings.filter((f) => f.severity === "critical").length,
-    runningScans: discoveryJobs.filter((j) => j.status === "running").length,
+    runningScans: scans.filter((s) => s.status === "running").length,
     installedModels: models.filter((m) => m.status === "installed").length,
   };
 }

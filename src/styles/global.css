@@ -987,6 +987,28 @@ a:hover {
   margin-top: 0.25rem;
 }
 
+/* Discovery */
+.discovery-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.discovery-controls .input {
+  width: auto;
+  min-width: 260px;
+  max-width: 360px;
+}
+.discovery-progress__row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.discovery-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
 /* Modal */
 .modal-overlay {
   position: fixed;

@@ -2,13 +2,16 @@ import type {
   ActivityItem,
   AttackRun,
   DashboardStats,
+  DiscoveredEndpoint,
   DiscoveryJob,
   Finding,
   LocalModel,
   Project,
   Report,
+  ScanRun,
   Target,
 } from "@/shared/types";
+import type { DiscoveryRunDto } from "@/shared/ipc";
 
 export type AppSettings = {
   theme: "dark" | "light" | "system";
@@ -29,6 +32,8 @@ export type UiState = {
 export type AppDataState = {
   projects: Project[];
   targets: Target[];
+  scans: ScanRun[];
+  endpoints: DiscoveredEndpoint[];
   discoveryJobs: DiscoveryJob[];
   attackRuns: AttackRun[];
   findings: Finding[];
@@ -43,7 +48,10 @@ export type AppDataState = {
   error: string | null;
 };
 
-export type LoadedData = Pick<AppDataState, "projects" | "targets" | "findings" | "reports">;
+export type LoadedData = Pick<
+  AppDataState,
+  "projects" | "targets" | "scans" | "endpoints" | "findings" | "reports"
+>;
 
 export type AppAction =
   | { type: "SET_BACKEND"; version: string; connected: boolean }
@@ -79,6 +87,7 @@ export type AppActions = {
     format?: string,
     kind?: string,
   ) => Promise<void>;
+  runDiscovery: (targetId: string) => Promise<DiscoveryRunDto>;
 };
 
 export type AppStoreValue = AppDataState & {

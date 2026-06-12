@@ -12,6 +12,8 @@ export {
   listFindings,
   generateReport,
   listReports,
+  runDiscovery,
+  listEndpoints,
   type AppInfoResponse,
   type HealthResponse,
   type ProjectDto,
@@ -19,4 +21,7 @@ export {
   type ScanDto,
   type FindingDto,
   type ReportDto,
+  type EndpointDto,
+  type DiscoveryStatsDto,
+  type DiscoveryRunDto,
 } from "./client";

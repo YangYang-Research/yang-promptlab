@@ -8,7 +8,7 @@ use serde::Serialize;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use aisec_storage::{Finding, Project, Report, Scan, Target};
+use aisec_storage::{Endpoint, Finding, Project, Report, Scan, Target};
 
 fn ts(dt: OffsetDateTime) -> String {
     dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string())
@@ -134,6 +134,55 @@ impl From<Finding> for FindingDto {
             updated_at: ts(f.updated_at),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EndpointDto {
+    pub id: String,
+    pub scan_id: String,
+    pub target_id: Option<String>,
+    pub url: String,
+    pub kind: String,
+    pub method: Option<String>,
+    pub confidence: f64,
+    pub evidence: Option<String>,
+    pub source_url: Option<String>,
+    pub discovered_at: String,
+}
+
+impl From<Endpoint> for EndpointDto {
+    fn from(e: Endpoint) -> Self {
+        Self {
+            id: e.id,
+            scan_id: e.scan_id,
+            target_id: e.target_id,
+            url: e.url,
+            kind: e.kind,
+            method: e.method,
+            confidence: e.confidence,
+            evidence: e.evidence,
+            source_url: e.source_url,
+            discovered_at: ts(e.discovered_at),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiscoveryStatsDto {
+    pub pages_fetched: u64,
+    pub pages_failed: u64,
+    pub links_extracted: u64,
+    pub probes_sent: u64,
+    pub duration_ms: u64,
+    pub endpoint_count: u64,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiscoveryRunDto {
+    pub scan: ScanDto,
+    pub endpoints: Vec<EndpointDto>,
+    pub stats: DiscoveryStatsDto,
 }
 
 #[derive(Debug, Clone, Serialize)]

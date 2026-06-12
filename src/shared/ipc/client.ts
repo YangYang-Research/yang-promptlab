@@ -97,6 +97,35 @@ export type FindingDto = {
   updated_at: string;
 };
 
+export type EndpointDto = {
+  id: string;
+  scan_id: string;
+  target_id: string | null;
+  url: string;
+  kind: string;
+  method: string | null;
+  confidence: number;
+  evidence: string | null;
+  source_url: string | null;
+  discovered_at: string;
+};
+
+export type DiscoveryStatsDto = {
+  pages_fetched: number;
+  pages_failed: number;
+  links_extracted: number;
+  probes_sent: number;
+  duration_ms: number;
+  endpoint_count: number;
+  errors: string[];
+};
+
+export type DiscoveryRunDto = {
+  scan: ScanDto;
+  endpoints: EndpointDto[];
+  stats: DiscoveryStatsDto;
+};
+
 export type ReportDto = {
   id: string;
   project_id: string;
@@ -163,3 +192,9 @@ export const generateReport = (
 
 export const listReports = (projectId: string) =>
   invokeCommand<ReportDto[]>("report_list", { projectId });
+
+export const runDiscovery = (targetId: string) =>
+  invokeCommand<DiscoveryRunDto>("discovery_run", { targetId });
+
+export const listEndpoints = (scanId: string) =>
+  invokeCommand<EndpointDto[]>("endpoint_list", { scanId });

@@ -6,6 +6,7 @@ use aisec_storage::ProjectRepository;
 use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
 
+pub mod discovery;
 pub mod domain;
 
 #[derive(Debug, Serialize)]

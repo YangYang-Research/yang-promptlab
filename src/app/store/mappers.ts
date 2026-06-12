@@ -1,14 +1,19 @@
 import type {
+  EndpointDto,
   FindingDto,
   ProjectDto,
   ReportDto,
+  ScanDto,
   TargetDto,
 } from "@/shared/ipc";
 import type {
+  DiscoveredEndpoint,
   Finding,
+  JobStatus,
   Project,
   Report,
   ReportFormat,
+  ScanRun,
   Severity,
   Target,
   TargetType,
@@ -41,16 +46,16 @@ function coerceReportFormat(value: string): ReportFormat {
   return (REPORT_FORMATS as string[]).includes(v) ? (v as ReportFormat) : "html";
 }
 
-function coerceJobStatus(value: string): Report["status"] {
+function coerceJobStatus(value: string, fallback: JobStatus = "completed"): JobStatus {
   switch (value.toLowerCase()) {
     case "pending":
     case "running":
     case "completed":
     case "failed":
     case "cancelled":
-      return value.toLowerCase() as Report["status"];
+      return value.toLowerCase() as JobStatus;
     default:
-      return "completed";
+      return fallback;
   }
 }
 
@@ -123,6 +128,34 @@ export function mapFindings(findings: FindingDto[], targets: TargetDto[]): Findi
     status: coerceFindingStatus(f.status),
     confidence: extractConfidence(f.evidence),
     discoveredAt: f.created_at,
+  }));
+}
+
+export function mapScans(scans: ScanDto[]): ScanRun[] {
+  return scans.map((s) => ({
+    id: s.id,
+    projectId: s.project_id,
+    targetId: s.target_id,
+    name: s.name,
+    status: coerceJobStatus(s.status, "pending"),
+    startedAt: s.started_at,
+    completedAt: s.completed_at,
+    createdAt: s.created_at,
+  }));
+}
+
+export function mapEndpoints(endpoints: EndpointDto[]): DiscoveredEndpoint[] {
+  return endpoints.map((e) => ({
+    id: e.id,
+    scanId: e.scan_id,
+    targetId: e.target_id,
+    url: e.url,
+    kind: e.kind,
+    method: e.method,
+    confidence: e.confidence,
+    evidence: e.evidence,
+    sourceUrl: e.source_url,
+    discoveredAt: e.discovered_at,
   }));
 }
 

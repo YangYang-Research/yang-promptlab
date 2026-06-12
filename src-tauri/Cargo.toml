@@ -22,6 +22,7 @@ tauri-build = { version = "2", features = [] }
 aisec-core = { workspace = true }
 aisec-storage = { workspace = true }
 aisec-report = { workspace = true }
+aisec-discovery = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 time = { workspace = true }

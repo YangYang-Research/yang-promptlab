@@ -15,19 +15,30 @@ import {
   createTarget as createTargetCmd,
   deleteProject as deleteProjectCmd,
   generateReport as generateReportCmd,
+  listEndpoints,
   listFindings,
   listProjects,
   listReports,
   listScans,
   listTargets,
+  runDiscovery as runDiscoveryCmd,
+  type EndpointDto,
   type FindingDto,
   type ReportDto,
+  type ScanDto,
 } from "@/shared/ipc";
 import { toAppError } from "@/shared/errors";
 import { createLogger } from "@/shared/logging";
 import { computeDashboardStats } from "@/shared/stats";
 
-import { mapFindings, mapProjects, mapReports, mapTargets } from "./mappers";
+import {
+  mapEndpoints,
+  mapFindings,
+  mapProjects,
+  mapReports,
+  mapScans,
+  mapTargets,
+} from "./mappers";
 import type {
   AppAction,
   AppActions,
@@ -41,6 +52,8 @@ const log = createLogger("AppStore");
 const initialState: AppDataState = {
   projects: [],
   targets: [],
+  scans: [],
+  endpoints: [],
   discoveryJobs: [],
   attackRuns: [],
   findings: [],
@@ -131,15 +144,21 @@ async function loadAll(): Promise<LoadedData> {
   ]);
 
   const targetDtos = targetGroups.flat();
-  const scanDtos = scanGroups.flat();
+  const scanDtos: ScanDto[] = scanGroups.flat();
   const reportDtos: ReportDto[] = reportGroups.flat();
 
-  const findingGroups = await Promise.all(scanDtos.map((s) => listFindings(s.id)));
+  const [findingGroups, endpointGroups] = await Promise.all([
+    Promise.all(scanDtos.map((s) => listFindings(s.id))),
+    Promise.all(scanDtos.map((s) => listEndpoints(s.id))),
+  ]);
   const findingDtos: FindingDto[] = findingGroups.flat();
+  const endpointDtos: EndpointDto[] = endpointGroups.flat();
 
   return {
     projects: mapProjects(projectDtos, targetDtos, findingDtos),
     targets: mapTargets(targetDtos),
+    scans: mapScans(scanDtos),
+    endpoints: mapEndpoints(endpointDtos),
     findings: mapFindings(findingDtos, targetDtos),
     reports: mapReports(reportDtos, projectDtos),
   };
@@ -204,6 +223,18 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
         runMutation("generateReport", () =>
           generateReportCmd(projectId, scanId, format, kind),
         ),
+      runDiscovery: async (targetId) => {
+        try {
+          const result = await runDiscoveryCmd(targetId);
+          await refresh();
+          return result;
+        } catch (error) {
+          const appError = toAppError(error);
+          log.error("mutation failed: runDiscovery", { error: appError });
+          dispatch({ type: "SET_ERROR", error: appError.message });
+          throw appError;
+        }
+      },
     }),
     [refresh, runMutation],
   );
@@ -217,7 +248,7 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
       state.projects,
       state.targets,
       state.findings,
-      state.discoveryJobs,
+      state.scans,
       state.models,
     );
     return { ...state, stats, dispatch, actions };
