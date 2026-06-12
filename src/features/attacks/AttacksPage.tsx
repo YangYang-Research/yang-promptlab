@@ -1,71 +1,119 @@
+import { useEffect, useMemo, useState } from "react";
+
 import { useAppStore } from "@/app/store/AppStore";
 import {
+  Badge,
   Button,
   Card,
   DataTable,
+  EmptyState,
   PageHeader,
-  ProgressBar,
+  SeverityBadge,
   StatusBadge,
 } from "@/shared/components";
-import type { AttackRun } from "@/shared/types";
+import { useToast } from "@/shared/notifications";
+import type { Finding } from "@/shared/types";
 
 const attackCategories = [
-  { id: "prompt_injection", label: "Prompt Injection", desc: "Direct and indirect instruction override" },
-  { id: "jailbreak", label: "Jailbreak", desc: "Safety filter bypass via persona/role-play" },
-  { id: "data_exfiltration", label: "Data Exfiltration", desc: "Extract training data, PII, secrets" },
-  { id: "system_prompt_leak", label: "System Prompt Leak", desc: "Recover hidden system instructions" },
-  { id: "rag_poisoning", label: "RAG Poisoning", desc: "Indirect injection via retrieved context" },
-  { id: "model_dos", label: "Model DoS", desc: "Resource exhaustion and token flooding" },
-  { id: "insecure_output", label: "Insecure Output", desc: "XSS, code injection in completions" },
-  { id: "excessive_agency", label: "Excessive Agency", desc: "Unauthorized tool/action invocation" },
-  { id: "supply_chain", label: "Supply Chain", desc: "Plugin and dependency tampering" },
+  { id: "prompt_injection", label: "Prompt Injection", enabled: true },
+  { id: "jailbreak", label: "Jailbreak", enabled: false },
+  { id: "system_prompt_leak", label: "System Prompt Leak", enabled: false },
+  { id: "data_exfiltration", label: "Data Exfiltration", enabled: false },
 ] as const;
 
-export function AttacksPage() {
-  const { attackRuns } = useAppStore();
+const findingColumns = [
+  {
+    key: "severity",
+    header: "Severity",
+    width: "100px",
+    render: (f: Finding) => <SeverityBadge severity={f.severity} />,
+  },
+  {
+    key: "title",
+    header: "Finding",
+    render: (f: Finding) => (
+      <div>
+        <strong>{f.title}</strong>
+        <div className="text-muted text-sm">{f.description}</div>
+      </div>
+    ),
+  },
+  {
+    key: "confidence",
+    header: "Confidence",
+    width: "100px",
+    render: (f: Finding) => `${Math.round(f.confidence * 100)}%`,
+  },
+  {
+    key: "status",
+    header: "Status",
+    width: "110px",
+    render: (f: Finding) => <Badge variant="muted">{f.status}</Badge>,
+  },
+];
 
-  const columns = [
-    {
-      key: "target",
-      header: "Target",
-      render: (a: AttackRun) => (
-        <div>
-          <strong>{a.targetName}</strong>
-          <div className="text-muted text-sm">{a.category.replace(/_/g, " ")}</div>
-        </div>
-      ),
-    },
-    {
-      key: "progress",
-      header: "Progress",
-      width: "160px",
-      render: (a: AttackRun) => (
-        <ProgressBar
-          value={a.payloadsRun}
-          max={a.payloadsTotal}
-          size="sm"
-        />
-      ),
-    },
-    {
-      key: "findings",
-      header: "Findings",
-      width: "90px",
-      render: (a: AttackRun) => a.findingsCount,
-    },
-    {
-      key: "status",
-      header: "Status",
-      width: "110px",
-      render: (a: AttackRun) => <StatusBadge status={a.status} />,
-    },
-    {
-      key: "started",
-      header: "Started",
-      width: "160px",
-      render: (a: AttackRun) => new Date(a.startedAt).toLocaleString(),
-    },
-  ];
+export function AttacksPage() {
+  const { endpoints, scans, findings, targets, loading, error, actions } = useAppStore();
+  const { notify } = useToast();
+  const [endpointId, setEndpointId] = useState("");
+  const [category, setCategory] = useState("prompt_injection");
+  const [running, setRunning] = useState(false);
+
+  // Prefer AI endpoints, but allow attacking any discovered endpoint.
+  const attackable = useMemo(() => {
+    const ai = endpoints.filter((e) => e.kind === "ai_endpoint");
+    return ai.length > 0 ? ai.concat(endpoints.filter((e) => e.kind !== "ai_endpoint")) : endpoints;
+  }, [endpoints]);
+
+  useEffect(() => {
+    if (!endpointId && attackable.length > 0) {
+      setEndpointId(attackable[0].id);
+    }
+  }, [attackable, endpointId]);
+
+  const findingsByScan = useMemo(() => {
+    const map = new Map<string, Finding[]>();
+    for (const f of findings) {
+      const list = map.get(f.scanId) ?? [];
+      list.push(f);
+      map.set(f.scanId, list);
+    }
+    return map;
+  }, [findings]);
+
+  // Attack runs are scans created by the prompt-injection command.
+  const runs = useMemo(
+    () =>
+      scans
+        .filter((s) => s.name.startsWith("Prompt Injection:"))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    [scans],
+  );
+
+  const targetName = (id: string | null) =>
+    id ? targets.find((t) => t.id === id)?.name ?? "—" : "—";
+
+  async function handleLaunch() {
+    if (!endpointId || running || category !== "prompt_injection") return;
+    setRunning(true);
+    try {
+      const result = await actions.runPromptInjection(endpointId);
+      notify(
+        result.findings.length > 0
+          ? `Attack complete — ${result.findings.length} finding(s) from ${result.attempts} attempt(s)`
+          : `Attack complete — ${result.attempts} attempt(s), no findings`,
+        result.findings.length > 0 ? "success" : "info",
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Attack failed";
+      notify(message, "error");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const noEndpoints = endpoints.length === 0;
+  const selectedEndpoint = endpoints.find((e) => e.id === endpointId) ?? null;
 
   return (
     <div className="page">
@@ -73,37 +121,123 @@ export function AttacksPage() {
         title="Attacks"
         description="OWASP LLM Top 10 aligned attack orchestration"
         actions={
-          <>
-            <Button variant="ghost">Playbook</Button>
-            <Button variant="primary">Launch Attack</Button>
-          </>
+          <div className="discovery-controls">
+            <select
+              className="input"
+              value={endpointId}
+              onChange={(e) => setEndpointId(e.target.value)}
+              disabled={noEndpoints || running}
+            >
+              {noEndpoints && <option value="">No endpoints — run Discovery first</option>}
+              {attackable.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.kind} · {e.url}
+                </option>
+              ))}
+            </select>
+            <select
+              className="input"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              disabled={running}
+            >
+              {attackCategories.map((c) => (
+                <option key={c.id} value={c.id} disabled={!c.enabled}>
+                  {c.label}
+                  {c.enabled ? "" : " (soon)"}
+                </option>
+              ))}
+            </select>
+            <Button
+              variant="primary"
+              onClick={handleLaunch}
+              disabled={noEndpoints || running || !endpointId}
+            >
+              {running ? "Attacking…" : "Launch Attack"}
+            </Button>
+          </div>
         }
       />
 
-      <section className="attack-categories">
-        <h3 className="section-title">Attack Categories</h3>
-        <div className="attack-category-grid">
-          {attackCategories.map((cat) => (
-            <Card key={cat.id} className="attack-category-card" padding="sm">
-              <h4>{cat.label}</h4>
-              <p className="text-muted text-sm">{cat.desc}</p>
-              <Button size="sm" variant="ghost">Configure</Button>
-            </Card>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <h3 className="section-title">Recent Runs</h3>
-        <Card padding="none">
-          <DataTable
-            columns={columns}
-            rows={attackRuns}
-            keyField="id"
-            emptyMessage="No attack runs yet"
-          />
+      {error && (
+        <Card>
+          <p className="text-danger">Failed to load attack data: {error}</p>
         </Card>
-      </section>
+      )}
+
+      {running && (
+        <Card>
+          <div className="discovery-progress__row">
+            <div className="page-loader__spinner" />
+            <div>
+              <strong>Running prompt injection against {selectedEndpoint?.url}…</strong>
+              <p className="text-muted text-sm">
+                Sending payloads over HTTP and evaluating responses for injection indicators.
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {runs.length === 0 && !running ? (
+        <EmptyState
+          title={loading ? "Loading…" : "No attack runs yet"}
+          description={
+            noEndpoints
+              ? "Run Discovery to find endpoints, then launch an attack here."
+              : "Select a discovered endpoint and launch a Prompt Injection attack."
+          }
+        />
+      ) : (
+        <div className="discovery-runs">
+          {runs.map((run) => {
+            const runFindings = findingsByScan.get(run.id) ?? [];
+            return (
+              <Card key={run.id} className="discovery-card">
+                <div className="discovery-card__header">
+                  <div>
+                    <h3 className="discovery-card__title">
+                      Prompt Injection · {targetName(run.targetId)}
+                    </h3>
+                    <p className="text-muted text-sm">
+                      {run.completedAt
+                        ? `Completed ${new Date(run.completedAt).toLocaleString()}`
+                        : `Created ${new Date(run.createdAt).toLocaleString()}`}
+                    </p>
+                  </div>
+                  <StatusBadge status={run.status} />
+                </div>
+
+                <div className="discovery-card__stats">
+                  <div>
+                    <span className="discovery-card__stat-value">{runFindings.length}</span>
+                    <span className="discovery-card__stat-label">Findings</span>
+                  </div>
+                  <div>
+                    <span className="discovery-card__stat-value">
+                      {runFindings.filter((f) => f.severity === "critical").length}
+                    </span>
+                    <span className="discovery-card__stat-label">Critical</span>
+                  </div>
+                </div>
+
+                {runFindings.length > 0 ? (
+                  <DataTable
+                    columns={findingColumns}
+                    rows={runFindings}
+                    keyField="id"
+                    emptyMessage="No findings"
+                  />
+                ) : (
+                  <p className="text-muted text-sm">
+                    No injection indicators detected for this endpoint.
+                  </p>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { useAppStore } from "@/app/store/AppStore";
 import {
   Badge,
@@ -7,17 +9,46 @@ import {
   PageHeader,
   StatusBadge,
 } from "@/shared/components";
+import { exportReport, readReport } from "@/shared/ipc";
+import { useToast } from "@/shared/notifications";
 import type { Report } from "@/shared/types";
 
-function formatSize(bytes: number) {
-  if (bytes === 0) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+import { GenerateReportModal } from "./GenerateReportModal";
 
 export function ReportsPage() {
-  const { reports } = useAppStore();
+  const { reports, loading, error, actions } = useAppStore();
+  const { notify } = useToast();
+  const [modalOpen, setModalOpen] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function downloadReport(report: Report) {
+    setBusyId(report.id);
+    try {
+      const dest = await exportReport(report.id);
+      notify(`Report saved to ${dest}`, "success");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to export report";
+      notify(message, "error");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function viewReport(report: Report) {
+    setBusyId(report.id);
+    try {
+      const file = await readReport(report.id);
+      const blob = new Blob([file.content], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      // URL is intentionally not revoked immediately so the new tab can load it.
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to open report";
+      notify(message, "error");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   const columns = [
     {
@@ -43,12 +74,6 @@ export function ReportsPage() {
       render: (r: Report) => r.findingCount,
     },
     {
-      key: "size",
-      header: "Size",
-      width: "90px",
-      render: (r: Report) => formatSize(r.sizeBytes),
-    },
-    {
       key: "status",
       header: "Status",
       width: "110px",
@@ -63,10 +88,22 @@ export function ReportsPage() {
     {
       key: "actions",
       header: "",
-      width: "100px",
+      width: "170px",
       render: (r: Report) =>
         r.status === "completed" ? (
-          <Button size="sm" variant="ghost">Download</Button>
+          <span className="row-actions" onClick={(e) => e.stopPropagation()}>
+            <Button size="sm" variant="ghost" onClick={() => viewReport(r)} disabled={busyId === r.id}>
+              View
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => downloadReport(r)}
+              disabled={busyId === r.id}
+            >
+              {busyId === r.id ? "…" : "Download"}
+            </Button>
+          </span>
         ) : (
           <span className="text-muted">—</span>
         ),
@@ -80,35 +117,32 @@ export function ReportsPage() {
         description="Executive, technical, and compliance report generation"
         actions={
           <>
-            <Button variant="ghost">Templates</Button>
-            <Button variant="primary">Generate Report</Button>
+            <Button variant="ghost" onClick={() => void actions.refresh()} disabled={loading}>
+              {loading ? "Refreshing…" : "Refresh"}
+            </Button>
+            <Button variant="primary" onClick={() => setModalOpen(true)}>
+              Generate Report
+            </Button>
           </>
         }
       />
 
-      <div className="report-format-grid">
-        {(["pdf", "html", "json", "sarif", "markdown"] as const).map((fmt) => (
-          <Card key={fmt} className="report-format-card" padding="sm">
-            <Badge variant="info">{fmt.toUpperCase()}</Badge>
-            <p className="text-sm text-muted">
-              {fmt === "pdf" && "Executive summary with charts"}
-              {fmt === "html" && "Interactive technical report"}
-              {fmt === "json" && "Machine-readable findings export"}
-              {fmt === "sarif" && "CI/CD integration format"}
-              {fmt === "markdown" && "Lightweight summary for wikis"}
-            </p>
-          </Card>
-        ))}
-      </div>
+      {error && (
+        <Card>
+          <p className="text-danger">Failed to load reports: {error}</p>
+        </Card>
+      )}
 
       <Card padding="none">
         <DataTable
           columns={columns}
           rows={reports}
           keyField="id"
-          emptyMessage="No reports generated yet"
+          emptyMessage={loading ? "Loading reports…" : "No reports generated yet. Generate your first report."}
         />
       </Card>
+
+      <GenerateReportModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </div>
   );
 }

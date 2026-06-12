@@ -31,6 +31,15 @@ pub trait ScanRepository: Send + Sync {
 }
 
 #[async_trait]
+pub trait EndpointRepository: Send + Sync {
+    async fn create(&self, input: CreateEndpoint) -> AisecResult<Endpoint>;
+    async fn create_many(&self, inputs: Vec<CreateEndpoint>) -> AisecResult<Vec<Endpoint>>;
+    async fn get(&self, id: &str) -> AisecResult<Endpoint>;
+    async fn list_by_scan(&self, scan_id: &str) -> AisecResult<Vec<Endpoint>>;
+    async fn delete_by_scan(&self, scan_id: &str) -> AisecResult<u64>;
+}
+
+#[async_trait]
 pub trait FindingRepository: Send + Sync {
     async fn create(&self, input: CreateFinding) -> AisecResult<Finding>;
     async fn get(&self, id: &str) -> AisecResult<Finding>;
