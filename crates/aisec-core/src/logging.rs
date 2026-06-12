@@ -50,7 +50,7 @@ pub fn init_logging(options: LogOptions) -> AisecResult<LogGuard> {
 
     let registry = tracing_subscriber::registry().with(env_filter);
 
-    if let Some(log_dir) = options.log_dir.as_deref() {
+    let init_result = if let Some(log_dir) = options.log_dir.as_deref() {
         std::fs::create_dir_all(log_dir).map_err(AisecError::from)?;
 
         let file_appender = tracing_appender::rolling::daily(log_dir, "aisec.log");
@@ -65,16 +65,19 @@ pub fn init_logging(options: LogOptions) -> AisecResult<LogGuard> {
 
         let _ = options.json_file;
 
-        registry
-            .with(stdout_layer)
-            .with(file_layer)
-            .try_init()
-            .map_err(|err| AisecError::internal(format!("failed to init file logging: {err}")))?;
+        registry.with(stdout_layer).with(file_layer).try_init()
     } else {
         registry
             .with(fmt::layer().with_target(true).with_ansi(true))
             .try_init()
-            .map_err(|err| AisecError::internal(format!("failed to init stdout logging: {err}")))?;
+    };
+
+    // `try_init` fails if a global subscriber was already installed. This can
+    // happen due to a benign race when several components initialize logging
+    // concurrently (e.g. parallel tests). Treat that as success and return an
+    // inert guard so initialization is idempotent.
+    if init_result.is_err() {
+        return Ok(LogGuard { _file_guard: None });
     }
 
     tracing::info!(
