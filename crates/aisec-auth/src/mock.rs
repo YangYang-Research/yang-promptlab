@@ -45,6 +45,7 @@ impl MockPlaywrightDriver {
                 source: "response_header".into(),
                 value: "Bearer tok123".into(),
                 url: Some("https://example.com/oauth/token".into()),
+                header_name: Some("Authorization".into()),
             }],
         }
     }

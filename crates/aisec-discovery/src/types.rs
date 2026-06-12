@@ -10,6 +10,11 @@ pub enum EndpointKind {
     OpenApi,
     GraphQl,
     AiEndpoint,
+    /// An HTML `<form>` submission target.
+    Form,
+    /// A referenced JavaScript file.
+    #[serde(rename = "javascript")]
+    JavaScript,
 }
 
 impl EndpointKind {
@@ -20,6 +25,8 @@ impl EndpointKind {
             Self::OpenApi => "openapi",
             Self::GraphQl => "graphql",
             Self::AiEndpoint => "ai_endpoint",
+            Self::Form => "form",
+            Self::JavaScript => "javascript",
         }
     }
 }

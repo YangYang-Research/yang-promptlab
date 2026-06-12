@@ -72,6 +72,7 @@ export type AttackRun = {
 
 export type Finding = {
   id: string;
+  scanId: string;
   projectId: string;
   targetId: string;
   targetName: string;
@@ -81,6 +82,31 @@ export type Finding = {
   category: string;
   status: "open" | "confirmed" | "false_positive" | "fixed";
   confidence: number;
+  verdict: "vulnerable" | "not_vulnerable" | null;
+  discoveredAt: string;
+};
+
+export type ScanRun = {
+  id: string;
+  projectId: string;
+  targetId: string | null;
+  name: string;
+  status: JobStatus;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+};
+
+export type DiscoveredEndpoint = {
+  id: string;
+  scanId: string;
+  targetId: string | null;
+  url: string;
+  kind: string;
+  method: string | null;
+  confidence: number;
+  evidence: string | null;
+  sourceUrl: string | null;
   discoveredAt: string;
 };
 

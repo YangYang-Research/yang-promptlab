@@ -8,6 +8,16 @@ publish = false
 aisec-core = { workspace = true }
 aisec-auth = { workspace = true }
 aisec-storage = { workspace = true }
+aisec-discovery = { workspace = true }
+aisec-fingerprint = { workspace = true }
+aisec-attack = { workspace = true, features = ["storage"] }
+aisec-judge = { workspace = true }
+aisec-report = { workspace = true }
+serde_json = { workspace = true }
 tempfile = "3"
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+wiremock = "0.6"

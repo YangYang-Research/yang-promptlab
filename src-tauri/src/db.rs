@@ -45,19 +45,21 @@ pub async fn open_database(path: &Path) -> AisecResult<Database> {
 mod tests {
     use super::*;
 
+    // Single test to avoid a parallel race on the shared `AISEC_DB_PATH` env var.
     #[test]
-    fn resolve_db_path_defaults_to_data_dir() {
-        // Ensure the env override is not set for this assertion.
+    fn resolve_db_path_default_and_override() {
         std::env::remove_var(DB_PATH_ENV);
-        let p = resolve_db_path(Path::new("/var/lib/aisec"));
-        assert_eq!(p, PathBuf::from("/var/lib/aisec/aisec.db"));
-    }
+        assert_eq!(
+            resolve_db_path(Path::new("/var/lib/aisec")),
+            PathBuf::from("/var/lib/aisec/aisec.db")
+        );
 
-    #[test]
-    fn resolve_db_path_honors_env_override() {
         std::env::set_var(DB_PATH_ENV, "/custom/place.db");
-        let p = resolve_db_path(Path::new("/ignored"));
-        assert_eq!(p, PathBuf::from("/custom/place.db"));
+        assert_eq!(
+            resolve_db_path(Path::new("/ignored")),
+            PathBuf::from("/custom/place.db")
+        );
+
         std::env::remove_var(DB_PATH_ENV);
     }
 }

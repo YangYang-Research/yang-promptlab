@@ -69,7 +69,10 @@ h1 {{ font-size:1.75rem; margin-bottom:0.25rem; }}
 .finding {{ border-left:4px solid; padding:1rem; margin-bottom:1rem; background:#0f172a; border-radius:0 8px 8px 0; }}
 .finding h3 {{ font-size:1rem; margin-bottom:0.5rem; }}
 .finding .cat {{ color:var(--muted); font-size:0.8rem; }}
-.finding pre {{ background:#020617; padding:0.75rem; border-radius:6px; overflow-x:auto; font-size:0.8rem; margin-top:0.5rem; }}
+.finding pre {{ background:#020617; padding:0.75rem; border-radius:6px; overflow-x:auto; white-space:pre-wrap; word-break:break-word; font-size:0.8rem; margin-top:0.35rem; }}
+.kv {{ margin-top:0.6rem; }}
+.kv .k {{ display:block; color:var(--muted); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.05em; }}
+.conf {{ color:#a5b4fc; font-weight:600; }}
 .rec {{ padding:0.75rem 0; border-bottom:1px solid #334155; }}
 .rec:last-child {{ border:none; }}
 .sev-critical {{ border-color:#ef4444; }} .sev-high {{ border-color:#f97316; }}
@@ -171,18 +174,62 @@ fn render_findings(kind: ReportKind, findings: &[ReportFinding]) -> String {
         return "<p>No findings recorded for this scan.</p>".into();
     }
 
+    let detailed = kind != ReportKind::Executive;
+
     findings
         .iter()
         .map(|f| {
             let sev_class = format!("sev-{}", f.severity.as_str());
-            let evidence = if kind == ReportKind::Executive {
-                String::new()
+
+            let confidence = f
+                .confidence
+                .map(|c| format!(r#" · <span class="conf">confidence {:.0}%</span>"#, c * 100.0))
+                .unwrap_or_default();
+
+            // Technical/compliance reports include the exact payload + response.
+            let payload = if detailed {
+                f.payload
+                    .as_ref()
+                    .map(|p| {
+                        format!(
+                            r#"<div class="kv"><span class="k">Payload sent</span><pre>{}</pre></div>"#,
+                            escape_html(p)
+                        )
+                    })
+                    .unwrap_or_default()
             } else {
+                String::new()
+            };
+
+            let response = if detailed {
+                f.response
+                    .as_ref()
+                    .map(|r| {
+                        format!(
+                            r#"<div class="kv"><span class="k">Target response</span><pre>{}</pre></div>"#,
+                            escape_html(r)
+                        )
+                    })
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            // Fall back to raw evidence only when structured payload/response are absent.
+            let evidence = if detailed && f.payload.is_none() && f.response.is_none() {
                 f.evidence
                     .as_ref()
-                    .map(|e| format!("<pre>{}</pre>", escape_html(e)))
+                    .map(|e| {
+                        format!(
+                            r#"<div class="kv"><span class="k">Evidence</span><pre>{}</pre></div>"#,
+                            escape_html(e)
+                        )
+                    })
                     .unwrap_or_default()
+            } else {
+                String::new()
             };
+
             let rec = f
                 .recommendation
                 .as_ref()
@@ -193,9 +240,9 @@ fn render_findings(kind: ReportKind, findings: &[ReportFinding]) -> String {
                 r#"<article class="finding {sev_class}">
   <span class="badge" style="background:{color}22;color:{color}">{severity}</span>
   <h3>{title}</h3>
-  <p class="cat">{category} · {status}</p>
+  <p class="cat">{category} · {status}{confidence}</p>
   <p>{desc}</p>
-  {rec}{evidence}
+  {payload}{response}{evidence}{rec}
 </article>"#,
                 sev_class = sev_class,
                 color = f.severity.color(),
@@ -203,9 +250,12 @@ fn render_findings(kind: ReportKind, findings: &[ReportFinding]) -> String {
                 title = escape_html(&f.title),
                 category = escape_html(&f.category),
                 status = escape_html(&f.status),
+                confidence = confidence,
                 desc = escape_html(&f.description),
-                rec = rec,
+                payload = payload,
+                response = response,
                 evidence = evidence,
+                rec = rec,
             )
         })
         .collect::<Vec<_>>()
@@ -273,19 +323,35 @@ mod tests {
                 severity: Severity::Medium,
                 category: "jailbreak".into(),
                 description: "desc".into(),
+                payload: Some("ignore previous instructions".into()),
+                response: Some("Sure, here is the answer...".into()),
+                confidence: Some(0.83),
                 evidence: None,
                 recommendation: None,
                 compliance_refs: vec!["LLM01".into()],
                 status: "open".into(),
             }],
         );
+        // Technical report includes payload + response + confidence per finding.
         let out = HtmlFormatter
-            .render(ReportKind::Executive, &input)
+            .render(ReportKind::Technical, &input)
             .await
             .unwrap();
         let html = String::from_utf8(out.bytes).unwrap();
         assert!(html.contains("<svg"));
         assert!(html.contains("Findings"));
         assert!(html.contains("Recommendations"));
+        assert!(html.contains("Payload sent"));
+        assert!(html.contains("ignore previous instructions"));
+        assert!(html.contains("Target response"));
+        assert!(html.contains("confidence 83%"));
+
+        // Executive report omits raw payload/response detail.
+        let exec = HtmlFormatter
+            .render(ReportKind::Executive, &input)
+            .await
+            .unwrap();
+        let exec_html = String::from_utf8(exec.bytes).unwrap();
+        assert!(!exec_html.contains("Payload sent"));
     }
 }

@@ -56,6 +56,21 @@ pub struct Finding {
     pub updated_at: OffsetDateTime,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct Endpoint {
+    pub id: String,
+    pub scan_id: String,
+    pub target_id: Option<String>,
+    pub url: String,
+    pub kind: String,
+    pub method: Option<String>,
+    pub confidence: f64,
+    pub evidence: Option<String>,
+    pub source_url: Option<String>,
+    pub discovered_at: OffsetDateTime,
+    pub created_at: OffsetDateTime,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct Payload {
     pub id: String,
@@ -193,6 +208,19 @@ pub struct UpdateFinding {
     pub description: Option<String>,
     pub evidence_json: Option<serde_json::Value>,
     pub status: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateEndpoint {
+    pub scan_id: String,
+    pub target_id: Option<String>,
+    pub url: String,
+    pub kind: String,
+    pub method: Option<String>,
+    pub confidence: f64,
+    pub evidence: Option<String>,
+    pub source_url: Option<String>,
+    pub discovered_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

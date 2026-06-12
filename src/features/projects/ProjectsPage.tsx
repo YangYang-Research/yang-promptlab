@@ -1,3 +1,6 @@
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+
 import { useAppStore } from "@/app/store/AppStore";
 import {
   Badge,
@@ -6,7 +9,10 @@ import {
   DataTable,
   PageHeader,
 } from "@/shared/components";
+import { useToast } from "@/shared/notifications";
 import type { Project } from "@/shared/types";
+
+import { NewProjectModal } from "./NewProjectModal";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, {
@@ -17,13 +23,34 @@ function formatDate(iso: string) {
 }
 
 export function ProjectsPage() {
-  const { projects, dispatch, ui } = useAppStore();
+  const { projects, dispatch, ui, loading, error, actions } = useAppStore();
+  const { notify } = useToast();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [modalOpen, setModalOpen] = useState(false);
+
+  useEffect(() => {
+    const state = location.state as { openNewProject?: boolean } | null;
+    if (state?.openNewProject) {
+      setModalOpen(true);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location, navigate]);
 
   const filtered = projects.filter((p) => {
     const q = ui.searchQuery.toLowerCase();
     if (!q) return true;
     return p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q);
   });
+
+  async function handleDelete(project: Project) {
+    try {
+      await actions.deleteProject(project.id);
+      notify(`Project "${project.name}" deleted`, "success");
+    } catch {
+      notify("Failed to delete project", "error");
+    }
+  }
 
   const columns = [
     {
@@ -65,10 +92,16 @@ export function ProjectsPage() {
       render: (p: Project) => formatDate(p.updatedAt),
     },
     {
-      key: "owner",
-      header: "Owner",
-      width: "160px",
-      render: (p: Project) => <span className="text-muted">{p.owner}</span>,
+      key: "actions",
+      header: "",
+      width: "90px",
+      render: (p: Project) => (
+        <span onClick={(e) => e.stopPropagation()}>
+          <Button variant="danger" size="sm" onClick={() => handleDelete(p)}>
+            Delete
+          </Button>
+        </span>
+      ),
     },
   ];
 
@@ -79,11 +112,21 @@ export function ProjectsPage() {
         description="Organize security assessments by engagement or product"
         actions={
           <>
-            <Button variant="ghost">Import</Button>
-            <Button variant="primary">New Project</Button>
+            <Button variant="ghost" onClick={() => void actions.refresh()} disabled={loading}>
+              {loading ? "Refreshing…" : "Refresh"}
+            </Button>
+            <Button variant="primary" onClick={() => setModalOpen(true)}>
+              New Project
+            </Button>
           </>
         }
       />
+
+      {error && (
+        <Card>
+          <p className="text-danger">Failed to load projects: {error}</p>
+        </Card>
+      )}
 
       <Card padding="none">
         <DataTable
@@ -91,9 +134,11 @@ export function ProjectsPage() {
           rows={filtered}
           keyField="id"
           onRowClick={(p) => dispatch({ type: "SET_SELECTED_PROJECT", projectId: p.id })}
-          emptyMessage="No projects match your search"
+          emptyMessage={loading ? "Loading projects…" : "No projects yet. Create your first project."}
         />
       </Card>
+
+      <NewProjectModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </div>
   );
 }

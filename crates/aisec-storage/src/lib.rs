@@ -13,8 +13,8 @@ pub use models::*;
 pub use pool::Database;
 pub use repositories::{
     AttackResultRepository, AuthProfileRepository, AuthRecordingRepository, AuthSessionRepository,
-    FindingRepository, ModelRepository, PayloadRepository, PluginRepository, ProjectRepository,
-    ReportRepository, Repositories, ScanRepository, TargetRepository,
+    EndpointRepository, FindingRepository, ModelRepository, PayloadRepository, PluginRepository,
+    ProjectRepository, ReportRepository, Repositories, ScanRepository, TargetRepository,
 };
 
 #[cfg(test)]

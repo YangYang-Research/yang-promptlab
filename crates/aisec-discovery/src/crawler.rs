@@ -4,14 +4,14 @@ use std::sync::Arc;
 
 use aisec_core::AisecResult;
 use dashmap::DashSet;
-use tokio::sync::{Mutex, Notify, Semaphore};
+use tokio::sync::{Mutex, Notify};
 use tracing::{debug, instrument, warn};
 use url::Url;
 
 use crate::client::HttpClient;
 use crate::config::DiscoveryConfig;
 use crate::detectors::detect_from_snapshot;
-use crate::extract::{extract_links, extract_url_hints};
+use crate::extract::{extract_forms, extract_links, extract_scripts, extract_url_hints};
 use crate::types::{CrawlStats, CrawlTask, DiscoveredEndpoint, EndpointKind};
 use crate::url_policy::{canonical_key, is_same_origin, normalize_url, validate_target_url};
 
@@ -24,7 +24,11 @@ pub struct Crawler {
     visited: Arc<DashSet<String>>,
     frontier: Arc<Mutex<VecDeque<CrawlTask>>>,
     notify: Arc<Notify>,
-    in_flight: Arc<AtomicUsize>,
+    /// Outstanding work: tasks queued in the frontier plus tasks currently
+    /// being processed. Incremented at enqueue, decremented after a task is
+    /// fully processed (including enqueuing its children). The crawl is
+    /// complete exactly when this reaches zero and the frontier is empty.
+    pending: Arc<AtomicUsize>,
     pages_fetched: Arc<AtomicUsize>,
     pages_failed: Arc<AtomicUsize>,
     links_extracted: Arc<AtomicUsize>,
@@ -43,7 +47,7 @@ impl Crawler {
             visited: Arc::new(DashSet::new()),
             frontier: Arc::new(Mutex::new(VecDeque::new())),
             notify: Arc::new(Notify::new()),
-            in_flight: Arc::new(AtomicUsize::new(0)),
+            pending: Arc::new(AtomicUsize::new(0)),
             pages_fetched: Arc::new(AtomicUsize::new(0)),
             pages_failed: Arc::new(AtomicUsize::new(0)),
             links_extracted: Arc::new(AtomicUsize::new(0)),
@@ -61,15 +65,14 @@ impl Crawler {
         })
         .await;
 
-        let semaphore = Arc::new(Semaphore::new(self.config.worker_count));
-        let mut handles = Vec::with_capacity(self.config.worker_count);
-
-        for worker_id in 0..self.config.worker_count {
-            handles.push(self.spawn_worker(worker_id, semaphore.clone()));
+        let worker_count = self.config.worker_count.max(1);
+        let mut handles = Vec::with_capacity(worker_count);
+        for worker_id in 0..worker_count {
+            handles.push(self.spawn_worker(worker_id));
         }
 
-        self.wait_for_completion().await;
-
+        // Workers self-terminate once all outstanding work is drained, so we
+        // simply join them. No separate completion-watcher is needed.
         for handle in handles {
             let _ = handle.await;
         }
@@ -90,58 +93,47 @@ impl Crawler {
         })
     }
 
-    fn spawn_worker(
-        &self,
-        worker_id: usize,
-        semaphore: Arc<Semaphore>,
-    ) -> tokio::task::JoinHandle<()> {
+    fn spawn_worker(&self, worker_id: usize) -> tokio::task::JoinHandle<()> {
         let crawler = self.clone_refs();
 
         tokio::spawn(async move {
             loop {
+                // Register interest in notifications *before* inspecting shared
+                // state so a wakeup raised between the check and the await is
+                // not lost (the classic condvar lost-wakeup race).
+                let notified = crawler.notify.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+
                 let task = {
                     let mut queue = crawler.frontier.lock().await;
                     queue.pop_front()
                 };
 
                 let Some(task) = task else {
-                    if crawler.in_flight.load(Ordering::Relaxed) == 0 {
+                    // No queued task. If nothing is in flight either, the whole
+                    // crawl is finished: wake any peers so they exit too.
+                    if crawler.pending.load(Ordering::SeqCst) == 0 {
+                        crawler.notify.notify_waiters();
                         break;
                     }
-                    crawler.notify.notified().await;
+                    // Otherwise wait for new work or a completion signal.
+                    notified.await;
                     continue;
                 };
-
-                let _permit = match semaphore.acquire().await {
-                    Ok(permit) => permit,
-                    Err(_) => break,
-                };
-
-                crawler.in_flight.fetch_add(1, Ordering::Relaxed);
 
                 if let Err(err) = crawler.process_task(worker_id, task).await {
                     warn!(worker_id, error = %err.client_message(), "crawl task failed");
                     crawler.record_error(err.client_message()).await;
                 }
 
-                crawler.in_flight.fetch_sub(1, Ordering::Relaxed);
-                crawler.notify.notify_one();
+                // The task (and any children it enqueued) is fully accounted
+                // for; drop its outstanding-work slot and wake peers in case
+                // this was the last task or new work appeared.
+                crawler.pending.fetch_sub(1, Ordering::SeqCst);
+                crawler.notify.notify_waiters();
             }
         })
-    }
-
-    async fn wait_for_completion(&self) {
-        loop {
-            let queue_empty = self.frontier.lock().await.is_empty();
-            let idle = self.in_flight.load(Ordering::Relaxed) == 0;
-            let limit_reached = self.pages_fetched.load(Ordering::Relaxed) >= self.config.max_pages;
-
-            if (queue_empty && idle) || limit_reached {
-                break;
-            }
-
-            self.notify.notified().await;
-        }
     }
 
     #[instrument(skip(self, task), fields(url = %task.url, depth = task.depth, worker_id))]
@@ -190,6 +182,40 @@ impl Crawler {
         let links = extract_links(&task.url, html);
         self.links_extracted
             .fetch_add(links.len(), Ordering::Relaxed);
+
+        // Surface HTML forms as discovered endpoints (submission targets).
+        for form in extract_forms(&task.url, html) {
+            let evidence = format!(
+                "HTML <form> with {} input field{}",
+                form.inputs.len(),
+                if form.inputs.len() == 1 { "" } else { "s" }
+            );
+            self.record_endpoint(
+                DiscoveredEndpoint::new(form.action, EndpointKind::Form, 0.8, evidence)
+                    .with_method(form.method)
+                    .with_source(task.url.clone()),
+            )
+            .await;
+        }
+
+        // Surface referenced JavaScript files.
+        for script in extract_scripts(&task.url, html) {
+            self.record_endpoint(
+                DiscoveredEndpoint::new(
+                    script,
+                    EndpointKind::JavaScript,
+                    0.6,
+                    "JavaScript file referenced by page",
+                )
+                .with_method("GET")
+                .with_source(task.url.clone()),
+            )
+            .await;
+        }
+
+        // Inline API references (fetch/XHR URLs embedded in the markup) become
+        // crawl/probe targets so their endpoints get classified.
+        self.process_hints(task, html).await?;
 
         for link in links {
             self.maybe_enqueue_link(link, task.depth + 1, Some(task.url.clone()))
@@ -267,8 +293,11 @@ impl Crawler {
     }
 
     async fn enqueue(&self, task: CrawlTask) {
+        // Count the task as outstanding *before* it becomes visible to workers
+        // so `pending` never momentarily reads zero while work remains.
+        self.pending.fetch_add(1, Ordering::SeqCst);
         self.frontier.lock().await.push_back(task);
-        self.notify.notify_one();
+        self.notify.notify_waiters();
     }
 
     fn clone_refs(&self) -> Self {
@@ -280,7 +309,7 @@ impl Crawler {
             visited: self.visited.clone(),
             frontier: self.frontier.clone(),
             notify: self.notify.clone(),
-            in_flight: self.in_flight.clone(),
+            pending: self.pending.clone(),
             pages_fetched: self.pages_fetched.clone(),
             pages_failed: self.pages_failed.clone(),
             links_extracted: self.links_extracted.clone(),
@@ -308,20 +337,43 @@ fn is_html(snapshot: &crate::types::HttpSnapshot) -> bool {
 mod tests {
     use super::*;
     use crate::config::DiscoveryConfig;
+    use std::time::Duration;
+
+    fn dead_target_config(worker_count: usize) -> DiscoveryConfig {
+        DiscoveryConfig {
+            max_depth: 0,
+            max_pages: 10,
+            worker_count,
+            request_timeout: Duration::from_millis(200),
+            allow_private_network: true,
+            ..Default::default()
+        }
+    }
 
     #[tokio::test]
     async fn crawler_respects_max_depth() {
-        let cfg = DiscoveryConfig {
-            max_depth: 0,
-            max_pages: 10,
-            worker_count: 2,
-            allow_private_network: true,
-            ..Default::default()
-        };
+        let cfg = dead_target_config(2);
         let client = HttpClient::new(cfg.clone()).unwrap();
         let seed = Url::parse("http://127.0.0.1:1/").unwrap();
         let crawler = Crawler::new(client, seed, cfg);
-        // Will fail fetch but should not panic
+        // Connection to port 1 fails, but the crawler must terminate cleanly.
         let _ = crawler.run().await;
+    }
+
+    /// Regression test for the multi-worker crawler deadlock: with more workers
+    /// than tasks, idle workers must not hang. The run has to terminate.
+    #[tokio::test]
+    async fn multi_worker_crawl_terminates() {
+        let cfg = dead_target_config(8);
+        let client = HttpClient::new(cfg.clone()).unwrap();
+        let seed = Url::parse("http://127.0.0.1:1/").unwrap();
+        let crawler = Crawler::new(client, seed, cfg);
+
+        let result = tokio::time::timeout(Duration::from_secs(10), crawler.run()).await;
+        assert!(result.is_ok(), "crawler deadlocked with 8 workers");
+
+        let output = result.unwrap().expect("crawl output");
+        // The single (failed) seed fetch should be accounted for.
+        assert_eq!(output.stats.pages_failed, 1);
     }
 }

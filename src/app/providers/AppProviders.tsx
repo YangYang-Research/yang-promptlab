@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { AppStoreProvider } from "@/app/store/AppStore";
 import { ErrorBoundary } from "@/shared/errors";
+import { ToastProvider } from "@/shared/notifications";
 
 type AppProvidersProps = {
   children: ReactNode;
@@ -10,7 +11,9 @@ type AppProvidersProps = {
 export function AppProviders({ children }: AppProvidersProps) {
   return (
     <ErrorBoundary>
-      <AppStoreProvider>{children}</AppStoreProvider>
+      <ToastProvider>
+        <AppStoreProvider>{children}</AppStoreProvider>
+      </ToastProvider>
     </ErrorBoundary>
   );
 }

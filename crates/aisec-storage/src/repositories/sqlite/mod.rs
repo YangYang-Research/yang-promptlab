@@ -2,6 +2,7 @@ use sqlx::SqlitePool;
 
 mod attack_result;
 mod auth;
+mod endpoint;
 mod finding;
 mod model;
 mod payload;
@@ -15,6 +16,7 @@ pub use attack_result::SqliteAttackResultRepository;
 pub use auth::{
     SqliteAuthProfileRepository, SqliteAuthRecordingRepository, SqliteAuthSessionRepository,
 };
+pub use endpoint::SqliteEndpointRepository;
 pub use finding::SqliteFindingRepository;
 pub use model::SqliteModelRepository;
 pub use payload::SqlitePayloadRepository;
@@ -49,6 +51,10 @@ impl Repositories {
 
     pub fn findings(&self) -> SqliteFindingRepository {
         SqliteFindingRepository::new(self.pool.clone())
+    }
+
+    pub fn endpoints(&self) -> SqliteEndpointRepository {
+        SqliteEndpointRepository::new(self.pool.clone())
     }
 
     pub fn payloads(&self) -> SqlitePayloadRepository {

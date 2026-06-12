@@ -77,16 +77,24 @@ pub async fn probe_ai_paths(
 
     let mut found = Vec::new();
     for url in ai_probe_paths(origin) {
-        if let Ok(snapshot) = client.get(&url).await {
-            found.extend(detect_ai_from_snapshot(&snapshot, Some(origin)));
-            continue;
-        }
-        // Many AI endpoints only accept POST
-        if let Ok(snapshot) = client
-            .post_json(&url, r#"{"model":"probe","messages":[]}"#)
-            .await
-        {
-            found.extend(detect_ai_from_snapshot(&snapshot, Some(origin)));
+        // Try GET first; keep any detections it yields.
+        let get_hits = match client.get(&url).await {
+            Ok(snapshot) => detect_ai_from_snapshot(&snapshot, Some(origin)),
+            Err(_) => Vec::new(),
+        };
+        let got_detection = !get_hits.is_empty();
+        found.extend(get_hits);
+
+        // Many AI endpoints only accept POST (e.g. `/v1/chat/completions`
+        // commonly returns 404/405 on GET). Probe POST whenever GET produced
+        // no detection so those routes are not missed.
+        if !got_detection {
+            if let Ok(snapshot) = client
+                .post_json(&url, r#"{"model":"probe","messages":[]}"#)
+                .await
+            {
+                found.extend(detect_ai_from_snapshot(&snapshot, Some(origin)));
+            }
         }
     }
     found

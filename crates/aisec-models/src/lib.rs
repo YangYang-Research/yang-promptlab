@@ -18,6 +18,8 @@ pub use hardware::detect_hardware;
 pub use manager::LocalModelManager;
 pub use registry::ModelRegistry;
 pub use runtime::{InferenceRuntime, LlamaCppConfig, LlamaCppRuntime, MockInferenceRuntime};
+#[cfg(feature = "llama")]
+pub use runtime::{LlamaInProcessRuntime, LlamaModelConfig};
 pub use types::*;
 pub use verify::VerificationEngine;
 

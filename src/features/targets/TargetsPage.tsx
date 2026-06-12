@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { useAppStore } from "@/app/store/AppStore";
 import {
   Badge,
@@ -9,8 +11,11 @@ import {
 } from "@/shared/components";
 import type { Target } from "@/shared/types";
 
+import { AddTargetModal } from "./AddTargetModal";
+
 export function TargetsPage() {
-  const { targets, projects, ui } = useAppStore();
+  const { targets, projects, ui, loading, error, actions } = useAppStore();
+  const [modalOpen, setModalOpen] = useState(false);
 
   const filtered = targets.filter((t) => {
     if (ui.selectedProjectId && t.projectId !== ui.selectedProjectId) return false;
@@ -85,20 +90,32 @@ export function TargetsPage() {
         description="Endpoints, applications, and models under test"
         actions={
           <>
-            <Button variant="ghost">Import OpenAPI</Button>
-            <Button variant="primary">Add Target</Button>
+            <Button variant="ghost" onClick={() => void actions.refresh()} disabled={loading}>
+              {loading ? "Refreshing…" : "Refresh"}
+            </Button>
+            <Button variant="primary" onClick={() => setModalOpen(true)}>
+              Add Target
+            </Button>
           </>
         }
       />
+
+      {error && (
+        <Card>
+          <p className="text-danger">Failed to load targets: {error}</p>
+        </Card>
+      )}
 
       <Card padding="none">
         <DataTable
           columns={columns}
           rows={filtered}
           keyField="id"
-          emptyMessage="No targets found"
+          emptyMessage={loading ? "Loading targets…" : "No targets yet. Add your first target."}
         />
       </Card>
+
+      <AddTargetModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </div>
   );
 }

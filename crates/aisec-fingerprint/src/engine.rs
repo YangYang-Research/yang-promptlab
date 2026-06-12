@@ -64,7 +64,7 @@ impl FingerprintEngine {
 
         let mut matches: Vec<ProviderFingerprint> = per_provider
             .into_iter()
-            .map(|(provider, acc)| build_provider_fingerprint(provider, acc))
+            .map(|(provider, acc)| build_provider_fingerprint(provider, acc, input))
             .filter(|fp| fp.confidence >= self.threshold)
             .collect();
 
@@ -89,6 +89,17 @@ impl FingerprintEngine {
             primary,
             analyzed_at: OffsetDateTime::now_utc(),
         }
+    }
+
+    /// Detect AI providers from an OpenAPI/Swagger specification.
+    ///
+    /// Enumerates the spec's servers and operations into synthetic requests and
+    /// runs the standard request-pattern rules over them, merging by highest
+    /// confidence per provider.
+    #[instrument(skip(self, spec))]
+    pub fn fingerprint_openapi(&self, spec: &serde_json::Value) -> FingerprintReport {
+        let inputs = crate::openapi::inputs_from_openapi(spec);
+        self.fingerprint_batch(&inputs)
     }
 
     /// Fingerprint multiple observations and merge by highest confidence per provider.
@@ -274,6 +285,80 @@ mod tests {
             None,
         ));
         assert!(report.primary.is_none());
+    }
+
+    #[test]
+    fn fingerprint_openapi_detects_openai() {
+        let engine = FingerprintEngine::new();
+        let spec = serde_json::json!({
+            "openapi": "3.0.0",
+            "servers": [{ "url": "https://api.openai.com/v1" }],
+            "paths": {
+                "/chat/completions": { "post": {} },
+                "/models": { "get": {} },
+                "/embeddings": { "post": {} }
+            }
+        });
+        let report = engine.fingerprint_openapi(&spec);
+        assert_eq!(report.primary.expect("primary").provider, AiProvider::OpenAi);
+    }
+
+    #[test]
+    fn fingerprint_openapi_detects_anthropic_and_gemini() {
+        let engine = FingerprintEngine::new();
+
+        let anthropic = serde_json::json!({
+            "openapi": "3.0.0",
+            "servers": [{ "url": "https://api.anthropic.com" }],
+            "paths": { "/v1/messages": { "post": {} } }
+        });
+        assert_eq!(
+            engine.fingerprint_openapi(&anthropic).primary.unwrap().provider,
+            AiProvider::Anthropic
+        );
+
+        let gemini = serde_json::json!({
+            "openapi": "3.0.0",
+            "servers": [{ "url": "https://generativelanguage.googleapis.com" }],
+            "paths": { "/v1beta/models/gemini-pro:generateContent": { "post": {} } }
+        });
+        assert_eq!(
+            engine.fingerprint_openapi(&gemini).primary.unwrap().provider,
+            AiProvider::Gemini
+        );
+    }
+
+    #[test]
+    fn fingerprint_openapi_detects_ollama_swagger2() {
+        let engine = FingerprintEngine::new();
+        let spec = serde_json::json!({
+            "swagger": "2.0",
+            "host": "localhost:11434",
+            "schemes": ["http"],
+            "paths": {
+                "/api/tags": { "get": {} },
+                "/api/generate": { "post": {} }
+            }
+        });
+        let report = engine.fingerprint_openapi(&spec);
+        assert_eq!(report.primary.expect("primary").provider, AiProvider::Ollama);
+    }
+
+    #[test]
+    fn suggested_method_uses_observed_then_path() {
+        let engine = FingerprintEngine::new();
+        // Observed GET wins even on a chat path.
+        let r = engine.fingerprint(&input(
+            "https://api.openai.com/v1/models",
+            200,
+            HashMap::new(),
+            Some(r#"{"data":[{"id":"gpt-4","object":"model"}]}"#),
+        ));
+        assert_eq!(
+            r.primary.unwrap().suggested_method.as_deref(),
+            Some("POST"),
+            "observed method (POST in test input) should be used"
+        );
     }
 
     #[test]

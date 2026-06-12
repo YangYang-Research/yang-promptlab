@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use aisec_core::{AisecError, AisecResult};
 use tracing::instrument;
 
 use crate::config::AuthEngineConfig;
 use crate::cookies::{CookieManager, TokenExtractor};
 use crate::mock::SharedPlaywrightDriver;
-use crate::playwright::{parse_cookies, parse_tokens, PlaywrightClient, PlaywrightDriver};
+use crate::playwright::{parse_cookies, parse_tokens, PlaywrightClient};
 use crate::session::SessionStore;
 use crate::types::{
     AuthConfig, AuthMethod, AuthProfile, AuthSession, AuthenticateResult, ExtractedToken,
@@ -92,7 +91,7 @@ impl AuthEngine {
                     origins: vec![],
                 });
 
-        let session = self
+        let mut session = self
             .store
             .persist_session(&profile.id, &cookies, &tokens, None)
             .await?;
@@ -105,6 +104,9 @@ impl AuthEngine {
         self.store
             .update_storage_path(&session.id, &storage_path)
             .await?;
+
+        // Reflect the persisted storageState path on the returned session.
+        session.storage_state_path = Some(storage_path.to_string_lossy().into_owned());
 
         let recording = self
             .store
@@ -221,11 +223,12 @@ impl AuthEngine {
 }
 
 async fn authenticate_jwt(profile: &AuthProfile, store: &SessionStore) -> AisecResult<AuthenticateResult> {
-    let AuthConfig::Jwt { token, .. } = &profile.config else {
+    let AuthConfig::Jwt { token, header_name, prefix } = &profile.config else {
         return Err(AisecError::invalid_input("expected jwt config"));
     };
     TokenExtractor::validate_jwt_structure(token)?;
-    let extracted = TokenExtractor::from_jwt_config(token);
+    let extracted =
+        TokenExtractor::from_jwt_config(token, header_name.as_deref(), prefix.as_deref());
     let session = store
         .persist_session(&profile.id, &[], &[extracted], None)
         .await?;
@@ -251,8 +254,10 @@ async fn authenticate_api_key(profile: &AuthProfile, store: &SessionStore) -> Ai
             key.clone()
         },
         url: None,
+        // Persist the target header so downstream HTTP clients can apply the
+        // credential as `{header_name}: {value}`.
+        header_name: Some(header_name.clone()),
     };
-    let _ = header_name; // stored in profile config for downstream HTTP clients
     let session = store
         .persist_session(&profile.id, &[], &[token], None)
         .await?;
@@ -314,21 +319,25 @@ mod tests {
     use aisec_storage::Database;
     use std::sync::Arc;
 
-    async fn test_engine() -> AuthEngine {
+    // Returns the engine together with the vault TempDir, which must be kept
+    // alive for the duration of the test (dropping it deletes the vault).
+    async fn test_engine() -> (AuthEngine, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::connect("sqlite::memory:").await.unwrap();
         let store = SessionStore::new(db, dir.path()).await.unwrap();
         let driver = Arc::new(MockPlaywrightDriver::login_success());
-        AuthEngine::new(AuthEngineConfig::default().with_vault_dir(dir.path()), store, Some(driver))
-            .await
-            .unwrap()
+        let engine =
+            AuthEngine::new(AuthEngineConfig::default().with_vault_dir(dir.path()), store, Some(driver))
+                .await
+                .unwrap();
+        (engine, dir)
     }
 
     #[tokio::test]
     async fn records_login_and_replays_session() {
-        let engine = test_engine().await;
+        let (engine, _vault) = test_engine().await;
         let profile = AuthProfile {
-            id: "prof-1".into(),
+            id: String::new(),
             project_id: None,
             name: "Test".into(),
             method: AuthMethod::UsernamePassword,
@@ -341,6 +350,8 @@ mod tests {
                 submit_selector: "#submit".into(),
             },
         };
+        // Sessions reference a real profile (FK), so persist it first.
+        let profile = engine.store().create_profile(&profile).await.unwrap();
 
         let (session, recording) = engine
             .record_login(&profile, RecordLoginOptions::default())
@@ -349,6 +360,7 @@ mod tests {
 
         assert!(!session.cookies.is_empty());
         assert!(!recording.steps.is_empty());
+        assert!(session.storage_state_path.is_some());
 
         let replay = engine
             .replay_session(&session.id, "https://example.com/app", ReplayOptions::default())
@@ -360,10 +372,10 @@ mod tests {
 
     #[tokio::test]
     async fn jwt_and_api_key_auth_without_browser() {
-        let engine = test_engine().await;
+        let (engine, _vault) = test_engine().await;
 
         let jwt_profile = AuthProfile {
-            id: "jwt-1".into(),
+            id: String::new(),
             project_id: None,
             name: "JWT".into(),
             method: AuthMethod::Jwt,
@@ -373,15 +385,22 @@ mod tests {
                 prefix: Some("Bearer".into()),
             },
         };
+        let jwt_profile = engine.store().create_profile(&jwt_profile).await.unwrap();
 
         let jwt_result = engine
             .authenticate(&jwt_profile, RecordLoginOptions::default())
             .await
             .unwrap();
         assert_eq!(jwt_result.session.tokens[0].kind, "jwt");
+        // header_name + scheme prefix are persisted so the token is ready to send.
+        assert_eq!(
+            jwt_result.session.tokens[0].header_name.as_deref(),
+            Some("Authorization")
+        );
+        assert!(jwt_result.session.tokens[0].value.starts_with("Bearer "));
 
         let api_profile = AuthProfile {
-            id: "key-1".into(),
+            id: String::new(),
             project_id: None,
             name: "API".into(),
             method: AuthMethod::ApiKey,
@@ -391,11 +410,17 @@ mod tests {
                 prefix: None,
             },
         };
+        let api_profile = engine.store().create_profile(&api_profile).await.unwrap();
 
         let api_result = engine
             .authenticate(&api_profile, RecordLoginOptions::default())
             .await
             .unwrap();
         assert_eq!(api_result.session.tokens[0].kind, "api_key");
+        // The target header is retained (previously discarded via `let _ =`).
+        assert_eq!(
+            api_result.session.tokens[0].header_name.as_deref(),
+            Some("X-API-Key")
+        );
     }
 }

@@ -60,12 +60,29 @@ impl<'a> CookieManager<'a> {
 pub struct TokenExtractor;
 
 impl TokenExtractor {
-    pub fn from_jwt_config(token: &str) -> ExtractedToken {
+    pub fn from_jwt_config(
+        token: &str,
+        header_name: Option<&str>,
+        prefix: Option<&str>,
+    ) -> ExtractedToken {
+        // Build the ready-to-send header value, applying the scheme prefix
+        // (defaulting to `Bearer`) unless the token already carries one.
+        let scheme = prefix.unwrap_or("Bearer");
+        let value = if token.to_lowercase().starts_with(&format!("{} ", scheme.to_lowercase()))
+        {
+            token.to_string()
+        } else if scheme.is_empty() {
+            token.to_string()
+        } else {
+            format!("{scheme} {token}")
+        };
+
         ExtractedToken {
             kind: "jwt".into(),
             source: "config".into(),
-            value: token.to_string(),
+            value,
             url: None,
+            header_name: Some(header_name.unwrap_or("Authorization").to_string()),
         }
     }
 
