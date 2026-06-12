@@ -1,5 +1,8 @@
 # AISec — Real Implementation Audit
 
+> **Trạng thái (2026-06-12):** Audit tại thời điểm 2026-06-11. Nhiều mục BROKEN/PARTIAL đã được
+> sửa qua PR #19. Xem `docs/STATUS.md` và `docs/MVP_VALIDATION_REPORT.md` cho trạng thái hiện tại.
+
 **Auditor role:** Principal Software Architect
 **Date:** 2026-06-11
 **Repository:** `yang-aisec-private`

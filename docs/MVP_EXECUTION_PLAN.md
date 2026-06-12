@@ -1,5 +1,8 @@
 # AISec — MVP Execution Plan (First Real Scan)
 
+> **Trạng thái (2026-06-12):** Kế hoạch lịch sử. Luồng MVP B1–B8 đã triển khai qua PR #19.
+> Xem `docs/MVP_VALIDATION_REPORT.md` cho kết quả validation.
+
 **Author role:** Principal Software Architect
 **Date:** 2026-06-11
 **Source of truth:** `docs/REAL_IMPLEMENTATION_AUDIT.md` (per-module status, verified by live build/test)

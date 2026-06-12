@@ -1,5 +1,8 @@
 # Báo cáo: Vì sao chưa thao tác được trên ứng dụng & app vẫn là mockup
 
+> **Trạng thái (2026-06-12):** Tài liệu lịch sử. Tích hợp desktop đã hoàn tất qua PR #19 — app
+> dùng IPC + SQLite, không còn mock store. Giữ lại để tham chiếu nguyên nhân gốc.
+
 **Ngày:** 2026-06-12
 **Phạm vi:** Giao diện desktop (React UI + Tauri shell) trong `src/` và `src-tauri/`.
 **Kết luận ngắn:** Ứng dụng desktop hiện vẫn là **bản vỏ chạy dữ liệu giả (mock)**. Mọi nút hành

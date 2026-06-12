@@ -1,5 +1,8 @@
 # AISec — Mock / Placeholder Removal Plan
 
+> **Trạng thái (2026-06-12):** Một phần đã thực hiện (PR #19: xóa `src/shared/mock/data.ts`,
+> IPC-backed store). Các mục còn lại trong tài liệu vẫn có thể áp dụng.
+
 **Author role:** Principal Software Architect
 **Date:** 2026-06-11
 **Inputs:** `docs/MVP_EXECUTION_PLAN.md`, `docs/REAL_IMPLEMENTATION_AUDIT.md`
