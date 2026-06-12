@@ -60,6 +60,14 @@ impl EndpointRepository for SqliteEndpointRepository {
         Ok(created)
     }
 
+    async fn get(&self, id: &str) -> AisecResult<Endpoint> {
+        sqlx::query_as::<_, Endpoint>("SELECT * FROM endpoints WHERE id = ?")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await
+            .map_storage()
+    }
+
     async fn list_by_scan(&self, scan_id: &str) -> AisecResult<Vec<Endpoint>> {
         sqlx::query_as::<_, Endpoint>(
             "SELECT * FROM endpoints WHERE scan_id = ? ORDER BY confidence DESC, url ASC",
@@ -77,16 +85,6 @@ impl EndpointRepository for SqliteEndpointRepository {
             .await
             .map_storage()?;
         Ok(result.rows_affected())
-    }
-}
-
-impl SqliteEndpointRepository {
-    async fn get(&self, id: &str) -> AisecResult<Endpoint> {
-        sqlx::query_as::<_, Endpoint>("SELECT * FROM endpoints WHERE id = ?")
-            .bind(id)
-            .fetch_one(&self.pool)
-            .await
-            .map_storage()
     }
 }
 

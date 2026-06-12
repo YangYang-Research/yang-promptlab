@@ -14,6 +14,7 @@ export {
   listReports,
   runDiscovery,
   listEndpoints,
+  runPromptInjection,
   type AppInfoResponse,
   type HealthResponse,
   type ProjectDto,
@@ -24,4 +25,5 @@ export {
   type EndpointDto,
   type DiscoveryStatsDto,
   type DiscoveryRunDto,
+  type AttackRunDto,
 } from "./client";

@@ -72,6 +72,7 @@ export type AttackRun = {
 
 export type Finding = {
   id: string;
+  scanId: string;
   projectId: string;
   targetId: string;
   targetName: string;

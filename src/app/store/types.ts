@@ -11,7 +11,7 @@ import type {
   ScanRun,
   Target,
 } from "@/shared/types";
-import type { DiscoveryRunDto } from "@/shared/ipc";
+import type { AttackRunDto, DiscoveryRunDto } from "@/shared/ipc";
 
 export type AppSettings = {
   theme: "dark" | "light" | "system";
@@ -88,6 +88,7 @@ export type AppActions = {
     kind?: string,
   ) => Promise<void>;
   runDiscovery: (targetId: string) => Promise<DiscoveryRunDto>;
+  runPromptInjection: (endpointId: string) => Promise<AttackRunDto>;
 };
 
 export type AppStoreValue = AppDataState & {

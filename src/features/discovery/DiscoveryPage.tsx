@@ -88,9 +88,12 @@ export function DiscoveryPage() {
     return map;
   }, [endpoints]);
 
-  // Show discovery runs newest first.
+  // Show discovery runs newest first (attack scans are shown on the Attacks page).
   const runs = useMemo(
-    () => [...scans].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    () =>
+      scans
+        .filter((s) => s.name.startsWith("Discovery:"))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [scans],
   );
 

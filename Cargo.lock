@@ -73,6 +73,7 @@ dependencies = [
 name = "aisec-desktop"
 version = "0.1.0"
 dependencies = [
+ "aisec-attack",
  "aisec-core",
  "aisec-discovery",
  "aisec-report",

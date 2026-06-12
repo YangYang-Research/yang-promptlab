@@ -126,6 +126,14 @@ export type DiscoveryRunDto = {
   stats: DiscoveryStatsDto;
 };
 
+export type AttackRunDto = {
+  scan: ScanDto;
+  category: string;
+  attempts: number;
+  successes: number;
+  findings: FindingDto[];
+};
+
 export type ReportDto = {
   id: string;
   project_id: string;
@@ -198,3 +206,6 @@ export const runDiscovery = (targetId: string) =>
 
 export const listEndpoints = (scanId: string) =>
   invokeCommand<EndpointDto[]>("endpoint_list", { scanId });
+
+export const runPromptInjection = (endpointId: string) =>
+  invokeCommand<AttackRunDto>("attack_run_prompt_injection", { endpointId });

@@ -186,6 +186,15 @@ pub struct DiscoveryRunDto {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct AttackRunDto {
+    pub scan: ScanDto,
+    pub category: String,
+    pub attempts: u64,
+    pub successes: u64,
+    pub findings: Vec<FindingDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ReportDto {
     pub id: String,
     pub project_id: String,

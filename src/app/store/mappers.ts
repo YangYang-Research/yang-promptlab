@@ -118,6 +118,7 @@ export function mapFindings(findings: FindingDto[], targets: TargetDto[]): Findi
   const targetNames = new Map(targets.map((t) => [t.id, t.name]));
   return findings.map((f) => ({
     id: f.id,
+    scanId: f.scan_id,
     projectId: f.project_id,
     targetId: f.target_id ?? "",
     targetName: f.target_id ? targetNames.get(f.target_id) ?? "" : "",

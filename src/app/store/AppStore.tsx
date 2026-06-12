@@ -22,6 +22,7 @@ import {
   listScans,
   listTargets,
   runDiscovery as runDiscoveryCmd,
+  runPromptInjection as runPromptInjectionCmd,
   type EndpointDto,
   type FindingDto,
   type ReportDto,
@@ -231,6 +232,18 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
         } catch (error) {
           const appError = toAppError(error);
           log.error("mutation failed: runDiscovery", { error: appError });
+          dispatch({ type: "SET_ERROR", error: appError.message });
+          throw appError;
+        }
+      },
+      runPromptInjection: async (endpointId) => {
+        try {
+          const result = await runPromptInjectionCmd(endpointId);
+          await refresh();
+          return result;
+        } catch (error) {
+          const appError = toAppError(error);
+          log.error("mutation failed: runPromptInjection", { error: appError });
           dispatch({ type: "SET_ERROR", error: appError.message });
           throw appError;
         }

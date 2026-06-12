@@ -76,6 +76,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::domain::report_list,
             commands::discovery::discovery_run,
             commands::discovery::endpoint_list,
+            commands::attack::attack_run_prompt_injection,
         ])
         .build(tauri::generate_context!())?;
 
