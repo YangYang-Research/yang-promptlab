@@ -15,7 +15,9 @@ use aisec_storage::{
 use tauri::State;
 use tracing::{info, instrument};
 
-use crate::dto::{FindingDto, ProjectDto, ReportDto, ScanDto, TargetDto};
+use crate::dto::{
+    FindingDto, ProjectDto, ReportContentDto, ReportDto, ScanDto, TargetDto,
+};
 use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
 
@@ -261,6 +263,22 @@ pub async fn report_generate_op(
     Ok(record.into())
 }
 
+pub async fn report_read_op(state: &AppState, id: String) -> CommandResult<ReportContentDto> {
+    let report = state.repositories().reports().get(&id).await.map_err(CommandError::from)?;
+    let path = report
+        .file_path
+        .clone()
+        .ok_or_else(|| CommandError::invalid_input("Report has no saved file"))?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|err| CommandError::from(AisecError::from(err)))?;
+    Ok(ReportContentDto {
+        id: report.id,
+        name: report.name,
+        format: report.format,
+        content,
+    })
+}
+
 pub async fn report_list_op(state: &AppState, project_id: String) -> CommandResult<Vec<ReportDto>> {
     let reports = state
         .repositories()
@@ -362,4 +380,12 @@ pub async fn report_list(
     project_id: String,
 ) -> CommandResult<Vec<ReportDto>> {
     report_list_op(state.inner(), project_id).await
+}
+
+#[tauri::command]
+pub async fn report_read(
+    state: State<'_, AppState>,
+    id: String,
+) -> CommandResult<ReportContentDto> {
+    report_read_op(state.inner(), id).await
 }

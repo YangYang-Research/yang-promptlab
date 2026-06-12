@@ -142,8 +142,16 @@ export type ReportDto = {
   format: string;
   status: string;
   file_path: string | null;
+  finding_count: number;
   created_at: string;
   updated_at: string;
+};
+
+export type ReportContentDto = {
+  id: string;
+  name: string;
+  format: string;
+  content: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -200,6 +208,9 @@ export const generateReport = (
 
 export const listReports = (projectId: string) =>
   invokeCommand<ReportDto[]>("report_list", { projectId });
+
+export const readReport = (id: string) =>
+  invokeCommand<ReportContentDto>("report_read", { id });
 
 export const runDiscovery = (targetId: string) =>
   invokeCommand<DiscoveryRunDto>("discovery_run", { targetId });

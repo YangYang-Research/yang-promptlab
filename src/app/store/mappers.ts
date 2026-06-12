@@ -169,7 +169,7 @@ export function mapReports(reports: ReportDto[], projects: ProjectDto[]): Report
     title: r.name,
     format: coerceReportFormat(r.format),
     status: coerceJobStatus(r.status),
-    findingCount: 0,
+    findingCount: r.finding_count,
     createdAt: r.created_at,
     sizeBytes: 0,
   }));

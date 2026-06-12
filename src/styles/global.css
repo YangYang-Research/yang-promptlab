@@ -1009,6 +1009,11 @@ a:hover {
   gap: 1rem;
 }
 
+.row-actions {
+  display: inline-flex;
+  gap: 0.375rem;
+}
+
 /* Modal */
 .modal-overlay {
   position: fixed;

@@ -203,12 +203,21 @@ pub struct ReportDto {
     pub format: String,
     pub status: String,
     pub file_path: Option<String>,
+    pub finding_count: u64,
     pub created_at: String,
     pub updated_at: String,
 }
 
+fn finding_count_from_metadata(metadata_json: Option<&str>) -> u64 {
+    metadata_json
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .and_then(|v| v.get("findings").and_then(|f| f.as_u64()))
+        .unwrap_or(0)
+}
+
 impl From<Report> for ReportDto {
     fn from(r: Report) -> Self {
+        let finding_count = finding_count_from_metadata(r.metadata_json.as_deref());
         Self {
             id: r.id,
             project_id: r.project_id,
@@ -217,8 +226,18 @@ impl From<Report> for ReportDto {
             format: r.format,
             status: r.status,
             file_path: r.file_path,
+            finding_count,
             created_at: ts(r.created_at),
             updated_at: ts(r.updated_at),
         }
     }
+}
+
+/// Full report file contents, returned for download/preview.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReportContentDto {
+    pub id: String,
+    pub name: String,
+    pub format: String,
+    pub content: String,
 }
