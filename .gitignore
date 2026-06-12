@@ -13,6 +13,10 @@ src-tauri/gen/
 *.log
 logs/
 
+# Local model vault + generated reports (runtime artifacts)
+/data/
+/reports/
+
 # IDE
 .idea/
 .vscode/

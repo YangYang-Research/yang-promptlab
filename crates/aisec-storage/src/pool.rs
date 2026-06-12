@@ -1,7 +1,9 @@
+use std::path::Path;
+
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::ConnectOptions;
 
-use aisec_core::AisecResult;
+use aisec_core::{AisecError, AisecResult};
 
 use crate::error::StorageResultExt;
 use crate::repositories::Repositories;
@@ -45,12 +47,84 @@ impl Database {
         Ok(Self { pool })
     }
 
+    /// Open (or create) a file-backed database at `path` and run migrations.
+    ///
+    /// Unlike [`Database::connect`], this takes a filesystem path directly and is
+    /// robust to paths containing spaces or characters that are awkward to encode
+    /// in a `sqlite://` URL. The parent directory must already exist.
+    ///
+    /// Uses WAL journaling for concurrency, but **falls back to a rollback
+    /// journal** (`TRUNCATE`) when the filesystem does not support WAL's
+    /// shared-memory files — some overlay/network filesystems return a disk I/O
+    /// error otherwise. This keeps startup reliable across environments.
+    pub async fn connect_path(path: impl AsRef<Path>) -> AisecResult<Self> {
+        let path = path.as_ref();
+        match Self::open_file(path, sqlx::sqlite::SqliteJournalMode::Wal).await {
+            Ok(db) => {
+                tracing::debug!(path = %path.display(), "database connected (WAL) and migrations applied");
+                Ok(db)
+            }
+            Err(wal_err) => {
+                tracing::warn!(
+                    error = %wal_err.client_message(),
+                    "WAL journal unavailable on this filesystem; retrying with TRUNCATE"
+                );
+                // Remove partial WAL side files before retrying so recovery is clean.
+                for suffix in ["-wal", "-shm"] {
+                    let mut side = std::ffi::OsString::from(path.as_os_str());
+                    side.push(suffix);
+                    let _ = std::fs::remove_file(std::path::PathBuf::from(side));
+                }
+                let db = Self::open_file(path, sqlx::sqlite::SqliteJournalMode::Truncate).await?;
+                tracing::debug!(path = %path.display(), "database connected (TRUNCATE) and migrations applied");
+                Ok(db)
+            }
+        }
+    }
+
+    async fn open_file(path: &Path, journal_mode: sqlx::sqlite::SqliteJournalMode) -> AisecResult<Self> {
+        let options = SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true)
+            .foreign_keys(true)
+            .journal_mode(journal_mode)
+            .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
+            .disable_statement_logging();
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(5)
+            .connect_with(options)
+            .await
+            .map_storage()?;
+
+        MIGRATOR
+            .run(&pool)
+            .await
+            .map_err(|err| AisecError::internal(format!("migration failed: {err}")))?;
+
+        Ok(Self { pool })
+    }
+
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }
 
     pub fn repositories(&self) -> Repositories {
         Repositories::new(self.pool.clone())
+    }
+
+    /// Returns true once the connection pool has been closed.
+    pub fn is_closed(&self) -> bool {
+        self.pool.is_closed()
+    }
+
+    /// Gracefully close the connection pool, flushing in-flight work.
+    ///
+    /// Idempotent: closing an already-closed pool is a no-op.
+    pub async fn close(&self) {
+        if !self.pool.is_closed() {
+            self.pool.close().await;
+        }
     }
 }
 
@@ -62,5 +136,38 @@ pub mod test_utils {
         Database::connect("sqlite::memory:")
             .await
             .expect("in-memory database should initialize")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::CreateProject;
+    use crate::repositories::ProjectRepository;
+
+    #[tokio::test]
+    async fn connect_path_creates_file_and_runs_migrations() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("aisec.db");
+        let db = Database::connect_path(&path).await.expect("connect_path");
+        assert!(path.exists(), "database file should be created");
+
+        // Migrations applied -> repositories are usable.
+        let project = db
+            .repositories()
+            .projects()
+            .create(CreateProject {
+                name: "p".into(),
+                description: None,
+            })
+            .await
+            .expect("create project");
+        assert_eq!(db.repositories().projects().list().await.unwrap().len(), 1);
+        assert_eq!(project.name, "p");
+
+        assert!(!db.is_closed());
+        db.close().await;
+        assert!(db.is_closed());
+        db.close().await; // idempotent
     }
 }
