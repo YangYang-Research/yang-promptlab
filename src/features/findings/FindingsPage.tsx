@@ -47,6 +47,19 @@ export function FindingsPage() {
       ),
     },
     {
+      key: "verdict",
+      header: "Judge Verdict",
+      width: "130px",
+      render: (f: Finding) =>
+        f.verdict === null ? (
+          <span className="text-muted">—</span>
+        ) : (
+          <Badge variant={f.verdict === "vulnerable" ? "danger" : "muted"}>
+            {f.verdict === "vulnerable" ? "Vulnerable" : "Not vulnerable"}
+          </Badge>
+        ),
+    },
+    {
       key: "confidence",
       header: "Confidence",
       width: "100px",

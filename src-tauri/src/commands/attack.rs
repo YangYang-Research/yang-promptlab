@@ -10,6 +10,7 @@
 use aisec_attack::{
     default_executor, AttackCategory, AttackContext, AttackTarget, FindingSeverity,
 };
+use aisec_judge::{deterministic_engine, JudgeRequest, JudgeVerdict, Severity as JudgeSeverity};
 use aisec_storage::{
     AttackResultRepository, CreateAttackResult, CreateFinding, CreateScan, EndpointRepository,
     FindingRepository, ScanRepository, UpdateScan,
@@ -29,6 +30,16 @@ fn severity_str(severity: FindingSeverity) -> &'static str {
         FindingSeverity::Medium => "medium",
         FindingSeverity::High => "high",
         FindingSeverity::Critical => "critical",
+    }
+}
+
+fn judge_severity_str(severity: JudgeSeverity) -> &'static str {
+    match severity {
+        JudgeSeverity::Info => "info",
+        JudgeSeverity::Low => "low",
+        JudgeSeverity::Medium => "medium",
+        JudgeSeverity::High => "high",
+        JudgeSeverity::Critical => "critical",
     }
 }
 
@@ -104,13 +115,30 @@ pub async fn attack_run_prompt_injection_op(
         }
     };
 
+    // Real evaluation of every attack response by the deterministic Judge
+    // Engine (rule + regex consensus, no mocked verdicts).
+    let judge = deterministic_engine();
+
     let mut successes = 0u64;
     let mut created_findings: Vec<FindingDto> = Vec::new();
 
     for attempt in &result.attempts {
         let eval = &attempt.evaluation;
 
-        // Persist every attempt as an attack_result.
+        let verdict: JudgeVerdict = judge
+            .judge_deterministic(JudgeRequest {
+                probe_id: attempt.payload_id.clone(),
+                attack_category: "prompt_injection".into(),
+                payload: attempt.mutated_content.clone(),
+                response_text: attempt.response.body.clone(),
+                context: serde_json::json!({ "payload_name": attempt.payload_name }),
+            })
+            .await
+            .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
+
+        let judge_json = serde_json::to_value(&verdict).unwrap_or(serde_json::Value::Null);
+
+        // Persist every attempt as an attack_result, including the judge verdict.
         let _ = repos
             .attack_results()
             .create(CreateAttackResult {
@@ -118,26 +146,35 @@ pub async fn attack_run_prompt_injection_op(
                 payload_id: None,
                 target_id: target_id.clone(),
                 probe_id: Some(attempt.payload_id.clone()),
-                success: eval.success,
+                success: verdict.vulnerable,
                 response_json: Some(serde_json::json!({
                     "status": attempt.response.status,
                     "body": attempt.response.body,
                     "duration_ms": attempt.response.duration_ms,
                 })),
                 evaluated_json: Some(serde_json::json!({
-                    "confidence": eval.confidence,
-                    "severity": eval.severity.map(severity_str),
-                    "indicators": eval.indicators,
-                    "summary": eval.summary,
+                    "attack_evaluation": {
+                        "success": eval.success,
+                        "confidence": eval.confidence,
+                        "severity": eval.severity.map(severity_str),
+                        "indicators": eval.indicators,
+                        "summary": eval.summary,
+                    },
+                    "judge": judge_json,
                 })),
                 duration_ms: Some(attempt.response.duration_ms as i64),
             })
             .await
             .map_err(CommandError::from)?;
 
-        if eval.success {
+        // The Judge Engine verdict is authoritative for findings.
+        if verdict.vulnerable {
             successes += 1;
-            let severity = eval.severity.map(severity_str).unwrap_or("medium");
+            let severity = verdict
+                .severity
+                .map(judge_severity_str)
+                .or_else(|| eval.severity.map(severity_str))
+                .unwrap_or("medium");
             let finding = repos
                 .findings()
                 .create(CreateFinding {
@@ -147,13 +184,15 @@ pub async fn attack_run_prompt_injection_op(
                     title: format!("Prompt injection: {}", attempt.payload_name),
                     severity: severity.to_string(),
                     category: Some("prompt_injection".into()),
-                    description: Some(eval.summary.clone()),
+                    description: Some(verdict.summary.clone()),
                     evidence_json: Some(serde_json::json!({
                         "payload_id": attempt.payload_id,
                         "payload": attempt.mutated_content,
+                        "verdict": "vulnerable",
+                        "confidence": verdict.confidence,
                         "indicators": eval.indicators,
-                        "confidence": eval.confidence,
                         "response_excerpt": attempt.response.body.chars().take(500).collect::<String>(),
+                        "judge": judge_json,
                     })),
                     status: None,
                 })

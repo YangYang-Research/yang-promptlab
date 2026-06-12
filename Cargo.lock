@@ -76,6 +76,7 @@ dependencies = [
  "aisec-attack",
  "aisec-core",
  "aisec-discovery",
+ "aisec-judge",
  "aisec-report",
  "aisec-storage",
  "serde",

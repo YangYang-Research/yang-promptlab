@@ -82,6 +82,7 @@ export type Finding = {
   category: string;
   status: "open" | "confirmed" | "false_positive" | "fixed";
   confidence: number;
+  verdict: "vulnerable" | "not_vulnerable" | null;
   discoveredAt: string;
 };
 

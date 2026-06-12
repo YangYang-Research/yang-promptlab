@@ -80,6 +80,19 @@ function extractConfidence(evidence: unknown): number {
   return 0;
 }
 
+function extractVerdict(evidence: unknown): Finding["verdict"] {
+  const obj = asRecord(evidence);
+  if (!obj) return null;
+  const judge = asRecord(obj.judge);
+  if (judge && typeof judge.vulnerable === "boolean") {
+    return judge.vulnerable ? "vulnerable" : "not_vulnerable";
+  }
+  if (typeof obj.verdict === "string") {
+    return obj.verdict === "vulnerable" ? "vulnerable" : "not_vulnerable";
+  }
+  return null;
+}
+
 export function mapProjects(
   projects: ProjectDto[],
   targets: TargetDto[],
@@ -128,6 +141,7 @@ export function mapFindings(findings: FindingDto[], targets: TargetDto[]): Findi
     category: f.category ?? "general",
     status: coerceFindingStatus(f.status),
     confidence: extractConfidence(f.evidence),
+    verdict: extractVerdict(f.evidence),
     discoveredAt: f.created_at,
   }));
 }

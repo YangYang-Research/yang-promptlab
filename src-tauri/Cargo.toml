@@ -24,6 +24,7 @@ aisec-storage = { workspace = true }
 aisec-report = { workspace = true }
 aisec-discovery = { workspace = true }
 aisec-attack = { workspace = true }
+aisec-judge = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 time = { workspace = true }
