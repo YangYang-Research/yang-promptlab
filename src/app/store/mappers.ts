@@ -50,6 +50,7 @@ function coerceJobStatus(value: string, fallback: JobStatus = "completed"): JobS
   switch (value.toLowerCase()) {
     case "pending":
     case "running":
+    case "paused":
     case "completed":
     case "failed":
     case "cancelled":
@@ -174,12 +175,19 @@ export function mapEndpoints(endpoints: EndpointDto[]): DiscoveredEndpoint[] {
   }));
 }
 
-export function mapReports(reports: ReportDto[], projects: ProjectDto[]): Report[] {
+export function mapReports(
+  reports: ReportDto[],
+  projects: ProjectDto[],
+  scans: ScanDto[] = [],
+): Report[] {
   const projectNames = new Map(projects.map((p) => [p.id, p.name]));
+  const scanNames = new Map(scans.map((s) => [s.id, s.name]));
   return reports.map((r) => ({
     id: r.id,
     projectId: r.project_id,
     projectName: projectNames.get(r.project_id) ?? "",
+    scanId: r.scan_id,
+    scanName: r.scan_id ? scanNames.get(r.scan_id) ?? r.scan_id.slice(0, 8) : "—",
     title: r.name,
     format: coerceReportFormat(r.format),
     status: coerceJobStatus(r.status),

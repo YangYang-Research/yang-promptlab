@@ -8,6 +8,7 @@ pub mod commands;
 pub mod db;
 pub mod dto;
 pub mod error;
+pub mod jobs;
 pub mod logging;
 pub mod state;
 
@@ -63,22 +64,30 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::health,
             commands::app_info,
             commands::db_health,
-            commands::domain::project_create,
-            commands::domain::project_list,
-            commands::domain::project_get,
-            commands::domain::project_delete,
+            commands::projects::project_create,
+            commands::projects::project_list,
+            commands::projects::project_get,
+            commands::projects::project_delete,
             commands::domain::target_create,
             commands::domain::target_list,
             commands::domain::scan_create,
             commands::domain::scan_list,
             commands::domain::finding_list,
+            commands::domain::finding_list_all,
             commands::domain::report_generate,
             commands::domain::report_list,
+            commands::domain::report_list_all,
             commands::domain::report_read,
             commands::domain::report_export,
             commands::discovery::discovery_run,
             commands::discovery::endpoint_list,
+            commands::discovery::endpoint_create,
             commands::attack::attack_run_prompt_injection,
+            commands::scan::scan_start,
+            commands::scan::scan_status,
+            commands::scan::scan_pause,
+            commands::scan::scan_resume,
+            commands::scan::scan_stop,
         ])
         .build(tauri::generate_context!())?;
 

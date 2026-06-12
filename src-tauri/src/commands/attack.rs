@@ -12,8 +12,8 @@ use aisec_attack::{
 };
 use aisec_judge::{deterministic_engine, JudgeRequest, JudgeVerdict, Severity as JudgeSeverity};
 use aisec_storage::{
-    AttackResultRepository, CreateAttackResult, CreateFinding, CreateScan, EndpointRepository,
-    FindingRepository, ScanRepository, UpdateScan,
+    AttackResultRepository, CreateAttackResult, CreateFinding, CreateScan, Endpoint,
+    EndpointRepository, FindingRepository, Repositories, ScanRepository, UpdateScan,
 };
 use tauri::State;
 use time::OffsetDateTime;
@@ -22,6 +22,12 @@ use tracing::{info, instrument, warn};
 use crate::dto::{AttackRunDto, FindingDto, ScanDto};
 use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
+
+pub struct CategoryRunResult {
+    pub attempts: usize,
+    pub successes: u64,
+    pub findings: Vec<FindingDto>,
+}
 
 fn severity_str(severity: FindingSeverity) -> &'static str {
     match severity {
@@ -43,6 +49,127 @@ fn judge_severity_str(severity: JudgeSeverity) -> &'static str {
     }
 }
 
+pub fn category_id(category: AttackCategory) -> &'static str {
+    category.as_str()
+}
+
+/// Execute one attack category against a single endpoint; persist attempts and findings.
+pub async fn run_category_on_endpoint(
+    repos: &Repositories,
+    scan_id: &str,
+    project_id: &str,
+    target_id: Option<String>,
+    endpoint: &Endpoint,
+    category: AttackCategory,
+) -> CommandResult<CategoryRunResult> {
+    let target = AttackTarget::llm_api(endpoint.url.clone());
+    let probe_id = format!("{}-{}", endpoint.id, category.as_str());
+    let ctx = AttackContext::new(scan_id, probe_id, target);
+    let executor = default_executor();
+
+    info!(
+        scan_id = %scan_id,
+        endpoint_id = %endpoint.id,
+        category = %category.as_str(),
+        url = %endpoint.url,
+        "attack unit started"
+    );
+
+    let result = executor
+        .execute_category(category, &ctx)
+        .await
+        .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
+
+    let judge = deterministic_engine();
+    let category_name = category.as_str();
+    let mut successes = 0u64;
+    let mut created_findings: Vec<FindingDto> = Vec::new();
+
+    for attempt in &result.attempts {
+        let eval = &attempt.evaluation;
+
+        let verdict: JudgeVerdict = judge
+            .judge_deterministic(JudgeRequest {
+                probe_id: attempt.payload_id.clone(),
+                attack_category: category_name.into(),
+                payload: attempt.mutated_content.clone(),
+                response_text: attempt.response.body.clone(),
+                context: serde_json::json!({ "payload_name": attempt.payload_name }),
+            })
+            .await
+            .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
+
+        let judge_json = serde_json::to_value(&verdict).unwrap_or(serde_json::Value::Null);
+
+        repos
+            .attack_results()
+            .create(CreateAttackResult {
+                scan_id: scan_id.to_string(),
+                payload_id: None,
+                target_id: target_id.clone(),
+                probe_id: Some(attempt.payload_id.clone()),
+                success: verdict.vulnerable,
+                response_json: Some(serde_json::json!({
+                    "status": attempt.response.status,
+                    "body": attempt.response.body,
+                    "duration_ms": attempt.response.duration_ms,
+                })),
+                evaluated_json: Some(serde_json::json!({
+                    "attack_evaluation": {
+                        "success": eval.success,
+                        "confidence": eval.confidence,
+                        "severity": eval.severity.map(severity_str),
+                        "indicators": eval.indicators,
+                        "summary": eval.summary,
+                    },
+                    "judge": judge_json,
+                })),
+                duration_ms: Some(attempt.response.duration_ms as i64),
+            })
+            .await
+            .map_err(CommandError::from)?;
+
+        if verdict.vulnerable {
+            successes += 1;
+            let severity = verdict
+                .severity
+                .map(judge_severity_str)
+                .or_else(|| eval.severity.map(severity_str))
+                .unwrap_or("medium");
+            let finding = repos
+                .findings()
+                .create(CreateFinding {
+                    scan_id: scan_id.to_string(),
+                    project_id: project_id.to_string(),
+                    target_id: target_id.clone(),
+                    title: format!("{}: {}", category.display_name(), attempt.payload_name),
+                    severity: severity.to_string(),
+                    category: Some(category_name.into()),
+                    description: Some(verdict.summary.clone()),
+                    evidence_json: Some(serde_json::json!({
+                        "payload_id": attempt.payload_id,
+                        "payload": attempt.mutated_content,
+                        "verdict": "vulnerable",
+                        "confidence": verdict.confidence,
+                        "indicators": eval.indicators,
+                        "response_excerpt": attempt.response.body.chars().take(500).collect::<String>(),
+                        "judge": judge_json,
+                    })),
+                    status: None,
+                })
+                .await
+                .map_err(CommandError::from)?;
+            created_findings.push(FindingDto::from(finding));
+        }
+    }
+
+    Ok(CategoryRunResult {
+        attempts: result.attempts.len(),
+        successes,
+        findings: created_findings,
+    })
+}
+
 #[instrument(skip(state))]
 pub async fn attack_run_prompt_injection_op(
     state: &AppState,
@@ -50,12 +177,19 @@ pub async fn attack_run_prompt_injection_op(
 ) -> CommandResult<AttackRunDto> {
     let repos = state.repositories();
 
-    let endpoint = repos.endpoints().get(&endpoint_id).await.map_err(CommandError::from)?;
-    let source_scan = repos.scans().get(&endpoint.scan_id).await.map_err(CommandError::from)?;
+    let endpoint = repos
+        .endpoints()
+        .get(&endpoint_id)
+        .await
+        .map_err(CommandError::from)?;
+    let source_scan = repos
+        .scans()
+        .get(&endpoint.scan_id)
+        .await
+        .map_err(CommandError::from)?;
     let project_id = source_scan.project_id.clone();
     let target_id = endpoint.target_id.clone().or(source_scan.target_id.clone());
 
-    // Dedicated scan for this attack run.
     let scan = repos
         .scans()
         .create(CreateScan {
@@ -83,18 +217,18 @@ pub async fn attack_run_prompt_injection_op(
         )
         .await;
 
-    // Execute the real attack engine over HTTP.
-    let target = AttackTarget::llm_api(endpoint.url.clone());
-    let ctx = AttackContext::new(scan.id.clone(), "probe-prompt-injection", target);
-    let executor = default_executor();
-
-    info!(scan_id = %scan.id, url = %endpoint.url, "prompt injection attack started");
-
-    let result = match executor
-        .execute_category(AttackCategory::PromptInjection, &ctx)
-        .await
+    let category = AttackCategory::PromptInjection;
+    let run = match run_category_on_endpoint(
+        &repos,
+        &scan.id,
+        &project_id,
+        target_id.clone(),
+        &endpoint,
+        category,
+    )
+    .await
     {
-        Ok(result) => result,
+        Ok(run) => run,
         Err(err) => {
             warn!(scan_id = %scan.id, error = %err, "attack run failed");
             let _ = repos
@@ -109,98 +243,9 @@ pub async fn attack_run_prompt_injection_op(
                     },
                 )
                 .await;
-            return Err(CommandError::from(aisec_core::AisecError::internal(
-                err.to_string(),
-            )));
+            return Err(err);
         }
     };
-
-    // Real evaluation of every attack response by the deterministic Judge
-    // Engine (rule + regex consensus, no mocked verdicts).
-    let judge = deterministic_engine();
-
-    let mut successes = 0u64;
-    let mut created_findings: Vec<FindingDto> = Vec::new();
-
-    for attempt in &result.attempts {
-        let eval = &attempt.evaluation;
-
-        let verdict: JudgeVerdict = judge
-            .judge_deterministic(JudgeRequest {
-                probe_id: attempt.payload_id.clone(),
-                attack_category: "prompt_injection".into(),
-                payload: attempt.mutated_content.clone(),
-                response_text: attempt.response.body.clone(),
-                context: serde_json::json!({ "payload_name": attempt.payload_name }),
-            })
-            .await
-            .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
-
-        let judge_json = serde_json::to_value(&verdict).unwrap_or(serde_json::Value::Null);
-
-        // Persist every attempt as an attack_result, including the judge verdict.
-        let _ = repos
-            .attack_results()
-            .create(CreateAttackResult {
-                scan_id: scan.id.clone(),
-                payload_id: None,
-                target_id: target_id.clone(),
-                probe_id: Some(attempt.payload_id.clone()),
-                success: verdict.vulnerable,
-                response_json: Some(serde_json::json!({
-                    "status": attempt.response.status,
-                    "body": attempt.response.body,
-                    "duration_ms": attempt.response.duration_ms,
-                })),
-                evaluated_json: Some(serde_json::json!({
-                    "attack_evaluation": {
-                        "success": eval.success,
-                        "confidence": eval.confidence,
-                        "severity": eval.severity.map(severity_str),
-                        "indicators": eval.indicators,
-                        "summary": eval.summary,
-                    },
-                    "judge": judge_json,
-                })),
-                duration_ms: Some(attempt.response.duration_ms as i64),
-            })
-            .await
-            .map_err(CommandError::from)?;
-
-        // The Judge Engine verdict is authoritative for findings.
-        if verdict.vulnerable {
-            successes += 1;
-            let severity = verdict
-                .severity
-                .map(judge_severity_str)
-                .or_else(|| eval.severity.map(severity_str))
-                .unwrap_or("medium");
-            let finding = repos
-                .findings()
-                .create(CreateFinding {
-                    scan_id: scan.id.clone(),
-                    project_id: project_id.clone(),
-                    target_id: target_id.clone(),
-                    title: format!("Prompt injection: {}", attempt.payload_name),
-                    severity: severity.to_string(),
-                    category: Some("prompt_injection".into()),
-                    description: Some(verdict.summary.clone()),
-                    evidence_json: Some(serde_json::json!({
-                        "payload_id": attempt.payload_id,
-                        "payload": attempt.mutated_content,
-                        "verdict": "vulnerable",
-                        "confidence": verdict.confidence,
-                        "indicators": eval.indicators,
-                        "response_excerpt": attempt.response.body.chars().take(500).collect::<String>(),
-                        "judge": judge_json,
-                    })),
-                    status: None,
-                })
-                .await
-                .map_err(CommandError::from)?;
-            created_findings.push(FindingDto::from(finding));
-        }
-    }
 
     let updated = repos
         .scans()
@@ -217,18 +262,18 @@ pub async fn attack_run_prompt_injection_op(
 
     info!(
         scan_id = %scan.id,
-        attempts = result.attempts.len(),
-        successes,
-        findings = created_findings.len(),
+        attempts = run.attempts,
+        successes = run.successes,
+        findings = run.findings.len(),
         "prompt injection attack completed"
     );
 
     Ok(AttackRunDto {
         scan: ScanDto::from(updated),
-        category: "prompt_injection".into(),
-        attempts: result.attempts.len() as u64,
-        successes,
-        findings: created_findings,
+        category: category_id(category).into(),
+        attempts: run.attempts as u64,
+        successes: run.successes,
+        findings: run.findings,
     })
 }
 

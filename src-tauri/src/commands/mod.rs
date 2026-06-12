@@ -9,6 +9,8 @@ use crate::state::AppState;
 pub mod attack;
 pub mod discovery;
 pub mod domain;
+pub mod projects;
+pub mod scan;
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {

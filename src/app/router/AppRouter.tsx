@@ -30,6 +30,12 @@ const ModelsPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import("@/features/settings/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 );
+const ScanWizardPage = lazy(() =>
+  import("@/features/scans/ScanWizardPage").then((m) => ({ default: m.ScanWizardPage })),
+);
+const ScansPage = lazy(() =>
+  import("@/features/scans/ScansPage").then((m) => ({ default: m.ScansPage })),
+);
 
 function PageLoader() {
   return (
@@ -58,6 +64,22 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <ProjectsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="scans"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <ScansPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="scans/new"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <ScanWizardPage />
               </Suspense>
             }
           />

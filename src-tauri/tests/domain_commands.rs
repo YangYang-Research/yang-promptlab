@@ -8,9 +8,11 @@ use std::path::Path;
 
 use aisec_core::{init_logging, LogOptions};
 use aisec_desktop_lib::commands::domain::{
-    finding_list_op, project_create_op, project_delete_op, project_get_op, project_list_op,
-    report_generate_op, report_list_op, scan_create_op, scan_list_op, target_create_op,
-    target_list_op,
+    finding_list_op, report_generate_op, report_list_op, scan_create_op, scan_list_op,
+    target_create_op, target_list_op,
+};
+use aisec_desktop_lib::commands::projects::{
+    project_create_op, project_delete_op, project_get_op, project_list_op,
 };
 use aisec_desktop_lib::db::open_database;
 use aisec_desktop_lib::state::AppState;

@@ -16,16 +16,15 @@ import {
   deleteProject as deleteProjectCmd,
   generateReport as generateReportCmd,
   listEndpoints,
-  listFindings,
+  listFindingsAll,
+  listReportsAll,
   listProjects,
-  listReports,
   listScans,
   listTargets,
   runDiscovery as runDiscoveryCmd,
   runPromptInjection as runPromptInjectionCmd,
   type EndpointDto,
   type FindingDto,
-  type ReportDto,
   type ScanDto,
 } from "@/shared/ipc";
 import { toAppError } from "@/shared/errors";
@@ -138,21 +137,20 @@ type AppStoreProviderProps = {
 async function loadAll(): Promise<LoadedData> {
   const projectDtos = await listProjects();
 
-  const [targetGroups, scanGroups, reportGroups] = await Promise.all([
+  const [targetGroups, scanGroups, reportDtos] = await Promise.all([
     Promise.all(projectDtos.map((p) => listTargets(p.id))),
     Promise.all(projectDtos.map((p) => listScans(p.id))),
-    Promise.all(projectDtos.map((p) => listReports(p.id))),
+    listReportsAll(),
   ]);
 
   const targetDtos = targetGroups.flat();
   const scanDtos: ScanDto[] = scanGroups.flat();
-  const reportDtos: ReportDto[] = reportGroups.flat();
 
   const [findingGroups, endpointGroups] = await Promise.all([
-    Promise.all(scanDtos.map((s) => listFindings(s.id))),
+    listFindingsAll(),
     Promise.all(scanDtos.map((s) => listEndpoints(s.id))),
   ]);
-  const findingDtos: FindingDto[] = findingGroups.flat();
+  const findingDtos: FindingDto[] = findingGroups;
   const endpointDtos: EndpointDto[] = endpointGroups.flat();
 
   return {
@@ -161,7 +159,7 @@ async function loadAll(): Promise<LoadedData> {
     scans: mapScans(scanDtos),
     endpoints: mapEndpoints(endpointDtos),
     findings: mapFindings(findingDtos, targetDtos),
-    reports: mapReports(reportDtos, projectDtos),
+    reports: mapReports(reportDtos, projectDtos, scanDtos),
   };
 }
 
@@ -211,13 +209,31 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
   const actions = useMemo<AppActions>(
     () => ({
       refresh,
-      createProject: (name, description) =>
-        runMutation("createProject", () => createProjectCmd(name, description)),
+      createProject: async (name, description) => {
+        try {
+          const dto = await createProjectCmd(name, description);
+          await refresh();
+          return mapProjects([dto], [], [])[0];
+        } catch (error) {
+          const appError = toAppError(error);
+          log.error("mutation failed: createProject", { error: appError });
+          dispatch({ type: "SET_ERROR", error: appError.message });
+          throw appError;
+        }
+      },
       deleteProject: (id) => runMutation("deleteProject", () => deleteProjectCmd(id)),
-      createTarget: (projectId, name, targetType, descriptor) =>
-        runMutation("createTarget", () =>
-          createTargetCmd(projectId, name, targetType, descriptor),
-        ),
+      createTarget: async (projectId, name, targetType, descriptor) => {
+        try {
+          const dto = await createTargetCmd(projectId, name, targetType, descriptor);
+          await refresh();
+          return mapTargets([dto])[0];
+        } catch (error) {
+          const appError = toAppError(error);
+          log.error("mutation failed: createTarget", { error: appError });
+          dispatch({ type: "SET_ERROR", error: appError.message });
+          throw appError;
+        }
+      },
       createScan: (projectId, name, targetId, status) =>
         runMutation("createScan", () => createScanCmd(projectId, name, targetId, status)),
       generateReport: (projectId, scanId, format, kind) =>

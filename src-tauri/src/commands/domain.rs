@@ -9,15 +9,13 @@ use aisec_report::{
     ReportDataBuilder, ReportFormat, ReportKind, ReportingEngine, StorageFindingRow,
 };
 use aisec_storage::{
-    CreateProject, CreateReport, CreateScan, CreateTarget, FindingRepository, ProjectRepository,
-    ReportRepository, ScanRepository, TargetRepository,
+    CreateReport, CreateScan, CreateTarget, FindingRepository, ProjectRepository, ReportRepository,
+    ScanRepository, TargetRepository,
 };
 use tauri::State;
 use tracing::{info, instrument};
 
-use crate::dto::{
-    FindingDto, ProjectDto, ReportContentDto, ReportDto, ScanDto, TargetDto,
-};
+use crate::dto::{FindingDto, ReportContentDto, ReportDto, ScanDto, TargetDto};
 use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
 
@@ -40,58 +38,6 @@ fn parse_kind(value: Option<&str>) -> ReportKind {
         Some("compliance") => ReportKind::Compliance,
         _ => ReportKind::Technical,
     }
-}
-
-// ---------------------------------------------------------------------------
-// Projects
-// ---------------------------------------------------------------------------
-
-#[instrument(skip(state))]
-pub async fn project_create_op(
-    state: &AppState,
-    name: String,
-    description: Option<String>,
-) -> CommandResult<ProjectDto> {
-    let project = state
-        .repositories()
-        .projects()
-        .create(CreateProject { name, description })
-        .await
-        .map_err(CommandError::from)?;
-    info!(id = %project.id, "project created");
-    Ok(project.into())
-}
-
-pub async fn project_list_op(state: &AppState) -> CommandResult<Vec<ProjectDto>> {
-    let projects = state
-        .repositories()
-        .projects()
-        .list()
-        .await
-        .map_err(CommandError::from)?;
-    Ok(projects.into_iter().map(ProjectDto::from).collect())
-}
-
-pub async fn project_get_op(state: &AppState, id: String) -> CommandResult<ProjectDto> {
-    let project = state
-        .repositories()
-        .projects()
-        .get(&id)
-        .await
-        .map_err(CommandError::from)?;
-    Ok(project.into())
-}
-
-#[instrument(skip(state))]
-pub async fn project_delete_op(state: &AppState, id: String) -> CommandResult<()> {
-    state
-        .repositories()
-        .projects()
-        .delete(&id)
-        .await
-        .map_err(CommandError::from)?;
-    info!(%id, "project deleted");
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -180,6 +126,24 @@ pub async fn finding_list_op(state: &AppState, scan_id: String) -> CommandResult
         .list_by_scan(&scan_id)
         .await
         .map_err(CommandError::from)?;
+    Ok(findings.into_iter().map(FindingDto::from).collect())
+}
+
+pub async fn finding_list_all_op(state: &AppState) -> CommandResult<Vec<FindingDto>> {
+    let repos = state.repositories();
+    let projects = repos.projects().list().await.map_err(CommandError::from)?;
+    let mut findings = Vec::new();
+
+    for project in projects {
+        let mut rows = repos
+            .findings()
+            .list_by_project(&project.id)
+            .await
+            .map_err(CommandError::from)?;
+        findings.append(&mut rows);
+    }
+
+    findings.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Ok(findings.into_iter().map(FindingDto::from).collect())
 }
 
@@ -313,33 +277,27 @@ pub async fn report_list_op(state: &AppState, project_id: String) -> CommandResu
     Ok(reports.into_iter().map(ReportDto::from).collect())
 }
 
+pub async fn report_list_all_op(state: &AppState) -> CommandResult<Vec<ReportDto>> {
+    let repos = state.repositories();
+    let projects = repos.projects().list().await.map_err(CommandError::from)?;
+    let mut reports = Vec::new();
+
+    for project in projects {
+        let mut rows = repos
+            .reports()
+            .list_by_project(&project.id)
+            .await
+            .map_err(CommandError::from)?;
+        reports.append(&mut rows);
+    }
+
+    reports.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(reports.into_iter().map(ReportDto::from).collect())
+}
+
 // ===========================================================================
 // Tauri command wrappers (thin; delegate to the *_op functions above)
 // ===========================================================================
-
-#[tauri::command]
-pub async fn project_create(
-    state: State<'_, AppState>,
-    name: String,
-    description: Option<String>,
-) -> CommandResult<ProjectDto> {
-    project_create_op(state.inner(), name, description).await
-}
-
-#[tauri::command]
-pub async fn project_list(state: State<'_, AppState>) -> CommandResult<Vec<ProjectDto>> {
-    project_list_op(state.inner()).await
-}
-
-#[tauri::command]
-pub async fn project_get(state: State<'_, AppState>, id: String) -> CommandResult<ProjectDto> {
-    project_get_op(state.inner(), id).await
-}
-
-#[tauri::command]
-pub async fn project_delete(state: State<'_, AppState>, id: String) -> CommandResult<()> {
-    project_delete_op(state.inner(), id).await
-}
 
 #[tauri::command]
 pub async fn target_create(
@@ -388,6 +346,11 @@ pub async fn finding_list(
 }
 
 #[tauri::command]
+pub async fn finding_list_all(state: State<'_, AppState>) -> CommandResult<Vec<FindingDto>> {
+    finding_list_all_op(state.inner()).await
+}
+
+#[tauri::command]
 pub async fn report_generate(
     state: State<'_, AppState>,
     project_id: String,
@@ -404,6 +367,11 @@ pub async fn report_list(
     project_id: String,
 ) -> CommandResult<Vec<ReportDto>> {
     report_list_op(state.inner(), project_id).await
+}
+
+#[tauri::command]
+pub async fn report_list_all(state: State<'_, AppState>) -> CommandResult<Vec<ReportDto>> {
+    report_list_all_op(state.inner()).await
 }
 
 #[tauri::command]

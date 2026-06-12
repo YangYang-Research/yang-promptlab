@@ -12,6 +12,7 @@ use aisec_storage::{
 use tauri::State;
 use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
+use url::Url;
 
 use crate::dto::{DiscoveryRunDto, DiscoveryStatsDto, EndpointDto, ScanDto};
 use crate::error::{CommandError, CommandResult};
@@ -28,6 +29,87 @@ fn seed_url_from_descriptor(descriptor_json: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn target_origin(descriptor_json: &str) -> CommandResult<String> {
+    let seed = seed_url_from_descriptor(descriptor_json).ok_or_else(|| {
+        CommandError::invalid_input("Target has no URL in its descriptor; add a URL first.")
+    })?;
+    let parsed = Url::parse(&seed)
+        .map_err(|_| CommandError::invalid_input("Target URL is invalid"))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| CommandError::invalid_input("Target URL has no host"))?;
+    let mut origin = format!("{}://{}", parsed.scheme(), host);
+    if let Some(port) = parsed.port() {
+        origin = format!("{origin}:{port}");
+    }
+    Ok(origin)
+}
+
+fn absolute_endpoint_url(origin: &str, path: &str) -> CommandResult<String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err(CommandError::invalid_input("path must not be empty"));
+    }
+    if !path.starts_with('/') {
+        return Err(CommandError::invalid_input("path must start with /"));
+    }
+    Url::parse(origin)
+        .and_then(|base| base.join(path))
+        .map(|url| url.to_string())
+        .map_err(|_| {
+            CommandError::invalid_input("could not resolve endpoint URL from target origin and path")
+        })
+}
+
+fn normalize_http_method(method: Option<String>) -> CommandResult<String> {
+    let method = method.unwrap_or_else(|| "GET".into());
+    let upper = method.trim().to_ascii_uppercase();
+    if upper.is_empty() {
+        return Err(CommandError::invalid_input("HTTP method must not be empty"));
+    }
+    Ok(upper)
+}
+
+#[instrument(skip(state))]
+pub async fn endpoint_create_op(
+    state: &AppState,
+    scan_id: String,
+    target_id: String,
+    method: Option<String>,
+    path: String,
+) -> CommandResult<EndpointDto> {
+    let repos = state.repositories();
+    let target = repos.targets().get(&target_id).await.map_err(CommandError::from)?;
+    repos
+        .scans()
+        .get(&scan_id)
+        .await
+        .map_err(CommandError::from)?;
+
+    let origin = target_origin(&target.descriptor_json)?;
+    let url = absolute_endpoint_url(&origin, &path)?;
+    let method = normalize_http_method(method)?;
+
+    let endpoint = repos
+        .endpoints()
+        .create(CreateEndpoint {
+            scan_id,
+            target_id: Some(target.id),
+            url,
+            kind: "manual".into(),
+            method: Some(method),
+            confidence: 1.0,
+            evidence: Some("Manual entry".into()),
+            source_url: Some("manual".into()),
+            discovered_at: OffsetDateTime::now_utc(),
+        })
+        .await
+        .map_err(CommandError::from)?;
+
+    info!(id = %endpoint.id, url = %endpoint.url, "manual endpoint created");
+    Ok(endpoint.into())
 }
 
 #[instrument(skip(state))]
@@ -190,6 +272,17 @@ pub async fn endpoint_list_op(
 // ---------------------------------------------------------------------------
 // Tauri command wrappers
 // ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn endpoint_create(
+    state: State<'_, AppState>,
+    scan_id: String,
+    target_id: String,
+    method: Option<String>,
+    path: String,
+) -> CommandResult<EndpointDto> {
+    endpoint_create_op(state.inner(), scan_id, target_id, method, path).await
+}
 
 #[tauri::command]
 pub async fn discovery_run(

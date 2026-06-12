@@ -241,3 +241,21 @@ pub struct ReportContentDto {
     pub format: String,
     pub content: String,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ScanStartDto {
+    pub scan_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ScanStatusDto {
+    pub scan_id: String,
+    pub status: String,
+    pub progress_percent: f64,
+    pub completed: u64,
+    pub total: u64,
+    pub findings_count: u64,
+    pub current_endpoint: Option<String>,
+    pub current_test: Option<String>,
+    pub started_at: Option<String>,
+}

@@ -1,6 +1,6 @@
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
 
-export type JobStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+export type JobStatus = "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
 
 export type ProjectStatus = "active" | "archived" | "draft";
 
@@ -114,6 +114,8 @@ export type Report = {
   id: string;
   projectId: string;
   projectName: string;
+  scanId: string | null;
+  scanName: string;
   title: string;
   format: ReportFormat;
   status: JobStatus;

@@ -81,12 +81,14 @@ dependencies = [
  "aisec-storage",
  "serde",
  "serde_json",
+ "sqlx",
  "tauri",
  "tauri-build",
  "tempfile",
  "time",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]

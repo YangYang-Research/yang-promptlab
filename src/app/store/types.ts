@@ -67,14 +67,14 @@ export type AppAction =
 
 export type AppActions = {
   refresh: () => Promise<void>;
-  createProject: (name: string, description?: string | null) => Promise<void>;
+  createProject: (name: string, description?: string | null) => Promise<Project>;
   deleteProject: (id: string) => Promise<void>;
   createTarget: (
     projectId: string,
     name: string,
     targetType: string,
     descriptor?: unknown,
-  ) => Promise<void>;
+  ) => Promise<Target>;
   createScan: (
     projectId: string,
     name: string,

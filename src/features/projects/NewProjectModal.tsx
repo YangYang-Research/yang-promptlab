@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import { Button, Modal } from "@/shared/components";
@@ -10,8 +11,9 @@ type NewProjectModalProps = {
 };
 
 export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
-  const { actions } = useAppStore();
+  const { actions, dispatch } = useAppStore();
   const { notify } = useToast();
+  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -40,10 +42,12 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
     setSubmitting(true);
     setFormError(null);
     try {
-      await actions.createProject(trimmed, description.trim() || null);
+      const project = await actions.createProject(trimmed, description.trim() || null);
       notify(`Project "${trimmed}" created`, "success");
+      dispatch({ type: "SET_SELECTED_PROJECT", projectId: project.id });
       reset();
       onClose();
+      navigate(`/scans/new?projectId=${encodeURIComponent(project.id)}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create project";
       setFormError(message);
