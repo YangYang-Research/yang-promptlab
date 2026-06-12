@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
@@ -8,7 +9,10 @@ import {
   DataTable,
   PageHeader,
 } from "@/shared/components";
+import { useToast } from "@/shared/notifications";
 import type { Project } from "@/shared/types";
+
+import { NewProjectModal } from "./NewProjectModal";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, {
@@ -20,10 +24,18 @@ function formatDate(iso: string) {
 
 export function ProjectsPage() {
   const { projects, dispatch, ui, loading, error, actions } = useAppStore();
-  const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const { notify } = useToast();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [modalOpen, setModalOpen] = useState(false);
+
+  useEffect(() => {
+    const state = location.state as { openNewProject?: boolean } | null;
+    if (state?.openNewProject) {
+      setModalOpen(true);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location, navigate]);
 
   const filtered = projects.filter((p) => {
     const q = ui.searchQuery.toLowerCase();
@@ -31,28 +43,12 @@ export function ProjectsPage() {
     return p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q);
   });
 
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed || submitting) return;
-    setSubmitting(true);
+  async function handleDelete(project: Project) {
     try {
-      await actions.createProject(trimmed, description.trim() || null);
-      setName("");
-      setDescription("");
-      setShowForm(false);
+      await actions.deleteProject(project.id);
+      notify(`Project "${project.name}" deleted`, "success");
     } catch {
-      // error surfaced via store.error
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleDelete(id: string) {
-    try {
-      await actions.deleteProject(id);
-    } catch {
-      // error surfaced via store.error
+      notify("Failed to delete project", "error");
     }
   }
 
@@ -101,7 +97,7 @@ export function ProjectsPage() {
       width: "90px",
       render: (p: Project) => (
         <span onClick={(e) => e.stopPropagation()}>
-          <Button variant="danger" size="sm" onClick={() => handleDelete(p.id)}>
+          <Button variant="danger" size="sm" onClick={() => handleDelete(p)}>
             Delete
           </Button>
         </span>
@@ -119,7 +115,7 @@ export function ProjectsPage() {
             <Button variant="ghost" onClick={() => void actions.refresh()} disabled={loading}>
               {loading ? "Refreshing…" : "Refresh"}
             </Button>
-            <Button variant="primary" onClick={() => setShowForm((v) => !v)}>
+            <Button variant="primary" onClick={() => setModalOpen(true)}>
               New Project
             </Button>
           </>
@@ -132,36 +128,6 @@ export function ProjectsPage() {
         </Card>
       )}
 
-      {showForm && (
-        <Card>
-          <form className="project-form" onSubmit={handleCreate}>
-            <div className="project-form__row">
-              <input
-                className="input"
-                placeholder="Project name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                autoFocus
-              />
-              <input
-                className="input"
-                placeholder="Description (optional)"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-            </div>
-            <div className="project-form__actions">
-              <Button variant="ghost" onClick={() => setShowForm(false)}>
-                Cancel
-              </Button>
-              <Button variant="primary" type="submit" disabled={submitting || !name.trim()}>
-                {submitting ? "Creating…" : "Create Project"}
-              </Button>
-            </div>
-          </form>
-        </Card>
-      )}
-
       <Card padding="none">
         <DataTable
           columns={columns}
@@ -171,6 +137,8 @@ export function ProjectsPage() {
           emptyMessage={loading ? "Loading projects…" : "No projects yet. Create your first project."}
         />
       </Card>
+
+      <NewProjectModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </div>
   );
 }

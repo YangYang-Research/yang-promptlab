@@ -32,7 +32,10 @@ export function DashboardPage() {
         title="Dashboard"
         description="Overview of your AI security testing workspace"
         actions={
-          <Button variant="primary" onClick={() => navigate("/projects")}>
+          <Button
+            variant="primary"
+            onClick={() => navigate("/projects", { state: { openNewProject: true } })}
+          >
             New Project
           </Button>
         }
