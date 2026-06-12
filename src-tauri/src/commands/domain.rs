@@ -279,6 +279,30 @@ pub async fn report_read_op(state: &AppState, id: String) -> CommandResult<Repor
     })
 }
 
+pub async fn report_export_op(state: &AppState, id: String) -> CommandResult<String> {
+    let report = state.repositories().reports().get(&id).await.map_err(CommandError::from)?;
+    let src = report
+        .file_path
+        .clone()
+        .ok_or_else(|| CommandError::invalid_input("Report has no saved file"))?;
+
+    let downloads = std::env::var_os("HOME")
+        .map(|home| std::path::PathBuf::from(home).join("Downloads"))
+        .unwrap_or_else(|| state.data_dir().join("downloads"));
+    std::fs::create_dir_all(&downloads).map_err(|err| CommandError::from(AisecError::from(err)))?;
+
+    let file_name = std::path::Path::new(&src)
+        .file_name()
+        .map(|f| f.to_os_string())
+        .unwrap_or_else(|| format!("{}.{}", report.name, report.format).into());
+    let dest = downloads.join(file_name);
+
+    std::fs::copy(&src, &dest).map_err(|err| CommandError::from(AisecError::from(err)))?;
+    let dest_str = dest.to_string_lossy().into_owned();
+    info!(report_id = %report.id, dest = %dest_str, "report exported");
+    Ok(dest_str)
+}
+
 pub async fn report_list_op(state: &AppState, project_id: String) -> CommandResult<Vec<ReportDto>> {
     let reports = state
         .repositories()
@@ -388,4 +412,9 @@ pub async fn report_read(
     id: String,
 ) -> CommandResult<ReportContentDto> {
     report_read_op(state.inner(), id).await
+}
+
+#[tauri::command]
+pub async fn report_export(state: State<'_, AppState>, id: String) -> CommandResult<String> {
+    report_export_op(state.inner(), id).await
 }

@@ -13,6 +13,7 @@ export {
   generateReport,
   listReports,
   readReport,
+  exportReport,
   runDiscovery,
   listEndpoints,
   runPromptInjection,

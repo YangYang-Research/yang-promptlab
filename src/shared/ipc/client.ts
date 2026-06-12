@@ -212,6 +212,9 @@ export const listReports = (projectId: string) =>
 export const readReport = (id: string) =>
   invokeCommand<ReportContentDto>("report_read", { id });
 
+export const exportReport = (id: string) =>
+  invokeCommand<string>("report_export", { id });
+
 export const runDiscovery = (targetId: string) =>
   invokeCommand<DiscoveryRunDto>("discovery_run", { targetId });
 

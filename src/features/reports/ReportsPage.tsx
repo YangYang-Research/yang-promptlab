@@ -9,7 +9,7 @@ import {
   PageHeader,
   StatusBadge,
 } from "@/shared/components";
-import { readReport } from "@/shared/ipc";
+import { exportReport, readReport } from "@/shared/ipc";
 import { useToast } from "@/shared/notifications";
 import type { Report } from "@/shared/types";
 
@@ -24,21 +24,10 @@ export function ReportsPage() {
   async function downloadReport(report: Report) {
     setBusyId(report.id);
     try {
-      const file = await readReport(report.id);
-      const ext = file.format || "html";
-      const mime = ext === "html" ? "text/html" : "text/plain";
-      const blob = new Blob([file.content], { type: mime });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${file.name.replace(/[^a-z0-9-_]+/gi, "_")}.${ext}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      notify("Report downloaded", "success");
+      const dest = await exportReport(report.id);
+      notify(`Report saved to ${dest}`, "success");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to read report";
+      const message = err instanceof Error ? err.message : "Failed to export report";
       notify(message, "error");
     } finally {
       setBusyId(null);
