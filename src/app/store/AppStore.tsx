@@ -211,8 +211,18 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
   const actions = useMemo<AppActions>(
     () => ({
       refresh,
-      createProject: (name, description) =>
-        runMutation("createProject", () => createProjectCmd(name, description)),
+      createProject: async (name, description) => {
+        try {
+          const created = await createProjectCmd(name, description);
+          await refresh();
+          return created;
+        } catch (error) {
+          const appError = toAppError(error);
+          log.error("mutation failed: createProject", { error: appError });
+          dispatch({ type: "SET_ERROR", error: appError.message });
+          throw appError;
+        }
+      },
       deleteProject: (id) => runMutation("deleteProject", () => deleteProjectCmd(id)),
       createTarget: (projectId, name, targetType, descriptor) =>
         runMutation("createTarget", () =>

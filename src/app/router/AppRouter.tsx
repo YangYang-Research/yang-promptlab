@@ -12,6 +12,9 @@ const ProjectsPage = lazy(() =>
 const TargetsPage = lazy(() =>
   import("@/features/targets/TargetsPage").then((m) => ({ default: m.TargetsPage })),
 );
+const ScanWizardPage = lazy(() =>
+  import("@/features/scans/ScanWizardPage").then((m) => ({ default: m.ScanWizardPage })),
+);
 const DiscoveryPage = lazy(() =>
   import("@/features/discovery/DiscoveryPage").then((m) => ({ default: m.DiscoveryPage })),
 );
@@ -66,6 +69,14 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <TargetsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="scans/new"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <ScanWizardPage />
               </Suspense>
             }
           />

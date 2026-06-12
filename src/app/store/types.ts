@@ -11,7 +11,7 @@ import type {
   ScanRun,
   Target,
 } from "@/shared/types";
-import type { AttackRunDto, DiscoveryRunDto } from "@/shared/ipc";
+import type { AttackRunDto, DiscoveryRunDto, ProjectDto } from "@/shared/ipc";
 
 export type AppSettings = {
   theme: "dark" | "light" | "system";
@@ -67,7 +67,7 @@ export type AppAction =
 
 export type AppActions = {
   refresh: () => Promise<void>;
-  createProject: (name: string, description?: string | null) => Promise<void>;
+  createProject: (name: string, description?: string | null) => Promise<ProjectDto>;
   deleteProject: (id: string) => Promise<void>;
   createTarget: (
     projectId: string,

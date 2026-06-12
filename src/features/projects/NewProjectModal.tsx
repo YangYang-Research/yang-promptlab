@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import { Button, Modal } from "@/shared/components";
@@ -12,6 +13,7 @@ type NewProjectModalProps = {
 export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
   const { actions } = useAppStore();
   const { notify } = useToast();
+  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -40,10 +42,12 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
     setSubmitting(true);
     setFormError(null);
     try {
-      await actions.createProject(trimmed, description.trim() || null);
+      const created = await actions.createProject(trimmed, description.trim() || null);
       notify(`Project "${trimmed}" created`, "success");
       reset();
       onClose();
+      // New Project flow: go straight into the Scan Wizard with the project locked.
+      navigate(`/scans/new?projectId=${encodeURIComponent(created.id)}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create project";
       setFormError(message);

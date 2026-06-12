@@ -1014,6 +1014,67 @@ a:hover {
   gap: 0.375rem;
 }
 
+/* Scan wizard stepper */
+.wizard-steps {
+  list-style: none;
+  display: flex;
+  gap: 0.5rem;
+  padding: 0;
+  margin: 0 0 1rem;
+}
+.wizard-steps__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  padding: 0.625rem 0.875rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+.wizard-steps__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+}
+.wizard-steps__item--active {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.wizard-steps__item--active .wizard-steps__index {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.wizard-steps__item--done {
+  color: var(--text);
+}
+.wizard-steps__item--done .wizard-steps__index {
+  background: var(--success);
+  border-color: var(--success);
+  color: #fff;
+}
+
+.wizard-project-locked {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+.wizard-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
 /* Modal */
 .modal-overlay {
   position: fixed;
