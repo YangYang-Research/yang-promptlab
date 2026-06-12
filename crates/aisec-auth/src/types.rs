@@ -118,6 +118,11 @@ pub struct ExtractedToken {
     pub source: String,
     pub value: String,
     pub url: Option<String>,
+    /// HTTP header the token should be sent in (e.g. `Authorization`,
+    /// `X-API-Key`). `None` for tokens scraped from a browser where the target
+    /// header is unknown. `value` is the ready-to-send header value.
+    #[serde(default)]
+    pub header_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
