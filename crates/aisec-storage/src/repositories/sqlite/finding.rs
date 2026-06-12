@@ -160,7 +160,7 @@ mod tests {
     use super::*;
     use crate::models::{CreateProject, CreateScan};
     use crate::pool::test_utils::test_database;
-    use crate::repositories::ProjectRepository;
+    use crate::repositories::{ProjectRepository, ScanRepository};
 
     #[tokio::test]
     async fn finding_fts_search() {

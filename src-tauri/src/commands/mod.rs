@@ -1,6 +1,10 @@
 use serde::Serialize;
+use tauri::State;
 
-use crate::error::CommandResult;
+use aisec_storage::ProjectRepository;
+
+use crate::error::{CommandError, CommandResult};
+use crate::state::AppState;
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
@@ -31,5 +35,29 @@ pub fn app_info() -> CommandResult<AppInfoResponse> {
         name: env!("CARGO_PKG_NAME"),
         version: env!("CARGO_PKG_VERSION"),
         identifier: "com.aisec.desktop",
+    })
+}
+
+/// Database connectivity check — proves the database is reachable from a command
+/// via the shared [`AppState`]/repository manager.
+#[derive(Debug, Serialize)]
+pub struct DbHealthResponse {
+    pub connected: bool,
+    pub project_count: usize,
+}
+
+#[tauri::command]
+pub async fn db_health(state: State<'_, AppState>) -> CommandResult<DbHealthResponse> {
+    // Exercise the repository manager against the live pool.
+    let projects = state
+        .repositories()
+        .projects()
+        .list()
+        .await
+        .map_err(CommandError::from)?;
+
+    Ok(DbHealthResponse {
+        connected: !state.database().is_closed(),
+        project_count: projects.len(),
     })
 }
