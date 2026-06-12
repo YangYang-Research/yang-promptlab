@@ -120,6 +120,78 @@ async fn discovers_openapi_graphql_ai_and_crawled_links() {
 }
 
 #[tokio::test]
+async fn discovers_forms_and_javascript() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"<!doctype html>
+            <html><head>
+              <script src="/assets/app.js"></script>
+            </head><body>
+              <form action="/login" method="post">
+                <input name="username" />
+                <input name="password" type="password" />
+              </form>
+            </body></html>"#,
+        ))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/assets/app.js"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "application/javascript")
+                .set_body_string(r#"fetch("/api/v2/profile");"#),
+        )
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/login"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<html>login</html>"))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v2/profile"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {}})))
+        .mount(&server)
+        .await;
+
+    let mut config = test_config();
+    config.probe_static_paths = false; // focus this test on crawl-time extraction
+    let engine = DiscoveryEngine::new(config).expect("engine");
+    let report = engine.discover(&server.uri()).await.expect("discovery");
+
+    let forms = report.endpoints_by_kind(EndpointKind::Form);
+    assert!(
+        forms.iter().any(|e| e.url.contains("/login")
+            && e.method.as_deref() == Some("POST")),
+        "expected POST form for /login, got {forms:?}"
+    );
+
+    assert!(
+        report
+            .endpoints_by_kind(EndpointKind::JavaScript)
+            .iter()
+            .any(|e| e.url.contains("/assets/app.js")),
+        "expected discovered JavaScript file"
+    );
+
+    // The API hint embedded in the crawled JS file should be classified.
+    assert!(
+        report
+            .endpoints_by_kind(EndpointKind::RestApi)
+            .iter()
+            .any(|e| e.url.contains("/api/v2/profile")),
+        "expected REST endpoint discovered from inline JS hint"
+    );
+}
+
+#[tokio::test]
 async fn rejects_private_targets_by_default() {
     let engine = DiscoveryEngine::with_defaults().expect("engine");
     let result = engine.discover("http://127.0.0.1:8080/").await;

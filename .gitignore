@@ -13,8 +13,10 @@ src-tauri/gen/
 *.log
 logs/
 
-# Local model vault + generated reports (runtime artifacts)
+# Local model vault (downloaded GGUF files)
 /data/
+
+# Generated reports
 /reports/
 
 # IDE
@@ -29,3 +31,4 @@ logs/
 
 # Build artifacts
 *.local
+reports/

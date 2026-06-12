@@ -10,6 +10,8 @@ rust-version.workspace = true
 [features]
 default = []
 storage = ["dep:aisec-storage"]
+# In-process llama.cpp GGUF runtime (builds llama.cpp via bindgen/cmake; needs clang).
+llama = ["dep:llama-cpp-2"]
 
 [dependencies]
 aisec-core = { workspace = true }
@@ -25,6 +27,11 @@ tokio = { workspace = true, features = ["fs", "io-util", "process", "sync"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
 futures-util = "0.3"
+llama-cpp-2 = { version = "0.1.146", optional = true }
+
+[[example]]
+name = "run_local_model"
+required-features = ["llama"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 sysctl = "0.6"

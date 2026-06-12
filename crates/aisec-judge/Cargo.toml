@@ -7,6 +7,15 @@ license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+# Enable the in-process llama.cpp runtime so the LLM evaluator runs real models.
+llama = ["aisec-models/llama"]
+
+[[example]]
+name = "judge_with_local_model"
+required-features = ["llama"]
+
 [dependencies]
 aisec-core = { workspace = true }
 aisec-models = { workspace = true }
