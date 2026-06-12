@@ -68,9 +68,15 @@ pub async fn discovery_run_op(
 
     // Run the real discovery engine. allow_private_network is enabled so the
     // desktop tool can scan localhost / internal targets the operator owns.
+    // worker_count is pinned to 1: the crawler has a known deadlock with
+    // concurrent workers (see crates/aisec-discovery/examples/verify_target.rs
+    // and docs/DISCOVERY_VERIFICATION_REPORT.md), so single-worker is the
+    // proven-stable setting until that is fixed.
     let config = DiscoveryConfig {
         max_depth: 2,
         max_pages: 25,
+        worker_count: 1,
+        request_timeout: std::time::Duration::from_secs(10),
         allow_private_network: true,
         probe_static_paths: true,
         ..Default::default()
