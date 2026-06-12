@@ -1,7 +1,7 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { severityCounts } from "@/shared/mock/data";
+import { severityCounts } from "@/shared/stats";
 import {
   Badge,
   Button,
@@ -22,6 +22,7 @@ function formatRelativeTime(iso: string) {
 
 export function DashboardPage() {
   const { stats, findings, activity, discoveryJobs, attackRuns, projects } = useAppStore();
+  const navigate = useNavigate();
   const counts = severityCounts(findings);
   const maxCount = Math.max(...Object.values(counts), 1);
 
@@ -30,7 +31,11 @@ export function DashboardPage() {
       <PageHeader
         title="Dashboard"
         description="Overview of your AI security testing workspace"
-        actions={<Button variant="primary">New Project</Button>}
+        actions={
+          <Button variant="primary" onClick={() => navigate("/projects")}>
+            New Project
+          </Button>
+        }
       />
 
       <div className="stat-grid">

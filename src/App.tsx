@@ -31,7 +31,7 @@ function AppBootstrap() {
         });
       } catch (error) {
         const appError = toAppError(error);
-        log.warn("backend unavailable, using mock data", { error: appError });
+        log.warn("backend unavailable", { error: appError });
         if (!cancelled) {
           dispatch({
             type: "SET_BACKEND",

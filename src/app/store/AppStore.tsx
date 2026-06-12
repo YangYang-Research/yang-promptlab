@@ -1,34 +1,52 @@
 import {
   createContext,
+  useCallback,
   useContext,
+  useEffect,
   useMemo,
   useReducer,
+  useRef,
   type ReactNode,
 } from "react";
 
 import {
-  computeDashboardStats,
-  mockActivity,
-  mockAttackRuns,
-  mockDiscoveryJobs,
-  mockFindings,
-  mockModels,
-  mockProjects,
-  mockReports,
-  mockTargets,
-} from "@/shared/mock/data";
+  createProject as createProjectCmd,
+  createScan as createScanCmd,
+  createTarget as createTargetCmd,
+  deleteProject as deleteProjectCmd,
+  generateReport as generateReportCmd,
+  listFindings,
+  listProjects,
+  listReports,
+  listScans,
+  listTargets,
+  type FindingDto,
+  type ReportDto,
+} from "@/shared/ipc";
+import { toAppError } from "@/shared/errors";
+import { createLogger } from "@/shared/logging";
+import { computeDashboardStats } from "@/shared/stats";
 
-import type { AppAction, AppDataState, AppStoreValue } from "./types";
+import { mapFindings, mapProjects, mapReports, mapTargets } from "./mappers";
+import type {
+  AppAction,
+  AppActions,
+  AppDataState,
+  AppStoreValue,
+  LoadedData,
+} from "./types";
+
+const log = createLogger("AppStore");
 
 const initialState: AppDataState = {
-  projects: mockProjects,
-  targets: mockTargets,
-  discoveryJobs: mockDiscoveryJobs,
-  attackRuns: mockAttackRuns,
-  findings: mockFindings,
-  reports: mockReports,
-  models: mockModels,
-  activity: mockActivity,
+  projects: [],
+  targets: [],
+  discoveryJobs: [],
+  attackRuns: [],
+  findings: [],
+  reports: [],
+  models: [],
+  activity: [],
   settings: {
     theme: "dark",
     pluginsDir: "~/.aisec/plugins",
@@ -40,11 +58,13 @@ const initialState: AppDataState = {
   ui: {
     sidebarCollapsed: false,
     searchQuery: "",
-    selectedProjectId: "proj-1",
+    selectedProjectId: null,
     severityFilter: null,
   },
   backendVersion: "",
   backendConnected: false,
+  loading: true,
+  error: null,
 };
 
 function appReducer(state: AppDataState, action: AppAction): AppDataState {
@@ -55,6 +75,12 @@ function appReducer(state: AppDataState, action: AppAction): AppDataState {
         backendVersion: action.version,
         backendConnected: action.connected,
       };
+    case "SET_LOADING":
+      return { ...state, loading: action.loading };
+    case "SET_ERROR":
+      return { ...state, error: action.error };
+    case "SET_DATA":
+      return { ...state, ...action.data };
     case "SET_SEARCH":
       return { ...state, ui: { ...state.ui, searchQuery: action.query } };
     case "TOGGLE_SIDEBAR":
@@ -95,8 +121,96 @@ type AppStoreProviderProps = {
   children: ReactNode;
 };
 
+async function loadAll(): Promise<LoadedData> {
+  const projectDtos = await listProjects();
+
+  const [targetGroups, scanGroups, reportGroups] = await Promise.all([
+    Promise.all(projectDtos.map((p) => listTargets(p.id))),
+    Promise.all(projectDtos.map((p) => listScans(p.id))),
+    Promise.all(projectDtos.map((p) => listReports(p.id))),
+  ]);
+
+  const targetDtos = targetGroups.flat();
+  const scanDtos = scanGroups.flat();
+  const reportDtos: ReportDto[] = reportGroups.flat();
+
+  const findingGroups = await Promise.all(scanDtos.map((s) => listFindings(s.id)));
+  const findingDtos: FindingDto[] = findingGroups.flat();
+
+  return {
+    projects: mapProjects(projectDtos, targetDtos, findingDtos),
+    targets: mapTargets(targetDtos),
+    findings: mapFindings(findingDtos, targetDtos),
+    reports: mapReports(reportDtos, projectDtos),
+  };
+}
+
 export function AppStoreProvider({ children }: AppStoreProviderProps) {
   const [state, dispatch] = useReducer(appReducer, initialState);
+  const inFlight = useRef(false);
+
+  const refresh = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    dispatch({ type: "SET_LOADING", loading: true });
+    try {
+      const data = await loadAll();
+      dispatch({ type: "SET_DATA", data });
+      dispatch({ type: "SET_ERROR", error: null });
+      log.info("workspace data loaded", {
+        projects: data.projects.length,
+        targets: data.targets.length,
+        findings: data.findings.length,
+        reports: data.reports.length,
+      });
+    } catch (error) {
+      const appError = toAppError(error);
+      log.error("failed to load workspace data", { error: appError });
+      dispatch({ type: "SET_ERROR", error: appError.message });
+    } finally {
+      dispatch({ type: "SET_LOADING", loading: false });
+      inFlight.current = false;
+    }
+  }, []);
+
+  const runMutation = useCallback(
+    async (label: string, op: () => Promise<unknown>) => {
+      try {
+        await op();
+        await refresh();
+      } catch (error) {
+        const appError = toAppError(error);
+        log.error(`mutation failed: ${label}`, { error: appError });
+        dispatch({ type: "SET_ERROR", error: appError.message });
+        throw appError;
+      }
+    },
+    [refresh],
+  );
+
+  const actions = useMemo<AppActions>(
+    () => ({
+      refresh,
+      createProject: (name, description) =>
+        runMutation("createProject", () => createProjectCmd(name, description)),
+      deleteProject: (id) => runMutation("deleteProject", () => deleteProjectCmd(id)),
+      createTarget: (projectId, name, targetType, descriptor) =>
+        runMutation("createTarget", () =>
+          createTargetCmd(projectId, name, targetType, descriptor),
+        ),
+      createScan: (projectId, name, targetId, status) =>
+        runMutation("createScan", () => createScanCmd(projectId, name, targetId, status)),
+      generateReport: (projectId, scanId, format, kind) =>
+        runMutation("generateReport", () =>
+          generateReportCmd(projectId, scanId, format, kind),
+        ),
+    }),
+    [refresh, runMutation],
+  );
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   const value = useMemo<AppStoreValue>(() => {
     const stats = computeDashboardStats(
@@ -106,8 +220,8 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
       state.discoveryJobs,
       state.models,
     );
-    return { ...state, stats, dispatch };
-  }, [state]);
+    return { ...state, stats, dispatch, actions };
+  }, [state, actions]);
 
   return (
     <AppStoreContext.Provider value={value}>{children}</AppStoreContext.Provider>
