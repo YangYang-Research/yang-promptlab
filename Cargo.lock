@@ -61,6 +61,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "aisec-browser"
+version = "0.1.0"
+dependencies = [
+ "aisec-auth",
+ "aisec-core",
+ "aisec-storage",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "aisec-core"
 version = "0.1.0"
 dependencies = [
@@ -78,12 +94,15 @@ version = "0.1.0"
 dependencies = [
  "aisec-attack",
  "aisec-auth",
+ "aisec-browser",
  "aisec-core",
  "aisec-discovery",
  "aisec-fingerprint",
+ "aisec-harness",
  "aisec-judge",
  "aisec-models",
  "aisec-report",
+ "aisec-runtime",
  "aisec-storage",
  "async-trait",
  "reqwest 0.12.28",
@@ -134,6 +153,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "aisec-harness"
+version = "0.1.0"
+dependencies = [
+ "aisec-auth",
+ "aisec-core",
+ "async-trait",
+ "base64 0.22.1",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+ "wiremock",
+]
+
+[[package]]
 name = "aisec-integration-tests"
 version = "0.1.0"
 dependencies = [
@@ -158,6 +195,7 @@ name = "aisec-judge"
 version = "0.1.0"
 dependencies = [
  "aisec-core",
+ "aisec-harness",
  "aisec-models",
  "async-trait",
  "regex",
@@ -242,6 +280,22 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "aisec-runtime"
+version = "0.1.0"
+dependencies = [
+ "aisec-core",
+ "aisec-models",
+ "async-trait",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

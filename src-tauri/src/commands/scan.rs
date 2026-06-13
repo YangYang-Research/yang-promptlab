@@ -15,7 +15,7 @@ use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
 
 use crate::commands::attack::run_category_on_endpoint;
-use crate::session_auth::{build_attack_runtime_parts, seed_url_from_descriptor, AttackRuntime};
+use crate::session_auth::{build_attack_runtime_parts, fallback_attack_runtime, seed_url_from_descriptor, AttackRuntime};
 use crate::dto::{ScanStartDto, ScanStatusDto};
 use crate::error::{CommandError, CommandResult};
 use crate::jobs::{ScanJobManager, ScanProgress};
@@ -104,12 +104,7 @@ async fn run_scan_job(
     auth_config: AuthEngineConfig,
 ) {
     let repos = db.repositories();
-    let default_runtime = AttackRuntime {
-        transport: crate::session_auth::SessionAwareTransport::Http(
-            aisec_attack::HttpTransport::new(),
-        ),
-        session: None,
-    };
+    let default_runtime = fallback_attack_runtime();
     let attack_runtime: AttackRuntime = if let Some(tid) = &target_id {
         if let Ok(target) = repos.targets().get(tid).await {
             let probe_url = seed_url_from_descriptor(&target.descriptor_json)

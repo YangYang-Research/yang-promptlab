@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 import { useAppStore } from "@/app/store/AppStore";
 import {
   Button,
@@ -6,13 +8,55 @@ import {
   Select,
 } from "@/shared/components";
 import type { AppSettings } from "@/app/store/types";
+import { getJudgeConfig, saveJudgeConfig, type JudgeConfigDto } from "@/shared/ipc/judge";
+import { listModels, type ModelEntryDto } from "@/shared/ipc/models";
+import { toAppError } from "@/shared/errors";
 
 export function SettingsPage() {
   const { settings, dispatch, backendVersion, backendConnected } = useAppStore();
+  const [judgeConfig, setJudgeConfig] = useState<JudgeConfigDto | null>(null);
+  const [installedModels, setInstalledModels] = useState<ModelEntryDto[]>([]);
+  const [judgeBusy, setJudgeBusy] = useState(false);
+  const [judgeError, setJudgeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!backendConnected) return;
+    void Promise.all([getJudgeConfig(), listModels()])
+      .then(([config, models]) => {
+        setJudgeConfig(config);
+        setInstalledModels(models);
+      })
+      .catch(() => {
+        setJudgeConfig(null);
+        setInstalledModels([]);
+      });
+  }, [backendConnected]);
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     dispatch({ type: "UPDATE_SETTING", key, value });
   };
+
+  async function handleJudgeModelChange(modelId: string) {
+    if (!judgeConfig) return;
+    setJudgeBusy(true);
+    setJudgeError(null);
+    try {
+      const next =
+        modelId === "none"
+          ? { ...judgeConfig, mode: "deterministic" as const, localVaultModelId: null }
+          : {
+              ...judgeConfig,
+              mode: "local_llm" as const,
+              localVaultModelId: modelId,
+            };
+      const saved = await saveJudgeConfig(next);
+      setJudgeConfig(saved);
+    } catch (err) {
+      setJudgeError(toAppError(err).message);
+    } finally {
+      setJudgeBusy(false);
+    }
+  }
 
   return (
     <div className="page settings-page">
@@ -36,6 +80,30 @@ export function SettingsPage() {
               <option value="system">System</option>
             </Select>
           </div>
+        </Card>
+
+        <Card>
+          <h3 className="card__title">AI Models</h3>
+          <div className="settings-field">
+            <label htmlFor="judgeModel">Judge Model</label>
+            <Select
+              id="judgeModel"
+              value={judgeConfig?.localVaultModelId ?? "none"}
+              disabled={!backendConnected || judgeBusy || !judgeConfig}
+              onChange={(e) => void handleJudgeModelChange(e.target.value)}
+            >
+              <option value="none">None (Deterministic rules only)</option>
+              {installedModels.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+          {judgeError ? <p className="text-danger text-sm">{judgeError}</p> : null}
+          {!backendConnected ? (
+            <p className="text-muted text-sm">Connect to the Tauri backend to configure judge models.</p>
+          ) : null}
         </Card>
 
         <Card>

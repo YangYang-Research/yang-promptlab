@@ -1,0 +1,30 @@
+{
+  "models": [
+    {
+      "id": "qwen3-8b-judge",
+      "name": "Qwen3 8B Security Judge",
+      "purpose": "judge",
+      "recommended": true,
+      "provider": "huggingface",
+      "repo": "Qwen/Qwen3-8B-GGUF",
+      "file": "qwen3-8b-q4_k_m.gguf"
+    },
+    {
+      "id": "hf-llama3-8b-q4",
+      "name": "Llama 3 8B Instruct Q4_K_M",
+      "purpose": "general",
+      "recommended": false,
+      "provider": "huggingface",
+      "repo": "QuantFactory/Meta-Llama-3-8B-Instruct-GGUF",
+      "file": "Meta-Llama-3-8B-Instruct.Q4_K_M.gguf"
+    },
+    {
+      "id": "ollama-llama3",
+      "name": "Llama 3 (Embedded Ollama)",
+      "purpose": "general",
+      "recommended": false,
+      "provider": "ollama",
+      "ollamaTag": "llama3"
+    }
+  ]
+}

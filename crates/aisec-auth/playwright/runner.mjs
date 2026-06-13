@@ -64,6 +64,8 @@ async function handleCommand(req) {
       return ok(id, await cmdSetCookies(req));
     case 'execute_http_request':
       return ok(id, await cmdExecuteHttpRequest(req));
+    case 'send_chat_prompt':
+      return ok(id, await cmdSendChatPrompt(req));
     default:
       throw new Error(`unknown command: ${cmd}`);
   }
@@ -331,6 +333,46 @@ async function cmdSetCookies(req) {
     await context.addCookies(req.cookies);
   }
   return { cookies: await context.cookies() };
+}
+
+async function cmdSendChatPrompt(req) {
+  const {
+    url,
+    prompt,
+    input_selector: inputSelector,
+    submit_selector: submitSelector,
+    response_selector: responseSelector,
+    storage_state_path: storageStatePath,
+    options,
+  } = req;
+
+  if (context) {
+    await context.close();
+    context = null;
+    page = null;
+  }
+
+  const launchOpts = { ...(options ?? {}), headless: false, headed: true };
+  if (storageStatePath) {
+    launchOpts.storage_state_path = storageStatePath;
+  }
+
+  await ensureBrowser(launchOpts);
+  if (!page) throw new Error('page not initialized');
+
+  await page.goto(url, {
+    waitUntil: 'domcontentloaded',
+    timeout: options?.timeout_ms ?? 30000,
+  });
+
+  await page.fill(inputSelector, prompt ?? '');
+  await Promise.all([
+    page.waitForSelector(responseSelector, { timeout: options?.timeout_ms ?? 30000 }),
+    page.click(submitSelector),
+  ]);
+
+  const responseText = await page.locator(responseSelector).last().innerText();
+  return { response_text: responseText };
 }
 
 async function cmdExecuteHttpRequest(req) {

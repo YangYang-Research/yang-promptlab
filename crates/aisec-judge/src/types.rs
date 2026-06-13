@@ -183,6 +183,28 @@ pub struct JudgeRequest {
     pub context: serde_json::Value,
 }
 
+impl JudgeRequest {
+    /// Build a judge request from a harness-normalized response.
+    pub fn from_normalized(
+        probe_id: impl Into<String>,
+        attack_category: impl Into<String>,
+        payload: impl Into<String>,
+        normalized: &aisec_harness::NormalizedResponse,
+    ) -> Self {
+        Self {
+            probe_id: probe_id.into(),
+            attack_category: attack_category.into(),
+            payload: payload.into(),
+            response_text: normalized.content.clone(),
+            context: serde_json::json!({
+                "raw_response": normalized.raw_response,
+                "status_code": normalized.status_code,
+                "harness_metadata": normalized.metadata,
+            }),
+        }
+    }
+}
+
 /// Result from a single evaluator pass.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvaluatorResult {

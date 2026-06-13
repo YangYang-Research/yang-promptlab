@@ -272,4 +272,12 @@ impl SessionStore {
             config: serde_json::from_str(&stored.config_json).unwrap(),
         })
     }
+
+    pub async fn delete_session(&self, session_id: &str) -> AisecResult<()> {
+        self.db
+            .repositories()
+            .auth_sessions()
+            .delete(session_id)
+            .await
+    }
 }

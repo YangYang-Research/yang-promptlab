@@ -52,6 +52,23 @@ impl JudgeEngine {
         }
     }
 
+    /// Evaluate a harness-normalized response without transport knowledge.
+    pub async fn judge_normalized(
+        &self,
+        probe_id: impl Into<String>,
+        attack_category: impl Into<String>,
+        payload: impl Into<String>,
+        normalized: &aisec_harness::NormalizedResponse,
+    ) -> JudgeResult<JudgeVerdict> {
+        self.judge(JudgeRequest::from_normalized(
+            probe_id,
+            attack_category,
+            payload,
+            normalized,
+        ))
+        .await
+    }
+
     async fn judge_consensus(&self, request: JudgeRequest) -> JudgeResult<JudgeVerdict> {
         let probe_id = request.probe_id.clone();
         let attack_category = request.attack_category.clone();

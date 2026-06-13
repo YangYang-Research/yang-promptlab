@@ -11,6 +11,7 @@ pub mod error;
 pub mod fingerprint_service;
 pub mod jobs;
 pub mod logging;
+pub mod harness_runtime;
 pub mod judge_config;
 pub mod playwright_runtime;
 pub mod session_auth;

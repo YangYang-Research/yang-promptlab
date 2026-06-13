@@ -7,10 +7,11 @@
 //! findings: results come straight from the engine evaluating real HTTP
 //! responses.
 
-use aisec_auth::AuthSessionManager;
 use aisec_attack::{
     apply_descriptor_auth, AttackCategory, AttackContext, AttackTarget, FindingSeverity,
 };
+use aisec_auth::AuthSessionManager;
+use aisec_harness::NormalizedResponse;
 use aisec_judge::{JudgeVerdict, Severity as JudgeSeverity};
 use aisec_storage::{
     AttackResultRepository, CreateAttackResult, CreateFinding, CreateScan, Endpoint,
@@ -111,14 +112,19 @@ pub async fn run_category_on_endpoint(
     for attempt in &result.attempts {
         let eval = &attempt.evaluation;
 
+        let normalized = NormalizedResponse::from_http(
+            attempt.response.status,
+            attempt.response.body.clone(),
+            runtime.harness_kind.as_str(),
+        );
+
         let verdict: JudgeVerdict = judge
-            .judge(aisec_judge::JudgeRequest {
-                probe_id: attempt.payload_id.clone(),
-                attack_category: category_name.into(),
-                payload: attempt.mutated_content.clone(),
-                response_text: attempt.response.body.clone(),
-                context: serde_json::json!({ "payload_name": attempt.payload_name }),
-            })
+            .judge_normalized(
+                attempt.payload_id.clone(),
+                category_name,
+                attempt.mutated_content.clone(),
+                &normalized,
+            )
             .await
             .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
 

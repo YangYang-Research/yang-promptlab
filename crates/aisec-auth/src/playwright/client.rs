@@ -54,6 +54,15 @@ pub trait PlaywrightDriver: Send + Sync {
         body: Option<String>,
         storage_state_path: Option<&Path>,
     ) -> AisecResult<ExecuteHttpResult>;
+    async fn send_chat_prompt(
+        &self,
+        url: &str,
+        prompt: &str,
+        input_selector: &str,
+        submit_selector: &str,
+        response_selector: &str,
+        storage_state_path: Option<&Path>,
+    ) -> AisecResult<String>;
 }
 
 pub struct PlaywrightClient {
@@ -366,6 +375,41 @@ impl PlaywrightDriver for PlaywrightClient {
             }),
         )
         .await
+    }
+
+    async fn send_chat_prompt(
+        &self,
+        url: &str,
+        prompt: &str,
+        input_selector: &str,
+        submit_selector: &str,
+        response_selector: &str,
+        storage_state_path: Option<&Path>,
+    ) -> AisecResult<String> {
+        let result: serde_json::Value = self
+            .call(
+                "send_chat_prompt",
+                serde_json::json!({
+                    "url": url,
+                    "prompt": prompt,
+                    "input_selector": input_selector,
+                    "submit_selector": submit_selector,
+                    "response_selector": response_selector,
+                    "storage_state_path": storage_state_path.map(|p| p.to_string_lossy().into_owned()),
+                    "options": PlaywrightOptions {
+                        headless: false,
+                        headed: true,
+                        storage_state_path: storage_state_path.map(|p| p.to_string_lossy().into_owned()),
+                        ..Default::default()
+                    },
+                }),
+            )
+            .await?;
+        result
+            .get("response_text")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| aisec_core::AisecError::internal("missing response_text from chat prompt"))
     }
 }
 

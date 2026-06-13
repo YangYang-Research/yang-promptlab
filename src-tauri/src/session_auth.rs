@@ -1,20 +1,17 @@
 //! Resolve browser session auth from target descriptors for discovery and attack.
 
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use aisec_attack::{
-    AttackExecutor, AttackRegistry, HttpTransport, TargetTransport, TransportRequest,
-    TransportResponse,
-};
+use aisec_attack::{AttackExecutor, AttackRegistry};
 use aisec_auth::{
     AuthEngineConfig, AuthSessionManager, SessionAuthContext, SessionStore, SessionValidationStatus,
 };
 use aisec_discovery::SessionAuthMaterial;
+use aisec_harness::{HarnessAttackTransport, HarnessFactory, HarnessKind, TargetDescriptor};
 use aisec_storage::Database;
-use async_trait::async_trait;
 
 use crate::error::{CommandError, CommandResult};
+use crate::harness_runtime::{build_harness_attack_runtime_parts, HarnessTargetTransport};
 use crate::state::AppState;
 
 pub async fn auth_session_manager_from_parts(
@@ -110,92 +107,10 @@ pub async fn resolve_discovery_auth(
     Ok(Some(session_auth_material(&ctx, seed_url)))
 }
 
-pub struct PlaywrightSessionTransport {
-    driver: aisec_auth::SharedPlaywrightDriver,
-    storage_state_path: PathBuf,
-    default_headers: HashMap<String, String>,
-}
-
-impl PlaywrightSessionTransport {
-    pub fn new(
-        driver: aisec_auth::SharedPlaywrightDriver,
-        storage_state_path: PathBuf,
-        default_headers: HashMap<String, String>,
-    ) -> Self {
-        Self {
-            driver,
-            storage_state_path,
-            default_headers,
-        }
-    }
-}
-
-impl Clone for PlaywrightSessionTransport {
-    fn clone(&self) -> Self {
-        Self {
-            driver: self.driver.clone(),
-            storage_state_path: self.storage_state_path.clone(),
-            default_headers: self.default_headers.clone(),
-        }
-    }
-}
-
-#[async_trait]
-impl TargetTransport for PlaywrightSessionTransport {
-    async fn send(&self, request: TransportRequest) -> aisec_attack::AttackResult<TransportResponse> {
-        let mut headers = self.default_headers.clone();
-        for (key, value) in request.headers {
-            headers.insert(key, value);
-        }
-
-        let result = self
-            .driver
-            .execute_http_request(
-                &request.url,
-                &request.method,
-                headers,
-                request.body,
-                Some(self.storage_state_path.as_path()),
-            )
-            .await
-            .map_err(|err| aisec_attack::AttackError::transport(err.client_message()))?;
-
-        Ok(TransportResponse {
-            status: result.status,
-            headers: result.headers,
-            body: result.body,
-            duration_ms: result.duration_ms,
-        })
-    }
-}
-
-pub enum SessionAwareTransport {
-    Http(HttpTransport),
-    Browser(PlaywrightSessionTransport),
-}
-
-impl Clone for SessionAwareTransport {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Http(transport) => Self::Http(transport.clone()),
-            Self::Browser(transport) => Self::Browser(transport.clone()),
-        }
-    }
-}
-
-#[async_trait]
-impl TargetTransport for SessionAwareTransport {
-    async fn send(&self, request: TransportRequest) -> aisec_attack::AttackResult<TransportResponse> {
-        match self {
-            Self::Http(transport) => transport.send(request).await,
-            Self::Browser(transport) => transport.send(request).await,
-        }
-    }
-}
-
 pub struct AttackRuntime {
-    pub transport: SessionAwareTransport,
+    pub transport: HarnessTargetTransport,
     pub session: Option<SessionAuthContext>,
+    pub harness_kind: HarnessKind,
 }
 
 impl Clone for AttackRuntime {
@@ -203,6 +118,7 @@ impl Clone for AttackRuntime {
         Self {
             transport: self.transport.clone(),
             session: self.session.clone(),
+            harness_kind: self.harness_kind,
         }
     }
 }
@@ -229,50 +145,40 @@ pub async fn build_attack_runtime_parts(
     descriptor_json: &str,
     probe_url: &str,
 ) -> CommandResult<AttackRuntime> {
-    if let Some(session_id) = browser_session_id(descriptor_json) {
-        let manager = auth_session_manager_from_parts(db, data_dir, auth_config).await?;
-        let ctx = manager
-            .validate_session(&session_id, Some(probe_url))
-            .await
-            .map_err(CommandError::from)?;
-        if ctx.validation_status == SessionValidationStatus::Expired {
-            return Err(CommandError::invalid_input(
-                "browser session is expired; record a new login session",
-            ));
-        }
-
-        let mut headers = AuthSessionManager::auth_headers(&ctx);
-        if let Some(cookie) = AuthSessionManager::cookie_header_for_url(&ctx, probe_url) {
-            headers.insert("Cookie".into(), cookie);
-        }
-
-        if let Some(path) = ctx.storage_state_path.clone() {
-            let transport = SessionAwareTransport::Browser(PlaywrightSessionTransport::new(
-                manager.driver().clone(),
-                path,
-                headers.clone(),
-            ));
-            return Ok(AttackRuntime {
-                transport,
-                session: Some(ctx),
-            });
-        }
-
-        return Ok(AttackRuntime {
-            transport: SessionAwareTransport::Http(
-                HttpTransport::new().with_default_headers(headers),
-            ),
-            session: Some(ctx),
-        });
-    }
+    let runtime = build_harness_attack_runtime_parts(
+        db,
+        data_dir,
+        auth_config,
+        descriptor_json,
+        probe_url,
+    )
+    .await?;
 
     Ok(AttackRuntime {
-        transport: SessionAwareTransport::Http(HttpTransport::new()),
-        session: None,
+        transport: runtime.transport,
+        session: runtime.session,
+        harness_kind: runtime.descriptor.preferred_harness(),
     })
 }
 
-pub fn attack_executor(transport: SessionAwareTransport) -> AttackExecutor<SessionAwareTransport> {
+pub fn fallback_attack_runtime() -> AttackRuntime {
+    let factory = HarnessFactory::new().expect("harness factory");
+    let descriptor = TargetDescriptor {
+        url: "https://localhost".into(),
+        ..TargetDescriptor::default()
+    };
+    AttackRuntime {
+        transport: HarnessTargetTransport::new(HarnessAttackTransport::new(
+            factory,
+            descriptor,
+            "https://localhost".into(),
+        )),
+        session: None,
+        harness_kind: HarnessKind::Http,
+    }
+}
+
+pub fn attack_executor(transport: HarnessTargetTransport) -> AttackExecutor<HarnessTargetTransport> {
     AttackExecutor::new(AttackRegistry::with_builtins(), transport)
 }
 

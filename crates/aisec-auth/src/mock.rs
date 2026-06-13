@@ -120,6 +120,18 @@ impl PlaywrightDriver for MockPlaywrightDriver {
             duration_ms: 0,
         })
     }
+
+    async fn send_chat_prompt(
+        &self,
+        _url: &str,
+        prompt: &str,
+        _input_selector: &str,
+        _submit_selector: &str,
+        _response_selector: &str,
+        _storage_state_path: Option<&std::path::Path>,
+    ) -> AisecResult<String> {
+        Ok(format!("mock-response:{prompt}"))
+    }
 }
 
 pub type SharedPlaywrightDriver = Arc<dyn PlaywrightDriver>;
