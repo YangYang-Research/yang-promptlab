@@ -38,6 +38,10 @@ export function finishAuthRecordSession(): Promise<AuthRecordFinishDto> {
   return invokeCommand<AuthRecordFinishDto>("auth_record_session_finish");
 }
 
+export function cancelAuthRecordSession(): Promise<AuthRecordStartDto> {
+  return invokeCommand<AuthRecordStartDto>("auth_record_session_cancel");
+}
+
 export function validateAuthSession(
   sessionId: string,
   probeUrl: string,

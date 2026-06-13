@@ -133,6 +133,7 @@ async function cmdClose() {
     browser = null;
   }
   capturedTokens.length = 0;
+  interactiveRecording = false;
   return { closed: true };
 }
 

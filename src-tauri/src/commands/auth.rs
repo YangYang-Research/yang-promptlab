@@ -40,6 +40,13 @@ impl AuthRecordingState {
         }
         Ok(())
     }
+
+    async fn cancel_recording(&mut self) {
+        if let Some(engine) = self.engine.take() {
+            let _ = engine.close().await;
+        }
+        self.profile_id = None;
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -140,7 +147,8 @@ pub async fn auth_record_session_start(
         .map_err(CommandError::from)?;
     auth.profile_id = Some(stored_profile.id.clone());
 
-    auth.engine
+    if let Err(err) = auth
+        .engine
         .as_mut()
         .expect("auth engine initialized after ensure")
         .begin_interactive_recording(
@@ -151,9 +159,21 @@ pub async fn auth_record_session_start(
             },
         )
         .await
-        .map_err(CommandError::from)?;
+    {
+        auth.cancel_recording().await;
+        return Err(CommandError::from(err));
+    }
 
     Ok(AuthRecordStartDto { recording: true })
+}
+
+#[tauri::command]
+pub async fn auth_record_session_cancel(
+    auth_state: State<'_, Mutex<AuthRecordingState>>,
+) -> CommandResult<AuthRecordStartDto> {
+    let mut auth = auth_state.lock().await;
+    auth.cancel_recording().await;
+    Ok(AuthRecordStartDto { recording: false })
 }
 
 #[tauri::command]

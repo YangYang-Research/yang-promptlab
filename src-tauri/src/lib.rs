@@ -101,6 +101,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::scan::scan_stop,
             commands::auth::auth_record_session_start,
             commands::auth::auth_record_session_finish,
+            commands::auth::auth_record_session_cancel,
             commands::auth::auth_session_validate,
             commands::auth::auth_session_status,
             commands::judge::judge_config_get,

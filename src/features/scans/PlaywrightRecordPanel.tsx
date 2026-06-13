@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
 import {
+  cancelAuthRecordSession,
   fetchAuthSessionStatus,
   finishAuthRecordSession,
   startAuthRecordSession,
@@ -127,24 +128,39 @@ export function PlaywrightRecordPanel({
       }
     }
 
+    const request = {
+      loginUrl: form.url.trim(),
+      method: authKind === "username_password" ? ("username_password" as const) : ("oauth" as const),
+      config:
+        authKind === "username_password"
+          ? {
+              type: "username_password",
+              username: form.loginUsername.trim(),
+              password: form.loginPassword,
+            }
+          : { type: "oauth" },
+    };
+
     setBusy(true);
     try {
-      await startAuthRecordSession({
-        loginUrl: form.url.trim(),
-        method: authKind === "username_password" ? "username_password" : "oauth",
-        config:
-          authKind === "username_password"
-            ? {
-                type: "username_password",
-                username: form.loginUsername.trim(),
-                password: form.loginPassword,
-              }
-            : { type: "oauth" },
-      });
+      await startAuthRecordSession(request);
       setPhase("recording");
       setSessionStatus(null);
     } catch (err) {
-      setError(toAppError(err).message);
+      const message = toAppError(err).message;
+      if (message.includes("already in progress")) {
+        try {
+          await cancelAuthRecordSession();
+          await startAuthRecordSession(request);
+          setPhase("recording");
+          setSessionStatus(null);
+          return;
+        } catch (retryErr) {
+          setError(toAppError(retryErr).message);
+        }
+      } else {
+        setError(message);
+      }
       setPhase("error");
     } finally {
       setBusy(false);
@@ -172,8 +188,16 @@ export function PlaywrightRecordPanel({
     }
   }
 
-  function handleReset() {
+  async function handleReset() {
     setError(null);
+    setBusy(true);
+    try {
+      await cancelAuthRecordSession();
+    } catch {
+      // Best-effort: local UI should still reset even if backend is already idle.
+    } finally {
+      setBusy(false);
+    }
     setPhase("idle");
     setSessionStatus(null);
     onChange({ browserSessionReady: false, browserSessionId: null });
@@ -248,7 +272,7 @@ export function PlaywrightRecordPanel({
         ) : null}
 
         {(phase === "recording" || phase === "verified" || phase === "error") && !busy ? (
-          <Button type="button" variant="ghost" onClick={handleReset}>
+          <Button type="button" variant="ghost" onClick={() => void handleReset()}>
             Record again
           </Button>
         ) : null}
