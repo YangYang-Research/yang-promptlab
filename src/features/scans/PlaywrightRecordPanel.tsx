@@ -1,11 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
 import {
+  fetchAuthSessionStatus,
   finishAuthRecordSession,
   startAuthRecordSession,
   type AuthRecordFinishDto,
+  type AuthSessionStatusDto,
 } from "@/shared/ipc/auth";
 
 import type { TargetAuthKind, TargetFormState } from "./targetDescriptor";
@@ -49,6 +51,24 @@ function activeStepIndex(phase: RecordPhase, stepCount: number): number {
   }
 }
 
+function formatStatusLabel(status: AuthSessionStatusDto["validationStatus"]): string {
+  switch (status) {
+    case "valid":
+      return "Valid";
+    case "expiring_soon":
+      return "Expiring Soon";
+    case "expired":
+      return "Expired";
+  }
+}
+
+function formatTimestamp(value: string | null | undefined): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString();
+}
+
 export function PlaywrightRecordPanel({
   form,
   authKind,
@@ -60,9 +80,30 @@ export function PlaywrightRecordPanel({
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sessionStatus, setSessionStatus] = useState<AuthSessionStatusDto | null>(null);
 
   const steps = authKind === "username_password" ? USER_PASS_STEPS : SSO_STEPS;
   const currentStep = activeStepIndex(phase, steps.length);
+
+  useEffect(() => {
+    if (!form.browserSessionId || !form.url.trim()) {
+      setSessionStatus(null);
+      return;
+    }
+
+    let cancelled = false;
+    void fetchAuthSessionStatus(form.browserSessionId, form.url.trim())
+      .then((status) => {
+        if (!cancelled) setSessionStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setSessionStatus(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.browserSessionId, form.url]);
 
   async function handleStart() {
     setError(null);
@@ -101,6 +142,7 @@ export function PlaywrightRecordPanel({
             : { type: "oauth" },
       });
       setPhase("recording");
+      setSessionStatus(null);
     } catch (err) {
       setError(toAppError(err).message);
       setPhase("error");
@@ -119,6 +161,8 @@ export function PlaywrightRecordPanel({
         browserSessionReady: true,
         browserSessionId: result.sessionId,
       });
+      const status = await fetchAuthSessionStatus(result.sessionId, form.url.trim());
+      setSessionStatus(status);
       setPhase("verified");
     } catch (err) {
       setError(toAppError(err).message);
@@ -131,6 +175,7 @@ export function PlaywrightRecordPanel({
   function handleReset() {
     setError(null);
     setPhase("idle");
+    setSessionStatus(null);
     onChange({ browserSessionReady: false, browserSessionId: null });
   }
 
@@ -159,6 +204,31 @@ export function PlaywrightRecordPanel({
           );
         })}
       </ol>
+
+      {sessionStatus && (
+        <dl className="wizard-auth-session-status">
+          <div>
+            <dt>Session Status</dt>
+            <dd>{formatStatusLabel(sessionStatus.validationStatus)}</dd>
+          </div>
+          <div>
+            <dt>User Identity</dt>
+            <dd>{sessionStatus.userIdentity ?? "—"}</dd>
+          </div>
+          <div>
+            <dt>Created At</dt>
+            <dd>{formatTimestamp(sessionStatus.createdAt)}</dd>
+          </div>
+          <div>
+            <dt>Expires At</dt>
+            <dd>{formatTimestamp(sessionStatus.expiresAt)}</dd>
+          </div>
+          <div>
+            <dt>Last Validated</dt>
+            <dd>{formatTimestamp(sessionStatus.lastValidatedAt)}</dd>
+          </div>
+        </dl>
+      )}
 
       <div className="wizard-auth-record__actions">
         {phase === "idle" || phase === "error" ? (

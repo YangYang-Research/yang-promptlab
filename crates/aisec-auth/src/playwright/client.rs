@@ -13,8 +13,8 @@ use tracing::instrument;
 
 use crate::config::AuthEngineConfig;
 use crate::playwright::protocol::{
-    PlaywrightOptions, PlaywrightResponse, RecordLoginRequest, RecordLoginResult,
-    ReplaySessionRequest, ReplaySessionResult,
+    ExecuteHttpResult, PlaywrightOptions, PlaywrightResponse, RecordLoginRequest,
+    RecordLoginResult, ReplaySessionRequest, ReplaySessionResult,
 };
 use crate::types::{CookieRecord, ExtractedToken, RecordLoginOptions, ReplayOptions};
 
@@ -46,6 +46,14 @@ pub trait PlaywrightDriver: Send + Sync {
     async fn extract_tokens(&self, url: Option<&str>) -> AisecResult<Vec<ExtractedToken>>;
     async fn get_cookies(&self, url: Option<&str>) -> AisecResult<Vec<CookieRecord>>;
     async fn set_cookies(&self, cookies: Vec<CookieRecord>) -> AisecResult<Vec<CookieRecord>>;
+    async fn execute_http_request(
+        &self,
+        url: &str,
+        method: &str,
+        headers: std::collections::HashMap<String, String>,
+        body: Option<String>,
+        storage_state_path: Option<&Path>,
+    ) -> AisecResult<ExecuteHttpResult>;
 }
 
 pub struct PlaywrightClient {
@@ -332,6 +340,32 @@ impl PlaywrightDriver for PlaywrightClient {
             .call("set_cookies", serde_json::json!({ "cookies": cookies }))
             .await?;
         parse_cookies(&result["cookies"])
+    }
+
+    async fn execute_http_request(
+        &self,
+        url: &str,
+        method: &str,
+        headers: std::collections::HashMap<String, String>,
+        body: Option<String>,
+        storage_state_path: Option<&Path>,
+    ) -> AisecResult<ExecuteHttpResult> {
+        self.call(
+            "execute_http_request",
+            serde_json::json!({
+                "url": url,
+                "method": method,
+                "headers": headers,
+                "body": body,
+                "storage_state_path": storage_state_path.map(|p| p.to_string_lossy().into_owned()),
+                "options": PlaywrightOptions {
+                    headless: true,
+                    storage_state_path: storage_state_path.map(|p| p.to_string_lossy().into_owned()),
+                    ..Default::default()
+                },
+            }),
+        )
+        .await
     }
 }
 

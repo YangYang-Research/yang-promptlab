@@ -13,6 +13,7 @@ aisec-storage = { workspace = true }
 async-trait = { workspace = true }
 base64 = "0.22"
 jsonwebtoken = "9"
+reqwest = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -22,6 +23,7 @@ time = { workspace = true }
 # and `fs` (storageState vault files) are required by this crate.
 tokio = { workspace = true, features = ["process", "io-util", "fs"] }
 tracing = { workspace = true }
+url = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]

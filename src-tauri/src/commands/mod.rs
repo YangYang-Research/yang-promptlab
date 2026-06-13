@@ -10,6 +10,8 @@ pub mod attack;
 pub mod auth;
 pub mod discovery;
 pub mod domain;
+pub mod judge;
+pub mod models;
 pub mod projects;
 pub mod scan;
 

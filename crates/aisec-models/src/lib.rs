@@ -3,6 +3,7 @@
 //! GGUF model registry, HuggingFace downloads with resume, SHA256 verification,
 //! hardware/GPU detection, and llama.cpp runtime integration.
 
+pub mod catalog;
 pub mod download;
 pub mod error;
 pub mod hardware;
@@ -12,12 +13,16 @@ pub mod runtime;
 pub mod types;
 pub mod verify;
 
+pub use catalog::{curated_catalog, find_catalog_entry};
 pub use download::{DownloadManager, DownloadOptions, HuggingFaceClient, huggingface_url};
 pub use error::{ModelError, ModelResult};
 pub use hardware::detect_hardware;
 pub use manager::LocalModelManager;
 pub use registry::ModelRegistry;
-pub use runtime::{InferenceRuntime, LlamaCppConfig, LlamaCppRuntime, MockInferenceRuntime};
+pub use runtime::{
+    InferenceRuntime, LocalInferenceEngine, LlamaCppConfig, LlamaCppRuntime,
+    MockInferenceRuntime, OllamaConfig, OllamaRuntime,
+};
 #[cfg(feature = "llama")]
 pub use runtime::{LlamaInProcessRuntime, LlamaModelConfig};
 pub use types::*;

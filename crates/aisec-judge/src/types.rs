@@ -42,6 +42,102 @@ pub enum EvaluatorKind {
     Llm,
 }
 
+/// Hybrid judge execution mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JudgeMode {
+    Deterministic,
+    LocalLlm,
+    RemoteLlm,
+    Consensus,
+}
+
+impl Default for JudgeMode {
+    fn default() -> Self {
+        Self::Deterministic
+    }
+}
+
+impl JudgeMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Deterministic => "deterministic",
+            Self::LocalLlm => "local_llm",
+            Self::RemoteLlm => "remote_llm",
+            Self::Consensus => "consensus",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "deterministic" => Some(Self::Deterministic),
+            "local_llm" => Some(Self::LocalLlm),
+            "remote_llm" => Some(Self::RemoteLlm),
+            "consensus" => Some(Self::Consensus),
+            _ => None,
+        }
+    }
+}
+
+/// Supported vulnerability categories for LLM classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VulnerabilityCategory {
+    PromptInjection,
+    SystemPromptLeakage,
+    Jailbreak,
+    ToolAbuse,
+    McpAbuse,
+    RagLeakage,
+    DataExfiltration,
+    PolicyBypass,
+}
+
+impl VulnerabilityCategory {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PromptInjection => "prompt_injection",
+            Self::SystemPromptLeakage => "system_prompt_leakage",
+            Self::Jailbreak => "jailbreak",
+            Self::ToolAbuse => "tool_abuse",
+            Self::McpAbuse => "mcp_abuse",
+            Self::RagLeakage => "rag_leakage",
+            Self::DataExfiltration => "data_exfiltration",
+            Self::PolicyBypass => "policy_bypass",
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::PromptInjection,
+            Self::SystemPromptLeakage,
+            Self::Jailbreak,
+            Self::ToolAbuse,
+            Self::McpAbuse,
+            Self::RagLeakage,
+            Self::DataExfiltration,
+            Self::PolicyBypass,
+        ]
+    }
+
+    pub fn normalize(input: &str) -> Self {
+        let key = input.trim().to_lowercase().replace([' ', '-'], "_");
+        match key.as_str() {
+            "prompt_injection" | "promptinjection" => Self::PromptInjection,
+            "system_prompt_leakage" | "system_prompt_leak" | "prompt_leak" => {
+                Self::SystemPromptLeakage
+            }
+            "jailbreak" | "jail_break" => Self::Jailbreak,
+            "tool_abuse" | "tool_misuse" => Self::ToolAbuse,
+            "mcp_abuse" | "mcp" => Self::McpAbuse,
+            "rag_leakage" | "rag_leak" => Self::RagLeakage,
+            "data_exfiltration" | "exfiltration" | "data_leak" => Self::DataExfiltration,
+            "policy_bypass" | "guardrail_bypass" => Self::PolicyBypass,
+            _ => Self::PromptInjection,
+        }
+    }
+}
+
 /// Finding severity aligned with attack framework.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -120,6 +216,10 @@ pub struct JudgeVerdict {
     pub severity: Option<Severity>,
     pub category: Option<String>,
     pub summary: String,
+    pub reasoning: String,
+    pub evidence: Vec<String>,
+    pub verdict: String,
+    pub mode: JudgeMode,
     pub consensus: ConsensusReport,
     pub evaluator_results: Vec<EvaluatorResult>,
     pub judged_at: OffsetDateTime,
@@ -128,6 +228,7 @@ pub struct JudgeVerdict {
 /// Engine configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JudgeConfig {
+    pub mode: JudgeMode,
     pub enable_rules: bool,
     pub enable_regex: bool,
     pub enable_llm: bool,
@@ -140,6 +241,7 @@ pub struct JudgeConfig {
 impl Default for JudgeConfig {
     fn default() -> Self {
         Self {
+            mode: JudgeMode::Deterministic,
             enable_rules: true,
             enable_regex: true,
             enable_llm: true,

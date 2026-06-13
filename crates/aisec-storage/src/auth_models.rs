@@ -22,6 +22,9 @@ pub struct AuthSessionRecord {
     pub tokens_json: Option<String>,
     pub storage_state_path: Option<String>,
     pub expires_at: Option<OffsetDateTime>,
+    pub validation_status: String,
+    pub last_validated_at: Option<OffsetDateTime>,
+    pub user_identity: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -58,6 +61,8 @@ pub struct CreateAuthSessionRecord {
     pub tokens_json: Option<serde_json::Value>,
     pub storage_state_path: Option<String>,
     pub expires_at: Option<OffsetDateTime>,
+    pub validation_status: Option<String>,
+    pub user_identity: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -67,6 +72,9 @@ pub struct UpdateAuthSessionRecord {
     pub tokens_json: Option<serde_json::Value>,
     pub storage_state_path: Option<String>,
     pub expires_at: Option<OffsetDateTime>,
+    pub validation_status: Option<String>,
+    pub last_validated_at: Option<OffsetDateTime>,
+    pub user_identity: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

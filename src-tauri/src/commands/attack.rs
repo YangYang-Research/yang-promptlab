@@ -7,11 +7,11 @@
 //! findings: results come straight from the engine evaluating real HTTP
 //! responses.
 
+use aisec_auth::AuthSessionManager;
 use aisec_attack::{
-    apply_descriptor_auth, default_executor, AttackCategory, AttackContext, AttackTarget,
-    FindingSeverity,
+    apply_descriptor_auth, AttackCategory, AttackContext, AttackTarget, FindingSeverity,
 };
-use aisec_judge::{deterministic_engine, JudgeRequest, JudgeVerdict, Severity as JudgeSeverity};
+use aisec_judge::{JudgeVerdict, Severity as JudgeSeverity};
 use aisec_storage::{
     AttackResultRepository, CreateAttackResult, CreateFinding, CreateScan, Endpoint,
     EndpointRepository, FindingRepository, Repositories, ScanRepository, TargetRepository,
@@ -23,6 +23,8 @@ use tracing::{info, instrument, warn};
 
 use crate::dto::{AttackRunDto, FindingDto, ScanDto};
 use crate::error::{CommandError, CommandResult};
+use crate::judge_config::build_configured_judge_engine;
+use crate::session_auth::{attack_executor, build_attack_runtime, AttackRuntime};
 use crate::state::AppState;
 
 pub struct CategoryRunResult {
@@ -63,6 +65,8 @@ pub async fn run_category_on_endpoint(
     target_id: Option<String>,
     endpoint: &Endpoint,
     category: AttackCategory,
+    runtime: AttackRuntime,
+    data_dir: &std::path::Path,
 ) -> CommandResult<CategoryRunResult> {
     let mut target = AttackTarget::llm_api(endpoint.url.clone());
     if let Some(tid) = &target_id {
@@ -70,10 +74,21 @@ pub async fn run_category_on_endpoint(
             target = apply_descriptor_auth(target, &stored_target.descriptor_json);
         }
     }
+
+    if let Some(ctx) = &runtime.session {
+        let mut headers = AuthSessionManager::auth_headers(ctx);
+        if let Some(cookie) = AuthSessionManager::cookie_header_for_url(ctx, &endpoint.url) {
+            headers.insert("Cookie".into(), cookie);
+        }
+        for (key, value) in headers {
+            target = target.with_header(&key, value);
+        }
+    }
+
     let probe_id = format!("{}-{}", endpoint.id, category.as_str());
     let mut ctx = AttackContext::new(scan_id, probe_id, target);
     ctx.target_id = target_id.clone();
-    let executor = default_executor();
+    let executor = attack_executor(runtime.transport);
 
     info!(
         scan_id = %scan_id,
@@ -88,7 +103,7 @@ pub async fn run_category_on_endpoint(
         .await
         .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
 
-    let judge = deterministic_engine();
+    let judge = build_configured_judge_engine(data_dir).await?;
     let category_name = category.as_str();
     let mut successes = 0u64;
     let mut created_findings: Vec<FindingDto> = Vec::new();
@@ -97,7 +112,7 @@ pub async fn run_category_on_endpoint(
         let eval = &attempt.evaluation;
 
         let verdict: JudgeVerdict = judge
-            .judge_deterministic(JudgeRequest {
+            .judge(aisec_judge::JudgeRequest {
                 probe_id: attempt.payload_id.clone(),
                 attack_category: category_name.into(),
                 payload: attempt.mutated_content.clone(),
@@ -198,6 +213,18 @@ pub async fn attack_run_prompt_injection_op(
     let project_id = source_scan.project_id.clone();
     let target_id = endpoint.target_id.clone().or(source_scan.target_id.clone());
 
+    let descriptor_json = if let Some(tid) = &target_id {
+        repos
+            .targets()
+            .get(tid)
+            .await
+            .map(|t| t.descriptor_json)
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let runtime = build_attack_runtime(state, &descriptor_json, &endpoint.url).await?;
+
     let scan = repos
         .scans()
         .create(CreateScan {
@@ -233,6 +260,8 @@ pub async fn attack_run_prompt_injection_op(
         target_id.clone(),
         &endpoint,
         category,
+        runtime,
+        state.data_dir(),
     )
     .await
     {

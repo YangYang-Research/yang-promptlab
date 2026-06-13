@@ -16,7 +16,7 @@ pub mod url_policy;
 
 pub use browser::{BrowserCapture, BrowserConfig, BrowserCrawler, CapturedRequest, WaitUntil};
 pub use client::HttpClient;
-pub use config::{DiscoveryConfig, RetryConfig};
+pub use config::{DiscoveryConfig, RetryConfig, SessionAuthMaterial};
 pub use engine::{DiscoveryEngine, SurfaceDiscovery};
 pub use types::{
     CrawlStats, DiscoveredEndpoint, DiscoveryReport, EndpointKind, HttpSnapshot,

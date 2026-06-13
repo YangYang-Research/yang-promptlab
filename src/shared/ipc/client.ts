@@ -83,6 +83,46 @@ export type EndpointDto = {
   evidence: string | null;
   source_url: string | null;
   discovered_at: string;
+  fingerprint: EndpointFingerprintDto | null;
+};
+
+export type EndpointFingerprintDto = {
+  confidence: number;
+  technologies: FingerprintTechnologyDto[];
+  agentFrameworks: FingerprintFrameworkDto[];
+  aiComponents: FingerprintComponentDto[];
+  attackRecommendations: FingerprintRecommendationDto[];
+  methodsUsed: string[];
+  primaryProvider: string | null;
+  apiStyle: string | null;
+};
+
+export type FingerprintTechnologyDto = {
+  id: string;
+  name: string;
+  category: string;
+  confidence: number;
+  signals: string[];
+};
+
+export type FingerprintFrameworkDto = {
+  id: string;
+  name: string;
+  confidence: number;
+  signals: string[];
+};
+
+export type FingerprintComponentDto = {
+  id: string;
+  name: string;
+  confidence: number;
+  signals: string[];
+};
+
+export type FingerprintRecommendationDto = {
+  category: string;
+  reason: string;
+  priority: number;
 };
 
 export type DiscoveryStatsDto = {

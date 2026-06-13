@@ -8,6 +8,9 @@ use serde::Serialize;
 use tauri::{async_runtime::Mutex, State};
 
 use crate::error::{CommandError, CommandResult};
+use crate::session_auth::{
+    auth_session_manager, session_status_dto, validate_browser_session, AuthSessionStatusDto,
+};
 use crate::state::AppState;
 
 pub struct AuthRecordingState {
@@ -179,4 +182,53 @@ pub async fn auth_record_session_finish(
         session_id: session.id,
         verified: true,
     })
+}
+
+#[tauri::command]
+pub async fn auth_session_validate(
+    state: State<'_, AppState>,
+    session_id: String,
+    probe_url: String,
+) -> CommandResult<AuthSessionStatusDto> {
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return Err(CommandError::from(AisecError::invalid_input(
+            "session id is required",
+        )));
+    }
+    let probe_url = probe_url.trim();
+    if probe_url.is_empty() {
+        return Err(CommandError::from(AisecError::invalid_input(
+            "probe URL is required",
+        )));
+    }
+
+    let ctx = validate_browser_session(state.inner(), session_id, probe_url).await?;
+    Ok(session_status_dto(&ctx))
+}
+
+#[tauri::command]
+pub async fn auth_session_status(
+    state: State<'_, AppState>,
+    session_id: String,
+    probe_url: Option<String>,
+) -> CommandResult<AuthSessionStatusDto> {
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return Err(CommandError::from(AisecError::invalid_input(
+            "session id is required",
+        )));
+    }
+
+    let manager = auth_session_manager(state.inner()).await?;
+    let ctx = if let Some(url) = probe_url.filter(|u| !u.trim().is_empty()) {
+        manager
+            .validate_session(session_id, Some(url.trim()))
+            .await
+            .map_err(CommandError::from)?
+    } else {
+        manager.load_context(session_id).await.map_err(CommandError::from)?
+    };
+
+    Ok(session_status_dto(&ctx))
 }

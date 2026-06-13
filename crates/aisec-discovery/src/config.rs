@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -73,6 +75,13 @@ impl RetryConfig {
         let millis = (self.initial_delay.as_millis() as f64 * factor) as u64;
         Duration::from_millis(millis.min(self.max_delay.as_millis() as u64))
     }
+}
+
+/// Authenticated discovery material (cookies/tokens as HTTP headers + Playwright storageState).
+#[derive(Debug, Clone, Default)]
+pub struct SessionAuthMaterial {
+    pub headers: HashMap<String, String>,
+    pub storage_state_path: Option<PathBuf>,
 }
 
 #[cfg(test)]

@@ -57,10 +57,14 @@ async function ensureBrowser(options) {
     browser = await chromium.launch({ headless: options.headless ?? true });
   }
   if (!context) {
-    context = await browser.newContext({
+    const ctxOptions = {
       userAgent: options.user_agent || undefined,
       ignoreHTTPSErrors: true,
-    });
+    };
+    if (options.storage_state_path) {
+      ctxOptions.storageState = options.storage_state_path;
+    }
+    context = await browser.newContext(ctxOptions);
     page = await context.newPage();
   }
 }

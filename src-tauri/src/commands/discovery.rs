@@ -16,6 +16,10 @@ use url::Url;
 
 use crate::dto::{DiscoveryRunDto, DiscoveryStatsDto, EndpointDto, ScanDto};
 use crate::error::{CommandError, CommandResult};
+use crate::fingerprint_service::{
+    fingerprint_endpoint_url, fingerprint_json, should_fingerprint_kind,
+};
+use crate::session_auth::resolve_discovery_auth;
 use crate::state::AppState;
 
 /// Extract a seed URL from a target's descriptor JSON (`url` or `base_url`).
@@ -104,6 +108,7 @@ pub async fn endpoint_create_op(
             evidence: Some("Manual entry".into()),
             source_url: Some("manual".into()),
             discovered_at: OffsetDateTime::now_utc(),
+            fingerprint_json: None,
         })
         .await
         .map_err(CommandError::from)?;
@@ -165,6 +170,14 @@ pub async fn discovery_run_op(
     };
 
     let engine = DiscoveryEngine::new(config).map_err(CommandError::from)?;
+    let session_auth = resolve_discovery_auth(state, &target.descriptor_json, &seed_url).await?;
+    let engine = if let Some(auth) = session_auth {
+        info!(scan_id = %scan.id, "using authenticated discovery session");
+        engine.with_session_auth(auth).map_err(CommandError::from)?
+    } else {
+        engine
+    };
+
     info!(scan_id = %scan.id, url = %seed_url, "discovery run started");
 
     let report = match engine.discover(&seed_url).await {
@@ -187,10 +200,27 @@ pub async fn discovery_run_op(
         }
     };
 
-    let inputs: Vec<CreateEndpoint> = report
-        .endpoints
-        .iter()
-        .map(|e| CreateEndpoint {
+    let fingerprint_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
+
+    let mut inputs: Vec<CreateEndpoint> = Vec::with_capacity(report.endpoints.len());
+    for e in &report.endpoints {
+        let fingerprint_json = if should_fingerprint_kind(e.kind.as_str()) {
+            fingerprint_endpoint_url(
+                &fingerprint_client,
+                &e.url,
+                e.method.as_deref(),
+                e.kind.as_str(),
+            )
+            .await
+            .map(|report| fingerprint_json(&report))
+        } else {
+            None
+        };
+
+        inputs.push(CreateEndpoint {
             scan_id: scan.id.clone(),
             target_id: Some(target.id.clone()),
             url: e.url.clone(),
@@ -200,8 +230,9 @@ pub async fn discovery_run_op(
             evidence: Some(e.evidence.clone()),
             source_url: e.source_url.clone(),
             discovered_at: e.discovered_at,
-        })
-        .collect();
+            fingerprint_json,
+        });
+    }
 
     let saved = repos
         .endpoints()

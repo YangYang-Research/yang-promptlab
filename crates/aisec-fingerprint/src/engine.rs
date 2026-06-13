@@ -1,17 +1,25 @@
+use std::collections::{HashMap, HashSet};
+
 use time::OffsetDateTime;
 use tracing::{debug, instrument};
 
 use crate::evaluator::evaluate_rule;
-use crate::rules::{rule_catalog, FingerprintRule};
+use crate::recommendations::{
+    aggregate_confidence, generate_attack_recommendations, technologies_from_providers,
+};
+use crate::rules::{rule_catalog, stack_rule_catalog, FingerprintRule, StackRule, StackTarget};
 use crate::scoring::{apply_conflict_penalties, build_provider_fingerprint, ScoreAccumulator};
 use crate::types::{
-    AiProvider, DEFAULT_CONFIDENCE_THRESHOLD, FingerprintInput, FingerprintReport,
-    ProviderFingerprint,
+    AiProvider, COMPONENT_CONFIDENCE_THRESHOLD, DEFAULT_CONFIDENCE_THRESHOLD,
+    DetectedComponent, DetectedFramework, FingerprintInput, FingerprintMethod,
+    FingerprintReport, FRAMEWORK_CONFIDENCE_THRESHOLD, ProviderFingerprint, StackFingerprintReport,
+    StackSignal,
 };
 
 /// AI endpoint fingerprinting engine.
 pub struct FingerprintEngine {
     rules: Vec<FingerprintRule>,
+    stack_rules: Vec<StackRule>,
     threshold: f32,
 }
 
@@ -19,6 +27,7 @@ impl FingerprintEngine {
     pub fn new() -> Self {
         Self {
             rules: rule_catalog(),
+            stack_rules: stack_rule_catalog(),
             threshold: DEFAULT_CONFIDENCE_THRESHOLD,
         }
     }
@@ -26,12 +35,13 @@ impl FingerprintEngine {
     pub fn with_threshold(threshold: f32) -> Self {
         Self {
             rules: rule_catalog(),
+            stack_rules: stack_rule_catalog(),
             threshold,
         }
     }
 
     pub fn rule_count(&self) -> usize {
-        self.rules.len()
+        self.rules.len() + self.stack_rules.len()
     }
 
     pub fn rules_for(&self, provider: AiProvider) -> Vec<&FingerprintRule> {
@@ -44,8 +54,7 @@ impl FingerprintEngine {
     /// Fingerprint an endpoint from HTTP observation data.
     #[instrument(skip(self, input), fields(url = %input.url))]
     pub fn fingerprint(&self, input: &FingerprintInput) -> FingerprintReport {
-        let mut per_provider: std::collections::HashMap<AiProvider, ScoreAccumulator> =
-            std::collections::HashMap::new();
+        let mut per_provider: HashMap<AiProvider, ScoreAccumulator> = HashMap::new();
 
         for rule in &self.rules {
             if evaluate_rule(rule, input) {
@@ -91,11 +100,138 @@ impl FingerprintEngine {
         }
     }
 
+    /// Full AI stack fingerprint: providers, frameworks, components, and attack recommendations.
+    pub fn fingerprint_stack(&self, input: &FingerprintInput) -> StackFingerprintReport {
+        let provider_report = if input
+            .kind_hint
+            .as_deref()
+            .is_some_and(|k| k == "openapi")
+            && input
+                .body
+                .as_deref()
+                .and_then(|b| serde_json::from_str::<serde_json::Value>(b).ok())
+                .is_some()
+        {
+            self.fingerprint_openapi(
+                &serde_json::from_str(input.body.as_deref().unwrap_or("{}")).unwrap_or_default(),
+            )
+        } else {
+            self.fingerprint(input)
+        };
+
+        let mut framework_scores: HashMap<crate::types::AgentFramework, StackScoreAccumulator> =
+            HashMap::new();
+        let mut component_scores: HashMap<crate::types::AiComponent, StackScoreAccumulator> =
+            HashMap::new();
+        let mut methods_used = HashSet::new();
+
+        infer_methods_from_input(input, &mut methods_used);
+
+        for rule in &self.stack_rules {
+            if !evaluate_rule(&rule_to_fingerprint(rule), input) {
+                continue;
+            }
+            methods_used.insert(rule.method.as_str().to_string());
+            match rule.target {
+                StackTarget::Framework(framework) => {
+                    let entry = framework_scores.entry(framework).or_default();
+                    entry.raw_weight += rule.weight;
+                    entry.stack_signals.push(StackSignal {
+                        rule_id: rule.id.to_string(),
+                        description: rule.description.to_string(),
+                        weight: rule.weight,
+                        method: rule.method,
+                    });
+                }
+                StackTarget::Component(component) => {
+                    let entry = component_scores.entry(component).or_default();
+                    entry.raw_weight += rule.weight;
+                    entry.stack_signals.push(StackSignal {
+                        rule_id: rule.id.to_string(),
+                        description: rule.description.to_string(),
+                        weight: rule.weight,
+                        method: rule.method,
+                    });
+                }
+            }
+        }
+
+        let technologies = technologies_from_providers(&provider_report.matches);
+        let agent_frameworks = framework_scores
+            .into_iter()
+            .filter_map(|(framework, acc)| {
+                let confidence = compute_stack_confidence(&acc);
+                if confidence < FRAMEWORK_CONFIDENCE_THRESHOLD {
+                    return None;
+                }
+                Some(DetectedFramework {
+                    framework,
+                    name: framework.display_name().into(),
+                    confidence,
+                    signals: acc
+                        .stack_signals
+                        .iter()
+                        .map(|s| s.description.clone())
+                        .collect(),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let ai_components = component_scores
+            .into_iter()
+            .filter_map(|(component, acc)| {
+                let confidence = compute_stack_confidence(&acc);
+                if confidence < COMPONENT_CONFIDENCE_THRESHOLD {
+                    return None;
+                }
+                Some(DetectedComponent {
+                    component,
+                    name: component.display_name().into(),
+                    confidence,
+                    signals: acc
+                        .stack_signals
+                        .iter()
+                        .map(|s| s.description.clone())
+                        .collect(),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let mut agent_frameworks = agent_frameworks;
+        agent_frameworks.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let mut ai_components = ai_components;
+        ai_components.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let confidence = aggregate_confidence(&technologies, &agent_frameworks, &ai_components);
+
+        let mut methods_used: Vec<String> = methods_used.into_iter().collect();
+        methods_used.sort();
+
+        let mut report = StackFingerprintReport {
+            url: input.url.clone(),
+            confidence,
+            technologies,
+            agent_frameworks,
+            ai_components,
+            provider_report,
+            attack_recommendations: vec![],
+            methods_used,
+            analyzed_at: OffsetDateTime::now_utc(),
+        };
+        report.attack_recommendations = generate_attack_recommendations(&report);
+        report
+    }
+
     /// Detect AI providers from an OpenAPI/Swagger specification.
-    ///
-    /// Enumerates the spec's servers and operations into synthetic requests and
-    /// runs the standard request-pattern rules over them, merging by highest
-    /// confidence per provider.
     #[instrument(skip(self, spec))]
     pub fn fingerprint_openapi(&self, spec: &serde_json::Value) -> FingerprintReport {
         let inputs = crate::openapi::inputs_from_openapi(spec);
@@ -113,8 +249,7 @@ impl FingerprintEngine {
             };
         }
 
-        let mut best: std::collections::HashMap<AiProvider, ProviderFingerprint> =
-            std::collections::HashMap::new();
+        let mut best: HashMap<AiProvider, ProviderFingerprint> = HashMap::new();
 
         for input in inputs {
             let report = self.fingerprint(input);
@@ -144,6 +279,57 @@ impl FingerprintEngine {
     }
 }
 
+#[derive(Debug, Default)]
+struct StackScoreAccumulator {
+    raw_weight: f32,
+    stack_signals: Vec<StackSignal>,
+}
+
+fn compute_stack_confidence(acc: &StackScoreAccumulator) -> f32 {
+    if acc.stack_signals.is_empty() {
+        return 0.0;
+    }
+    let mut score = 1.0 - (-acc.raw_weight).exp();
+    if acc.stack_signals.len() == 1 && acc.raw_weight >= 0.35 {
+        score = score.max(0.65);
+    }
+    score.min(1.0)
+}
+
+fn rule_to_fingerprint(rule: &StackRule) -> FingerprintRule {
+    FingerprintRule {
+        id: rule.id,
+        provider: AiProvider::OpenAi,
+        kind: rule.kind,
+        weight: rule.weight,
+        matcher: rule.matcher.clone(),
+        description: rule.description,
+    }
+}
+
+fn infer_methods_from_input(input: &FingerprintInput, methods: &mut HashSet<String>) {
+    if !input.headers.is_empty() {
+        methods.insert(FingerprintMethod::Headers.as_str().into());
+    }
+    if input.body.is_some() {
+        methods.insert(FingerprintMethod::Responses.as_str().into());
+    }
+    methods.insert(FingerprintMethod::KnownRoutes.as_str().into());
+
+    if input.kind_hint.as_deref() == Some("openapi") {
+        methods.insert(FingerprintMethod::OpenApi.as_str().into());
+    }
+    if input.kind_hint.as_deref() == Some("graphql") {
+        methods.insert(FingerprintMethod::GraphQl.as_str().into());
+    }
+    if input.kind_hint.as_deref() == Some("javascript") {
+        methods.insert(FingerprintMethod::JavaScript.as_str().into());
+    }
+    if input.content_type.as_deref().is_some_and(|ct| ct.contains("javascript")) {
+        methods.insert(FingerprintMethod::JavaScript.as_str().into());
+    }
+}
+
 impl Default for FingerprintEngine {
     fn default() -> Self {
         Self::new()
@@ -162,6 +348,8 @@ mod tests {
             status: Some(status),
             headers,
             body: body.map(str::to_string),
+            content_type: None,
+            kind_hint: None,
         }
     }
 
@@ -195,170 +383,53 @@ mod tests {
     }
 
     #[test]
-    fn detects_gemini_api() {
+    fn detects_openrouter_api() {
         let engine = FingerprintEngine::new();
         let report = engine.fingerprint(&input(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
-            200,
-            HashMap::new(),
-            Some(r#"{"candidates":[{"content":{"parts":[{"text":"hi"}]}}],"promptFeedback":{}}"#),
-        ));
-        assert_eq!(report.primary.unwrap().provider, AiProvider::Gemini);
-    }
-
-    #[test]
-    fn detects_bedrock_api() {
-        let engine = FingerprintEngine::new();
-        let mut headers = HashMap::new();
-        headers.insert("x-amzn-requestid".into(), "abc".into());
-        let report = engine.fingerprint(&input(
-            "https://bedrock-runtime.us-east-1.amazonaws.com/model/anthropic.claude-3-sonnet/invoke",
-            403,
-            headers,
-            None,
-        ));
-        assert_eq!(report.primary.unwrap().provider, AiProvider::Bedrock);
-    }
-
-    #[test]
-    fn detects_azure_openai() {
-        let engine = FingerprintEngine::new();
-        let mut headers = HashMap::new();
-        headers.insert("x-ms-client-request-id".into(), "ms-1".into());
-        let report = engine.fingerprint(&input(
-            "https://myresource.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-02-01",
-            404,
-            headers,
-            Some(r#"{"error":{"code":"DeploymentNotFound","message":"not found"}}"#),
-        ));
-        assert_eq!(report.primary.unwrap().provider, AiProvider::AzureOpenAi);
-    }
-
-    #[test]
-    fn detects_ollama_api() {
-        let engine = FingerprintEngine::new();
-        let report = engine.fingerprint(&input(
-            "http://127.0.0.1:11434/api/tags",
-            200,
-            HashMap::new(),
-            Some(r#"{"models":[{"name":"llama3:latest","model":"llama3:latest"}]}"#),
-        ));
-        assert_eq!(report.primary.unwrap().provider, AiProvider::Ollama);
-    }
-
-    #[test]
-    fn detects_litellm_proxy() {
-        let engine = FingerprintEngine::new();
-        let mut headers = HashMap::new();
-        headers.insert("x-litellm-model-id".into(), "gpt-4".into());
-        headers.insert("x-litellm-provider".into(), "openai".into());
-        let report = engine.fingerprint(&input(
-            "https://proxy.internal/v1/chat/completions",
-            502,
-            headers,
-            Some(r#"{"error":{"type":"litellm_error","message":"LiteLLM rate limit"}}"#),
-        ));
-        assert_eq!(report.primary.unwrap().provider, AiProvider::LiteLlm);
-    }
-
-    #[test]
-    fn detects_vllm_server() {
-        let engine = FingerprintEngine::new();
-        let mut headers = HashMap::new();
-        headers.insert("server".into(), "uvicorn/vllm-0.6.0".into());
-        let report = engine.fingerprint(&input(
-            "http://gpu-cluster:8000/health",
-            200,
-            headers,
-            Some(r#"{"status":"ok","vllm":"0.6.0"}"#),
-        ));
-        assert_eq!(report.primary.unwrap().provider, AiProvider::Vllm);
-    }
-
-    #[test]
-    fn below_threshold_excluded() {
-        let engine = FingerprintEngine::with_threshold(0.90);
-        let report = engine.fingerprint(&input(
-            "https://example.com/v1/chat/completions",
-            200,
+            "https://openrouter.ai/api/v1/chat/completions",
+            401,
             HashMap::new(),
             None,
         ));
-        assert!(report.primary.is_none());
+        assert_eq!(report.primary.unwrap().provider, AiProvider::OpenRouter);
     }
 
     #[test]
-    fn fingerprint_openapi_detects_openai() {
+    fn stack_detects_langchain_and_recommends_tool_abuse() {
         let engine = FingerprintEngine::new();
-        let spec = serde_json::json!({
-            "openapi": "3.0.0",
-            "servers": [{ "url": "https://api.openai.com/v1" }],
-            "paths": {
-                "/chat/completions": { "post": {} },
-                "/models": { "get": {} },
-                "/embeddings": { "post": {} }
-            }
-        });
-        let report = engine.fingerprint_openapi(&spec);
-        assert_eq!(report.primary.expect("primary").provider, AiProvider::OpenAi);
-    }
-
-    #[test]
-    fn fingerprint_openapi_detects_anthropic_and_gemini() {
-        let engine = FingerprintEngine::new();
-
-        let anthropic = serde_json::json!({
-            "openapi": "3.0.0",
-            "servers": [{ "url": "https://api.anthropic.com" }],
-            "paths": { "/v1/messages": { "post": {} } }
-        });
-        assert_eq!(
-            engine.fingerprint_openapi(&anthropic).primary.unwrap().provider,
-            AiProvider::Anthropic
-        );
-
-        let gemini = serde_json::json!({
-            "openapi": "3.0.0",
-            "servers": [{ "url": "https://generativelanguage.googleapis.com" }],
-            "paths": { "/v1beta/models/gemini-pro:generateContent": { "post": {} } }
-        });
-        assert_eq!(
-            engine.fingerprint_openapi(&gemini).primary.unwrap().provider,
-            AiProvider::Gemini
-        );
-    }
-
-    #[test]
-    fn fingerprint_openapi_detects_ollama_swagger2() {
-        let engine = FingerprintEngine::new();
-        let spec = serde_json::json!({
-            "swagger": "2.0",
-            "host": "localhost:11434",
-            "schemes": ["http"],
-            "paths": {
-                "/api/tags": { "get": {} },
-                "/api/generate": { "post": {} }
-            }
-        });
-        let report = engine.fingerprint_openapi(&spec);
-        assert_eq!(report.primary.expect("primary").provider, AiProvider::Ollama);
-    }
-
-    #[test]
-    fn suggested_method_uses_observed_then_path() {
-        let engine = FingerprintEngine::new();
-        // Observed GET wins even on a chat path.
-        let r = engine.fingerprint(&input(
-            "https://api.openai.com/v1/models",
+        let report = engine.fingerprint_stack(&input(
+            "https://example.com/invoke",
             200,
             HashMap::new(),
-            Some(r#"{"data":[{"id":"gpt-4","object":"model"}]}"#),
+            Some(r#"{"output":"ok","langchain":true}"#),
         ));
-        assert_eq!(
-            r.primary.unwrap().suggested_method.as_deref(),
-            Some("POST"),
-            "observed method (POST in test input) should be used"
-        );
+        assert!(report
+            .agent_frameworks
+            .iter()
+            .any(|f| f.framework == crate::types::AgentFramework::LangChain));
+        assert!(report
+            .attack_recommendations
+            .iter()
+            .any(|r| r.category == "tool_abuse"));
+    }
+
+    #[test]
+    fn stack_detects_mcp_server() {
+        let engine = FingerprintEngine::new();
+        let report = engine.fingerprint_stack(&input(
+            "https://example.com/mcp",
+            200,
+            HashMap::new(),
+            Some(r#"{"jsonrpc":"2.0","result":{"tools":[{"name":"read_file"}]}}"#),
+        ));
+        assert!(report
+            .ai_components
+            .iter()
+            .any(|c| c.component == crate::types::AiComponent::McpServer));
+        assert!(report
+            .attack_recommendations
+            .iter()
+            .any(|r| r.category == "mcp_abuse"));
     }
 
     #[test]

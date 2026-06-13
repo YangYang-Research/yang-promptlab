@@ -62,6 +62,8 @@ async function handleCommand(req) {
       return ok(id, await cmdGetCookies(req));
     case 'set_cookies':
       return ok(id, await cmdSetCookies(req));
+    case 'execute_http_request':
+      return ok(id, await cmdExecuteHttpRequest(req));
     default:
       throw new Error(`unknown command: ${cmd}`);
   }
@@ -328,6 +330,42 @@ async function cmdSetCookies(req) {
     await context.addCookies(req.cookies);
   }
   return { cookies: await context.cookies() };
+}
+
+async function cmdExecuteHttpRequest(req) {
+  const { url, method, headers, body, storage_state_path, options } = req;
+
+  if (context) {
+    await context.close();
+    context = null;
+    page = null;
+  }
+
+  const launchOpts = { ...(options ?? {}), headless: true };
+  if (storage_state_path) {
+    launchOpts.storage_state_path = storage_state_path;
+  }
+
+  await ensureBrowser(launchOpts);
+  if (!context) throw new Error('context not initialized');
+
+  const started = Date.now();
+  const response = await context.request.fetch(url, {
+    method: method ?? 'GET',
+    headers: headers ?? {},
+    data: body ?? undefined,
+  });
+  const responseHeaders = {};
+  for (const [key, value] of Object.entries(response.headers())) {
+    responseHeaders[key] = value;
+  }
+
+  return {
+    status: response.status(),
+    headers: responseHeaders,
+    body: await response.text(),
+    duration_ms: Date.now() - started,
+  };
 }
 
 function dedupeTokens(tokens) {

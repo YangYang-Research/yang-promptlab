@@ -13,5 +13,5 @@ pub use cookies::{CookieManager, TokenExtractor};
 pub use engine::AuthEngine;
 pub use mock::{MockPlaywrightDriver, SharedPlaywrightDriver};
 pub use playwright::{PlaywrightClient, PlaywrightDriver};
-pub use session::SessionStore;
+pub use session::{AuthSessionManager, SessionAuthContext, SessionStore};
 pub use types::*;

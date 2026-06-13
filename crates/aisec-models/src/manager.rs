@@ -4,14 +4,19 @@ use time::OffsetDateTime;
 use tracing::{info, instrument};
 use uuid::Uuid;
 
+use crate::catalog::{curated_catalog, find_catalog_entry};
 use crate::download::{DownloadManager, DownloadOptions};
 use crate::error::{ModelError, ModelResult};
 use crate::hardware::detect_hardware;
 use crate::registry::ModelRegistry;
-use crate::runtime::{InferenceRuntime, LlamaCppConfig, LlamaCppRuntime};
+use crate::runtime::{
+    infer_capabilities, infer_provider, infer_version, InferenceRuntime, LocalInferenceEngine,
+    LlamaCppConfig, LlamaCppRuntime, OllamaConfig, OllamaRuntime,
+};
 use crate::types::{
-    DownloadStatus, HardwareProfile, HuggingFaceDownloadRequest, InferenceRequest,
-    InferenceResponse, ModelEntry, ModelFormat, ModelSource, VerificationResult,
+    ChatMessage, ChatRequest, DownloadStatus, HardwareProfile, HuggingFaceDownloadRequest,
+    InferenceRequest, ModelCatalogEntry, ModelEntry, ModelFormat, ModelProvider, ModelSource,
+    VerificationResult,
 };
 use crate::verify::VerificationEngine;
 
@@ -32,10 +37,11 @@ impl LocalModelManager {
         let hardware = detect_hardware()?;
         let mut llama_config = LlamaCppConfig::default();
         llama_config.n_gpu_layers = hardware.recommended_gpu_layers();
+        let registry = ModelRegistry::load_from_vault(&vault_path)?;
 
         Ok(Self {
             vault_path,
-            registry: ModelRegistry::new(),
+            registry,
             downloader: DownloadManager::with_defaults(),
             hardware,
             runtime: LlamaCppRuntime::new(llama_config),
@@ -75,12 +81,81 @@ impl LocalModelManager {
         &mut self.runtime
     }
 
+    pub fn llama_config(&self) -> LlamaCppConfig {
+        let mut config = LlamaCppConfig::default();
+        config.n_gpu_layers = self.hardware.recommended_gpu_layers();
+        config
+    }
+
+    fn persist(&self) -> ModelResult<()> {
+        self.registry.save_to_vault(&self.vault_path)
+    }
+
+    /// Curated catalog for browse UI.
+    pub fn browse_catalog(&self) -> Vec<ModelCatalogEntry> {
+        curated_catalog()
+    }
+
     /// Import an existing local GGUF file into the vault registry.
     pub fn import_local(&mut self, name: impl Into<String>, path: impl AsRef<Path>) -> ModelResult<ModelEntry> {
         let path = path.as_ref();
         let entry = self.registry.register_local(name, path)?;
+        self.persist()?;
         info!(id = %entry.id, path = %path.display(), "imported local model");
         Ok(entry)
+    }
+
+    /// Install from catalog entry id (HuggingFace download or Ollama registration).
+    #[instrument(skip(self))]
+    pub async fn install_catalog(
+        &mut self,
+        catalog_id: &str,
+        ollama_base_url: Option<String>,
+    ) -> ModelResult<ModelEntry> {
+        let catalog = find_catalog_entry(catalog_id)
+            .ok_or_else(|| ModelError::not_found(format!("catalog entry: {catalog_id}")))?;
+
+        match catalog.provider {
+            ModelProvider::Ollama => {
+                let tag = catalog
+                    .ollama_tag
+                    .ok_or_else(|| ModelError::invalid("catalog entry missing ollama tag"))?;
+                let base_url = ollama_base_url.unwrap_or_else(|| "http://127.0.0.1:11434".into());
+                let runtime = OllamaRuntime::new(OllamaConfig {
+                    base_url: base_url.clone(),
+                    model: tag.clone(),
+                });
+                runtime.pull_model().await?;
+                let entry = self.registry.register_ollama(
+                    &self.vault_path,
+                    catalog.name,
+                    tag,
+                    base_url,
+                )?;
+                self.persist()?;
+                Ok(entry)
+            }
+            ModelProvider::HuggingFace => {
+                let repo = catalog
+                    .repo
+                    .ok_or_else(|| ModelError::invalid("catalog entry missing repo"))?;
+                let filename = catalog
+                    .filename
+                    .ok_or_else(|| ModelError::invalid("catalog entry missing filename"))?;
+                self.download_huggingface(HuggingFaceDownloadRequest {
+                    name: catalog.name,
+                    repo,
+                    filename,
+                    revision: Some(catalog.version.clone()),
+                    expected_sha256: None,
+                    expected_size_bytes: catalog.size_bytes,
+                })
+                .await
+            }
+            ModelProvider::Gguf => Err(ModelError::invalid(
+                "catalog GGUF entries must be installed via HuggingFace or import",
+            )),
+        }
     }
 
     /// Download a GGUF model from HuggingFace, verify, and register.
@@ -98,11 +173,6 @@ impl LocalModelManager {
         tokio::fs::create_dir_all(&model_dir).await.map_err(ModelError::Io)?;
 
         let destination = model_dir.join(&request.filename);
-        let url = crate::download::huggingface_url(
-            &request.repo,
-            &request.filename,
-            request.revision.as_deref(),
-        );
 
         info!(repo = %request.repo, file = %request.filename, "starting HuggingFace download");
 
@@ -123,16 +193,21 @@ impl LocalModelManager {
             return Err(ModelError::verification("post-download checksum mismatch"));
         }
 
+        let source = ModelSource::HuggingFace {
+            repo: request.repo,
+            filename: request.filename.clone(),
+            revision: request.revision,
+        };
+        let provider = infer_provider(&source);
         let now = OffsetDateTime::now_utc();
         let entry = ModelEntry {
             id: model_id.clone(),
             name: request.name,
             format: ModelFormat::Gguf,
-            source: ModelSource::HuggingFace {
-                repo: request.repo,
-                filename: request.filename.clone(),
-                revision: request.revision,
-            },
+            provider,
+            version: infer_version(&source),
+            capabilities: infer_capabilities(provider),
+            source,
             file_path: destination,
             size_bytes: Some(verification.size_bytes),
             checksum_sha256: Some(verification.actual_sha256),
@@ -148,11 +223,26 @@ impl LocalModelManager {
         };
 
         self.registry.register_entry(entry.clone())?;
+        self.persist()?;
         info!(id = %entry.id, "model registered after download");
         Ok(entry)
     }
 
-    /// Verify a registered model's SHA256 checksum.
+    /// Remove a model from the registry and delete vault files.
+    pub async fn remove_model(&mut self, model_id: &str) -> ModelResult<ModelEntry> {
+        let entry = self.registry.remove(model_id)?;
+        let model_dir = ModelRegistry::model_dir(&self.vault_path, model_id);
+        if model_dir.exists() {
+            tokio::fs::remove_dir_all(&model_dir)
+                .await
+                .map_err(ModelError::Io)?;
+        }
+        self.persist()?;
+        info!(id = %model_id, "removed model");
+        Ok(entry)
+    }
+
+    /// Verify a registered model (SHA256 for GGUF, Ollama health for Ollama refs).
     pub async fn verify_model(&mut self, model_id: &str) -> ModelResult<VerificationResult> {
         let entry = self
             .registry
@@ -160,15 +250,33 @@ impl LocalModelManager {
             .ok_or_else(|| ModelError::not_found(model_id))?
             .clone();
 
+        if entry.provider == ModelProvider::Ollama {
+            let engine = LocalInferenceEngine::from_entry(entry.clone(), self.llama_config()).await?;
+            let ok = engine.health().await.unwrap_or(false);
+            if ok {
+                self.registry.update_verification(model_id, "ollama-ok".into(), true)?;
+                self.persist()?;
+            }
+            return Ok(VerificationResult {
+                file_path: entry.file_path,
+                expected_sha256: None,
+                actual_sha256: if ok {
+                    "ollama-ok".into()
+                } else {
+                    "ollama-unreachable".into()
+                },
+                size_bytes: 0,
+                valid: ok,
+            });
+        }
+
         let expected = entry.checksum_sha256.as_deref();
         let result = self.verify_file(&entry.file_path, expected).await?;
 
         if result.valid {
-            self.registry.update_verification(
-                model_id,
-                result.actual_sha256.clone(),
-                true,
-            )?;
+            self.registry
+                .update_verification(model_id, result.actual_sha256.clone(), true)?;
+            self.persist()?;
         }
 
         Ok(result)
@@ -181,6 +289,45 @@ impl LocalModelManager {
         expected_sha256: Option<&str>,
     ) -> ModelResult<VerificationResult> {
         VerificationEngine::verify_file(path, expected_sha256).await
+    }
+
+    /// Build a unified inference engine for a registered model.
+    pub async fn inference_engine(&self, model_id: &str) -> ModelResult<LocalInferenceEngine> {
+        let entry = self
+            .registry
+            .get(model_id)
+            .ok_or_else(|| ModelError::not_found(model_id))?
+            .clone();
+        LocalInferenceEngine::from_entry(entry, self.llama_config()).await
+    }
+
+    /// Run a completion smoke test on a registered model.
+    pub async fn test_inference(&self, model_id: &str) -> ModelResult<String> {
+        let engine = self.inference_engine(model_id).await?;
+        let response = engine
+            .complete(InferenceRequest {
+                prompt: "Reply with exactly: AISec OK".into(),
+                max_tokens: 16,
+                temperature: 0.0,
+            })
+            .await?;
+        Ok(response.text)
+    }
+
+    /// Run a chat smoke test on a registered model.
+    pub async fn test_chat(&self, model_id: &str) -> ModelResult<String> {
+        let engine = self.inference_engine(model_id).await?;
+        let response = engine
+            .chat(ChatRequest {
+                messages: vec![ChatMessage {
+                    role: "user".into(),
+                    content: "Reply with exactly: AISec OK".into(),
+                }],
+                max_tokens: 16,
+                temperature: 0.0,
+            })
+            .await?;
+        Ok(response.message.content)
     }
 
     /// Load a registered model into the llama.cpp runtime.
@@ -208,12 +355,19 @@ impl LocalModelManager {
     }
 
     /// Run inference on the loaded model.
-    pub async fn complete(&self, request: InferenceRequest) -> ModelResult<InferenceResponse> {
+    pub async fn complete(
+        &self,
+        request: InferenceRequest,
+    ) -> ModelResult<crate::types::InferenceResponse> {
         self.runtime.complete(request).await
     }
 
     pub fn list_models(&self) -> Vec<&ModelEntry> {
         self.registry.list()
+    }
+
+    pub fn get_model(&self, model_id: &str) -> Option<&ModelEntry> {
+        self.registry.get(model_id)
     }
 }
 
@@ -241,5 +395,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut mgr = LocalModelManager::new(dir.path().join("vault")).unwrap();
         assert!(mgr.hardware().cpu_cores >= 1);
+    }
+
+    #[test]
+    fn browse_returns_catalog() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = LocalModelManager::new(dir.path().join("vault")).unwrap();
+        assert!(!mgr.browse_catalog().is_empty());
     }
 }

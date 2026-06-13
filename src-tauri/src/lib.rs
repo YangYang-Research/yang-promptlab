@@ -8,9 +8,12 @@ pub mod commands;
 pub mod db;
 pub mod dto;
 pub mod error;
+pub mod fingerprint_service;
 pub mod jobs;
 pub mod logging;
+pub mod judge_config;
 pub mod playwright_runtime;
+pub mod session_auth;
 pub mod state;
 
 use state::AppState;
@@ -98,6 +101,20 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::scan::scan_stop,
             commands::auth::auth_record_session_start,
             commands::auth::auth_record_session_finish,
+            commands::auth::auth_session_validate,
+            commands::auth::auth_session_status,
+            commands::judge::judge_config_get,
+            commands::judge::judge_config_save,
+            commands::judge::judge_test_connectivity,
+            commands::judge::judge_test_model,
+            commands::models::models_list,
+            commands::models::models_browse,
+            commands::models::models_install,
+            commands::models::models_remove,
+            commands::models::models_verify,
+            commands::models::models_test_inference,
+            commands::models::models_test_embeddings,
+            commands::models::models_vault_path,
         ])
         .manage(AsyncMutex::new(commands::auth::AuthRecordingState::new()))
         .build(tauri::generate_context!())?;

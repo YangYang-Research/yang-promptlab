@@ -28,6 +28,7 @@ fn obs(
         status: Some(status),
         headers,
         body: body.map(str::to_string),
+        ..Default::default()
     }
 }
 

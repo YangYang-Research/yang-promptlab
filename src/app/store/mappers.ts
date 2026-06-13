@@ -168,6 +168,18 @@ export function mapEndpoints(endpoints: EndpointDto[]): DiscoveredEndpoint[] {
     evidence: e.evidence,
     sourceUrl: e.source_url,
     discoveredAt: e.discovered_at,
+    fingerprint: e.fingerprint
+      ? {
+          confidence: e.fingerprint.confidence,
+          technologies: e.fingerprint.technologies,
+          agentFrameworks: e.fingerprint.agentFrameworks,
+          aiComponents: e.fingerprint.aiComponents,
+          attackRecommendations: e.fingerprint.attackRecommendations,
+          methodsUsed: e.fingerprint.methodsUsed,
+          primaryProvider: e.fingerprint.primaryProvider,
+          apiStyle: e.fingerprint.apiStyle,
+        }
+      : null,
   }));
 }
 

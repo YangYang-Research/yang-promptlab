@@ -26,11 +26,15 @@ aisec-discovery = { workspace = true }
 aisec-attack = { workspace = true }
 aisec-auth = { workspace = true }
 aisec-judge = { workspace = true }
+aisec-models = { workspace = true }
+aisec-fingerprint = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 time = { workspace = true }
 url = { workspace = true }
 tauri = { version = "2", features = [] }
+reqwest = { workspace = true }
+async-trait = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing = { workspace = true }
 

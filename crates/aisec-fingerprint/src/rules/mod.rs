@@ -36,6 +36,66 @@ pub struct FingerprintRule {
     pub description: &'static str,
 }
 
+/// Stack detection rule for agent frameworks and AI components.
+#[derive(Debug, Clone)]
+pub struct StackRule {
+    pub id: &'static str,
+    pub target: StackTarget,
+    pub kind: SignalKind,
+    pub weight: f32,
+    pub method: crate::types::FingerprintMethod,
+    pub matcher: RuleMatcher,
+    pub description: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StackTarget {
+    Framework(crate::types::AgentFramework),
+    Component(crate::types::AiComponent),
+}
+
+impl StackRule {
+    pub const fn framework(
+        id: &'static str,
+        framework: crate::types::AgentFramework,
+        kind: SignalKind,
+        weight: f32,
+        method: crate::types::FingerprintMethod,
+        matcher: RuleMatcher,
+        description: &'static str,
+    ) -> Self {
+        Self {
+            id,
+            target: StackTarget::Framework(framework),
+            kind,
+            weight,
+            method,
+            matcher,
+            description,
+        }
+    }
+
+    pub const fn component(
+        id: &'static str,
+        component: crate::types::AiComponent,
+        kind: SignalKind,
+        weight: f32,
+        method: crate::types::FingerprintMethod,
+        matcher: RuleMatcher,
+        description: &'static str,
+    ) -> Self {
+        Self {
+            id,
+            target: StackTarget::Component(component),
+            kind,
+            weight,
+            method,
+            matcher,
+            description,
+        }
+    }
+}
+
 impl FingerprintRule {
     pub const fn new(
         id: &'static str,
@@ -57,10 +117,18 @@ impl FingerprintRule {
 }
 
 pub mod providers;
+pub mod stack;
 
 use providers::all_rules;
+use stack::{component_rules, framework_rules};
 
 /// Returns the full rule set for all supported providers.
 pub fn rule_catalog() -> Vec<FingerprintRule> {
     all_rules()
+}
+
+pub fn stack_rule_catalog() -> Vec<StackRule> {
+    let mut rules = framework_rules();
+    rules.extend(component_rules());
+    rules
 }

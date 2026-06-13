@@ -7,8 +7,10 @@ use crate::error::{AttackError, AttackResult};
 use crate::transport::{TargetTransport, TransportRequest, TransportResponse};
 
 /// HTTP transport using reqwest.
+#[derive(Clone)]
 pub struct HttpTransport {
     client: reqwest::Client,
+    default_headers: HashMap<String, String>,
 }
 
 impl HttpTransport {
@@ -18,11 +20,20 @@ impl HttpTransport {
                 .redirect(reqwest::redirect::Policy::limited(5))
                 .build()
                 .expect("reqwest client"),
+            default_headers: HashMap::new(),
         }
     }
 
     pub fn with_client(client: reqwest::Client) -> Self {
-        Self { client }
+        Self {
+            client,
+            default_headers: HashMap::new(),
+        }
+    }
+
+    pub fn with_default_headers(mut self, headers: HashMap<String, String>) -> Self {
+        self.default_headers = headers;
+        self
     }
 }
 
@@ -48,6 +59,11 @@ impl TargetTransport for HttpTransport {
 
         for (key, value) in &request.headers {
             builder = builder.header(key, value);
+        }
+        for (key, value) in &self.default_headers {
+            if !request.headers.contains_key(key) {
+                builder = builder.header(key, value);
+            }
         }
 
         if let Some(body) = &request.body {

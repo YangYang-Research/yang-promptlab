@@ -1,11 +1,17 @@
 mod llama_cpp;
+mod ollama;
+mod inference_engine;
 #[cfg(feature = "llama")]
 mod llama_inproc;
 mod mock;
 
 use async_trait::async_trait;
 
+pub use inference_engine::{
+    infer_capabilities, infer_provider, infer_version, LocalInferenceEngine,
+};
 pub use llama_cpp::{LlamaCppConfig, LlamaCppRuntime};
+pub use ollama::{OllamaConfig, OllamaRuntime};
 #[cfg(feature = "llama")]
 pub use llama_inproc::{LlamaInProcessRuntime, LlamaModelConfig};
 pub use mock::MockInferenceRuntime;

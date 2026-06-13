@@ -7,6 +7,7 @@ use crate::error::{JudgeError, JudgeResult};
 use crate::types::ModelRole;
 
 /// Pool of offline LLM runtimes keyed by model role.
+#[derive(Clone)]
 pub struct ModelRolePool {
     judge: Option<Arc<Mutex<dyn InferenceRuntime>>>,
     classifier: Option<Arc<Mutex<dyn InferenceRuntime>>>,

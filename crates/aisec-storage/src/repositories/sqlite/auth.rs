@@ -118,10 +118,14 @@ impl AuthSessionRepository for SqliteAuthSessionRepository {
         let cookies = json_opt(&input.cookies_json)?;
         let tokens = json_opt(&input.tokens_json)?;
 
+        let validation_status = input
+            .validation_status
+            .unwrap_or_else(|| "valid".to_string());
+
         sqlx::query(
             "INSERT INTO auth_sessions (id, profile_id, status, cookies_json, tokens_json,
-             storage_state_path, expires_at, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             storage_state_path, expires_at, validation_status, user_identity, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(&input.profile_id)
@@ -130,6 +134,8 @@ impl AuthSessionRepository for SqliteAuthSessionRepository {
         .bind(&tokens)
         .bind(&input.storage_state_path)
         .bind(input.expires_at)
+        .bind(&validation_status)
+        .bind(&input.user_identity)
         .bind(ts)
         .bind(ts)
         .execute(&self.pool)
@@ -170,17 +176,28 @@ impl AuthSessionRepository for SqliteAuthSessionRepository {
         };
         let storage_state_path = input.storage_state_path.or(existing.storage_state_path);
         let expires_at = input.expires_at.or(existing.expires_at);
+        let validation_status = input
+            .validation_status
+            .unwrap_or(existing.validation_status);
+        let last_validated_at = input
+            .last_validated_at
+            .or(existing.last_validated_at);
+        let user_identity = input.user_identity.or(existing.user_identity);
         let ts = now();
 
         let result = sqlx::query(
             "UPDATE auth_sessions SET status = ?, cookies_json = ?, tokens_json = ?,
-             storage_state_path = ?, expires_at = ?, updated_at = ? WHERE id = ?",
+             storage_state_path = ?, expires_at = ?, validation_status = ?,
+             last_validated_at = ?, user_identity = ?, updated_at = ? WHERE id = ?",
         )
         .bind(&status)
         .bind(&cookies)
         .bind(&tokens)
         .bind(&storage_state_path)
         .bind(expires_at)
+        .bind(&validation_status)
+        .bind(last_validated_at)
+        .bind(&user_identity)
         .bind(ts)
         .bind(id)
         .execute(&self.pool)

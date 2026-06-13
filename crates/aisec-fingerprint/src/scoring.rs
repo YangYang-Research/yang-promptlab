@@ -128,9 +128,8 @@ pub fn build_provider_fingerprint(
 
 fn infer_api_style(provider: AiProvider) -> ApiStyle {
     match provider {
-        AiProvider::OpenAi | AiProvider::AzureOpenAi | AiProvider::Vllm | AiProvider::LiteLlm => {
-            ApiStyle::OpenAiCompatible
-        }
+        AiProvider::OpenAi | AiProvider::AzureOpenAi | AiProvider::Vllm | AiProvider::LiteLlm
+        | AiProvider::OpenRouter => ApiStyle::OpenAiCompatible,
         AiProvider::Anthropic => ApiStyle::AnthropicMessages,
         AiProvider::Gemini => ApiStyle::GeminiGenerateContent,
         AiProvider::Bedrock => ApiStyle::BedrockInvoke,

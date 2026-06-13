@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use aisec_auth::AuthEngineConfig;
 use aisec_attack::AttackCategory;
 use aisec_storage::{
     CreateScan, EndpointRepository, FindingRepository, ProjectRepository, Repositories,
@@ -14,6 +15,7 @@ use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
 
 use crate::commands::attack::run_category_on_endpoint;
+use crate::session_auth::{build_attack_runtime_parts, seed_url_from_descriptor, AttackRuntime};
 use crate::dto::{ScanStartDto, ScanStatusDto};
 use crate::error::{CommandError, CommandResult};
 use crate::jobs::{ScanJobManager, ScanProgress};
@@ -98,8 +100,35 @@ async fn run_scan_job(
     cancel: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
     progress: Arc<Mutex<ScanProgress>>,
+    data_dir: std::path::PathBuf,
+    auth_config: AuthEngineConfig,
 ) {
     let repos = db.repositories();
+    let default_runtime = AttackRuntime {
+        transport: crate::session_auth::SessionAwareTransport::Http(
+            aisec_attack::HttpTransport::new(),
+        ),
+        session: None,
+    };
+    let attack_runtime: AttackRuntime = if let Some(tid) = &target_id {
+        if let Ok(target) = repos.targets().get(tid).await {
+            let probe_url = seed_url_from_descriptor(&target.descriptor_json)
+                .unwrap_or_else(|| "https://localhost".into());
+            build_attack_runtime_parts(
+                db.clone(),
+                &data_dir,
+                auth_config.clone(),
+                &target.descriptor_json,
+                &probe_url,
+            )
+            .await
+            .unwrap_or(default_runtime)
+        } else {
+            default_runtime
+        }
+    } else {
+        default_runtime
+    };
     let total = (endpoint_ids.len() * categories.len()) as u64;
     let mut findings_total = 0u64;
     let mut had_error = false;
@@ -150,6 +179,8 @@ async fn run_scan_job(
                 target_id.clone(),
                 &endpoint,
                 *category,
+                attack_runtime.clone(),
+                &data_dir,
             )
             .await
             {
@@ -311,6 +342,8 @@ pub async fn scan_start_op(
     let db = state.database().clone();
     let jobs = state.jobs().clone();
     let scan_id = scan.id.clone();
+    let data_dir = state.data_dir().to_path_buf();
+    let auth_config = state.auth_engine_config().clone();
 
     tauri::async_runtime::spawn(async move {
         run_scan_job(
@@ -324,6 +357,8 @@ pub async fn scan_start_op(
             cancel,
             paused,
             progress,
+            data_dir,
+            auth_config,
         )
         .await;
     });

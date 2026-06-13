@@ -9,7 +9,7 @@ use tracing::debug;
 
 use crate::types::{
     AuthMethod, AuthProfile, AuthSession, CookieRecord, ExtractedToken, LoginRecording,
-    PlaywrightStorageState, RecordedStep, SessionStatus,
+    PlaywrightStorageState, RecordedStep, SessionStatus, SessionValidationStatus,
 };
 
 /// Persists auth sessions, recordings, and Playwright storageState files.
@@ -72,7 +72,9 @@ impl SessionStore {
                 cookies_json: Some(serde_json::to_value(cookies).unwrap()),
                 tokens_json: Some(serde_json::to_value(tokens).unwrap()),
                 storage_state_path: storage_state_path.map(|p| p.to_string_lossy().into_owned()),
-                expires_at: None,
+                expires_at: crate::session::manager::earliest_cookie_expiry(cookies),
+                validation_status: Some(SessionValidationStatus::Valid.as_str().to_string()),
+                user_identity: crate::session::manager::infer_user_identity(tokens, cookies),
             })
             .await?;
 
@@ -84,6 +86,10 @@ impl SessionStore {
             tokens: tokens.to_vec(),
             storage_state_path: record.storage_state_path,
             expires_at: record.expires_at,
+            validation_status: SessionValidationStatus::parse(&record.validation_status),
+            last_validated_at: record.last_validated_at,
+            user_identity: record.user_identity,
+            created_at: record.created_at,
         })
     }
 
@@ -163,7 +169,36 @@ impl SessionStore {
             tokens,
             storage_state_path: record.storage_state_path,
             expires_at: record.expires_at,
+            validation_status: SessionValidationStatus::parse(&record.validation_status),
+            last_validated_at: record.last_validated_at,
+            user_identity: record.user_identity,
+            created_at: record.created_at,
         })
+    }
+
+    pub async fn update_validation(
+        &self,
+        session_id: &str,
+        validation_status: SessionValidationStatus,
+        last_validated_at: Option<time::OffsetDateTime>,
+        user_identity: Option<&str>,
+        expires_at: Option<time::OffsetDateTime>,
+    ) -> AisecResult<()> {
+        self.db
+            .repositories()
+            .auth_sessions()
+            .update(
+                session_id,
+                UpdateAuthSessionRecord {
+                    validation_status: Some(validation_status.as_str().to_string()),
+                    last_validated_at,
+                    user_identity: user_identity.map(str::to_string),
+                    expires_at,
+                    ..Default::default()
+                },
+            )
+            .await?;
+        Ok(())
     }
 
     pub async fn save_recording(

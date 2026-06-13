@@ -15,6 +15,15 @@ export type AuthRecordFinishDto = {
   verified: boolean;
 };
 
+export type AuthSessionStatusDto = {
+  sessionId: string;
+  validationStatus: "valid" | "expiring_soon" | "expired";
+  userIdentity: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+  lastValidatedAt: string | null;
+};
+
 export function startAuthRecordSession(
   request: AuthRecordStartRequest,
 ): Promise<AuthRecordStartDto> {
@@ -27,4 +36,24 @@ export function startAuthRecordSession(
 
 export function finishAuthRecordSession(): Promise<AuthRecordFinishDto> {
   return invokeCommand<AuthRecordFinishDto>("auth_record_session_finish");
+}
+
+export function validateAuthSession(
+  sessionId: string,
+  probeUrl: string,
+): Promise<AuthSessionStatusDto> {
+  return invokeCommand<AuthSessionStatusDto>("auth_session_validate", {
+    sessionId,
+    probeUrl,
+  });
+}
+
+export function fetchAuthSessionStatus(
+  sessionId: string,
+  probeUrl?: string,
+): Promise<AuthSessionStatusDto> {
+  return invokeCommand<AuthSessionStatusDto>("auth_session_status", {
+    sessionId,
+    probeUrl: probeUrl ?? null,
+  });
 }

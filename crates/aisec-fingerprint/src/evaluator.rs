@@ -114,6 +114,7 @@ mod tests {
             status: Some(200),
             headers: HashMap::new(),
             body: None,
+            ..Default::default()
         };
         assert!(evaluate_rule(&rule, &input));
     }
@@ -133,6 +134,7 @@ mod tests {
             status: Some(401),
             headers,
             body: None,
+            ..Default::default()
         };
         assert!(evaluate_rule(&rule, &input));
     }

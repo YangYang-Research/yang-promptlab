@@ -71,6 +71,8 @@ pub struct BrowserConfig {
     pub idle_timeout_ms: u64,
     /// Maximum number of network requests to capture.
     pub max_requests: usize,
+    /// Playwright storageState file for authenticated browser discovery.
+    pub storage_state_path: Option<PathBuf>,
 }
 
 impl Default for BrowserConfig {
@@ -85,6 +87,7 @@ impl Default for BrowserConfig {
             settle_ms: 1_500,
             idle_timeout_ms: 5_000,
             max_requests: 1_000,
+            storage_state_path: None,
         }
     }
 }
@@ -224,6 +227,7 @@ impl BrowserCrawler {
                 "settle_ms": self.config.settle_ms,
                 "idle_timeout_ms": self.config.idle_timeout_ms,
                 "max_requests": self.config.max_requests,
+                "storage_state_path": self.config.storage_state_path,
             }
         });
 

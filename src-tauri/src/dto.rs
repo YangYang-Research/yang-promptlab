@@ -179,10 +179,61 @@ pub struct EndpointDto {
     pub evidence: Option<String>,
     pub source_url: Option<String>,
     pub discovered_at: String,
+    pub fingerprint: Option<EndpointFingerprintDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndpointFingerprintDto {
+    pub confidence: f32,
+    pub technologies: Vec<FingerprintTechnologyDto>,
+    pub agent_frameworks: Vec<FingerprintFrameworkDto>,
+    pub ai_components: Vec<FingerprintComponentDto>,
+    pub attack_recommendations: Vec<FingerprintRecommendationDto>,
+    pub methods_used: Vec<String>,
+    pub primary_provider: Option<String>,
+    pub api_style: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FingerprintTechnologyDto {
+    pub id: String,
+    pub name: String,
+    pub category: String,
+    pub confidence: f32,
+    pub signals: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FingerprintFrameworkDto {
+    pub id: String,
+    pub name: String,
+    pub confidence: f32,
+    pub signals: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FingerprintComponentDto {
+    pub id: String,
+    pub name: String,
+    pub confidence: f32,
+    pub signals: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FingerprintRecommendationDto {
+    pub category: String,
+    pub reason: String,
+    pub priority: u8,
 }
 
 impl From<Endpoint> for EndpointDto {
     fn from(e: Endpoint) -> Self {
+        let fingerprint = e.fingerprint_json.as_deref().and_then(parse_fingerprint_json);
         Self {
             id: e.id,
             scan_id: e.scan_id,
@@ -194,8 +245,73 @@ impl From<Endpoint> for EndpointDto {
             evidence: e.evidence,
             source_url: e.source_url,
             discovered_at: ts(e.discovered_at),
+            fingerprint,
         }
     }
+}
+
+fn parse_fingerprint_json(raw: &str) -> Option<EndpointFingerprintDto> {
+    let report: aisec_fingerprint::StackFingerprintReport = serde_json::from_str(raw).ok()?;
+    Some(EndpointFingerprintDto {
+        confidence: report.confidence,
+        technologies: report
+            .technologies
+            .into_iter()
+            .map(|t| FingerprintTechnologyDto {
+                id: t.id,
+                name: t.name,
+                category: t.category,
+                confidence: t.confidence,
+                signals: t.signals,
+            })
+            .collect(),
+        agent_frameworks: report
+            .agent_frameworks
+            .into_iter()
+            .map(|f| FingerprintFrameworkDto {
+                id: f.framework.as_str().into(),
+                name: f.name,
+                confidence: f.confidence,
+                signals: f.signals,
+            })
+            .collect(),
+        ai_components: report
+            .ai_components
+            .into_iter()
+            .map(|c| FingerprintComponentDto {
+                id: c.component.as_str().into(),
+                name: c.name,
+                confidence: c.confidence,
+                signals: c.signals,
+            })
+            .collect(),
+        attack_recommendations: report
+            .attack_recommendations
+            .into_iter()
+            .map(|r| FingerprintRecommendationDto {
+                category: r.category,
+                reason: r.reason,
+                priority: r.priority,
+            })
+            .collect(),
+        methods_used: report.methods_used,
+        primary_provider: report
+            .provider_report
+            .primary
+            .as_ref()
+            .map(|p| p.provider.as_str().into()),
+        api_style: report.provider_report.primary.as_ref().map(|p| {
+            match p.inferred_api_style {
+                aisec_fingerprint::ApiStyle::OpenAiCompatible => "openai_compatible",
+                aisec_fingerprint::ApiStyle::AnthropicMessages => "anthropic_messages",
+                aisec_fingerprint::ApiStyle::GeminiGenerateContent => "gemini_generate_content",
+                aisec_fingerprint::ApiStyle::BedrockInvoke => "bedrock_invoke",
+                aisec_fingerprint::ApiStyle::OllamaNative => "ollama_native",
+                aisec_fingerprint::ApiStyle::Unknown => "unknown",
+            }
+            .into()
+        }),
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]

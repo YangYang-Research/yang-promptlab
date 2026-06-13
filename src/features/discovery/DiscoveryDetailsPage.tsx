@@ -16,7 +16,7 @@ import {
   parseDiscoveryPlaybook,
 } from "@/features/scans/scanPlaybook";
 import { getScan, type ScanDetailDto } from "@/shared/ipc";
-import type { DiscoveredEndpoint } from "@/shared/types";
+import type { DiscoveredEndpoint, EndpointFingerprint } from "@/shared/types";
 
 export function DiscoveryDetailsPage() {
   const { scanId = "" } = useParams();
@@ -87,6 +87,12 @@ export function DiscoveryDetailsPage() {
     };
   }, [scan?.targetId, scans]);
 
+  const fingerprintedEndpoints = runEndpoints.filter((e) => e.fingerprint);
+  const aggregateFingerprint = useMemo(
+    () => aggregateFingerprints(fingerprintedEndpoints),
+    [fingerprintedEndpoints],
+  );
+
   const columns = [
     {
       key: "method",
@@ -98,6 +104,19 @@ export function DiscoveryDetailsPage() {
       key: "url",
       header: "Endpoint",
       render: (row: DiscoveredEndpoint) => <span className="mono text-sm">{row.url}</span>,
+    },
+    {
+      key: "fingerprint",
+      header: "Stack",
+      width: "140px",
+      render: (row: DiscoveredEndpoint) =>
+        row.fingerprint ? (
+          <Badge variant="info">
+            {row.fingerprint.primaryProvider ?? row.fingerprint.technologies[0]?.name ?? "AI"}
+          </Badge>
+        ) : (
+          <span className="text-muted">—</span>
+        ),
     },
     {
       key: "confidence",
@@ -187,6 +206,61 @@ export function DiscoveryDetailsPage() {
         </div>
       </Card>
 
+      {aggregateFingerprint && (
+        <Card className="detail-section">
+          <h2 className="detail-section__title">AI Fingerprint</h2>
+          <div className="fingerprint-summary">
+            <div className="fingerprint-summary__score">
+              <span className="fingerprint-summary__value">
+                {Math.round(aggregateFingerprint.confidence * 100)}%
+              </span>
+              <span className="fingerprint-summary__label">Confidence</span>
+            </div>
+            <div className="fingerprint-summary__breakdown">
+              <FingerprintGroup
+                title="Technologies"
+                items={aggregateFingerprint.technologies.map((t) => t.name)}
+              />
+              <FingerprintGroup
+                title="Agent Frameworks"
+                items={aggregateFingerprint.agentFrameworks.map((f) => f.name)}
+              />
+              <FingerprintGroup
+                title="AI Components"
+                items={aggregateFingerprint.aiComponents.map((c) => c.name)}
+              />
+              <FingerprintGroup
+                title="Methods"
+                items={aggregateFingerprint.methodsUsed.map((m) => m.replaceAll("_", " "))}
+              />
+            </div>
+          </div>
+
+          {aggregateFingerprint.attackRecommendations.length > 0 && (
+            <div className="fingerprint-recommendations">
+              <h3 className="card__title">Attack Recommendations</h3>
+              <ul className="fingerprint-recommendation-list">
+                {aggregateFingerprint.attackRecommendations.map((rec) => (
+                  <li key={rec.category}>
+                    <strong>{rec.category.replaceAll("_", " ")}</strong>
+                    <span className="text-muted text-sm"> — {rec.reason}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {fingerprintedEndpoints.length > 0 && (
+        <Card className="detail-section">
+          <h2 className="detail-section__title">Technology Breakdown</h2>
+          {fingerprintedEndpoints.map((endpoint) => (
+            <EndpointFingerprintPanel key={endpoint.id} endpoint={endpoint} />
+          ))}
+        </Card>
+      )}
+
       <Card className="detail-section">
         <h2 className="detail-section__title">Endpoint table</h2>
         <DataTable columns={columns} rows={runEndpoints} keyField="id" emptyMessage="No endpoints discovered" />
@@ -229,4 +303,99 @@ function Stat({ label, value }: { label: string; value: string | number }) {
       <span className="discovery-card__stat-label">{label}</span>
     </div>
   );
+}
+
+function FingerprintGroup({ title, items }: { title: string; items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="fingerprint-group">
+      <h4 className="fingerprint-group__title">{title}</h4>
+      <div className="fingerprint-group__tags">
+        {items.map((item) => (
+          <Badge key={item} variant="muted">
+            {item}
+          </Badge>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EndpointFingerprintPanel({ endpoint }: { endpoint: DiscoveredEndpoint }) {
+  const fp = endpoint.fingerprint;
+  if (!fp) return null;
+  return (
+    <div className="fingerprint-endpoint">
+      <div className="fingerprint-endpoint__header">
+        <span className="mono text-sm">{endpoint.url}</span>
+        <Badge variant="info">{`${Math.round(fp.confidence * 100)}%`}</Badge>
+      </div>
+      <div className="fingerprint-endpoint__grid">
+        <FingerprintGroup title="Technologies" items={fp.technologies.map((t) => t.name)} />
+        <FingerprintGroup title="Frameworks" items={fp.agentFrameworks.map((f) => f.name)} />
+        <FingerprintGroup title="Components" items={fp.aiComponents.map((c) => c.name)} />
+      </div>
+      {fp.attackRecommendations.length > 0 && (
+        <p className="text-muted text-sm">
+          Recommended: {fp.attackRecommendations.map((r) => r.category.replaceAll("_", " ")).join(", ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+type AggregateFingerprint = {
+  confidence: number;
+  technologies: FingerprintTechnology[];
+  agentFrameworks: FingerprintFramework[];
+  aiComponents: FingerprintComponent[];
+  attackRecommendations: FingerprintRecommendation[];
+  methodsUsed: string[];
+};
+
+type FingerprintTechnology = EndpointFingerprint["technologies"][number];
+type FingerprintFramework = EndpointFingerprint["agentFrameworks"][number];
+type FingerprintComponent = EndpointFingerprint["aiComponents"][number];
+type FingerprintRecommendation = EndpointFingerprint["attackRecommendations"][number];
+
+function aggregateFingerprints(endpoints: DiscoveredEndpoint[]): AggregateFingerprint | null {
+  const fps = endpoints.map((e) => e.fingerprint).filter(Boolean) as EndpointFingerprint[];
+  if (fps.length === 0) return null;
+
+  const mergeByName = <T extends { name: string; confidence: number }>(items: T[]) => {
+    const map = new Map<string, T>();
+    for (const item of items) {
+      const existing = map.get(item.name);
+      if (!existing || item.confidence > existing.confidence) {
+        map.set(item.name, item);
+      }
+    }
+    return [...map.values()].sort((a, b) => b.confidence - a.confidence);
+  };
+
+  const technologies = mergeByName(fps.flatMap((fp) => fp.technologies));
+  const agentFrameworks = mergeByName(fps.flatMap((fp) => fp.agentFrameworks));
+  const aiComponents = mergeByName(fps.flatMap((fp) => fp.aiComponents));
+  const methodsUsed = [...new Set(fps.flatMap((fp) => fp.methodsUsed))].sort();
+  const confidence = Math.max(...fps.map((fp) => fp.confidence));
+
+  const recMap = new Map<string, FingerprintRecommendation>();
+  for (const fp of fps) {
+    for (const rec of fp.attackRecommendations) {
+      const existing = recMap.get(rec.category);
+      if (!existing || rec.priority < existing.priority) {
+        recMap.set(rec.category, rec);
+      }
+    }
+  }
+  const attackRecommendations = [...recMap.values()].sort((a, b) => a.priority - b.priority);
+
+  return {
+    confidence,
+    technologies,
+    agentFrameworks,
+    aiComponents,
+    attackRecommendations,
+    methodsUsed,
+  };
 }

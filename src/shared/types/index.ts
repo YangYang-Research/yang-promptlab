@@ -109,6 +109,46 @@ export type DiscoveredEndpoint = {
   evidence: string | null;
   sourceUrl: string | null;
   discoveredAt: string;
+  fingerprint: EndpointFingerprint | null;
+};
+
+export type EndpointFingerprint = {
+  confidence: number;
+  technologies: FingerprintTechnology[];
+  agentFrameworks: FingerprintFramework[];
+  aiComponents: FingerprintComponent[];
+  attackRecommendations: FingerprintRecommendation[];
+  methodsUsed: string[];
+  primaryProvider: string | null;
+  apiStyle: string | null;
+};
+
+export type FingerprintTechnology = {
+  id: string;
+  name: string;
+  category: string;
+  confidence: number;
+  signals: string[];
+};
+
+export type FingerprintFramework = {
+  id: string;
+  name: string;
+  confidence: number;
+  signals: string[];
+};
+
+export type FingerprintComponent = {
+  id: string;
+  name: string;
+  confidence: number;
+  signals: string[];
+};
+
+export type FingerprintRecommendation = {
+  category: string;
+  reason: string;
+  priority: number;
 };
 
 export type Report = {
