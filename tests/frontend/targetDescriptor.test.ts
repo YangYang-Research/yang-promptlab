@@ -42,6 +42,15 @@ describe("buildTargetDescriptor", () => {
       auth: { kind: "api_key", header: "X-API-Key", value: "sk-test" },
     });
   });
+
+  it("persists sso auth placeholder", () => {
+    expect(
+      buildTargetDescriptor({ url: "https://api.example.com", authKind: "sso" }),
+    ).toEqual({
+      url: "https://api.example.com",
+      auth: { kind: "sso" },
+    });
+  });
 });
 
 describe("validateTargetStep", () => {

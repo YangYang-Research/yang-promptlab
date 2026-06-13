@@ -14,6 +14,7 @@ import type { Severity } from "@/shared/types";
 type ResultsStepProps = {
   projectId: string;
   scanId: string;
+  onDone?: () => void;
 };
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
@@ -25,7 +26,7 @@ function severityVariant(severity: Severity): "danger" | "warning" | "info" | "m
   return "muted";
 }
 
-export function ResultsStep({ projectId, scanId }: ResultsStepProps) {
+export function ResultsStep({ projectId, scanId, onDone }: ResultsStepProps) {
   const { scans, findings, actions } = useAppStore();
 
   const [exporting, setExporting] = useState<ReportExportFormat | null>(null);
@@ -47,14 +48,6 @@ export function ResultsStep({ projectId, scanId }: ResultsStepProps) {
     for (const severity of SEVERITY_ORDER) counts.set(severity, 0);
     for (const finding of scanFindings) {
       counts.set(finding.severity, (counts.get(finding.severity) ?? 0) + 1);
-    }
-    return counts;
-  }, [scanFindings]);
-
-  const statusCounts = useMemo(() => {
-    const counts = { open: 0, confirmed: 0, false_positive: 0, fixed: 0 };
-    for (const finding of scanFindings) {
-      counts[finding.status] += 1;
     }
     return counts;
   }, [scanFindings]);
@@ -99,6 +92,26 @@ export function ResultsStep({ projectId, scanId }: ResultsStepProps) {
       )}
 
       <section className="wizard-results__section">
+        <h3 className="wizard-results__heading">Scan summary</h3>
+        <dl className="wizard-results__summary-grid">
+          <div>
+            <dt>Status</dt>
+            <dd>
+              <Badge variant={severityVariantForStatus(status.status)}>{status.status}</Badge>
+            </dd>
+          </div>
+          <div>
+            <dt>Progress</dt>
+            <dd>{status.progress_percent}%</dd>
+          </div>
+          <div>
+            <dt>Findings</dt>
+            <dd>{scanFindings.length}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="wizard-results__section">
         <h3 className="wizard-results__heading">Severity summary</h3>
         <div className="wizard-results__severity-grid">
           {SEVERITY_ORDER.map((severity) => (
@@ -112,14 +125,6 @@ export function ResultsStep({ projectId, scanId }: ResultsStepProps) {
 
       <section className="wizard-results__section">
         <h3 className="wizard-results__heading">Findings summary</h3>
-        <div className="wizard-results__stats">
-          <span>{scanFindings.length} total</span>
-          <span>{statusCounts.open} open</span>
-          <span>{statusCounts.confirmed} confirmed</span>
-          <span>{statusCounts.false_positive} false positive</span>
-          <span>{statusCounts.fixed} fixed</span>
-        </div>
-
         {scanFindings.length === 0 ? (
           <p className="text-muted">
             {scanRunning
@@ -137,20 +142,10 @@ export function ResultsStep({ projectId, scanId }: ResultsStepProps) {
             ))}
           </ul>
         )}
-
-        {scanFindings.length > topFindings.length && (
-          <Link to={`/findings?scanId=${encodeURIComponent(scanId)}`} className="wizard-results__link">
-            View all {scanFindings.length} findings →
-          </Link>
-        )}
       </section>
 
       <section className="wizard-results__section">
-        <h3 className="wizard-results__heading">Generate report</h3>
-        <p className="text-muted">
-          Export a report from SQLite for this scan. Reports include findings captured at generation
-          time.
-        </p>
+        <h3 className="wizard-results__heading">Report actions</h3>
         <div className="wizard-results__export-actions">
           {(["html", "pdf", "sarif"] as ReportExportFormat[]).map((format) => (
             <Button
@@ -168,6 +163,20 @@ export function ResultsStep({ projectId, scanId }: ResultsStepProps) {
           <p className="wizard-results__export-path text-muted">Saved to {exportPath}</p>
         )}
       </section>
+
+      <div className="wizard-results__footer-actions">
+        <Link to={`/findings?scanId=${encodeURIComponent(scanId)}`}>
+          <Button variant="secondary">View Findings</Button>
+        </Link>
+        <Link to="/scans">
+          <Button variant="secondary">Open Scan Monitor</Button>
+        </Link>
+        {onDone && (
+          <Button variant="primary" onClick={onDone}>
+            Done
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -175,4 +184,14 @@ export function ResultsStep({ projectId, scanId }: ResultsStepProps) {
 function severityRank(severity: Severity): number {
   const idx = SEVERITY_ORDER.indexOf(severity);
   return idx === -1 ? SEVERITY_ORDER.length : idx;
+}
+
+function severityVariantForStatus(
+  status: string,
+): "success" | "warning" | "danger" | "info" | "muted" {
+  if (status === "completed") return "success";
+  if (status === "running") return "info";
+  if (status === "paused") return "warning";
+  if (status === "failed" || status === "stopped") return "danger";
+  return "muted";
 }

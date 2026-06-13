@@ -36,6 +36,14 @@ const ScanWizardPage = lazy(() =>
 const ScansPage = lazy(() =>
   import("@/features/scans/ScansPage").then((m) => ({ default: m.ScansPage })),
 );
+const ScanDetailsPage = lazy(() =>
+  import("@/features/scans/ScanDetailsPage").then((m) => ({ default: m.ScanDetailsPage })),
+);
+const DiscoveryDetailsPage = lazy(() =>
+  import("@/features/discovery/DiscoveryDetailsPage").then((m) => ({
+    default: m.DiscoveryDetailsPage,
+  })),
+);
 
 function PageLoader() {
   return (
@@ -84,10 +92,26 @@ export function AppRouter() {
             }
           />
           <Route
+            path="scans/:scanId"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <ScanDetailsPage />
+              </Suspense>
+            }
+          />
+          <Route
             path="targets"
             element={
               <Suspense fallback={<PageLoader />}>
                 <TargetsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="discovery/:scanId"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <DiscoveryDetailsPage />
               </Suspense>
             }
           />

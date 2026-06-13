@@ -15,7 +15,7 @@ use aisec_storage::{
 use tauri::State;
 use tracing::{info, instrument};
 
-use crate::dto::{FindingDto, ReportContentDto, ReportDto, ScanDto, TargetDto};
+use crate::dto::{FindingDto, ReportContentDto, ReportDto, ScanDetailDto, ScanDto, TargetDto};
 use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
 
@@ -77,6 +77,16 @@ pub async fn target_list_op(state: &AppState, project_id: String) -> CommandResu
     Ok(targets.into_iter().map(TargetDto::from).collect())
 }
 
+pub async fn target_get_op(state: &AppState, target_id: String) -> CommandResult<TargetDto> {
+    let target = state
+        .repositories()
+        .targets()
+        .get(&target_id)
+        .await
+        .map_err(CommandError::from)?;
+    Ok(TargetDto::from(target))
+}
+
 // ---------------------------------------------------------------------------
 // Scans
 // ---------------------------------------------------------------------------
@@ -113,6 +123,16 @@ pub async fn scan_list_op(state: &AppState, project_id: String) -> CommandResult
         .await
         .map_err(CommandError::from)?;
     Ok(scans.into_iter().map(ScanDto::from).collect())
+}
+
+pub async fn scan_get_op(state: &AppState, scan_id: String) -> CommandResult<ScanDetailDto> {
+    let scan = state
+        .repositories()
+        .scans()
+        .get(&scan_id)
+        .await
+        .map_err(CommandError::from)?;
+    Ok(ScanDetailDto::from_scan(scan))
 }
 
 // ---------------------------------------------------------------------------
@@ -319,6 +339,11 @@ pub async fn target_list(
 }
 
 #[tauri::command]
+pub async fn target_get(state: State<'_, AppState>, id: String) -> CommandResult<TargetDto> {
+    target_get_op(state.inner(), id).await
+}
+
+#[tauri::command]
 pub async fn scan_create(
     state: State<'_, AppState>,
     project_id: String,
@@ -335,6 +360,11 @@ pub async fn scan_list(
     project_id: String,
 ) -> CommandResult<Vec<ScanDto>> {
     scan_list_op(state.inner(), project_id).await
+}
+
+#[tauri::command]
+pub async fn scan_get(state: State<'_, AppState>, id: String) -> CommandResult<ScanDetailDto> {
+    scan_get_op(state.inner(), id).await
 }
 
 #[tauri::command]

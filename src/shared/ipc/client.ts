@@ -53,6 +53,10 @@ export type ScanDto = {
   updated_at: string;
 };
 
+export type ScanDetailDto = ScanDto & {
+  playbook: unknown | null;
+};
+
 export type FindingDto = {
   id: string;
   scan_id: string;
@@ -157,6 +161,8 @@ export type ReportContentDto = {
 export const listTargets = (projectId: string) =>
   invokeCommand<TargetDto[]>("target_list", { projectId });
 
+export const getTarget = (id: string) => invokeCommand<TargetDto>("target_get", { id });
+
 export const createTarget = (
   projectId: string,
   name: string,
@@ -166,6 +172,8 @@ export const createTarget = (
 
 export const listScans = (projectId: string) =>
   invokeCommand<ScanDto[]>("scan_list", { projectId });
+
+export const getScan = (id: string) => invokeCommand<ScanDetailDto>("scan_get", { id });
 
 export const createScan = (
   projectId: string,

@@ -7,7 +7,7 @@ import {
   DataTable,
   ProgressBar,
 } from "@/shared/components";
-import type { EndpointDto, DiscoveryStatsDto } from "@/shared/ipc";
+import type { EndpointDto } from "@/shared/ipc";
 import { createEndpoint, listEndpoints } from "@/shared/ipc";
 import { useToast } from "@/shared/notifications";
 import type { Target } from "@/shared/types";
@@ -17,6 +17,7 @@ import {
   endpointSourceLabel,
   phaseStatuses,
 } from "../discoveryPhases";
+import type { DiscoveryWizardState } from "../wizardState";
 
 export type DiscoverySelection = {
   scanId: string | null;
@@ -26,36 +27,34 @@ export type DiscoverySelection = {
 
 type DiscoveryStepProps = {
   target: Target;
-  onSelectionChange?: (selection: DiscoverySelection) => void;
+  discovery: DiscoveryWizardState;
+  onDiscoveryChange: (patch: Partial<DiscoveryWizardState>) => void;
 };
 
 type EndpointRow = EndpointDto & { selected: boolean };
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 
-function toRows(endpoints: EndpointDto[], selectedIds: Set<string>): EndpointRow[] {
+function toRows(endpoints: EndpointDto[], selectedIds: string[]): EndpointRow[] {
+  const selected = new Set(selectedIds);
   return endpoints.map((endpoint) => ({
     ...endpoint,
-    selected: selectedIds.has(endpoint.id),
+    selected: selected.has(endpoint.id),
   }));
 }
 
-export function DiscoveryStep({ target, onSelectionChange }: DiscoveryStepProps) {
+export function DiscoveryStep({ target, discovery, onDiscoveryChange }: DiscoveryStepProps) {
   const { actions } = useAppStore();
   const { notify } = useToast();
 
-  const [scanId, setScanId] = useState<string | null>(null);
   const [endpoints, setEndpoints] = useState<EndpointDto[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [stats, setStats] = useState<DiscoveryStatsDto | null>(null);
   const [running, setRunning] = useState(false);
-  const [completed, setCompleted] = useState(false);
   const [activePhaseIndex, setActivePhaseIndex] = useState(0);
   const [formError, setFormError] = useState<string | null>(null);
-
-  const [manualMethod, setManualMethod] = useState<(typeof HTTP_METHODS)[number]>("GET");
-  const [manualPath, setManualPath] = useState("");
   const [addingManual, setAddingManual] = useState(false);
+  const [loadingEndpoints, setLoadingEndpoints] = useState(false);
+
+  const { scanId, selectedEndpointIds, completed, stats, manualMethod, manualPath } = discovery;
 
   useEffect(() => {
     if (!running || completed) return;
@@ -67,29 +66,52 @@ export function DiscoveryStep({ target, onSelectionChange }: DiscoveryStepProps)
   }, [running, completed]);
 
   useEffect(() => {
-    onSelectionChange?.({
-      scanId,
-      selectedCount: selectedIds.size,
-      selectedEndpointIds: [...selectedIds],
-    });
-  }, [scanId, selectedIds, onSelectionChange]);
+    if (!scanId || !completed) {
+      setEndpoints([]);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingEndpoints(true);
+    void listEndpoints(scanId)
+      .then((rows) => {
+        if (cancelled) return;
+        setEndpoints(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setEndpoints([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingEndpoints(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [scanId, completed]);
 
   const statuses = phaseStatuses(running, completed, activePhaseIndex);
 
   async function handleStartDiscovery() {
     if (running) return;
     setRunning(true);
-    setCompleted(false);
     setFormError(null);
-    setStats(null);
+    onDiscoveryChange({
+      completed: false,
+      stats: null,
+      selectedEndpointIds: [],
+    });
 
     try {
       const result = await actions.runDiscovery(target.id);
-      setScanId(result.scan.id);
+      const ids = result.endpoints.map((endpoint) => endpoint.id);
       setEndpoints(result.endpoints);
-      setStats(result.stats);
-      setSelectedIds(new Set(result.endpoints.map((e) => e.id)));
-      setCompleted(true);
+      onDiscoveryChange({
+        scanId: result.scan.id,
+        completed: true,
+        stats: result.stats,
+        selectedEndpointIds: ids,
+      });
       notify(
         `Discovery complete — ${result.stats.endpoint_count} endpoint(s) found`,
         "success",
@@ -98,7 +120,7 @@ export function DiscoveryStep({ target, onSelectionChange }: DiscoveryStepProps)
       const message = error instanceof Error ? error.message : "Discovery failed";
       setFormError(message);
       notify(message, "error");
-      setCompleted(false);
+      onDiscoveryChange({ completed: false });
     } finally {
       setRunning(false);
     }
@@ -123,8 +145,10 @@ export function DiscoveryStep({ target, onSelectionChange }: DiscoveryStepProps)
       await actions.refresh();
       const rows = await listEndpoints(scanId);
       setEndpoints(rows);
-      setSelectedIds((prev) => new Set([...prev, created.id]));
-      setManualPath("");
+      onDiscoveryChange({
+        selectedEndpointIds: [...selectedEndpointIds, created.id],
+        manualPath: "",
+      });
       notify("Manual endpoint added", "success");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to add endpoint";
@@ -136,24 +160,20 @@ export function DiscoveryStep({ target, onSelectionChange }: DiscoveryStepProps)
   }
 
   function toggleEndpoint(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    const next = new Set(selectedEndpointIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onDiscoveryChange({ selectedEndpointIds: [...next] });
   }
 
   function toggleAll(checked: boolean) {
-    if (checked) {
-      setSelectedIds(new Set(endpoints.map((e) => e.id)));
-    } else {
-      setSelectedIds(new Set());
-    }
+    onDiscoveryChange({
+      selectedEndpointIds: checked ? endpoints.map((endpoint) => endpoint.id) : [],
+    });
   }
 
-  const rows = toRows(endpoints, selectedIds);
-  const allSelected = endpoints.length > 0 && selectedIds.size === endpoints.length;
+  const rows = toRows(endpoints, selectedEndpointIds);
+  const allSelected = endpoints.length > 0 && selectedEndpointIds.length === endpoints.length;
 
   const columns = [
     {
@@ -225,10 +245,16 @@ export function DiscoveryStep({ target, onSelectionChange }: DiscoveryStepProps)
         />
       )}
 
-      {stats && (
+      {completed && stats && (
         <p className="text-muted text-sm wizard-discovery-stats">
           {stats.pages_fetched} pages · {stats.probes_sent} probes · {stats.endpoint_count}{" "}
           endpoints · {stats.duration_ms}ms
+        </p>
+      )}
+
+      {!completed && !running && (
+        <p className="text-muted text-sm">
+          Start discovery to enumerate endpoints from {target.url}.
         </p>
       )}
 
@@ -240,85 +266,84 @@ export function DiscoveryStep({ target, onSelectionChange }: DiscoveryStepProps)
         >
           {running ? "Discovering…" : completed ? "Re-run Discovery" : "Start Discovery"}
         </Button>
-        {scanId && (
+        {scanId && completed && (
           <span className="text-muted text-sm">Scan ID: {scanId}</span>
         )}
       </div>
 
       {formError && <p className="text-danger">{formError}</p>}
 
-      <div className="wizard-endpoints">
-        <div className="wizard-endpoints__header">
-          <h4 className="wizard-endpoints__title">Endpoints</h4>
-          <div className="wizard-endpoints__meta">
-            <label className="wizard-endpoints__select-all">
-              <input
-                type="checkbox"
-                checked={allSelected}
-                onChange={(e) => toggleAll(e.target.checked)}
-                disabled={endpoints.length === 0}
-              />
-              <span>Select all</span>
-            </label>
-            <span className="text-muted text-sm">
-              {selectedIds.size} of {endpoints.length} selected
-            </span>
-          </div>
-        </div>
-        <DataTable
-          columns={columns}
-          rows={rows}
-          keyField="id"
-          emptyMessage={
-            completed
-              ? "No endpoints discovered. Add manual endpoints below."
-              : "Run discovery to populate endpoints from the target."
-          }
-        />
-      </div>
-
-      <div className="wizard-manual-endpoints">
-        <h4 className="wizard-endpoints__title">Manual endpoints</h4>
-        <form className="wizard-manual-form" onSubmit={handleAddManual}>
-          <label className="field">
-            <span className="field__label">Method</span>
-            <select
-              className="input"
-              value={manualMethod}
-              onChange={(e) =>
-                setManualMethod(e.target.value as (typeof HTTP_METHODS)[number])
+      {completed && (
+        <>
+          <div className="wizard-endpoints">
+            <div className="wizard-endpoints__header">
+              <h4 className="wizard-endpoints__title">Discovered endpoints</h4>
+              <div className="wizard-endpoints__meta">
+                <label className="wizard-endpoints__select-all">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={(e) => toggleAll(e.target.checked)}
+                    disabled={endpoints.length === 0}
+                  />
+                  <span>Select all</span>
+                </label>
+                <span className="text-muted text-sm">
+                  {selectedEndpointIds.length} of {endpoints.length} selected
+                </span>
+              </div>
+            </div>
+            <DataTable
+              columns={columns}
+              rows={rows}
+              keyField="id"
+              emptyMessage={
+                loadingEndpoints
+                  ? "Loading endpoints…"
+                  : "No endpoints discovered. Add manual endpoints below."
               }
-              disabled={!scanId || addingManual}
-            >
-              {HTTP_METHODS.map((method) => (
-                <option key={method} value={method}>
-                  {method}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field wizard-manual-form__path">
-            <span className="field__label">Path</span>
-            <input
-              className="input"
-              placeholder="/v1/chat/completions"
-              value={manualPath}
-              onChange={(e) => setManualPath(e.target.value)}
-              disabled={!scanId || addingManual}
             />
-          </label>
-          <Button
-            variant="secondary"
-            type="submit"
-            disabled={!scanId || addingManual || !manualPath.trim()}
-          >
-            {addingManual ? "Adding…" : "Add Endpoint"}
-          </Button>
-        </form>
-        {!scanId && (
-          <p className="text-muted text-sm">Start discovery to enable manual endpoints.</p>
-        )}
-      </div>
+          </div>
+
+          <div className="wizard-manual-endpoints">
+            <h4 className="wizard-endpoints__title">Manual endpoints</h4>
+            <form className="wizard-manual-form" onSubmit={handleAddManual}>
+              <label className="field">
+                <span className="field__label">Method</span>
+                <select
+                  className="input"
+                  value={manualMethod}
+                  onChange={(e) => onDiscoveryChange({ manualMethod: e.target.value })}
+                  disabled={!scanId || addingManual}
+                >
+                  {HTTP_METHODS.map((method) => (
+                    <option key={method} value={method}>
+                      {method}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field wizard-manual-form__path">
+                <span className="field__label">Path</span>
+                <input
+                  className="input"
+                  placeholder="/v1/chat/completions"
+                  value={manualPath}
+                  onChange={(e) => onDiscoveryChange({ manualPath: e.target.value })}
+                  disabled={!scanId || addingManual}
+                />
+              </label>
+              <Button
+                variant="secondary"
+                type="submit"
+                disabled={!scanId || addingManual || !manualPath.trim()}
+              >
+                {addingManual ? "Adding…" : "Add Endpoint"}
+              </Button>
+            </form>
+          </div>
+        </>
+      )}
     </div>
   );
 }

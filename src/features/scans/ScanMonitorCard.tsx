@@ -80,7 +80,11 @@ export function ScanMonitorCard({
       </dl>
 
       {isActive && (
-        <div className="scan-monitor-card__controls">
+        <div
+          className="scan-monitor-card__controls"
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
           <Button
             variant="secondary"
             size="sm"

@@ -1,4 +1,17 @@
-export type TargetAuthKind = "none" | "basic" | "api_key";
+import type { Target } from "@/shared/types";
+
+export type TargetAuthKind = "none" | "basic" | "sso" | "api_key";
+
+export type TargetFormState = {
+  url: string;
+  authKind: TargetAuthKind;
+  username: string;
+  password: string;
+  headerName: string;
+  headerValue: string;
+  /** Placeholder until Playwright SSO integration lands. */
+  ssoSessionReady: boolean;
+};
 
 export type TargetDescriptorInput = {
   url: string;
@@ -8,6 +21,18 @@ export type TargetDescriptorInput = {
   headerName?: string;
   headerValue?: string;
 };
+
+export function createInitialTargetForm(): TargetFormState {
+  return {
+    url: "",
+    authKind: "none",
+    username: "",
+    password: "",
+    headerName: "Authorization",
+    headerValue: "",
+    ssoSessionReady: false,
+  };
+}
 
 export function deriveTargetName(url: string): string {
   const trimmed = url.trim();
@@ -65,9 +90,34 @@ export function buildTargetDescriptor(input: TargetDescriptorInput): Record<stri
         value: input.headerValue!.trim(),
       };
       break;
+    case "sso":
+      descriptor.auth = { kind: "sso" };
+      break;
     default:
       descriptor.auth = { kind: "none" };
   }
 
   return descriptor;
+}
+
+export function targetFormFingerprint(form: TargetFormState): string {
+  return JSON.stringify({
+    url: form.url.trim(),
+    authKind: form.authKind,
+    username: form.username,
+    password: form.password,
+    headerName: form.headerName,
+    headerValue: form.headerValue,
+    ssoSessionReady: form.ssoSessionReady,
+  });
+}
+
+export function targetFormMatchesDescriptor(
+  savedTarget: Target,
+  form: TargetFormState,
+  fingerprint: string,
+  savedFingerprint: string | null,
+): boolean {
+  if (savedTarget.url.trim() !== form.url.trim()) return false;
+  return fingerprint === savedFingerprint;
 }

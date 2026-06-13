@@ -137,18 +137,27 @@ export function ScansPage() {
                   );
 
                   return (
-                    <Card key={scan.id} className="scan-monitor-card-wrap">
-                      <ScanMonitorCard
-                        scan={scan}
-                        status={status}
-                        projectName={projectName(scan.projectId)}
-                        targetName={targetName(scan.targetId)}
-                        controlPending={controlPending === scan.id}
-                        onPause={() => void runControl(scan.id, "pause")}
-                        onResume={() => void runControl(scan.id, "resume")}
-                        onStop={() => void runControl(scan.id, "stop")}
-                      />
-                    </Card>
+                    <Link
+                      key={scan.id}
+                      to={`/scans/${scan.id}`}
+                      className="scan-card-link"
+                      onClick={(event) => {
+                        if (controlPending === scan.id) event.preventDefault();
+                      }}
+                    >
+                      <Card className="scan-monitor-card-wrap">
+                        <ScanMonitorCard
+                          scan={scan}
+                          status={status}
+                          projectName={projectName(scan.projectId)}
+                          targetName={targetName(scan.targetId)}
+                          controlPending={controlPending === scan.id}
+                          onPause={() => void runControl(scan.id, "pause")}
+                          onResume={() => void runControl(scan.id, "resume")}
+                          onStop={() => void runControl(scan.id, "stop")}
+                        />
+                      </Card>
+                    </Link>
                   );
                 })}
               </div>
@@ -162,14 +171,16 @@ export function ScansPage() {
               </div>
               <div className="scan-monitor-grid">
                 {historyScans.map((scan) => (
-                  <Card key={scan.id} className="scan-monitor-card-wrap">
-                    <ScanHistoryCard
-                      scan={scan}
-                      findingsCount={findingsByScan.get(scan.id) ?? 0}
-                      projectName={projectName(scan.projectId)}
-                      targetName={targetName(scan.targetId)}
-                    />
-                  </Card>
+                  <Link key={scan.id} to={`/scans/${scan.id}`} className="scan-card-link">
+                    <Card className="scan-monitor-card-wrap">
+                      <ScanHistoryCard
+                        scan={scan}
+                        findingsCount={findingsByScan.get(scan.id) ?? 0}
+                        projectName={projectName(scan.projectId)}
+                        targetName={targetName(scan.targetId)}
+                      />
+                    </Card>
+                  </Link>
                 ))}
               </div>
             </section>

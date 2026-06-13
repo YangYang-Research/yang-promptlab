@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 
 import { Badge } from "@/shared/components";
 
 import {
-  ALL_ATTACK_CATEGORY_IDS,
   ATTACK_CATALOG,
   ATTACK_PROFILES,
   estimateRequests,
@@ -14,23 +13,27 @@ import {
   type AttackPlanConfig,
   type AttackProfileId,
 } from "../attackProfiles";
+import type { AttackPlanUiState } from "../wizardState";
 
 type AttackPlanStepProps = {
   selectedEndpointCount: number;
+  planUi: AttackPlanUiState;
+  onPlanUiChange: (patch: Partial<AttackPlanUiState>) => void;
   onPlanChange?: (plan: AttackPlanConfig) => void;
 };
 
-export function AttackPlanStep({ selectedEndpointCount, onPlanChange }: AttackPlanStepProps) {
-  const [profileId, setProfileId] = useState<AttackProfileId>("standard");
-  const [customCategories, setCustomCategories] = useState<AttackCategoryId[]>(
-    ALL_ATTACK_CATEGORY_IDS,
-  );
-  const [expandedCategory, setExpandedCategory] = useState<AttackCategoryId | null>(null);
-  const [disabledTests, setDisabledTests] = useState<Set<string>>(new Set());
+export function AttackPlanStep({
+  selectedEndpointCount,
+  planUi,
+  onPlanUiChange,
+  onPlanChange,
+}: AttackPlanStepProps) {
+  const { profileId, customCategories, expandedCategory, disabledTests } = planUi;
+  const disabledTestSet = useMemo(() => new Set(disabledTests), [disabledTests]);
 
   const activeCategories = useMemo(() => {
     if (profileId === "custom") return customCategories;
-    return ATTACK_PROFILES.find((p) => p.id === profileId)?.categories ?? [];
+    return ATTACK_PROFILES.find((profile) => profile.id === profileId)?.categories ?? [];
   }, [profileId, customCategories]);
 
   const estimateInput = useMemo(
@@ -38,9 +41,9 @@ export function AttackPlanStep({ selectedEndpointCount, onPlanChange }: AttackPl
       selectedEndpointCount,
       profileId,
       customCategories,
-      disabledTestIds: disabledTests,
+      disabledTestIds: disabledTestSet,
     }),
-    [selectedEndpointCount, profileId, customCategories, disabledTests],
+    [selectedEndpointCount, profileId, customCategories, disabledTestSet],
   );
 
   const estimatedRequests = estimateRequests(estimateInput);
@@ -50,35 +53,36 @@ export function AttackPlanStep({ selectedEndpointCount, onPlanChange }: AttackPl
     onPlanChange?.({
       profileId,
       customCategories,
-      disabledTests: [...disabledTests],
+      disabledTests,
       categories: activeCategories,
     });
   }, [profileId, customCategories, disabledTests, activeCategories, onPlanChange]);
 
   function selectProfile(next: AttackProfileId) {
-    setProfileId(next);
-    if (next !== "custom") {
-      setDisabledTests(new Set());
-    }
+    onPlanUiChange({
+      profileId: next,
+      disabledTests: next !== "custom" ? [] : disabledTests,
+    });
   }
 
   function toggleCustomCategory(id: AttackCategoryId, enabled: boolean) {
-    setCustomCategories((prev) => {
-      if (enabled) return prev.includes(id) ? prev : [...prev, id];
-      return prev.filter((c) => c !== id);
+    onPlanUiChange({
+      customCategories: enabled
+        ? customCategories.includes(id)
+          ? customCategories
+          : [...customCategories, id]
+        : customCategories.filter((category) => category !== id),
     });
   }
 
   function toggleTest(testId: string, enabled: boolean) {
-    setDisabledTests((prev) => {
-      const next = new Set(prev);
-      if (enabled) next.delete(testId);
-      else next.add(testId);
-      return next;
+    const next = new Set(disabledTests);
+    if (enabled) next.delete(testId);
+    else next.add(testId);
+    onPlanUiChange({
+      profileId: profileId !== "custom" ? "custom" : profileId,
+      disabledTests: [...next],
     });
-    if (profileId !== "custom") {
-      setProfileId("custom");
-    }
   }
 
   return (
@@ -123,7 +127,7 @@ export function AttackPlanStep({ selectedEndpointCount, onPlanChange }: AttackPl
                 ? customCategories.includes(category.id)
                 : activeCategories.includes(category.id);
             const expanded = expandedCategory === category.id;
-            const enabledTests = category.tests.filter((t) => !disabledTests.has(t.id));
+            const enabledTests = category.tests.filter((test) => !disabledTestSet.has(test.id));
 
             return (
               <div
@@ -150,7 +154,9 @@ export function AttackPlanStep({ selectedEndpointCount, onPlanChange }: AttackPl
                     type="button"
                     className="wizard-attack-category__expand text-sm"
                     onClick={() =>
-                      setExpandedCategory(expanded ? null : category.id)
+                      onPlanUiChange({
+                        expandedCategory: expanded ? null : category.id,
+                      })
                     }
                     aria-expanded={expanded}
                   >
@@ -161,7 +167,7 @@ export function AttackPlanStep({ selectedEndpointCount, onPlanChange }: AttackPl
                 {expanded && (
                   <ul className="wizard-attack-test-list">
                     {category.tests.map((test) => {
-                      const enabled = !disabledTests.has(test.id);
+                      const enabled = !disabledTestSet.has(test.id);
                       return (
                         <li key={test.id}>
                           <label className="wizard-attack-test">

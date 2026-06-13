@@ -73,6 +73,37 @@ impl From<Target> for TargetDto {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ScanDetailDto {
+    pub id: String,
+    pub project_id: String,
+    pub target_id: Option<String>,
+    pub name: String,
+    pub status: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub playbook: Option<serde_json::Value>,
+}
+
+impl ScanDetailDto {
+    pub fn from_scan(scan: Scan) -> Self {
+        Self {
+            id: scan.id,
+            project_id: scan.project_id,
+            target_id: scan.target_id,
+            name: scan.name,
+            status: scan.status,
+            started_at: ts_opt(scan.started_at),
+            completed_at: ts_opt(scan.completed_at),
+            created_at: ts(scan.created_at),
+            updated_at: ts(scan.updated_at),
+            playbook: json_opt(scan.playbook_json),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ScanDto {
     pub id: String,
     pub project_id: String,

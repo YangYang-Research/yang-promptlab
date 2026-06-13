@@ -1,4 +1,3 @@
-import { Badge } from "@/shared/components";
 import type { Project } from "@/shared/types";
 
 type ProjectStepProps = {
@@ -11,23 +10,6 @@ type ProjectStepProps = {
   onSelectProject: (projectId: string) => void;
 };
 
-function LockedProjectSelector({ project }: { project: Project }) {
-  return (
-    <div className="wizard-project wizard-project--locked">
-      <div className="wizard-project__header">
-        <span className="field__label">Project</span>
-        <Badge variant="muted">Locked</Badge>
-      </div>
-      <input className="input" value={project.name} readOnly disabled aria-readonly />
-      {project.description ? (
-        <p className="wizard-project__description">{project.description}</p>
-      ) : (
-        <p className="wizard-project__description text-muted">No description</p>
-      )}
-    </div>
-  );
-}
-
 export function ProjectStep({
   lockedProjectId,
   lockedProject,
@@ -38,7 +20,8 @@ export function ProjectStep({
   onSelectProject,
 }: ProjectStepProps) {
   const activeProject =
-    projects.find((p) => p.id === (lockedProjectId || selectedProjectId)) ?? lockedProject;
+    projects.find((project) => project.id === (lockedProjectId || selectedProjectId)) ??
+    lockedProject;
 
   if (lockedProjectId) {
     if (loading && !lockedProject) {
@@ -48,7 +31,17 @@ export function ProjectStep({
       return <p className="text-danger">{resolveError}</p>;
     }
     if (lockedProject) {
-      return <LockedProjectSelector project={lockedProject} />;
+      return (
+        <label className="field">
+          <span className="field__label">Project</span>
+          <select className="input" value={lockedProject.id} disabled aria-readonly>
+            <option value={lockedProject.id}>{lockedProject.name}</option>
+          </select>
+          {lockedProject.description ? (
+            <p className="wizard-project__description text-muted">{lockedProject.description}</p>
+          ) : null}
+        </label>
+      );
     }
     return <p className="text-danger">Project not found</p>;
   }

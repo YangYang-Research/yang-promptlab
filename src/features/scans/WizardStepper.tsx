@@ -1,5 +1,6 @@
 import type { WizardDraft, WizardStepId } from "./wizardSteps";
 import { WIZARD_STEPS, canNavigateToStep } from "./wizardSteps";
+import { isTargetFormValid } from "./wizardState";
 
 type WizardStepperProps = {
   currentStep: WizardStepId;
@@ -44,8 +45,8 @@ export function WizardStepper({ currentStep, draft, onStepChange }: WizardSteppe
 
 function isStepDone(step: WizardStepId, draft: WizardDraft): boolean {
   if (step === 1) return draft.projectId.length > 0;
-  if (step === 2) return draft.target !== null;
-  if (step === 3) return draft.discovery.selectedCount > 0;
+  if (step === 2) return draft.target !== null && isTargetFormValid(draft.targetForm);
+  if (step === 3) return draft.discoveryCompleted && draft.discovery.selectedCount > 0;
   if (step === 4) return (draft.attackPlan?.categories.length ?? 0) > 0;
   if (step === 5) return draft.submittedScanId !== null;
   return false;
