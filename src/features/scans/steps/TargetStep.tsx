@@ -75,16 +75,6 @@ export function TargetStep({ projectId, onTargetSaved }: TargetStepProps) {
 
   return (
     <div className="wizard-step">
-      <div className="wizard-step__heading">
-        <span className="wizard-step__number">2</span>
-        <div>
-          <h3 className="wizard-step__title">Target &amp; authentication</h3>
-          <p className="wizard-step__hint text-muted">
-            Enter the scan target URL and optional credentials
-          </p>
-        </div>
-      </div>
-
       {savedTarget ? (
         <div className="wizard-target-saved">
           <Badge variant="success">Saved to SQLite</Badge>

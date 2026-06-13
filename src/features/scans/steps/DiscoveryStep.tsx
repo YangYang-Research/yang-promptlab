@@ -206,16 +206,6 @@ export function DiscoveryStep({ target, onSelectionChange }: DiscoveryStepProps)
 
   return (
     <div className="wizard-step">
-      <div className="wizard-step__heading">
-        <span className="wizard-step__number">3</span>
-        <div>
-          <h3 className="wizard-step__title">Discovery</h3>
-          <p className="wizard-step__hint text-muted">
-            Run the discovery engine against {target.url} and select endpoints for the scan
-          </p>
-        </div>
-      </div>
-
       <div className="wizard-discovery-phases">
         {DISCOVERY_PHASES.map((phase, index) => (
           <span

@@ -1,67 +1,32 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import { mapProjects } from "@/app/store/mappers";
-import { Badge, Card, PageHeader } from "@/shared/components";
+import { Button, Card, PageHeader } from "@/shared/components";
 import { getProject } from "@/shared/ipc";
 import type { Project, Target } from "@/shared/types";
 
 import type { AttackPlanConfig } from "./attackProfiles";
 import { AttackPlanStep } from "./steps/AttackPlanStep";
 import { DiscoveryStep, type DiscoverySelection } from "./steps/DiscoveryStep";
+import { ProjectStep } from "./steps/ProjectStep";
+import { ResultsStep } from "./steps/ResultsStep";
 import { SubmitStep } from "./steps/SubmitStep";
 import { TargetStep } from "./steps/TargetStep";
-
-function LockedProjectSelector({ project }: { project: Project }) {
-  return (
-    <div className="wizard-project wizard-project--locked">
-      <div className="wizard-project__header">
-        <span className="field__label">Project</span>
-        <Badge variant="muted">Locked</Badge>
-      </div>
-      <input className="input" value={project.name} readOnly disabled aria-readonly />
-      {project.description ? (
-        <p className="wizard-project__description">{project.description}</p>
-      ) : (
-        <p className="wizard-project__description text-muted">No description</p>
-      )}
-    </div>
-  );
-}
-
-function ProjectDropdown({
-  projects,
-  value,
-  onChange,
-}: {
-  projects: Project[];
-  value: string;
-  onChange: (projectId: string) => void;
-}) {
-  return (
-    <label className="field">
-      <span className="field__label">Project</span>
-      <select
-        className="input"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">Select a project…</option>
-        {projects.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
+import { WizardStepper } from "./WizardStepper";
+import {
+  canNavigateToStep,
+  canProceedFromStep,
+  getWizardStep,
+  type WizardDraft,
+  type WizardStepId,
+} from "./wizardSteps";
 
 export function ScanWizardPage() {
   const [searchParams] = useSearchParams();
   const lockedProjectId = searchParams.get("projectId")?.trim() ?? "";
-  const { projects, loading, error, dispatch } = useAppStore();
+  const { projects, loading, error, dispatch, actions } = useAppStore();
   const [resolvedProject, setResolvedProject] = useState<Project | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState("");
@@ -72,11 +37,25 @@ export function ScanWizardPage() {
     selectedEndpointIds: [],
   });
   const [attackPlan, setAttackPlan] = useState<AttackPlanConfig | null>(null);
+  const [submittedScanId, setSubmittedScanId] = useState<string | null>(null);
+  const [currentStep, setCurrentStep] = useState<WizardStepId>(1);
 
   const storeProject = lockedProjectId
-    ? projects.find((p) => p.id === lockedProjectId)
+    ? projects.find((project) => project.id === lockedProjectId)
     : null;
   const lockedProject = storeProject ?? resolvedProject;
+  const activeProjectId = lockedProjectId || selectedProjectId;
+
+  const draft: WizardDraft = useMemo(
+    () => ({
+      projectId: activeProjectId,
+      target: savedTarget,
+      discovery: discoverySelection,
+      attackPlan,
+      submittedScanId,
+    }),
+    [activeProjectId, savedTarget, discoverySelection, attackPlan, submittedScanId],
+  );
 
   useEffect(() => {
     if (!lockedProjectId) {
@@ -116,15 +95,119 @@ export function ScanWizardPage() {
     };
   }, [lockedProjectId, storeProject, loading, dispatch]);
 
-  const activeProjectId = lockedProjectId || selectedProjectId;
-  const activeProject = projects.find((p) => p.id === activeProjectId) ?? lockedProject;
+  useEffect(() => {
+    if (!submittedScanId || currentStep < 5) return;
+    const timer = window.setInterval(() => void actions.refresh(), 3000);
+    return () => window.clearInterval(timer);
+  }, [submittedScanId, currentStep, actions]);
+
+  const stepDef = getWizardStep(currentStep);
+  const showNext = currentStep < 6;
+  const nextDisabled = !canProceedFromStep(currentStep, draft);
+
+  function handleStepChange(step: WizardStepId) {
+    if (canNavigateToStep(step, draft)) {
+      setCurrentStep(step);
+    }
+  }
+
+  function handleNext() {
+    if (currentStep >= 6 || !canProceedFromStep(currentStep, draft)) return;
+    setCurrentStep((currentStep + 1) as WizardStepId);
+  }
+
+  function handleBack() {
+    if (currentStep > 1) {
+      setCurrentStep((currentStep - 1) as WizardStepId);
+    }
+  }
+
+  function resetWizard() {
+    setCurrentStep(1);
+    setSavedTarget(null);
+    setDiscoverySelection({ scanId: null, selectedCount: 0, selectedEndpointIds: [] });
+    setAttackPlan(null);
+    setSubmittedScanId(null);
+    if (!lockedProjectId) {
+      setSelectedProjectId("");
+      dispatch({ type: "SET_SELECTED_PROJECT", projectId: null });
+    }
+  }
+
+  function handleSubmitted(scanId: string) {
+    setSubmittedScanId(scanId);
+  }
+
+  function renderStepBody() {
+    switch (currentStep) {
+      case 1:
+        return (
+          <ProjectStep
+            lockedProjectId={lockedProjectId}
+            lockedProject={lockedProject}
+            resolveError={resolveError}
+            loading={loading}
+            projects={projects}
+            selectedProjectId={selectedProjectId}
+            onSelectProject={(projectId) => {
+              setSelectedProjectId(projectId);
+              dispatch({ type: "SET_SELECTED_PROJECT", projectId: projectId || null });
+            }}
+          />
+        );
+      case 2:
+        return activeProjectId ? (
+          <TargetStep projectId={activeProjectId} onTargetSaved={setSavedTarget} />
+        ) : (
+          <p className="text-muted">Select a project in step 1 to configure the target.</p>
+        );
+      case 3:
+        return savedTarget ? (
+          <DiscoveryStep target={savedTarget} onSelectionChange={setDiscoverySelection} />
+        ) : (
+          <p className="text-muted">Save a target in step 2 to run discovery.</p>
+        );
+      case 4:
+        return discoverySelection.selectedCount > 0 ? (
+          <AttackPlanStep
+            selectedEndpointCount={discoverySelection.selectedCount}
+            onPlanChange={setAttackPlan}
+          />
+        ) : (
+          <p className="text-muted">Select at least one endpoint in step 3 to plan attacks.</p>
+        );
+      case 5:
+        return activeProjectId &&
+          savedTarget &&
+          attackPlan &&
+          attackPlan.categories.length > 0 &&
+          discoverySelection.selectedEndpointIds.length > 0 ? (
+          <SubmitStep
+            projectId={activeProjectId}
+            target={savedTarget}
+            endpointIds={discoverySelection.selectedEndpointIds}
+            attackPlan={attackPlan}
+            submittedScanId={submittedScanId}
+            onSubmitted={handleSubmitted}
+            onCreateAnother={resetWizard}
+          />
+        ) : (
+          <p className="text-muted">Complete steps 1–4 before submitting the scan.</p>
+        );
+      case 6:
+        return submittedScanId && activeProjectId ? (
+          <ResultsStep projectId={activeProjectId} scanId={submittedScanId} />
+        ) : (
+          <p className="text-muted">Submit a scan in step 5 to review results.</p>
+        );
+      default:
+        return null;
+    }
+  }
 
   return (
     <div className="page">
-      <PageHeader
-        title="New Scan"
-        description="Configure a new security scan"
-      />
+      <PageHeader title="New Scan" description="Configure a new security scan" />
 
       {error && (
         <Card>
@@ -132,140 +215,30 @@ export function ScanWizardPage() {
         </Card>
       )}
 
-      <Card>
-        <div className="wizard-step">
-          <div className="wizard-step__heading">
-            <span className="wizard-step__number">1</span>
-            <div>
-              <h3 className="wizard-step__title">Project</h3>
-              <p className="wizard-step__hint text-muted">
-                Choose the project this scan belongs to
-              </p>
-            </div>
-          </div>
+      <WizardStepper currentStep={currentStep} draft={draft} onStepChange={handleStepChange} />
 
-          {lockedProjectId ? (
-            loading && !lockedProject ? (
-              <p className="text-muted">Loading project…</p>
-            ) : resolveError ? (
-              <p className="text-danger">{resolveError}</p>
-            ) : lockedProject ? (
-              <LockedProjectSelector project={lockedProject} />
-            ) : (
-              <p className="text-danger">Project not found</p>
-            )
-          ) : (
-            <ProjectDropdown
-              projects={projects}
-              value={selectedProjectId}
-              onChange={(id) => {
-                setSelectedProjectId(id);
-                dispatch({ type: "SET_SELECTED_PROJECT", projectId: id || null });
-              }}
-            />
-          )}
+      <Card className="wizard-panel">
+        <header className="wizard-panel__header">
+          <p className="wizard-panel__step-label text-muted">
+            Step {currentStep} of 6 · {stepDef.label}
+          </p>
+          <h2 className="wizard-panel__title">{stepDef.title}</h2>
+          <p className="wizard-panel__hint text-muted">{stepDef.hint}</p>
+        </header>
 
-          {activeProject && !lockedProjectId && (
-            <p className="wizard-project__description text-muted">{activeProject.description}</p>
+        <div className="wizard-panel__body">{renderStepBody()}</div>
+
+        <footer className="wizard-panel__footer">
+          <Button variant="ghost" disabled={currentStep === 1} onClick={handleBack}>
+            Back
+          </Button>
+          {showNext && (
+            <Button variant="primary" disabled={nextDisabled} onClick={handleNext}>
+              Next
+            </Button>
           )}
-        </div>
+        </footer>
       </Card>
-
-      {activeProjectId ? (
-        <Card>
-          <TargetStep projectId={activeProjectId} onTargetSaved={setSavedTarget} />
-        </Card>
-      ) : (
-        <Card>
-          <div className="wizard-step wizard-step--disabled">
-            <div className="wizard-step__heading">
-              <span className="wizard-step__number">2</span>
-              <div>
-                <h3 className="wizard-step__title">Target &amp; authentication</h3>
-                <p className="wizard-step__hint text-muted">
-                  Select a project in step 1 to configure the target
-                </p>
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {savedTarget ? (
-        <Card>
-          <DiscoveryStep target={savedTarget} onSelectionChange={setDiscoverySelection} />
-        </Card>
-      ) : (
-        <Card>
-          <div className="wizard-step wizard-step--disabled">
-            <div className="wizard-step__heading">
-              <span className="wizard-step__number">3</span>
-              <div>
-                <h3 className="wizard-step__title">Discovery</h3>
-                <p className="wizard-step__hint text-muted">
-                  Save a target in step 2 to run discovery
-                </p>
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {discoverySelection.selectedCount > 0 ? (
-        <Card>
-          <AttackPlanStep
-            selectedEndpointCount={discoverySelection.selectedCount}
-            onPlanChange={setAttackPlan}
-          />
-        </Card>
-      ) : (
-        <Card>
-          <div className="wizard-step wizard-step--disabled">
-            <div className="wizard-step__heading">
-              <span className="wizard-step__number">4</span>
-              <div>
-                <h3 className="wizard-step__title">Attack planning</h3>
-                <p className="wizard-step__hint text-muted">
-                  {savedTarget
-                    ? "Select at least one endpoint in step 3 to configure the attack profile"
-                    : "Complete discovery in step 3 to choose an attack profile"}
-                </p>
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {activeProjectId &&
-      savedTarget &&
-      attackPlan &&
-      attackPlan.categories.length > 0 &&
-      discoverySelection.selectedEndpointIds.length > 0 ? (
-        <Card>
-          <SubmitStep
-            projectId={activeProjectId}
-            target={savedTarget}
-            endpointIds={discoverySelection.selectedEndpointIds}
-            attackPlan={attackPlan}
-          />
-        </Card>
-      ) : (
-        <Card>
-          <div className="wizard-step wizard-step--disabled">
-            <div className="wizard-step__heading">
-              <span className="wizard-step__number">5</span>
-              <div>
-                <h3 className="wizard-step__title">Start scan</h3>
-                <p className="wizard-step__hint text-muted">
-                  {discoverySelection.selectedCount > 0
-                    ? "Choose an attack profile in step 4 to start the scan"
-                    : "Complete steps 1–4 to submit the scan"}
-                </p>
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
     </div>
   );
 }

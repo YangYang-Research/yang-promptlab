@@ -83,17 +83,6 @@ export function AttackPlanStep({ selectedEndpointCount, onPlanChange }: AttackPl
 
   return (
     <div className="wizard-step">
-      <div className="wizard-step__heading">
-        <span className="wizard-step__number">4</span>
-        <div>
-          <h3 className="wizard-step__title">Attack planning</h3>
-          <p className="wizard-step__hint text-muted">
-            Choose a profile for {selectedEndpointCount} selected endpoint
-            {selectedEndpointCount === 1 ? "" : "s"}
-          </p>
-        </div>
-      </div>
-
       <div className="wizard-attack-profiles">
         {ATTACK_PROFILES.map((profile) => {
           const selected = profileId === profile.id;
