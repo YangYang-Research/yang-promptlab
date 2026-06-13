@@ -74,6 +74,33 @@ pub async fn project_get_op(state: &AppState, id: String) -> CommandResult<Proje
 }
 
 #[instrument(skip(state), fields(id = %id))]
+pub async fn project_update_op(
+    state: &AppState,
+    id: String,
+    name: Option<String>,
+    description: Option<String>,
+) -> CommandResult<ProjectDto> {
+    let id = validate_project_id(&id)?;
+    let name = name.map(|value| validate_project_name(&value)).transpose()?;
+    let description = description.map(|value| value.trim().to_string());
+
+    let project = state
+        .repositories()
+        .projects()
+        .update(
+            id,
+            aisec_storage::UpdateProject {
+                name,
+                description,
+            },
+        )
+        .await
+        .map_err(CommandError::from)?;
+    info!(id = %project.id, "project updated");
+    Ok(project.into())
+}
+
+#[instrument(skip(state), fields(id = %id))]
 pub async fn project_delete_op(state: &AppState, id: String) -> CommandResult<()> {
     let id = validate_project_id(&id)?;
     state
@@ -103,6 +130,16 @@ pub async fn project_list(state: State<'_, AppState>) -> CommandResult<Vec<Proje
 #[tauri::command]
 pub async fn project_get(state: State<'_, AppState>, id: String) -> CommandResult<ProjectDto> {
     project_get_op(state.inner(), id).await
+}
+
+#[tauri::command]
+pub async fn project_update(
+    state: State<'_, AppState>,
+    id: String,
+    name: Option<String>,
+    description: Option<String>,
+) -> CommandResult<ProjectDto> {
+    project_update_op(state.inner(), id, name, description).await
 }
 
 #[tauri::command]

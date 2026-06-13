@@ -17,5 +17,16 @@ export const createProject = (name: string, description?: string | null) =>
 export const getProject = (id: string) =>
   invokeCommand<ProjectDto>("project_get", { id });
 
+export const updateProject = (
+  id: string,
+  name?: string | null,
+  description?: string | null,
+) =>
+  invokeCommand<ProjectDto>("project_update", {
+    id,
+    name: name ?? null,
+    description: description ?? null,
+  });
+
 export const deleteProject = (id: string) =>
   invokeCommand<null>("project_delete", { id });

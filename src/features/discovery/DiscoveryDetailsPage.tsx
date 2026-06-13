@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Badge, Button, Card, DataTable, EmptyState, PageHeader, StatusBadge } from "@/shared/components";
+import { Badge, Card, DataTable, EmptyState, PageHeader, RefreshButton, StatusBadge } from "@/shared/components";
 import { endpointSourceLabel } from "@/features/scans/discoveryPhases";
 import {
   formatDurationMs,
@@ -131,6 +131,7 @@ export function DiscoveryDetailsPage() {
   if (!scanId) {
     return (
       <div className="page">
+        <PageHeader title="Discovery Details" backTo="/discovery" backOnly />
         <EmptyState title="Discovery not found" description="Missing discovery run identifier." />
       </div>
     );
@@ -139,7 +140,7 @@ export function DiscoveryDetailsPage() {
   if (loading && !scan && !detail) {
     return (
       <div className="page">
-        <PageHeader title="Discovery Details" description="Loading discovery run…" />
+        <PageHeader title="Discovery Details" backTo="/discovery" backOnly description="Loading discovery run…" />
       </div>
     );
   }
@@ -147,17 +148,11 @@ export function DiscoveryDetailsPage() {
   return (
     <div className="page">
       <PageHeader
+        backTo="/discovery"
+        backOnly
         title="Discovery Details"
-        description={`${project?.name ?? "Project"} · ${target?.url ?? target?.name ?? "Target"}`}
         actions={
-          <div className="discovery-controls">
-            <Button variant="ghost" onClick={() => void actions.refresh()}>
-              Refresh
-            </Button>
-            <Link to="/discovery">
-              <Button variant="secondary">Back to Discovery</Button>
-            </Link>
-          </div>
+          <RefreshButton onClick={() => void actions.refresh()} />
         }
       />
 

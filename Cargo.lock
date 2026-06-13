@@ -25,6 +25,7 @@ dependencies = [
  "aisec-payload",
  "aisec-storage",
  "async-trait",
+ "base64 0.22.1",
  "regex",
  "reqwest 0.12.28",
  "serde",
@@ -74,6 +75,7 @@ name = "aisec-desktop"
 version = "0.1.0"
 dependencies = [
  "aisec-attack",
+ "aisec-auth",
  "aisec-core",
  "aisec-discovery",
  "aisec-judge",

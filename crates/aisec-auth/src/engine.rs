@@ -76,6 +76,32 @@ impl AuthEngine {
             )
             .await?;
 
+        self.persist_record_result(&profile.id, result).await
+    }
+
+    /// Launch a headed browser for manual login at `login_url`.
+    pub async fn begin_interactive_recording(
+        &self,
+        login_url: &str,
+        options: RecordLoginOptions,
+    ) -> AisecResult<()> {
+        self.driver.begin_interactive_login(login_url, options).await
+    }
+
+    /// Capture browser state after the user finishes manual login.
+    pub async fn finish_interactive_recording(
+        &self,
+        profile_id: &str,
+    ) -> AisecResult<(AuthSession, LoginRecording)> {
+        let result = self.driver.finish_interactive_login().await?;
+        self.persist_record_result(profile_id, result).await
+    }
+
+    async fn persist_record_result(
+        &self,
+        profile_id: &str,
+        result: crate::playwright::RecordLoginResult,
+    ) -> AisecResult<(AuthSession, LoginRecording)> {
         let cookies = parse_cookies(&serde_json::Value::Array(result.cookies))?;
         let tokens = parse_tokens(&serde_json::Value::Array(result.tokens))?;
         let steps: Vec<RecordedStep> = result
@@ -93,7 +119,7 @@ impl AuthEngine {
 
         let mut session = self
             .store
-            .persist_session(&profile.id, &cookies, &tokens, None)
+            .persist_session(profile_id, &cookies, &tokens, None)
             .await?;
 
         let storage_path = self
@@ -105,13 +131,12 @@ impl AuthEngine {
             .update_storage_path(&session.id, &storage_path)
             .await?;
 
-        // Reflect the persisted storageState path on the returned session.
         session.storage_state_path = Some(storage_path.to_string_lossy().into_owned());
 
         let recording = self
             .store
             .save_recording(
-                &profile.id,
+                profile_id,
                 &steps,
                 Some(storage_path.clone()),
                 serde_json::json!({"final_url": result.final_url}),

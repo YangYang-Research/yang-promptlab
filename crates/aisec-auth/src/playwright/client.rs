@@ -30,6 +30,12 @@ pub trait PlaywrightDriver: Send + Sync {
         config: Value,
         options: RecordLoginOptions,
     ) -> AisecResult<RecordLoginResult>;
+    async fn begin_interactive_login(
+        &self,
+        url: &str,
+        options: RecordLoginOptions,
+    ) -> AisecResult<()>;
+    async fn finish_interactive_login(&self) -> AisecResult<RecordLoginResult>;
     async fn replay_session(
         &self,
         url: &str,
@@ -89,12 +95,22 @@ impl PlaywrightClient {
         }
 
         let runner = self.runner_path()?;
-        let mut child = Command::new(&self.config.node_bin)
+        let mut command = Command::new(&self.config.node_bin);
+        command
             .arg(&runner)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+
+        if let Some(workdir) = &self.config.runner_workdir {
+            command.current_dir(workdir);
+        }
+        if let Some(browsers_path) = &self.config.playwright_browsers_path {
+            command.env("PLAYWRIGHT_BROWSERS_PATH", browsers_path);
+        }
+
+        let mut child = command
             .spawn()
             .map_err(|err| AisecError::internal(format!("failed to spawn playwright runner: {err}")))?;
 
@@ -231,6 +247,43 @@ impl PlaywrightDriver for PlaywrightClient {
         };
 
         self.call("record_login", serde_json::to_value(req).unwrap())
+            .await
+    }
+
+    async fn begin_interactive_login(
+        &self,
+        url: &str,
+        options: RecordLoginOptions,
+    ) -> AisecResult<()> {
+        self.launch(PlaywrightOptions {
+            headless: false,
+            headed: true,
+            timeout_ms: options.timeout_ms,
+            interactive_timeout_ms: options.interactive_timeout_ms,
+            ..Default::default()
+        })
+        .await?;
+
+        let _: serde_json::Value = self
+            .call(
+                "begin_interactive_login",
+                serde_json::json!({
+                    "url": url,
+                    "options": PlaywrightOptions {
+                        headless: false,
+                        headed: true,
+                        timeout_ms: options.timeout_ms,
+                        interactive_timeout_ms: options.interactive_timeout_ms,
+                        ..Default::default()
+                    }
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn finish_interactive_login(&self) -> AisecResult<RecordLoginResult> {
+        self.call("finish_interactive_login", serde_json::json!({}))
             .await
     }
 

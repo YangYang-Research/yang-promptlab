@@ -16,7 +16,7 @@ use aisec_desktop_lib::state::AppState;
 async fn make_state(dir: &Path) -> AppState {
     let db = open_database(&dir.join("aisec.db")).await.expect("open db");
     let guard = init_logging(LogOptions::bootstrap("project-it")).unwrap();
-    AppState::new(db, dir.to_path_buf(), guard)
+    AppState::new(db, dir.to_path_buf(), guard, aisec_auth::AuthEngineConfig::default())
 }
 
 async fn sqlite_project_count(state: &AppState) -> i64 {

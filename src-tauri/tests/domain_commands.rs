@@ -22,7 +22,7 @@ use serde_json::json;
 async fn make_state(dir: &Path) -> AppState {
     let db = open_database(&dir.join("aisec.db")).await.expect("open db");
     let guard = init_logging(LogOptions::bootstrap("domain-it")).unwrap();
-    AppState::new(db, dir.to_path_buf(), guard)
+    AppState::new(db, dir.to_path_buf(), guard, aisec_auth::AuthEngineConfig::default())
 }
 
 #[tokio::test]

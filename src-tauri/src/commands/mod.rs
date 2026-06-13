@@ -7,6 +7,7 @@ use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
 
 pub mod attack;
+pub mod auth;
 pub mod discovery;
 pub mod domain;
 pub mod projects;

@@ -3,11 +3,12 @@ import {
   Button,
   Card,
   PageHeader,
+  Select,
 } from "@/shared/components";
 import type { AppSettings } from "@/app/store/types";
 
 export function SettingsPage() {
-  const { settings, dispatch, backendVersion, backendConnected, projects, ui } = useAppStore();
+  const { settings, dispatch, backendVersion, backendConnected } = useAppStore();
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     dispatch({ type: "UPDATE_SETTING", key, value });
@@ -25,31 +26,15 @@ export function SettingsPage() {
           <h3 className="card__title">General</h3>
           <div className="settings-field">
             <label htmlFor="theme">Theme</label>
-            <select
+            <Select
               id="theme"
-              className="settings-select"
               value={settings.theme}
               onChange={(e) => update("theme", e.target.value as AppSettings["theme"])}
             >
               <option value="dark">Dark</option>
               <option value="light">Light</option>
               <option value="system">System</option>
-            </select>
-          </div>
-          <div className="settings-field">
-            <label htmlFor="project">Default Project</label>
-            <select
-              id="project"
-              className="settings-select"
-              value={ui.selectedProjectId ?? ""}
-              onChange={(e) =>
-                dispatch({ type: "SET_SELECTED_PROJECT", projectId: e.target.value || null })
-              }
-            >
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+            </Select>
           </div>
         </Card>
 
@@ -87,7 +72,7 @@ export function SettingsPage() {
             <label htmlFor="pluginsDir">Plugins directory</label>
             <input
               id="pluginsDir"
-              className="settings-input mono"
+              className="input mono"
               value={settings.pluginsDir}
               onChange={(e) => update("pluginsDir", e.target.value)}
             />
@@ -96,7 +81,7 @@ export function SettingsPage() {
             <label htmlFor="modelsDir">Models directory</label>
             <input
               id="modelsDir"
-              className="settings-input mono"
+              className="input mono"
               value={settings.modelsDir}
               onChange={(e) => update("modelsDir", e.target.value)}
             />

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Badge, Button } from "@/shared/components";
+import { Badge, Button, RefreshButton } from "@/shared/components";
 import {
   generateAndExportScanReport,
   reportExportLabel,
@@ -85,9 +85,11 @@ export function ResultsStep({ projectId, scanId, onDone }: ResultsStepProps) {
             Scan still in progress ({status.progress_percent}% · {status.findings_count}{" "}
             finding{status.findings_count === 1 ? "" : "s"} so far). Results update automatically.
           </p>
-          <Button variant="ghost" size="sm" onClick={() => void actions.refresh()}>
-            Refresh data
-          </Button>
+          <RefreshButton
+            size="sm"
+            ariaLabel="Refresh data"
+            onClick={() => void actions.refresh()}
+          />
         </div>
       )}
 

@@ -1,65 +1,69 @@
 import { useEffect, useState } from "react";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Button, Modal } from "@/shared/components";
+import { TargetFormFields } from "@/features/scans/TargetFormFields";
+import {
+  buildTargetDescriptor,
+  createInitialTargetForm,
+  deriveTargetName,
+  validateTargetStep,
+  type TargetFormState,
+} from "@/features/scans/targetDescriptor";
+import { Button, Modal, Select } from "@/shared/components";
 import { useToast } from "@/shared/notifications";
-import type { TargetType } from "@/shared/types";
 
 type AddTargetModalProps = {
   open: boolean;
   onClose: () => void;
+  defaultProjectId?: string | null;
 };
 
-const TARGET_TYPES: TargetType[] = ["llm", "api", "web", "mobile"];
-
-export function AddTargetModal({ open, onClose }: AddTargetModalProps) {
-  const { actions, projects, ui } = useAppStore();
+export function AddTargetModal({ open, onClose, defaultProjectId = null }: AddTargetModalProps) {
+  const { actions, projects } = useAppStore();
   const { notify } = useToast();
   const [projectId, setProjectId] = useState("");
-  const [name, setName] = useState("");
-  const [url, setUrl] = useState("");
-  const [targetType, setTargetType] = useState<TargetType>("llm");
+  const [form, setForm] = useState<TargetFormState>(() => createInitialTargetForm());
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    const fallback = ui.selectedProjectId ?? projects[0]?.id ?? "";
-    setProjectId((current) => current || fallback);
-  }, [open, ui.selectedProjectId, projects]);
-
-  function reset() {
-    setName("");
-    setUrl("");
-    setTargetType("llm");
+    setProjectId(defaultProjectId ?? "");
+    setForm(createInitialTargetForm());
     setFormError(null);
     setSubmitting(false);
+  }, [open, defaultProjectId]);
+
+  function patchForm(patch: Partial<TargetFormState>) {
+    setFormError(null);
+    setForm((prev) => ({ ...prev, ...patch }));
   }
 
   function handleClose() {
     if (submitting) return;
-    reset();
     onClose();
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const trimmedUrl = url.trim();
     if (!projectId) {
       setFormError("Select a project first.");
       return;
     }
-    if (!trimmedUrl) {
-      setFormError("Target URL is required.");
+
+    const validationError = validateTargetStep(form);
+    if (validationError) {
+      setFormError(validationError);
       return;
     }
-    const trimmedName = name.trim() || trimmedUrl;
+
     setSubmitting(true);
     setFormError(null);
     try {
-      await actions.createTarget(projectId, trimmedName, targetType, { url: trimmedUrl });
-      notify(`Target "${trimmedName}" added`, "success");
-      reset();
+      const descriptor = buildTargetDescriptor(form);
+      const name = deriveTargetName(form.url);
+      await actions.createTarget(projectId, name, "web", descriptor);
+      notify(`Target "${name}" added`, "success");
       onClose();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to add target";
@@ -70,6 +74,7 @@ export function AddTargetModal({ open, onClose }: AddTargetModalProps) {
   }
 
   const noProjects = projects.length === 0;
+  const canSubmit = Boolean(projectId && form.url.trim());
 
   return (
     <Modal open={open} title="Add Target" onClose={handleClose}>
@@ -80,51 +85,17 @@ export function AddTargetModal({ open, onClose }: AddTargetModalProps) {
           <>
             <label className="field">
               <span className="field__label">Project</span>
-              <select
-                className="input"
-                value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
-              >
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
+              <Select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                <option value="">Select a project…</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
-            <label className="field">
-              <span className="field__label">Target URL</span>
-              <input
-                className="input"
-                placeholder="https://api.example.com/v1/chat/completions"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                autoFocus
-              />
-            </label>
-            <label className="field">
-              <span className="field__label">Name</span>
-              <input
-                className="input"
-                placeholder="Optional — defaults to the URL"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
-            <label className="field">
-              <span className="field__label">Type</span>
-              <select
-                className="input"
-                value={targetType}
-                onChange={(e) => setTargetType(e.target.value as TargetType)}
-              >
-                {TARGET_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </label>
+
+            <TargetFormFields form={form} onChange={patchForm} autoFocusUrl={Boolean(projectId)} />
           </>
         )}
         {formError && <p className="text-danger">{formError}</p>}
@@ -135,7 +106,7 @@ export function AddTargetModal({ open, onClose }: AddTargetModalProps) {
           <Button
             variant="primary"
             type="submit"
-            disabled={submitting || noProjects || !url.trim()}
+            disabled={submitting || noProjects || !canSubmit}
           >
             {submitting ? "Adding…" : "Add Target"}
           </Button>

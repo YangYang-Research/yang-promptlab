@@ -8,6 +8,9 @@ target/
 # Tauri
 src-tauri/target/
 src-tauri/gen/
+src-tauri/resources/playwright/auth/
+src-tauri/resources/playwright/node/
+src-tauri/resources/playwright/BUNDLE.txt
 
 # Logs and local data
 *.log

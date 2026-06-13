@@ -1,19 +1,25 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
   Badge,
-  Button,
   Card,
+  ContentToolbar,
   DataTable,
   EmptyState,
   PageHeader,
+  Pagination,
+  RefreshButton,
   SearchInput,
+  Select,
   SeverityBadge,
 } from "@/shared/components";
 import type { Finding, Severity } from "@/shared/types";
 
 import { filterFindings } from "./findingsFilters";
+import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
+import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
 
 const severities: Severity[] = ["critical", "high", "medium", "low", "info"];
 const statuses: Finding["status"][] = ["open", "confirmed", "false_positive", "fixed"];
@@ -35,8 +41,17 @@ export function FindingsPage() {
     dispatch,
     ui,
   } = useAppStore();
+  const [searchParams] = useSearchParams();
   const [scanFilter, setScanFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<Finding["status"] | "">("");
+  const [pageSize, setPageSize] = usePageSizePreference("findings");
+
+  useEffect(() => {
+    const projectId = searchParams.get("projectId");
+    if (projectId) {
+      dispatch({ type: "SET_SELECTED_PROJECT", projectId });
+    }
+  }, [searchParams, dispatch]);
 
   const filtered = useMemo(
     () =>
@@ -63,6 +78,8 @@ export function FindingsPage() {
       scans,
     ],
   );
+
+  const { page, setPage, pagination } = usePaginatedList(filtered, pageSize);
 
   const projectName = (projectId: string) =>
     projects.find((p) => p.id === projectId)?.name ?? "—";
@@ -170,9 +187,7 @@ export function FindingsPage() {
         title="Findings"
         description="Read-only view of vulnerabilities from SQLite attack and judge results"
         actions={
-          <Button variant="secondary" onClick={() => void actions.refresh()} disabled={loading}>
-            Refresh
-          </Button>
+          <RefreshButton loading={loading} onClick={() => void actions.refresh()} />
         }
       />
 
@@ -191,8 +206,7 @@ export function FindingsPage() {
           />
           <label className="field findings-toolbar__field">
             <span className="field__label">Project</span>
-            <select
-              className="input"
+            <Select
               value={ui.selectedProjectId ?? ""}
               onChange={(e) =>
                 dispatch({
@@ -207,22 +221,18 @@ export function FindingsPage() {
                   {project.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="field findings-toolbar__field">
             <span className="field__label">Scan</span>
-            <select
-              className="input"
-              value={scanFilter}
-              onChange={(e) => setScanFilter(e.target.value)}
-            >
+            <Select value={scanFilter} onChange={(e) => setScanFilter(e.target.value)}>
               <option value="">All scans</option>
               {scanOptions.map((scan) => (
                 <option key={scan.id} value={scan.id}>
                   {scan.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
         </div>
 
@@ -272,18 +282,25 @@ export function FindingsPage() {
           </div>
         </div>
 
-        <div className="findings-toolbar__meta">
-          <span className="text-muted text-sm">
-            {loading
-              ? "Loading findings…"
-              : `${filtered.length} of ${findings.length} finding${findings.length === 1 ? "" : "s"}`}
-          </span>
-          {hasActiveFilters && (
-            <button type="button" className="findings-toolbar__clear" onClick={clearFilters}>
-              Clear filters
-            </button>
-          )}
-        </div>
+        <ContentToolbar
+          filters={
+            <>
+              <span className="text-muted text-sm">
+                {loading
+                  ? "Loading findings…"
+                  : `${filtered.length} of ${findings.length} finding${findings.length === 1 ? "" : "s"}`}
+              </span>
+              {hasActiveFilters && (
+                <button type="button" className="findings-toolbar__clear" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              )}
+            </>
+          }
+          pageSize={pageSize}
+          onPageSizeChange={setPageSize}
+          showViewMode={false}
+        />
       </Card>
 
       {findings.length === 0 && !loading ? (
@@ -295,11 +312,22 @@ export function FindingsPage() {
         <Card padding="none">
           <DataTable
             columns={columns}
-            rows={filtered}
+            rows={pagination.items}
             keyField="id"
             emptyMessage="No findings match your filters"
           />
         </Card>
+      )}
+
+      {filtered.length > 0 && (
+        <Pagination
+          page={page}
+          totalItems={pagination.totalItems}
+          rangeStart={pagination.rangeStart}
+          rangeEnd={pagination.rangeEnd}
+          totalPages={pagination.totalPages}
+          onPageChange={setPage}
+        />
       )}
     </div>
   );

@@ -10,10 +10,11 @@ pub mod dto;
 pub mod error;
 pub mod jobs;
 pub mod logging;
+pub mod playwright_runtime;
 pub mod state;
 
 use state::AppState;
-use tauri::{Manager, RunEvent};
+use tauri::{async_runtime::Mutex as AsyncMutex, Manager, RunEvent};
 
 pub fn run() {
     let app = match build_app() {
@@ -54,8 +55,12 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             let database = tauri::async_runtime::block_on(db::open_database(&db_path))
                 .map_err(crate::error::CommandError::from)?;
 
+            let auth_engine_config =
+                playwright_runtime::resolve_auth_engine_config(app.handle())
+                    .map_err(crate::error::CommandError::from)?;
+
             // 3. Store Database + repository manager inside AppState for commands.
-            app.manage(AppState::new(database, data_dir, log_guard));
+            app.manage(AppState::new(database, data_dir, log_guard, auth_engine_config));
 
             tracing::info!("AISec backend integration ready (database + repositories)");
             Ok(())
@@ -67,6 +72,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::projects::project_create,
             commands::projects::project_list,
             commands::projects::project_get,
+            commands::projects::project_update,
             commands::projects::project_delete,
             commands::domain::target_create,
             commands::domain::target_list,
@@ -90,7 +96,10 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::scan::scan_pause,
             commands::scan::scan_resume,
             commands::scan::scan_stop,
+            commands::auth::auth_record_session_start,
+            commands::auth::auth_record_session_finish,
         ])
+        .manage(AsyncMutex::new(commands::auth::AuthRecordingState::new()))
         .build(tauri::generate_context!())?;
 
     Ok(app)

@@ -1,3 +1,4 @@
+import { Select } from "@/shared/components";
 import type { Project } from "@/shared/types";
 
 type ProjectStepProps = {
@@ -34,9 +35,9 @@ export function ProjectStep({
       return (
         <label className="field">
           <span className="field__label">Project</span>
-          <select className="input" value={lockedProject.id} disabled aria-readonly>
+          <Select value={lockedProject.id} disabled aria-readonly>
             <option value={lockedProject.id}>{lockedProject.name}</option>
-          </select>
+          </Select>
           {lockedProject.description ? (
             <p className="wizard-project__description text-muted">{lockedProject.description}</p>
           ) : null}
@@ -50,8 +51,7 @@ export function ProjectStep({
     <>
       <label className="field">
         <span className="field__label">Project</span>
-        <select
-          className="input"
+        <Select
           value={selectedProjectId}
           onChange={(e) => onSelectProject(e.target.value)}
         >
@@ -61,7 +61,7 @@ export function ProjectStep({
               {project.name}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
       {activeProject?.description && (
         <p className="wizard-project__description text-muted">{activeProject.description}</p>

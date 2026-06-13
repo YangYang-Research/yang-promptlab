@@ -225,6 +225,10 @@ export function ScanWizardPage() {
     }
   }
 
+  function handleCancel() {
+    navigate("/scans");
+  }
+
   async function handleStartScan() {
     if (!canStartScan(draft) || !store.savedTarget || !session.attackPlan) return;
 
@@ -362,7 +366,15 @@ export function ScanWizardPage() {
 
   return (
     <div className="page">
-      <PageHeader title="New Scan" description="Configure a new security scan" />
+      <PageHeader
+        title="New Scan"
+        description="Configure a new security scan"
+        actions={
+          <Button variant="danger" onClick={handleCancel}>
+            Cancel
+          </Button>
+        }
+      />
 
       {error && (
         <Card>

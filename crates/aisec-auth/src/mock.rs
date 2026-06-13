@@ -71,6 +71,18 @@ impl PlaywrightDriver for MockPlaywrightDriver {
         Ok(self.record_result.clone())
     }
 
+    async fn begin_interactive_login(
+        &self,
+        _url: &str,
+        _options: RecordLoginOptions,
+    ) -> AisecResult<()> {
+        Ok(())
+    }
+
+    async fn finish_interactive_login(&self) -> AisecResult<RecordLoginResult> {
+        Ok(self.record_result.clone())
+    }
+
     async fn replay_session(
         &self,
         _url: &str,

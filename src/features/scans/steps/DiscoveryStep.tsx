@@ -6,6 +6,7 @@ import {
   Button,
   DataTable,
   ProgressBar,
+  Select,
 } from "@/shared/components";
 import type { EndpointDto } from "@/shared/ipc";
 import { createEndpoint, listEndpoints } from "@/shared/ipc";
@@ -310,8 +311,7 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
             <form className="wizard-manual-form" onSubmit={handleAddManual}>
               <label className="field">
                 <span className="field__label">Method</span>
-                <select
-                  className="input"
+                <Select
                   value={manualMethod}
                   onChange={(e) => onDiscoveryChange({ manualMethod: e.target.value })}
                   disabled={!scanId || addingManual}
@@ -321,7 +321,7 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
                       {method}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="field wizard-manual-form__path">
                 <span className="field__label">Path</span>

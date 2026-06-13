@@ -1,7 +1,12 @@
 type AuthDescriptor = {
   kind?: string;
+  engine?: string;
+  method?: string;
+  session_id?: string | null;
+  config?: Record<string, unknown>;
   username?: string;
   header?: string;
+  header_name?: string;
   value?: string;
 };
 
@@ -38,13 +43,18 @@ export function extractAuthType(descriptor: unknown): string {
   const obj = asRecord(descriptor);
   const auth = asRecord(obj?.auth) as AuthDescriptor | null;
   const kind = auth?.kind ?? "none";
+
   switch (kind) {
-    case "basic":
-      return "Username / password";
-    case "api_key":
-      return "API key";
+    case "username_password":
+      return "Username / Password (Playwright)";
     case "sso":
-      return "SSO";
+      return "SSO (Playwright)";
+    case "basic":
+      return "Basic (AuthEngine)";
+    case "api_key":
+      return "API Key (AuthEngine)";
+    case "jwt":
+      return "JWT (AuthEngine)";
     default:
       return "None";
   }
@@ -55,13 +65,41 @@ export function extractAuthSummary(descriptor: unknown): string {
   const auth = asRecord(obj?.auth) as AuthDescriptor | null;
   if (!auth?.kind || auth.kind === "none") return "No authentication configured";
 
+  const config = asRecord(auth.config);
+
   switch (auth.kind) {
-    case "basic":
-      return auth.username ? `Basic auth user: ${auth.username}` : "Basic authentication";
-    case "api_key":
-      return auth.header ? `Header: ${auth.header}` : "API key header configured";
+    case "username_password":
+      return [
+        config?.login_url ? `Login: ${config.login_url}` : null,
+        config?.username ? `User: ${config.username}` : null,
+        auth.session_id ? `Session: ${auth.session_id}` : "Session not recorded yet",
+      ]
+        .filter(Boolean)
+        .join(" · ");
     case "sso":
-      return "Browser SSO session (Playwright integration pending)";
+      return [
+        config?.login_url ? `Login: ${config.login_url}` : null,
+        config?.success_url_pattern ? `Success: ${config.success_url_pattern}` : null,
+        auth.session_id ? `Session: ${auth.session_id}` : "Session not recorded yet",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    case "basic":
+      return config?.username
+        ? `HTTP Basic user: ${config.username}`
+        : auth.username
+          ? `HTTP Basic user: ${auth.username}`
+          : "HTTP Basic authentication";
+    case "api_key":
+      return config?.header_name
+        ? `Header: ${config.header_name}`
+        : auth.header
+          ? `Header: ${auth.header}`
+          : "API key header configured";
+    case "jwt":
+      return config?.header_name
+        ? `JWT via ${config.header_name}`
+        : "Configured JWT bearer token";
     default:
       return auth.kind;
   }

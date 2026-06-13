@@ -1,4 +1,5 @@
 import { Button, ProgressBar, StatusBadge } from "@/shared/components";
+import { formatDurationMs, formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import type { ScanStatusDto } from "@/shared/ipc";
 import type { ScanRun } from "@/shared/types";
 
@@ -21,6 +22,19 @@ function progressLabel(status: ScanStatusDto): string {
     return `${status.completed} / ${status.total} tests`;
   }
   return "Scan in progress";
+}
+
+function scanStartedLabel(scan: ScanRun): string {
+  return `Started: ${formatTimestamp(scan.startedAt ?? scan.createdAt)}`;
+}
+
+function scanDurationLabel(scan: ScanRun): string {
+  if (scan.startedAt && scan.completedAt) {
+    return formatDurationMs(
+      new Date(scan.completedAt).getTime() - new Date(scan.startedAt).getTime(),
+    );
+  }
+  return "—";
 }
 
 export function ScanMonitorCard({
@@ -81,34 +95,32 @@ export function ScanMonitorCard({
 
       {isActive && (
         <div
-          className="scan-monitor-card__controls"
+          className="card-footer"
           onClick={(event) => event.stopPropagation()}
           onKeyDown={(event) => event.stopPropagation()}
         >
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={controlPending || !canPause}
-            onClick={onPause}
-          >
-            Pause
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={controlPending || !canResume}
-            onClick={onResume}
-          >
-            Resume
-          </Button>
-          <Button
-            variant="danger"
-            size="sm"
-            disabled={controlPending}
-            onClick={onStop}
-          >
-            Stop
-          </Button>
+          <span className="card-footer-meta text-sm text-muted">{scanStartedLabel(scan)}</span>
+          <div className="card-footer-actions scan-monitor-card__controls">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={controlPending || !canPause}
+              onClick={onPause}
+            >
+              Pause
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={controlPending || !canResume}
+              onClick={onResume}
+            >
+              Resume
+            </Button>
+            <Button variant="danger" size="sm" disabled={controlPending} onClick={onStop}>
+              Stop
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -145,14 +157,13 @@ export function ScanHistoryCard({
           <dd>{findingsCount}</dd>
         </div>
         <div>
-          <dt>Started</dt>
-          <dd className="text-sm">
-            {scan.startedAt
-              ? new Date(scan.startedAt).toLocaleString()
-              : new Date(scan.createdAt).toLocaleString()}
-          </dd>
+          <dt>Duration</dt>
+          <dd className="text-sm">{scanDurationLabel(scan)}</dd>
         </div>
       </dl>
+      <div className="card-footer">
+        <span className="card-footer-meta text-sm text-muted">{scanStartedLabel(scan)}</span>
+      </div>
     </div>
   );
 }

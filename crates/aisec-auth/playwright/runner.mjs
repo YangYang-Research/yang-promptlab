@@ -44,6 +44,10 @@ async function handleCommand(req) {
   const { id, cmd } = req;
 
   switch (cmd) {
+    case 'begin_interactive_login':
+      return ok(id, await cmdBeginInteractiveLogin(req));
+    case 'finish_interactive_login':
+      return ok(id, await cmdFinishInteractiveLogin(req));
     case 'launch':
       return ok(id, await cmdLaunch(req));
     case 'close':
@@ -65,6 +69,50 @@ async function handleCommand(req) {
 
 function ok(id, result) {
   return { id, ok: true, result };
+}
+
+/** @type {boolean} */
+let interactiveRecording = false;
+
+async function cmdBeginInteractiveLogin(req) {
+  const { url, options } = req;
+  await ensureBrowser({
+    ...(options ?? {}),
+    headless: false,
+    headed: true,
+  });
+
+  if (!page) throw new Error('page not initialized');
+
+  capturedTokens.length = 0;
+  await page.goto(url, {
+    waitUntil: 'domcontentloaded',
+    timeout: options?.timeout_ms ?? 30000,
+  });
+  interactiveRecording = true;
+
+  return { recording: true, url: page.url() };
+}
+
+async function cmdFinishInteractiveLogin() {
+  if (!interactiveRecording) {
+    throw new Error('no interactive recording in progress');
+  }
+  if (!page || !context) throw new Error('browser not initialized');
+
+  const storageState = await context.storageState();
+  const cookies = await context.cookies();
+  const localTokens = await scrapeStorageTokens(page);
+  const result = {
+    steps: [{ action: 'interactive_login' }],
+    storage_state: storageState,
+    cookies,
+    tokens: dedupeTokens([...capturedTokens, ...localTokens]),
+    final_url: page.url(),
+  };
+
+  interactiveRecording = false;
+  return result;
 }
 
 async function cmdLaunch(req) {

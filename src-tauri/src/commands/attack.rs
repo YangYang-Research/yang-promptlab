@@ -8,12 +8,14 @@
 //! responses.
 
 use aisec_attack::{
-    default_executor, AttackCategory, AttackContext, AttackTarget, FindingSeverity,
+    apply_descriptor_auth, default_executor, AttackCategory, AttackContext, AttackTarget,
+    FindingSeverity,
 };
 use aisec_judge::{deterministic_engine, JudgeRequest, JudgeVerdict, Severity as JudgeSeverity};
 use aisec_storage::{
     AttackResultRepository, CreateAttackResult, CreateFinding, CreateScan, Endpoint,
-    EndpointRepository, FindingRepository, Repositories, ScanRepository, UpdateScan,
+    EndpointRepository, FindingRepository, Repositories, ScanRepository, TargetRepository,
+    UpdateScan,
 };
 use tauri::State;
 use time::OffsetDateTime;
@@ -62,9 +64,15 @@ pub async fn run_category_on_endpoint(
     endpoint: &Endpoint,
     category: AttackCategory,
 ) -> CommandResult<CategoryRunResult> {
-    let target = AttackTarget::llm_api(endpoint.url.clone());
+    let mut target = AttackTarget::llm_api(endpoint.url.clone());
+    if let Some(tid) = &target_id {
+        if let Ok(stored_target) = repos.targets().get(tid).await {
+            target = apply_descriptor_auth(target, &stored_target.descriptor_json);
+        }
+    }
     let probe_id = format!("{}-{}", endpoint.id, category.as_str());
-    let ctx = AttackContext::new(scan_id, probe_id, target);
+    let mut ctx = AttackContext::new(scan_id, probe_id, target);
+    ctx.target_id = target_id.clone();
     let executor = default_executor();
 
     info!(

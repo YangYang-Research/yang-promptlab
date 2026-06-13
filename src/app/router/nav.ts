@@ -23,5 +23,7 @@ export const routeTitles: Record<string, string> = {
   ...Object.fromEntries(navItems.map((item) => [item.path, item.label])),
   "/scans/new": "New Scan",
   "/scans/:scanId": "Scan Details",
+  "/projects/:projectId": "Project Details",
+  "/targets/:targetId": "Target Details",
   "/discovery/:scanId": "Discovery Details",
 };

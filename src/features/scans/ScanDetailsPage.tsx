@@ -161,6 +161,7 @@ export function ScanDetailsPage() {
   if (!scanId) {
     return (
       <div className="page">
+        <PageHeader title="Scan Details" backTo="/scans" backOnly />
         <EmptyState title="Scan not found" description="Missing scan identifier." />
       </div>
     );
@@ -169,7 +170,7 @@ export function ScanDetailsPage() {
   if (loading && !scan && !detail) {
     return (
       <div className="page">
-        <PageHeader title="Scan Details" description="Loading scan configuration…" />
+        <PageHeader title="Scan Details" backTo="/scans" backOnly description="Loading scan configuration…" />
       </div>
     );
   }
@@ -177,6 +178,7 @@ export function ScanDetailsPage() {
   if (error && !scan && !detail) {
     return (
       <div className="page">
+        <PageHeader title="Scan Details" backTo="/scans" backOnly />
         <EmptyState title="Scan not found" description={error} />
       </div>
     );
@@ -188,13 +190,9 @@ export function ScanDetailsPage() {
   return (
     <div className="page">
       <PageHeader
+        backTo="/scans"
+        backOnly
         title={scan?.name ?? "Scan Details"}
-        description={project?.name ?? "Scan configuration and execution summary"}
-        actions={
-          <Link to="/scans">
-            <Button variant="secondary">Back to Scans</Button>
-          </Link>
-        }
       />
 
       {error && (
@@ -204,6 +202,11 @@ export function ScanDetailsPage() {
       )}
 
       <div className="detail-sections">
+        <DetailSection title="Scan">
+          <DetailRow label="Name" value={scan?.name ?? "—"} />
+          <DetailRow label="Scan ID" value={<code>{scanId}</code>} mono />
+        </DetailSection>
+
         <DetailSection title="Project">
           <DetailRow label="Project name" value={project?.name ?? "—"} />
         </DetailSection>
@@ -264,7 +267,6 @@ export function ScanDetailsPage() {
           {status && (status.status === "running" || status.status === "paused") && (
             <ProgressBar value={status.progress_percent} label="Scan progress" size="sm" />
           )}
-          <DetailRow label="Scan ID" value={<code>{scanId}</code>} mono />
         </DetailSection>
 
         <DetailSection title="Results">

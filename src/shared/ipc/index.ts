@@ -1,13 +1,17 @@
 export {
-  getAppInfo,
-  healthCheck,
   listProjects,
   createProject,
   getProject,
+  updateProject,
   deleteProject,
-  listTargets,
+  type ProjectDto,
+} from "./projects";
+export {
   getTarget,
   createTarget,
+  listTargets,
+  healthCheck,
+  getAppInfo,
   listScans,
   getScan,
   createScan,
@@ -29,7 +33,6 @@ export {
   stopScan,
   type AppInfoResponse,
   type HealthResponse,
-  type ProjectDto,
   type TargetDto,
   type ScanDto,
   type ScanDetailDto,

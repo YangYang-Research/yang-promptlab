@@ -1,27 +1,48 @@
 import { useCallback, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
   Button,
   Card,
+  ContentToolbar,
+  DataTable,
   EmptyState,
   PageHeader,
+  Pagination,
+  RefreshButton,
+  StatusBadge,
 } from "@/shared/components";
+import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
+import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
+import { useViewPreference } from "@/shared/hooks/useViewPreference";
 import { pauseScan, resumeScan, stopScan } from "@/shared/ipc";
 import { useToast } from "@/shared/notifications";
+import { formatDurationMs, formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import type { ScanRun } from "@/shared/types";
 
 import { ScanHistoryCard, ScanMonitorCard } from "./ScanMonitorCard";
 import { mergeScanStatus, useScanStatuses } from "./useScanStatuses";
 
-function isActiveScan(scan: ScanRun): boolean {
-  return scan.status === "running" || scan.status === "paused" || scan.status === "pending";
+function isAttackScan(scan: ScanRun): boolean {
+  return scan.name.startsWith("Scan (");
+}
+
+function scanDuration(scan: ScanRun): string {
+  if (scan.startedAt && scan.completedAt) {
+    return formatDurationMs(
+      new Date(scan.completedAt).getTime() - new Date(scan.startedAt).getTime(),
+    );
+  }
+  return "—";
 }
 
 export function ScansPage() {
+  const navigate = useNavigate();
   const { scans, targets, projects, findings, loading, error, actions } = useAppStore();
   const { notify } = useToast();
+  const [viewMode, setViewMode] = useViewPreference("scans");
+  const [pageSize, setPageSize] = usePageSizePreference("scans");
   const [controlPending, setControlPending] = useState<string | null>(null);
 
   const findingsByScan = useMemo(() => {
@@ -32,29 +53,37 @@ export function ScansPage() {
     return map;
   }, [findings]);
 
-  const sortedScans = useMemo(
-    () => [...scans].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+  const attackScans = useMemo(
+    () =>
+      scans
+        .filter(isAttackScan)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [scans],
   );
 
-  const activeScans = useMemo(
-    () => sortedScans.filter(isActiveScan),
-    [sortedScans],
+  const { page, setPage, pagination } = usePaginatedList(attackScans, pageSize);
+
+  const activeScanIds = useMemo(
+    () =>
+      pagination.items
+        .filter(
+          (scan) =>
+            scan.status === "running" || scan.status === "paused" || scan.status === "pending",
+        )
+        .map((scan) => scan.id),
+    [pagination.items],
   );
 
-  const historyScans = useMemo(
-    () => sortedScans.filter((scan) => !isActiveScan(scan)),
-    [sortedScans],
-  );
-
-  const activeScanIds = useMemo(() => activeScans.map((scan) => scan.id), [activeScans]);
   const liveStatuses = useScanStatuses(activeScanIds, activeScanIds.length > 0);
 
-  const targetName = (targetId: string | null) =>
-    targetId ? targets.find((t) => t.id === targetId)?.name ?? "—" : "—";
+  const targetLabel = (targetId: string | null) => {
+    if (!targetId) return "—";
+    const target = targets.find((item) => item.id === targetId);
+    return target?.url || target?.name || "—";
+  };
 
   const projectName = (projectId: string) =>
-    projects.find((p) => p.id === projectId)?.name ?? "—";
+    projects.find((project) => project.id === projectId)?.name ?? "—";
 
   const runControl = useCallback(
     async (scanId: string, action: "pause" | "resume" | "stop") => {
@@ -81,18 +110,58 @@ export function ScansPage() {
     [actions, notify],
   );
 
+  const tableColumns = [
+    {
+      key: "id",
+      header: "Scan ID",
+      render: (scan: ScanRun) => <code className="mono text-sm">{scan.id.slice(0, 8)}…</code>,
+    },
+    {
+      key: "project",
+      header: "Project",
+      render: (scan: ScanRun) => projectName(scan.projectId),
+    },
+    {
+      key: "target",
+      header: "Target",
+      render: (scan: ScanRun) => <span className="mono text-sm">{targetLabel(scan.targetId)}</span>,
+    },
+    {
+      key: "status",
+      header: "Status",
+      width: "110px",
+      render: (scan: ScanRun) => <StatusBadge status={scan.status} />,
+    },
+    {
+      key: "findings",
+      header: "Findings",
+      width: "90px",
+      render: (scan: ScanRun) => findingsByScan.get(scan.id) ?? 0,
+    },
+    {
+      key: "started",
+      header: "Started",
+      width: "160px",
+      render: (scan: ScanRun) => formatTimestamp(scan.startedAt ?? scan.createdAt),
+    },
+    {
+      key: "duration",
+      header: "Duration",
+      width: "100px",
+      render: (scan: ScanRun) => scanDuration(scan),
+    },
+  ];
+
   return (
     <div className="page">
       <PageHeader
         title="Scans"
         description="Monitor background security scans"
         actions={
-          <div className="discovery-controls">
-            <Button variant="secondary" onClick={() => void actions.refresh()} disabled={loading}>
-              Refresh
-            </Button>
-            <Link to="/scans/new" className="btn btn--primary">
-              New Scan
+          <div className="page-actions">
+            <RefreshButton loading={loading} onClick={() => void actions.refresh()} />
+            <Link to="/scans/new">
+              <Button variant="primary">New Scan</Button>
             </Link>
           </div>
         }
@@ -104,87 +173,87 @@ export function ScansPage() {
         </Card>
       )}
 
-      {sortedScans.length === 0 && !loading ? (
+      {attackScans.length === 0 && !loading ? (
         <EmptyState
           title="No scans yet"
           description="Configure a new scan in the wizard to start a background attack job."
           action={
-            <Link to="/scans/new" className="btn btn--primary">
-              New Scan
+            <Link to="/scans/new">
+              <Button variant="primary">New Scan</Button>
             </Link>
           }
         />
       ) : (
         <>
-          <section className="scan-monitor-section">
-            <div className="scan-monitor-section__header">
-              <h2 className="scan-monitor-section__title">Running scans</h2>
-              <span className="text-muted text-sm">{activeScans.length} active</span>
-            </div>
+          <ContentToolbar
+            pageSize={pageSize}
+            onPageSizeChange={setPageSize}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+          />
 
-            {activeScans.length === 0 ? (
-              <Card>
-                <p className="text-muted">No scans are running right now.</p>
-              </Card>
-            ) : (
-              <div className="scan-monitor-grid">
-                {activeScans.map((scan) => {
-                  const status = mergeScanStatus(
-                    scan.id,
-                    scan.status,
-                    liveStatuses.get(scan.id),
-                    findingsByScan.get(scan.id) ?? 0,
-                  );
+          {viewMode === "table" ? (
+            <Card padding="none">
+              <DataTable
+                columns={tableColumns}
+                rows={pagination.items}
+                keyField="id"
+                onRowClick={(scan) => navigate(`/scans/${scan.id}`)}
+                emptyMessage={loading ? "Loading scans…" : "No scans found"}
+              />
+            </Card>
+          ) : (
+            <div className="scan-monitor-grid">
+              {pagination.items.map((scan) => {
+                const live = liveStatuses.get(scan.id);
+                const status = mergeScanStatus(
+                  scan.id,
+                  scan.status,
+                  live,
+                  findingsByScan.get(scan.id) ?? 0,
+                );
+                const isActive =
+                  scan.status === "running" ||
+                  scan.status === "paused" ||
+                  scan.status === "pending";
 
-                  return (
-                    <Link
-                      key={scan.id}
-                      to={`/scans/${scan.id}`}
-                      className="scan-card-link"
-                      onClick={(event) => {
-                        if (controlPending === scan.id) event.preventDefault();
-                      }}
-                    >
-                      <Card className="scan-monitor-card-wrap">
+                return (
+                  <Link key={scan.id} to={`/scans/${scan.id}`} className="scan-card-link">
+                    <Card className="scan-monitor-card-wrap">
+                      {isActive ? (
                         <ScanMonitorCard
                           scan={scan}
                           status={status}
                           projectName={projectName(scan.projectId)}
-                          targetName={targetName(scan.targetId)}
+                          targetName={targetLabel(scan.targetId)}
                           controlPending={controlPending === scan.id}
                           onPause={() => void runControl(scan.id, "pause")}
                           onResume={() => void runControl(scan.id, "resume")}
                           onStop={() => void runControl(scan.id, "stop")}
                         />
-                      </Card>
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          {historyScans.length > 0 && (
-            <section className="scan-monitor-section">
-              <div className="scan-monitor-section__header">
-                <h2 className="scan-monitor-section__title">Recent scans</h2>
-              </div>
-              <div className="scan-monitor-grid">
-                {historyScans.map((scan) => (
-                  <Link key={scan.id} to={`/scans/${scan.id}`} className="scan-card-link">
-                    <Card className="scan-monitor-card-wrap">
-                      <ScanHistoryCard
-                        scan={scan}
-                        findingsCount={findingsByScan.get(scan.id) ?? 0}
-                        projectName={projectName(scan.projectId)}
-                        targetName={targetName(scan.targetId)}
-                      />
+                      ) : (
+                        <ScanHistoryCard
+                          scan={scan}
+                          findingsCount={findingsByScan.get(scan.id) ?? 0}
+                          projectName={projectName(scan.projectId)}
+                          targetName={targetLabel(scan.targetId)}
+                        />
+                      )}
                     </Card>
                   </Link>
-                ))}
-              </div>
-            </section>
+                );
+              })}
+            </div>
           )}
+
+          <Pagination
+            page={page}
+            totalItems={pagination.totalItems}
+            rangeStart={pagination.rangeStart}
+            rangeEnd={pagination.rangeEnd}
+            totalPages={pagination.totalPages}
+            onPageChange={setPage}
+          />
         </>
       )}
     </div>

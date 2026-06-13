@@ -3,6 +3,7 @@ import type { DiscoverySelection } from "./steps/DiscoveryStep";
 import type { TargetFormState } from "./targetDescriptor";
 import {
   createInitialTargetForm,
+  migrateTargetForm,
   targetFormFingerprint,
   targetFormMatchesDescriptor,
   validateTargetStep,
@@ -12,7 +13,7 @@ import type { DiscoveryStatsDto } from "@/shared/ipc";
 import type { Target } from "@/shared/types";
 
 const STORAGE_KEY = "aisec:scan-wizard";
-const STORAGE_VERSION = 1;
+const STORAGE_VERSION = 2;
 
 export type DiscoveryWizardState = {
   scanId: string | null;
@@ -136,7 +137,7 @@ export function loadWizardSession(lockedProjectId: string): ScanWizardSession {
       ...createInitialSession(lockedProjectId),
       ...parsed,
       selectedProjectId: lockedProjectId || parsed.selectedProjectId,
-      targetForm: { ...createInitialTargetForm(), ...parsed.targetForm },
+      targetForm: migrateTargetForm(parsed.targetForm ?? {}),
       discovery: { ...createInitialDiscoveryState(), ...parsed.discovery },
       attackPlanUi: { ...createInitialAttackPlanUi(), ...parsed.attackPlanUi },
     };

@@ -5,11 +5,16 @@ import {
   Badge,
   Button,
   Card,
+  ContentToolbar,
   DataTable,
   EmptyState,
   PageHeader,
+  Pagination,
+  RefreshButton,
   StatusBadge,
 } from "@/shared/components";
+import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
+import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
 import { useToast } from "@/shared/notifications";
 import type { Report } from "@/shared/types";
 
@@ -28,6 +33,8 @@ export function ReportsPage() {
   const { reports, scans, findings, projects, loading, error, actions } = useAppStore();
   const { notify } = useToast();
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [exportPageSize, setExportPageSize] = usePageSizePreference("reports-export");
+  const [archivePageSize, setArchivePageSize] = usePageSizePreference("reports-archive");
 
   const exportRows = useMemo(
     () =>
@@ -44,6 +51,18 @@ export function ReportsPage() {
     () => [...reports].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [reports],
   );
+
+  const {
+    page: exportPage,
+    setPage: setExportPage,
+    pagination: exportPagination,
+  } = usePaginatedList(exportRows, exportPageSize);
+
+  const {
+    page: archivePage,
+    setPage: setArchivePage,
+    pagination: archivePagination,
+  } = usePaginatedList(sortedReports, archivePageSize);
 
   async function runExport(
     key: string,
@@ -198,9 +217,7 @@ export function ReportsPage() {
         title="Reports"
         description="Read-only report exports generated from SQLite findings via aisec-report"
         actions={
-          <Button variant="secondary" onClick={() => void actions.refresh()} disabled={loading}>
-            Refresh
-          </Button>
+          <RefreshButton loading={loading} onClick={() => void actions.refresh()} />
         }
       />
 
@@ -212,10 +229,19 @@ export function ReportsPage() {
 
       <section className="reports-section">
         <div className="reports-section__header">
-          <h2 className="reports-section__title">Export reports</h2>
-          <span className="text-muted text-sm">
-            Generate HTML, PDF, or SARIF from scan findings
-          </span>
+          <div>
+            <h2 className="reports-section__title">Export reports</h2>
+            <span className="text-muted text-sm">
+              Generate HTML, PDF, or SARIF from scan findings
+            </span>
+          </div>
+          {exportRows.length > 0 && (
+            <ContentToolbar
+              pageSize={exportPageSize}
+              onPageSizeChange={setExportPageSize}
+              showViewMode={false}
+            />
+          )}
         </div>
 
         {exportRows.length === 0 && !loading ? (
@@ -229,18 +255,38 @@ export function ReportsPage() {
           <Card padding="none">
             <DataTable
               columns={exportColumns}
-              rows={exportRows}
+              rows={exportPagination.items}
               keyField="scanId"
               emptyMessage={loading ? "Loading scans…" : "No exportable scans"}
             />
           </Card>
         )}
+
+        {exportRows.length > 0 && (
+          <Pagination
+            page={exportPage}
+            totalItems={exportPagination.totalItems}
+            rangeStart={exportPagination.rangeStart}
+            rangeEnd={exportPagination.rangeEnd}
+            totalPages={exportPagination.totalPages}
+            onPageChange={setExportPage}
+          />
+        )}
       </section>
 
       <section className="reports-section">
         <div className="reports-section__header">
-          <h2 className="reports-section__title">Stored reports</h2>
-          <span className="text-muted text-sm">{sortedReports.length} in SQLite</span>
+          <div>
+            <h2 className="reports-section__title">Stored reports</h2>
+            <span className="text-muted text-sm">{sortedReports.length} in SQLite</span>
+          </div>
+          {sortedReports.length > 0 && (
+            <ContentToolbar
+              pageSize={archivePageSize}
+              onPageSizeChange={setArchivePageSize}
+              showViewMode={false}
+            />
+          )}
         </div>
 
         {sortedReports.length === 0 && !loading ? (
@@ -251,11 +297,22 @@ export function ReportsPage() {
           <Card padding="none">
             <DataTable
               columns={archiveColumns}
-              rows={sortedReports}
+              rows={archivePagination.items}
               keyField="id"
               emptyMessage={loading ? "Loading reports…" : "No stored reports"}
             />
           </Card>
+        )}
+
+        {sortedReports.length > 0 && (
+          <Pagination
+            page={archivePage}
+            totalItems={archivePagination.totalItems}
+            rangeStart={archivePagination.rangeStart}
+            rangeEnd={archivePagination.rangeEnd}
+            totalPages={archivePagination.totalPages}
+            onPageChange={setArchivePage}
+          />
         )}
       </section>
     </div>

@@ -1,28 +1,32 @@
 use std::path::{Path, PathBuf};
 
+use aisec_auth::AuthEngineConfig;
 use aisec_core::LogGuard;
 use aisec_storage::{Database, Repositories};
 
 use crate::jobs::ScanJobManager;
 
 /// Shared application state managed by Tauri and accessible from commands.
-///
-/// Holds the open [`Database`] (SQLite connection pool with migrations applied),
-/// the application data directory (used to resolve report output), and keeps the
-/// logging guard alive for the lifetime of the process.
 pub struct AppState {
     db: Database,
     data_dir: PathBuf,
     jobs: ScanJobManager,
+    auth_engine_config: AuthEngineConfig,
     _log_guard: LogGuard,
 }
 
 impl AppState {
-    pub fn new(db: Database, data_dir: PathBuf, log_guard: LogGuard) -> Self {
+    pub fn new(
+        db: Database,
+        data_dir: PathBuf,
+        log_guard: LogGuard,
+        auth_engine_config: AuthEngineConfig,
+    ) -> Self {
         Self {
             db,
             data_dir,
             jobs: ScanJobManager::default(),
+            auth_engine_config,
             _log_guard: log_guard,
         }
     }
@@ -54,5 +58,10 @@ impl AppState {
     /// Directory where generated reports are written.
     pub fn reports_dir(&self) -> PathBuf {
         self.data_dir.join("reports")
+    }
+
+    /// Auth engine configuration (bundled Playwright paths resolved at startup).
+    pub fn auth_engine_config(&self) -> &AuthEngineConfig {
+        &self.auth_engine_config
     }
 }

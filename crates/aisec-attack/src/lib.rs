@@ -14,6 +14,7 @@ pub mod payload;
 pub mod registry;
 #[cfg(feature = "storage")]
 pub mod scanner;
+pub mod target_auth;
 pub mod traits;
 pub mod transport;
 pub mod types;
@@ -29,6 +30,7 @@ pub use registry::AttackRegistry;
 #[cfg(feature = "storage")]
 pub use scanner::{PromptInjectionScanner, ScanContext, ScanSummary};
 pub use traits::Attack;
+pub use target_auth::{apply_descriptor_auth, apply_descriptor_auth_value};
 pub use transport::{HttpTransport, MockTransport, TargetTransport, TransportRequest, TransportResponse};
 pub use types::*;
 

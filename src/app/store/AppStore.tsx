@@ -14,6 +14,7 @@ import {
   createScan as createScanCmd,
   createTarget as createTargetCmd,
   deleteProject as deleteProjectCmd,
+  updateProject as updateProjectCmd,
   generateReport as generateReportCmd,
   listEndpoints,
   listFindingsAll,
@@ -222,6 +223,18 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
         }
       },
       deleteProject: (id) => runMutation("deleteProject", () => deleteProjectCmd(id)),
+      updateProject: async (id, name, description) => {
+        try {
+          const dto = await updateProjectCmd(id, name, description);
+          await refresh();
+          return mapProjects([dto], [], [])[0];
+        } catch (error) {
+          const appError = toAppError(error);
+          log.error("mutation failed: updateProject", { error: appError });
+          dispatch({ type: "SET_ERROR", error: appError.message });
+          throw appError;
+        }
+      },
       createTarget: async (projectId, name, targetType, descriptor) => {
         try {
           const dto = await createTargetCmd(projectId, name, targetType, descriptor);

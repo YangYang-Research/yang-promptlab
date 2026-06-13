@@ -68,6 +68,7 @@ export type AppAction =
 export type AppActions = {
   refresh: () => Promise<void>;
   createProject: (name: string, description?: string | null) => Promise<Project>;
+  updateProject: (id: string, name?: string | null, description?: string | null) => Promise<Project>;
   deleteProject: (id: string) => Promise<void>;
   createTarget: (
     projectId: string,

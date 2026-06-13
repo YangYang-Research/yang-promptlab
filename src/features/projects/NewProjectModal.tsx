@@ -11,7 +11,7 @@ type NewProjectModalProps = {
 };
 
 export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
-  const { actions, dispatch } = useAppStore();
+  const { actions } = useAppStore();
   const { notify } = useToast();
   const navigate = useNavigate();
   const [name, setName] = useState("");
@@ -44,7 +44,6 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
     try {
       const project = await actions.createProject(trimmed, description.trim() || null);
       notify(`Project "${trimmed}" created`, "success");
-      dispatch({ type: "SET_SELECTED_PROJECT", projectId: project.id });
       reset();
       onClose();
       navigate(`/scans/new?projectId=${encodeURIComponent(project.id)}`);

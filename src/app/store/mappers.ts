@@ -66,12 +66,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function extractUrl(descriptor: unknown): string {
-  const obj = asRecord(descriptor);
-  if (obj && typeof obj.url === "string") return obj.url;
-  if (obj && typeof obj.base_url === "string") return obj.base_url as string;
-  return "";
-}
+import { extractAuthType, extractTargetUrl } from "@/features/scans/scanDetailsHelpers";
 
 function extractConfidence(evidence: unknown): number {
   const obj = asRecord(evidence);
@@ -119,12 +114,13 @@ export function mapTargets(targets: TargetDto[]): Target[] {
     id: t.id,
     projectId: t.project_id,
     name: t.name,
-    url: extractUrl(t.descriptor),
+    url: extractTargetUrl(t.descriptor),
     type: coerceTargetType(t.target_type),
     status: "pending",
     lastScanAt: null,
     fingerprint: null,
     tags: [],
+    authType: extractAuthType(t.descriptor),
   }));
 }
 

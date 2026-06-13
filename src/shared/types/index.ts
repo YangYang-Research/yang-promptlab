@@ -43,6 +43,7 @@ export type Target = {
   lastScanAt: string | null;
   fingerprint: string | null;
   tags: string[];
+  authType: string;
 };
 
 export type DiscoveryJob = {
