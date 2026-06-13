@@ -1,15 +1,18 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use reqwest::header::{CONTENT_LENGTH, RANGE};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::fs::{self, OpenOptions};
+use tokio::sync::Mutex;
 use tracing::{debug, info, instrument};
 
 use crate::download::HuggingFaceClient;
+use crate::download::coordinator::DownloadControl;
 use crate::error::{ModelError, ModelResult};
-use crate::types::DownloadStatus;
+use crate::types::{DownloadProgress, DownloadStatus};
 
 /// Options controlling download behavior.
 #[derive(Debug, Clone)]
@@ -38,6 +41,7 @@ struct ResumeState {
 }
 
 /// Resumable HTTP download manager.
+#[derive(Clone)]
 pub struct DownloadManager {
     hf: HuggingFaceClient,
     options: DownloadOptions,
@@ -198,6 +202,148 @@ impl DownloadManager {
     ) -> ModelResult<crate::types::DownloadProgress> {
         let url = self.hf.resolve_url(repo, filename, revision);
         self.download(&url, destination).await
+    }
+
+    /// Download from HuggingFace with pause/cancel controls and live progress updates.
+    pub async fn download_huggingface_controlled(
+        &self,
+        repo: &str,
+        filename: &str,
+        destination: impl AsRef<Path>,
+        revision: Option<&str>,
+        control: &DownloadControl,
+        progress: Arc<Mutex<DownloadProgress>>,
+    ) -> ModelResult<DownloadProgress> {
+        let url = self.hf.resolve_url(repo, filename, revision);
+        self.download_controlled(&url, destination, control, progress)
+            .await
+    }
+
+    /// Download with pause/cancel controls and live progress updates.
+    pub async fn download_controlled(
+        &self,
+        url: &str,
+        destination: impl AsRef<Path>,
+        control: &DownloadControl,
+        progress_slot: Arc<Mutex<DownloadProgress>>,
+    ) -> ModelResult<DownloadProgress> {
+        let destination = destination.as_ref();
+        let existing = Self::load_state(destination).await?;
+        let mut downloaded = if destination.exists() {
+            fs::metadata(destination).await.map(|m| m.len()).unwrap_or(0)
+        } else {
+            0
+        };
+
+        if let Some(state) = &existing {
+            if state.url == url {
+                downloaded = downloaded.max(state.downloaded_bytes);
+            }
+        }
+
+        let resumed = downloaded > 0;
+        if resumed {
+            info!(downloaded, "resuming download");
+        }
+
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .read(true)
+            .open(destination)
+            .await?;
+
+        if downloaded > 0 {
+            file.seek(std::io::SeekFrom::Start(downloaded)).await?;
+        }
+
+        let timeout = std::time::Duration::from_millis(self.options.timeout_ms);
+        let mut request = self.hf.client().get(url).timeout(timeout);
+        if downloaded > 0 {
+            request = request.header(RANGE, format!("bytes={downloaded}-"));
+        }
+
+        {
+            let mut slot = progress_slot.lock().await;
+            slot.url = url.to_string();
+            slot.destination = destination.to_path_buf();
+            slot.downloaded_bytes = downloaded;
+            slot.resumed = resumed;
+            slot.status = DownloadStatus::Downloading;
+            slot.updated_at = OffsetDateTime::now_utc();
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| ModelError::download(e.to_string()))?;
+
+        if !response.status().is_success() && response.status().as_u16() != 206 {
+            return Err(ModelError::download(format!(
+                "HTTP {} for {}",
+                response.status(),
+                url
+            )));
+        }
+
+        let total_bytes = parse_content_length(&response, downloaded);
+        {
+            let mut slot = progress_slot.lock().await;
+            slot.total_bytes = total_bytes;
+        }
+
+        let mut stream = response.bytes_stream();
+        use futures_util::StreamExt;
+
+        while let Some(chunk) = stream
+            .next()
+            .await
+            .transpose()
+            .map_err(|e| ModelError::download(e.to_string()))?
+        {
+            control.wait_if_paused().await?;
+            control.check_cancelled()?;
+
+            file.write_all(&chunk).await?;
+            downloaded += chunk.len() as u64;
+
+            {
+                let mut slot = progress_slot.lock().await;
+                slot.downloaded_bytes = downloaded;
+                slot.total_bytes = total_bytes;
+                slot.status = DownloadStatus::Downloading;
+                slot.updated_at = OffsetDateTime::now_utc();
+            }
+
+            Self::save_state(&ResumeState {
+                url: url.to_string(),
+                destination: destination.to_path_buf(),
+                downloaded_bytes: downloaded,
+                total_bytes,
+                updated_at: OffsetDateTime::now_utc(),
+            })
+            .await?;
+        }
+
+        file.flush().await?;
+        Self::clear_state(destination).await?;
+
+        let done = DownloadProgress {
+            model_id: progress_slot.lock().await.model_id.clone(),
+            status: DownloadStatus::Completed,
+            url: url.to_string(),
+            destination: destination.to_path_buf(),
+            downloaded_bytes: downloaded,
+            total_bytes,
+            resumed,
+            updated_at: OffsetDateTime::now_utc(),
+        };
+        *progress_slot.lock().await = done.clone();
+        Ok(done)
     }
 }
 

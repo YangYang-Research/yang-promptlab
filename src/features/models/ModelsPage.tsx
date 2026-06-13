@@ -22,14 +22,24 @@ import {
 } from "@/shared/ipc/judge";
 import {
   browseModels,
+  cancelModelDownload,
+  getModelDownloadStatus,
+  getModelsRegistryInfo,
   getModelsVaultPath,
+  importModelGguf,
+  importModelZip,
   installModel,
   listModels,
+  pauseModelDownload,
   removeModel,
+  resumeModelDownload,
+  startModelDownload,
   testModelInference,
   verifyModel,
   type ModelCatalogEntryDto,
+  type ModelDownloadProgressDto,
   type ModelEntryDto,
+  type ModelRegistryInfoDto,
 } from "@/shared/ipc/models";
 
 export function ModelsPage() {
@@ -37,7 +47,14 @@ export function ModelsPage() {
   const [config, setConfig] = useState<JudgeConfigDto>(DEFAULT_JUDGE_CONFIG);
   const [installed, setInstalled] = useState<ModelEntryDto[]>([]);
   const [catalog, setCatalog] = useState<ModelCatalogEntryDto[]>([]);
+  const [registryInfo, setRegistryInfo] = useState<ModelRegistryInfoDto | null>(null);
   const [vaultPath, setVaultPath] = useState<string>("");
+  const [importName, setImportName] = useState("");
+  const [importPath, setImportPath] = useState("");
+  const [importBusy, setImportBusy] = useState<"gguf" | "zip" | null>(null);
+  const [downloadProgress, setDownloadProgress] =
+    useState<ModelDownloadProgressDto | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<"connectivity" | "model" | null>(null);
@@ -49,10 +66,26 @@ export function ModelsPage() {
   const [saved, setSaved] = useState(false);
 
   const refreshModels = useCallback(async () => {
-    const [models, entries] = await Promise.all([listModels(), browseModels()]);
+    const [models, entries, info] = await Promise.all([
+      listModels(),
+      browseModels(),
+      getModelsRegistryInfo(),
+    ]);
     setInstalled(models);
     setCatalog(entries);
+    setRegistryInfo(info);
   }, []);
+
+  const pollDownloadStatus = useCallback(async () => {
+    const status = await getModelDownloadStatus();
+    if (status.installed) {
+      setDownloadProgress(null);
+      setDownloadingId(null);
+      await refreshModels();
+      return;
+    }
+    setDownloadProgress(status.progress);
+  }, [refreshModels]);
 
   useEffect(() => {
     void import("@/shared/ipc/client").then(({ healthCheck }) =>
@@ -79,6 +112,16 @@ export function ModelsPage() {
       .catch((err) => setError(toAppError(err).message))
       .finally(() => setLoading(false));
   }, [backendConnected, refreshModels]);
+
+  useEffect(() => {
+    if (!backendConnected || !downloadProgress) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void pollDownloadStatus().catch((err) => setError(toAppError(err).message));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [backendConnected, downloadProgress, pollDownloadStatus]);
 
   function patch(patchValue: Partial<JudgeConfigDto>) {
     setSaved(false);
@@ -131,16 +174,46 @@ export function ModelsPage() {
     setError(null);
     setInstallingId(entry.id);
     try {
-      await installModel({
-        catalogId: entry.id,
-        ollamaBaseUrl:
-          entry.provider === "ollama" ? config.localBaseUrl : null,
-      });
-      await refreshModels();
+      if (entry.provider === "huggingface") {
+        const progress = await startModelDownload({ catalogId: entry.id });
+        setDownloadingId(entry.id);
+        setDownloadProgress(progress);
+      } else {
+        await installModel({
+          catalogId: entry.id,
+          ollamaBaseUrl:
+            entry.provider === "ollama" ? config.localBaseUrl : null,
+        });
+        await refreshModels();
+      }
     } catch (err) {
       setError(toAppError(err).message);
     } finally {
       setInstallingId(null);
+    }
+  }
+
+  async function handleImport(kind: "gguf" | "zip") {
+    if (!importName.trim() || !importPath.trim()) {
+      setError("Import name and file path are required");
+      return;
+    }
+    setError(null);
+    setImportBusy(kind);
+    try {
+      const request = { name: importName.trim(), path: importPath.trim() };
+      if (kind === "gguf") {
+        await importModelGguf(request);
+      } else {
+        await importModelZip(request);
+      }
+      setImportName("");
+      setImportPath("");
+      await refreshModels();
+    } catch (err) {
+      setError(toAppError(err).message);
+    } finally {
+      setImportBusy(null);
     }
   }
 
@@ -239,31 +312,154 @@ export function ModelsPage() {
         </p>
       )}
 
+      {registryInfo && (
+        <p className="text-muted text-sm">
+          Registry: {registryInfo.entryCount} entries
+          {registryInfo.remoteMerged ? " · online merge active" : " · offline"}
+          {registryInfo.sourcePath ? (
+            <>
+              {" "}
+              · <span className="mono">{registryInfo.sourcePath}</span>
+            </>
+          ) : null}
+        </p>
+      )}
+
       <div className="models-grid">
         <Card className="model-card model-card--wide">
-          <h3 className="card__title">Browse Models</h3>
+          <h3 className="card__title">Import Local Model</h3>
           <p className="text-muted text-sm">
-            Curated Ollama tags and HuggingFace GGUF models. Ollama installs call{" "}
-            <code>ollama pull</code>; HuggingFace downloads into the vault.
+            Register a local GGUF file or extract one from a ZIP package into the vault.
           </p>
+          <div className="wizard-auth-fields">
+            <div className="settings-field">
+              <label htmlFor="importName">Display name</label>
+              <input
+                id="importName"
+                className="input"
+                value={importName}
+                onChange={(e) => setImportName(e.target.value)}
+                disabled={!backendConnected || importBusy !== null}
+              />
+            </div>
+            <div className="settings-field">
+              <label htmlFor="importPath">File path</label>
+              <input
+                id="importPath"
+                className="input mono"
+                value={importPath}
+                onChange={(e) => setImportPath(e.target.value)}
+                placeholder="/path/to/model.gguf or package.zip"
+                disabled={!backendConnected || importBusy !== null}
+              />
+            </div>
+          </div>
+          <div className="model-card__actions">
+            <Button
+              variant="secondary"
+              disabled={!backendConnected || importBusy !== null}
+              onClick={() => void handleImport("gguf")}
+            >
+              {importBusy === "gguf" ? "Importing…" : "Import GGUF"}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={!backendConnected || importBusy !== null}
+              onClick={() => void handleImport("zip")}
+            >
+              {importBusy === "zip" ? "Importing…" : "Import ZIP"}
+            </Button>
+          </div>
+        </Card>
+
+        <Card className="model-card model-card--wide">
+          <h3 className="card__title">Browse Registry</h3>
+          <p className="text-muted text-sm">
+            Built-in catalog from <code>resources/models.json</code>. Ollama entries call{" "}
+            <code>ollama pull</code>; HuggingFace entries download into the vault with
+            pause/resume/cancel.
+          </p>
+          {downloadProgress && (
+            <div className="model-download-status">
+              <p className="text-sm">
+                Downloading {downloadProgress.catalogId}
+                {downloadProgress.percent != null
+                  ? ` · ${downloadProgress.percent.toFixed(1)}%`
+                  : ` · ${(downloadProgress.downloadedBytes / (1024 * 1024)).toFixed(1)} MB`}
+                {" · "}
+                {downloadProgress.status}
+              </p>
+              <div className="model-card__actions">
+                <Button
+                  variant="ghost"
+                  disabled={!backendConnected}
+                  onClick={() =>
+                    void pauseModelDownload()
+                      .then(setDownloadProgress)
+                      .catch((err) => setError(toAppError(err).message))
+                  }
+                >
+                  Pause
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={!backendConnected}
+                  onClick={() =>
+                    void resumeModelDownload()
+                      .then(setDownloadProgress)
+                      .catch((err) => setError(toAppError(err).message))
+                  }
+                >
+                  Resume
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={!backendConnected}
+                  onClick={() =>
+                    void cancelModelDownload()
+                      .then(() => {
+                        setDownloadProgress(null);
+                        setDownloadingId(null);
+                      })
+                      .catch((err) => setError(toAppError(err).message))
+                  }
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="model-catalog">
             {catalog.map((entry) => (
               <div key={entry.id} className="model-catalog__row">
                 <div>
-                  <strong>{entry.name}</strong>
+                  <strong>
+                    {entry.name}
+                    {entry.recommended ? " · recommended" : ""}
+                  </strong>
                   <p className="text-muted text-sm">{entry.description}</p>
                   <p className="text-muted text-sm">
-                    {entry.provider}
+                    {entry.provider} · {entry.purpose}
                     {entry.quant ? ` · ${entry.quant}` : ""}
                     {entry.sizeGb != null ? ` · ${entry.sizeGb.toFixed(1)} GB` : ""}
                   </p>
                 </div>
                 <Button
                   variant="secondary"
-                  disabled={!backendConnected || installingId !== null}
+                  disabled={
+                    !backendConnected ||
+                    installingId !== null ||
+                    (downloadingId !== null && downloadingId !== entry.id)
+                  }
                   onClick={() => void handleInstall(entry)}
                 >
-                  {installingId === entry.id ? "Installing…" : "Install"}
+                  {downloadingId === entry.id
+                    ? "Downloading…"
+                    : installingId === entry.id
+                      ? "Installing…"
+                      : entry.provider === "huggingface"
+                        ? "Download"
+                        : "Install"}
                 </Button>
               </div>
             ))}

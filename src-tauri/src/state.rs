@@ -1,8 +1,11 @@
 use std::path::{Path, PathBuf};
 
+use std::sync::Arc;
+
 use aisec_auth::AuthEngineConfig;
 use aisec_core::LogGuard;
-use aisec_models::LocalModelManager;
+use aisec_models::{BuiltinCatalogMeta, LocalModelManager};
+use aisec_runtime::{RuntimeSupervisor, SharedModelProvider};
 use aisec_storage::{Database, Repositories};
 use tauri::async_runtime::Mutex as AsyncMutex;
 
@@ -14,7 +17,10 @@ pub struct AppState {
     data_dir: PathBuf,
     jobs: ScanJobManager,
     auth_engine_config: AuthEngineConfig,
-    model_manager: AsyncMutex<LocalModelManager>,
+    model_manager: Arc<AsyncMutex<LocalModelManager>>,
+    model_provider: SharedModelProvider,
+    model_catalog_meta: BuiltinCatalogMeta,
+    runtime_supervisor: Arc<AsyncMutex<RuntimeSupervisor>>,
     _log_guard: LogGuard,
 }
 
@@ -24,16 +30,20 @@ impl AppState {
         data_dir: PathBuf,
         log_guard: LogGuard,
         auth_engine_config: AuthEngineConfig,
+        runtime_supervisor: RuntimeSupervisor,
+        model_manager: Arc<AsyncMutex<LocalModelManager>>,
+        model_provider: SharedModelProvider,
+        model_catalog_meta: BuiltinCatalogMeta,
     ) -> Self {
-        let model_manager = crate::judge_config::open_model_manager(&data_dir)
-            .expect("failed to initialize local model manager");
-
         Self {
             db,
             data_dir,
             jobs: ScanJobManager::default(),
             auth_engine_config,
-            model_manager: AsyncMutex::new(model_manager),
+            model_manager,
+            model_provider,
+            model_catalog_meta,
+            runtime_supervisor: Arc::new(AsyncMutex::new(runtime_supervisor)),
             _log_guard: log_guard,
         }
     }
@@ -49,10 +59,6 @@ impl AppState {
     }
 
     /// Repository manager bound to the shared connection pool.
-    ///
-    /// `Repositories` is the repository manager: it exposes per-entity
-    /// repositories (`projects()`, `targets()`, `scans()`, `findings()`,
-    /// `reports()`, …) that share the single pooled connection.
     pub fn repositories(&self) -> Repositories {
         self.db.repositories()
     }
@@ -72,9 +78,27 @@ impl AppState {
         self.data_dir.join("models")
     }
 
+    pub fn model_catalog_meta(&self) -> &BuiltinCatalogMeta {
+        &self.model_catalog_meta
+    }
+
     /// Local model manager (vault registry, downloads, inference).
-    pub fn model_manager(&self) -> &AsyncMutex<LocalModelManager> {
+    pub fn model_manager(&self) -> &Arc<AsyncMutex<LocalModelManager>> {
         &self.model_manager
+    }
+
+    pub fn model_provider(&self) -> &SharedModelProvider {
+        &self.model_provider
+    }
+
+    /// Embedded Ollama runtime supervisor.
+    pub fn runtime_supervisor(&self) -> &Arc<AsyncMutex<RuntimeSupervisor>> {
+        &self.runtime_supervisor
+    }
+
+    /// Default Ollama base URL for model install when the client omits one.
+    pub async fn ollama_base_url(&self) -> String {
+        self.runtime_supervisor.lock().await.base_url().to_string()
     }
 
     /// Auth engine configuration (bundled Playwright paths resolved at startup).

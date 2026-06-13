@@ -3,18 +3,21 @@
 //! GGUF model registry, HuggingFace downloads with resume, SHA256 verification,
 //! hardware/GPU detection, and llama.cpp runtime integration.
 
+pub mod builtin_catalog;
 pub mod catalog;
 pub mod download;
 pub mod error;
 pub mod hardware;
+pub mod import_pack;
 pub mod manager;
 pub mod registry;
 pub mod runtime;
 pub mod types;
 pub mod verify;
 
-pub use catalog::{curated_catalog, find_catalog_entry};
-pub use download::{DownloadManager, DownloadOptions, HuggingFaceClient, huggingface_url};
+pub use builtin_catalog::{BuiltinCatalog, BuiltinCatalogMeta, BuiltinRegistryEntry, entry_to_catalog};
+pub use catalog::find_catalog_entry;
+pub use download::{DownloadControl, DownloadCoordinator, DownloadManager, DownloadOptions, HuggingFaceClient, huggingface_url};
 pub use error::{ModelError, ModelResult};
 pub use hardware::detect_hardware;
 pub use manager::LocalModelManager;

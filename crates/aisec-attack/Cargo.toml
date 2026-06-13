@@ -13,6 +13,7 @@ storage = ["dep:aisec-storage"]
 
 [dependencies]
 aisec-core = { workspace = true }
+aisec-harness = { workspace = true }
 aisec-payload = { workspace = true }
 aisec-storage = { workspace = true, optional = true }
 async-trait = { workspace = true }
@@ -24,7 +25,6 @@ time = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
-reqwest = { workspace = true }
 base64 = "0.22"
 
 [dev-dependencies]

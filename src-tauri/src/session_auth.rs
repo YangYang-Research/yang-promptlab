@@ -2,16 +2,18 @@
 
 use std::path::Path;
 
-use aisec_attack::{AttackExecutor, AttackRegistry};
+use aisec_attack::{AttackExecutor, AttackRegistry, HarnessTransport};
 use aisec_auth::{
-    AuthEngineConfig, AuthSessionManager, SessionAuthContext, SessionStore, SessionValidationStatus,
+    auth_sessions_dir, AuthEngineConfig, AuthSessionManager, SessionAuthContext, SessionStore,
+    SessionValidationStatus,
 };
 use aisec_discovery::SessionAuthMaterial;
-use aisec_harness::{HarnessAttackTransport, HarnessFactory, HarnessKind, TargetDescriptor};
+use aisec_harness::{HarnessFactory, HarnessKind, TargetDescriptor};
+
 use aisec_storage::Database;
 
 use crate::error::{CommandError, CommandResult};
-use crate::harness_runtime::{build_harness_attack_runtime_parts, HarnessTargetTransport};
+use crate::harness_runtime::build_harness_attack_runtime_parts;
 use crate::state::AppState;
 
 pub async fn auth_session_manager_from_parts(
@@ -19,7 +21,7 @@ pub async fn auth_session_manager_from_parts(
     data_dir: &Path,
     auth_config: AuthEngineConfig,
 ) -> Result<AuthSessionManager, CommandError> {
-    let vault_dir = data_dir.join("auth-vault");
+    let vault_dir = auth_sessions_dir(data_dir);
     let store = SessionStore::new(db, vault_dir)
         .await
         .map_err(CommandError::from)?;
@@ -108,7 +110,7 @@ pub async fn resolve_discovery_auth(
 }
 
 pub struct AttackRuntime {
-    pub transport: HarnessTargetTransport,
+    pub transport: HarnessTransport,
     pub session: Option<SessionAuthContext>,
     pub harness_kind: HarnessKind,
 }
@@ -168,17 +170,17 @@ pub fn fallback_attack_runtime() -> AttackRuntime {
         ..TargetDescriptor::default()
     };
     AttackRuntime {
-        transport: HarnessTargetTransport::new(HarnessAttackTransport::new(
+        transport: HarnessTransport::from_parts(
             factory,
             descriptor,
-            "https://localhost".into(),
-        )),
+            "https://localhost".to_string(),
+        ),
         session: None,
         harness_kind: HarnessKind::Http,
     }
 }
 
-pub fn attack_executor(transport: HarnessTargetTransport) -> AttackExecutor<HarnessTargetTransport> {
+pub fn attack_executor(transport: HarnessTransport) -> AttackExecutor<HarnessTransport> {
     AttackExecutor::new(AttackRegistry::with_builtins(), transport)
 }
 

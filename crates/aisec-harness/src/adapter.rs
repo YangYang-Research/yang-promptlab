@@ -1,7 +1,5 @@
 use std::time::Instant;
 
-use async_trait::async_trait;
-
 use crate::factory::HarnessFactory;
 use crate::models::{AttackRequest, AuthMaterial, HttpMethod, TargetDescriptor};
 
@@ -33,6 +31,14 @@ impl HarnessAttackTransport {
 
     pub fn factory(&self) -> &HarnessFactory {
         &self.factory
+    }
+
+    pub fn descriptor(&self) -> &TargetDescriptor {
+        &self.descriptor
+    }
+
+    pub fn endpoint_url(&self) -> &str {
+        &self.endpoint_url
     }
 
     pub async fn send_payload(
@@ -79,47 +85,6 @@ pub struct TransportResponse {
     pub body: String,
     pub duration_ms: u64,
     pub normalized: crate::models::NormalizedResponse,
-}
-
-/// Adapter implementing attack-layer transport when `aisec-attack` is linked.
-#[cfg(feature = "attack-bridge")]
-pub mod attack_bridge {
-    use super::*;
-    use aisec_attack::{AttackResult, TargetTransport, TransportRequest, TransportResponse as AttackTransportResponse};
-
-    pub struct AttackTransportBridge {
-        inner: HarnessAttackTransport,
-    }
-
-    impl AttackTransportBridge {
-        pub fn new(inner: HarnessAttackTransport) -> Self {
-            Self { inner }
-        }
-    }
-
-    #[async_trait]
-    impl TargetTransport for AttackTransportBridge {
-        async fn send(&self, request: TransportRequest) -> AttackResult<AttackTransportResponse> {
-            let response = self
-                .inner
-                .send_payload(
-                    &request.body.clone().unwrap_or_default(),
-                    Some(&request.method),
-                    request.headers,
-                    None,
-                    request.timeout_ms,
-                )
-                .await
-                .map_err(|err| aisec_attack::AttackError::transport(err))?;
-
-            Ok(AttackTransportResponse {
-                status: response.status,
-                headers: response.headers,
-                body: response.body,
-                duration_ms: response.duration_ms,
-            })
-        }
-    }
 }
 
 pub fn descriptor_from_parts(

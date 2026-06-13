@@ -4,8 +4,10 @@ use time::OffsetDateTime;
 use tracing::{info, instrument};
 use uuid::Uuid;
 
-use crate::catalog::{curated_catalog, find_catalog_entry};
-use crate::download::{DownloadManager, DownloadOptions};
+use crate::builtin_catalog::BuiltinCatalog;
+use crate::catalog::find_catalog_entry;
+use crate::download::{DownloadCoordinator, DownloadManager, DownloadOptions};
+use crate::import_pack::{extract_gguf_from_zip, validate_gguf_path};
 use crate::error::{ModelError, ModelResult};
 use crate::hardware::detect_hardware;
 use crate::registry::ModelRegistry;
@@ -14,10 +16,11 @@ use crate::runtime::{
     LlamaCppConfig, LlamaCppRuntime, OllamaConfig, OllamaRuntime,
 };
 use crate::types::{
-    ChatMessage, ChatRequest, DownloadStatus, HardwareProfile, HuggingFaceDownloadRequest,
+    ChatMessage, ChatRequest, DownloadProgress, DownloadStatus, HardwareProfile, HuggingFaceDownloadRequest,
     InferenceRequest, ModelCatalogEntry, ModelEntry, ModelFormat, ModelProvider, ModelSource,
     VerificationResult,
 };
+use crate::builtin_catalog::BuiltinCatalogMeta;
 use crate::verify::VerificationEngine;
 
 /// Top-level local model manager orchestrating registry, downloads, verification, and runtime.
@@ -25,6 +28,9 @@ pub struct LocalModelManager {
     vault_path: PathBuf,
     registry: ModelRegistry,
     downloader: DownloadManager,
+    download_coordinator: DownloadCoordinator,
+    catalog: Vec<ModelCatalogEntry>,
+    catalog_meta: BuiltinCatalogMeta,
     hardware: HardwareProfile,
     runtime: LlamaCppRuntime,
 }
@@ -43,9 +49,18 @@ impl LocalModelManager {
             vault_path,
             registry,
             downloader: DownloadManager::with_defaults(),
+            download_coordinator: DownloadCoordinator::new(DownloadManager::with_defaults()),
+            catalog: Vec::new(),
+            catalog_meta: BuiltinCatalogMeta::default(),
             hardware,
             runtime: LlamaCppRuntime::new(llama_config),
         })
+    }
+
+    pub fn with_catalog(mut self, catalog: BuiltinCatalog) -> Self {
+        self.catalog_meta = catalog.meta().clone();
+        self.catalog = catalog.entries().to_vec();
+        self
     }
 
     pub fn with_download_options(
@@ -53,7 +68,8 @@ impl LocalModelManager {
         download_options: DownloadOptions,
     ) -> ModelResult<Self> {
         let mut mgr = Self::new(vault_path)?;
-        mgr.downloader = DownloadManager::new(download_options);
+        mgr.downloader = DownloadManager::new(download_options.clone());
+        mgr.download_coordinator = DownloadCoordinator::new(DownloadManager::new(download_options));
         Ok(mgr)
     }
 
@@ -91,17 +107,45 @@ impl LocalModelManager {
         self.registry.save_to_vault(&self.vault_path)
     }
 
-    /// Curated catalog for browse UI.
-    pub fn browse_catalog(&self) -> Vec<ModelCatalogEntry> {
-        curated_catalog()
+    pub fn catalog_meta(&self) -> &BuiltinCatalogMeta {
+        &self.catalog_meta
+    }
+
+    pub fn download_coordinator(&self) -> &DownloadCoordinator {
+        &self.download_coordinator
+    }
+
+    /// Built-in registry catalog for browse UI.
+    pub fn browse_catalog(&self) -> &[ModelCatalogEntry] {
+        &self.catalog
+    }
+
+    pub fn find_catalog_entry(&self, catalog_id: &str) -> Option<&ModelCatalogEntry> {
+        find_catalog_entry(&self.catalog, catalog_id)
     }
 
     /// Import an existing local GGUF file into the vault registry.
     pub fn import_local(&mut self, name: impl Into<String>, path: impl AsRef<Path>) -> ModelResult<ModelEntry> {
         let path = path.as_ref();
+        validate_gguf_path(path)?;
         let entry = self.registry.register_local(name, path)?;
         self.persist()?;
         info!(id = %entry.id, path = %path.display(), "imported local model");
+        Ok(entry)
+    }
+
+    pub fn import_zip_package(
+        &mut self,
+        name: impl Into<String>,
+        zip_path: impl AsRef<Path>,
+    ) -> ModelResult<ModelEntry> {
+        let zip_path = zip_path.as_ref();
+        let model_id = Uuid::new_v4().to_string();
+        let model_dir = ModelRegistry::model_dir(&self.vault_path, &model_id);
+        let extracted = extract_gguf_from_zip(zip_path, &model_dir)?;
+        let entry = self.registry.register_local(name, &extracted)?;
+        self.persist()?;
+        info!(id = %entry.id, zip = %zip_path.display(), "imported zip model package");
         Ok(entry)
     }
 
@@ -112,8 +156,10 @@ impl LocalModelManager {
         catalog_id: &str,
         ollama_base_url: Option<String>,
     ) -> ModelResult<ModelEntry> {
-        let catalog = find_catalog_entry(catalog_id)
-            .ok_or_else(|| ModelError::not_found(format!("catalog entry: {catalog_id}")))?;
+        let catalog = self
+            .find_catalog_entry(catalog_id)
+            .ok_or_else(|| ModelError::not_found(format!("catalog entry: {catalog_id}")))?
+            .clone();
 
         match catalog.provider {
             ModelProvider::Ollama => {
@@ -158,7 +204,112 @@ impl LocalModelManager {
         }
     }
 
-    /// Download a GGUF model from HuggingFace, verify, and register.
+    /// Start a background HuggingFace download for a registry catalog entry.
+    pub async fn start_catalog_download(
+        &mut self,
+        catalog_id: &str,
+    ) -> ModelResult<DownloadProgress> {
+        let catalog = self
+            .find_catalog_entry(catalog_id)
+            .ok_or_else(|| ModelError::not_found(format!("catalog entry: {catalog_id}")))?
+            .clone();
+
+        if catalog.provider != ModelProvider::HuggingFace {
+            return Err(ModelError::invalid(
+                "background download supports HuggingFace registry entries only",
+            ));
+        }
+
+        let repo = catalog
+            .repo
+            .ok_or_else(|| ModelError::invalid("catalog entry missing repo"))?;
+        let filename = catalog
+            .filename
+            .ok_or_else(|| ModelError::invalid("catalog entry missing filename"))?;
+
+        let model_id = Uuid::new_v4().to_string();
+        let model_dir = ModelRegistry::model_dir(&self.vault_path, &model_id);
+        tokio::fs::create_dir_all(&model_dir).await.map_err(ModelError::Io)?;
+        let destination = model_dir.join(&filename);
+
+        self.download_coordinator
+            .start_huggingface(
+                catalog_id,
+                HuggingFaceDownloadRequest {
+                    name: catalog.name,
+                    repo,
+                    filename,
+                    revision: Some(catalog.version.clone()),
+                    expected_sha256: None,
+                    expected_size_bytes: catalog.size_bytes,
+                },
+                destination,
+            )
+            .await
+    }
+
+    pub async fn download_status(&self) -> Option<DownloadProgress> {
+        self.download_coordinator.status().await
+    }
+
+    pub async fn pause_download(&self) -> ModelResult<DownloadProgress> {
+        self.download_coordinator.pause().await
+    }
+
+    pub async fn resume_download(&self) -> ModelResult<DownloadProgress> {
+        self.download_coordinator.resume().await
+    }
+
+    pub async fn cancel_download(&self) -> ModelResult<()> {
+        self.download_coordinator.cancel().await
+    }
+
+    /// Finalize a completed background download into the vault registry.
+    pub async fn finalize_active_download(&mut self) -> ModelResult<Option<ModelEntry>> {
+        let Some((catalog_id, destination, progress)) =
+            self.download_coordinator.take_if_completed().await
+        else {
+            return Ok(None);
+        };
+
+        let catalog = self
+            .find_catalog_entry(&catalog_id)
+            .ok_or_else(|| ModelError::not_found(format!("catalog entry: {catalog_id}")))?
+            .clone();
+
+        let verification = self.verify_file(&destination, None).await?;
+        if !verification.valid {
+            return Err(ModelError::verification("post-download checksum mismatch"));
+        }
+
+        let source = ModelSource::HuggingFace {
+            repo: catalog.repo.clone().unwrap_or_default(),
+            filename: catalog.filename.clone().unwrap_or_default(),
+            revision: Some(catalog.version.clone()),
+        };
+        let provider = infer_provider(&source);
+        let now = OffsetDateTime::now_utc();
+        let entry = ModelEntry {
+            id: Uuid::new_v4().to_string(),
+            name: catalog.name,
+            format: ModelFormat::Gguf,
+            provider,
+            version: infer_version(&source),
+            capabilities: infer_capabilities(provider),
+            source,
+            file_path: destination,
+            size_bytes: Some(verification.size_bytes),
+            checksum_sha256: Some(verification.actual_sha256),
+            verified: true,
+            created_at: now,
+            updated_at: now,
+            metadata: serde_json::json!({ "download": progress }),
+        };
+
+        self.registry.register_entry(entry.clone())?;
+        self.persist()?;
+        Ok(Some(entry))
+    }
     #[instrument(skip(self, request))]
     pub async fn download_huggingface(
         &mut self,
@@ -398,9 +549,14 @@ mod tests {
     }
 
     #[test]
-    fn browse_returns_catalog() {
+    fn browse_uses_loaded_catalog() {
         let dir = tempfile::tempdir().unwrap();
-        let mgr = LocalModelManager::new(dir.path().join("vault")).unwrap();
+        let catalog_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/models.json");
+        let catalog = BuiltinCatalog::load_from_path(&catalog_path).unwrap();
+        let mgr = LocalModelManager::new(dir.path().join("vault"))
+            .unwrap()
+            .with_catalog(catalog);
         assert!(!mgr.browse_catalog().is_empty());
     }
 }

@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use aisec_models::runtime::{InferenceRuntime, LlamaCppConfig, LlamaCppRuntime, OllamaConfig, OllamaRuntime};
+use aisec_models::runtime::InferenceRuntime;
+use aisec_runtime::ModelProviderRuntime;
 use tokio::sync::Mutex;
 
 use crate::config::{
@@ -13,21 +14,28 @@ use crate::providers::local::LocalLlmBackend;
 use crate::providers::remote::RemoteLlmBackend;
 use crate::providers::LlmBackend;
 use crate::roles::ModelRolePool;
+use crate::runtime_context::JudgeRuntimeContext;
 use crate::types::{JudgeMode, JudgeRequest};
 
 /// Build a hybrid judge engine from persisted provider configuration.
-pub async fn build_judge_engine(config: &JudgeProviderConfig) -> JudgeResult<JudgeEngine> {
+pub async fn build_judge_engine(
+    config: &JudgeProviderConfig,
+    runtime: Option<JudgeRuntimeContext>,
+) -> JudgeResult<JudgeEngine> {
     let engine_config = config.to_engine_config();
-    let pool = build_role_pool(config).await?;
+    let pool = build_role_pool(config, runtime).await?;
     Ok(JudgeEngine::new(engine_config, pool))
 }
 
-async fn build_role_pool(config: &JudgeProviderConfig) -> JudgeResult<ModelRolePool> {
+async fn build_role_pool(
+    config: &JudgeProviderConfig,
+    runtime: Option<JudgeRuntimeContext>,
+) -> JudgeResult<ModelRolePool> {
     let mut pool = ModelRolePool::new();
     match config.mode {
         JudgeMode::Deterministic => {}
         JudgeMode::LocalLlm | JudgeMode::Consensus => {
-            let backend = build_local_backend(&config.local).await?;
+            let backend = build_local_backend(config, runtime.as_ref()).await?;
             attach_backend_to_pool(&mut pool, backend);
         }
         JudgeMode::RemoteLlm => {
@@ -89,39 +97,36 @@ impl InferenceRuntime for BackendRuntime {
 }
 
 async fn build_local_backend(
-    settings: &crate::config::LocalProviderSettings,
+    config: &JudgeProviderConfig,
+    runtime: Option<&JudgeRuntimeContext>,
 ) -> JudgeResult<Arc<dyn LlmBackend>> {
-    match settings.provider {
-        LocalProvider::Ollama => {
-            let runtime = OllamaRuntime::new(OllamaConfig {
-                base_url: settings.base_url.clone(),
-                model: settings.model.clone(),
-            });
-            Ok(Arc::new(LocalLlmBackend::new(
-                "ollama",
-                settings.model.clone(),
-                Arc::new(Mutex::new(runtime)),
-            )))
-        }
-        LocalProvider::LlamaCpp => {
-            let path = settings.model_path.clone().ok_or_else(|| {
-                JudgeError::config("llama.cpp requires model_path to a GGUF file")
-            })?;
-            let mut runtime = LlamaCppRuntime::new(LlamaCppConfig {
-                binary_path: settings.llama_binary.clone().into(),
-                port: settings.llama_port,
-                ..LlamaCppConfig::default()
-            });
-            runtime.load_model(&path).await.map_err(|e| {
-                JudgeError::config(format!("failed to load GGUF model: {e}"))
-            })?;
-            Ok(Arc::new(LocalLlmBackend::new(
-                "llama_cpp",
-                settings.model.clone(),
-                Arc::new(Mutex::new(runtime)),
-            )))
-        }
+    let ctx = runtime.ok_or_else(|| {
+        JudgeError::config("local judge requires runtime context (ModelProvider bridge)")
+    })?;
+
+    let model_id = config
+        .local
+        .vault_model_id
+        .clone()
+        .unwrap_or_else(|| ctx.active_model_id.clone());
+
+    if model_id.trim().is_empty() {
+        return Err(JudgeError::config(
+            "select an active vault model on the Models page before using local judge modes",
+        ));
     }
+
+    let provider_runtime = ModelProviderRuntime::new(ctx.model_provider.clone(), model_id.clone());
+    let label = match config.local.provider {
+        LocalProvider::Ollama => "runtime/ollama",
+        LocalProvider::LlamaCpp => "runtime/llama_cpp",
+    };
+
+    Ok(Arc::new(LocalLlmBackend::new(
+        label,
+        config.local.model.clone(),
+        Arc::new(Mutex::new(provider_runtime)),
+    )))
 }
 
 fn build_remote_backend(
@@ -135,7 +140,10 @@ fn build_remote_backend(
 }
 
 /// Validate connectivity for the configured judge provider.
-pub async fn test_connectivity(config: &JudgeProviderConfig) -> JudgeResult<JudgeConnectivityResult> {
+pub async fn test_connectivity(
+    config: &JudgeProviderConfig,
+    runtime: Option<JudgeRuntimeContext>,
+) -> JudgeResult<JudgeConnectivityResult> {
     let started = Instant::now();
     match config.mode {
         JudgeMode::Deterministic => Ok(JudgeConnectivityResult {
@@ -147,7 +155,7 @@ pub async fn test_connectivity(config: &JudgeProviderConfig) -> JudgeResult<Judg
             sample_response: None,
         }),
         JudgeMode::LocalLlm | JudgeMode::Consensus => {
-            let backend = build_local_backend(&config.local).await?;
+            let backend = build_local_backend(config, runtime.as_ref()).await?;
             let ok = backend.health_check().await.unwrap_or(false);
             Ok(JudgeConnectivityResult {
                 ok,
@@ -155,9 +163,9 @@ pub async fn test_connectivity(config: &JudgeProviderConfig) -> JudgeResult<Judg
                 model: backend.model_label().to_string(),
                 latency_ms: started.elapsed().as_millis() as u64,
                 message: if ok {
-                    "Local provider reachable".into()
+                    "Runtime model provider reachable".into()
                 } else {
-                    "Local provider unreachable".into()
+                    "Runtime model provider unreachable".into()
                 },
                 sample_response: None,
             })
@@ -195,9 +203,12 @@ pub async fn test_connectivity(config: &JudgeProviderConfig) -> JudgeResult<Judg
 }
 
 /// Run a short judge smoke test against sample probe input.
-pub async fn test_model(config: &JudgeProviderConfig) -> JudgeResult<JudgeConnectivityResult> {
+pub async fn test_model(
+    config: &JudgeProviderConfig,
+    runtime: Option<JudgeRuntimeContext>,
+) -> JudgeResult<JudgeConnectivityResult> {
     let started = Instant::now();
-    let engine = build_judge_engine(config).await?;
+    let engine = build_judge_engine(config, runtime).await?;
     let verdict = engine
         .judge(JudgeRequest {
             probe_id: "connectivity-test".into(),
@@ -218,6 +229,6 @@ pub async fn test_model(config: &JudgeProviderConfig) -> JudgeResult<JudgeConnec
         },
         latency_ms: started.elapsed().as_millis() as u64,
         message: verdict.summary.clone(),
-        sample_response: Some(verdict.reasoning),
+        sample_response: Some(verdict.to_json_string()?),
     })
 }

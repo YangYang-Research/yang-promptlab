@@ -43,6 +43,7 @@ impl<'a, T: TargetTransport + ?Sized> PayloadRunner<'a, T> {
             headers: response.headers,
             body: response.body,
             duration_ms: response.duration_ms.max(started.elapsed().as_millis() as u64),
+            normalized: response.normalized,
         })
     }
 }

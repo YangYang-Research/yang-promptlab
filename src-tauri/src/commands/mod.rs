@@ -13,6 +13,7 @@ pub mod domain;
 pub mod judge;
 pub mod models;
 pub mod projects;
+pub mod runtime;
 pub mod scan;
 
 #[derive(Debug, Serialize)]

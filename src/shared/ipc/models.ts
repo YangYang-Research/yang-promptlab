@@ -27,6 +27,8 @@ export type ModelCatalogEntryDto = {
   provider: string;
   version: string;
   description: string;
+  purpose: string;
+  recommended: boolean;
   sizeBytes: number | null;
   sizeGb: number | null;
   quant: string | null;
@@ -34,9 +36,41 @@ export type ModelCatalogEntryDto = {
   ollamaTag: string | null;
 };
 
+export type ModelRegistryInfoDto = {
+  entryCount: number;
+  remoteMerged: boolean;
+  remoteUrl: string | null;
+  sourcePath: string | null;
+};
+
 export type ModelInstallRequest = {
   catalogId: string;
   ollamaBaseUrl?: string | null;
+};
+
+export type ModelImportRequest = {
+  name: string;
+  path: string;
+};
+
+export type ModelDownloadRequest = {
+  catalogId: string;
+};
+
+export type ModelDownloadProgressDto = {
+  catalogId: string;
+  status: string;
+  downloadedBytes: number;
+  totalBytes: number | null;
+  percent: number | null;
+  resumed: boolean;
+  destination: string;
+};
+
+export type ModelDownloadStatusDto = {
+  active: boolean;
+  progress: ModelDownloadProgressDto | null;
+  installed: ModelEntryDto | null;
 };
 
 export type ModelInferenceTestResult = {
@@ -50,12 +84,44 @@ export function listModels(): Promise<ModelEntryDto[]> {
   return invokeCommand<ModelEntryDto[]>("models_list");
 }
 
+export function getModelsRegistryInfo(): Promise<ModelRegistryInfoDto> {
+  return invokeCommand<ModelRegistryInfoDto>("models_registry_info");
+}
+
 export function browseModels(): Promise<ModelCatalogEntryDto[]> {
   return invokeCommand<ModelCatalogEntryDto[]>("models_browse");
 }
 
 export function installModel(request: ModelInstallRequest): Promise<ModelEntryDto> {
   return invokeCommand<ModelEntryDto>("models_install", { request });
+}
+
+export function importModelGguf(request: ModelImportRequest): Promise<ModelEntryDto> {
+  return invokeCommand<ModelEntryDto>("models_import_gguf", { request });
+}
+
+export function importModelZip(request: ModelImportRequest): Promise<ModelEntryDto> {
+  return invokeCommand<ModelEntryDto>("models_import_zip", { request });
+}
+
+export function startModelDownload(request: ModelDownloadRequest): Promise<ModelDownloadProgressDto> {
+  return invokeCommand<ModelDownloadProgressDto>("models_download_start", { request });
+}
+
+export function getModelDownloadStatus(): Promise<ModelDownloadStatusDto> {
+  return invokeCommand<ModelDownloadStatusDto>("models_download_status");
+}
+
+export function pauseModelDownload(): Promise<ModelDownloadProgressDto> {
+  return invokeCommand<ModelDownloadProgressDto>("models_download_pause");
+}
+
+export function resumeModelDownload(): Promise<ModelDownloadProgressDto> {
+  return invokeCommand<ModelDownloadProgressDto>("models_download_resume");
+}
+
+export function cancelModelDownload(): Promise<void> {
+  return invokeCommand<void>("models_download_cancel");
 }
 
 export function removeModel(modelId: string): Promise<ModelEntryDto> {

@@ -1,7 +1,8 @@
 //! Interactive Playwright session recording for target authentication.
 
 use aisec_auth::{
-    AuthConfig, AuthEngine, AuthMethod, AuthProfile, RecordLoginOptions, SessionStore,
+    auth_sessions_dir, AuthConfig, AuthEngine, AuthMethod, AuthProfile, RecordLoginOptions,
+    SessionStore,
 };
 use aisec_core::AisecError;
 use serde::Serialize;
@@ -28,7 +29,7 @@ impl AuthRecordingState {
 
     async fn ensure_engine(&mut self, state: &AppState) -> Result<(), CommandError> {
         if self.engine.is_none() {
-            let vault_dir = state.data_dir().join("auth-vault");
+            let vault_dir = auth_sessions_dir(state.data_dir());
             let config = state.auth_engine_config().clone().with_vault_dir(vault_dir);
             let store = SessionStore::new(state.database().clone(), config.vault_dir.clone())
                 .await
@@ -80,6 +81,7 @@ fn build_auth_config(
                 .get("password")
                 .and_then(|v| v.as_str())
                 .map(str::to_string),
+            password_credential_id: None,
             username_selector: String::new(),
             password_selector: String::new(),
             submit_selector: String::new(),

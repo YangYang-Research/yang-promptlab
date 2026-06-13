@@ -51,7 +51,10 @@ pub enum AuthConfig {
     UsernamePassword {
         login_url: String,
         username: Option<String>,
+        #[serde(default, skip_serializing)]
         password: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        password_credential_id: Option<String>,
         username_selector: String,
         password_selector: String,
         submit_selector: String,
@@ -73,12 +76,18 @@ pub enum AuthConfig {
         idp_entity_id: Option<String>,
     },
     Jwt {
+        #[serde(default, skip_serializing)]
         token: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token_credential_id: Option<String>,
         header_name: Option<String>,
         prefix: Option<String>,
     },
     ApiKey {
+        #[serde(default, skip_serializing)]
         key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key_credential_id: Option<String>,
         header_name: String,
         prefix: Option<String>,
     },

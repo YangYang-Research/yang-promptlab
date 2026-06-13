@@ -10,7 +10,6 @@ members = [
     "crates/aisec-fingerprint",
     "crates/aisec-plugin-host",
     "crates/aisec-auth",
-    "crates/aisec-browser",
     "crates/aisec-discovery",
     "crates/aisec-harness",
     "crates/aisec-runtime",
@@ -35,7 +34,6 @@ aisec-report = { path = "crates/aisec-report" }
 aisec-fingerprint = { path = "crates/aisec-fingerprint" }
 aisec-plugin-host = { path = "crates/aisec-plugin-host" }
 aisec-auth = { path = "crates/aisec-auth" }
-aisec-browser = { path = "crates/aisec-browser" }
 aisec-harness = { path = "crates/aisec-harness" }
 aisec-runtime = { path = "crates/aisec-runtime" }
 aisec-core = { path = "crates/aisec-core" }
@@ -57,3 +55,6 @@ scraper = "0.23"
 regex = "1"
 url = "2"
 dashmap = "6"
+keyring = "3.6"
+aes-gcm = "0.10"
+rand = "0.8"

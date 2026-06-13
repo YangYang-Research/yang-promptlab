@@ -1,18 +1,18 @@
 //! Attack execution commands.
 //!
 //! `attack_run_prompt_injection` executes the real `aisec-attack` prompt
-//! injection attack (HTTP transport + built-in evaluation) against a previously
+//! injection attack (harness transport + built-in evaluation) against a previously
 //! discovered endpoint, persists every attempt as an `attack_result` and every
 //! successful attempt as a `finding`, and returns the run summary. No mocked
-//! findings: results come straight from the engine evaluating real HTTP
-//! responses.
+//! findings: results come straight from the engine evaluating real target
+//! responses normalized by the harness layer.
 
 use aisec_attack::{
     apply_descriptor_auth, AttackCategory, AttackContext, AttackTarget, FindingSeverity,
 };
-use aisec_auth::AuthSessionManager;
-use aisec_harness::NormalizedResponse;
+use aisec_auth::{resolve_descriptor_for_runtime, AuthSessionManager, SecretStore};
 use aisec_judge::{JudgeVerdict, Severity as JudgeSeverity};
+use aisec_runtime::{RuntimeSupervisor, SharedModelProvider};
 use aisec_storage::{
     AttackResultRepository, CreateAttackResult, CreateFinding, CreateScan, Endpoint,
     EndpointRepository, FindingRepository, Repositories, ScanRepository, TargetRepository,
@@ -68,11 +68,17 @@ pub async fn run_category_on_endpoint(
     category: AttackCategory,
     runtime: AttackRuntime,
     data_dir: &std::path::Path,
+    model_manager: &aisec_models::LocalModelManager,
+    model_provider: SharedModelProvider,
+    runtime_supervisor: &mut RuntimeSupervisor,
 ) -> CommandResult<CategoryRunResult> {
     let mut target = AttackTarget::llm_api(endpoint.url.clone());
     if let Some(tid) = &target_id {
         if let Ok(stored_target) = repos.targets().get(tid).await {
-            target = apply_descriptor_auth(target, &stored_target.descriptor_json);
+            let secrets = SecretStore::new().map_err(CommandError::from)?;
+            let resolved = resolve_descriptor_for_runtime(&stored_target.descriptor_json, &secrets)
+                .map_err(CommandError::from)?;
+            target = apply_descriptor_auth(target, &resolved);
         }
     }
 
@@ -104,26 +110,27 @@ pub async fn run_category_on_endpoint(
         .await
         .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
 
-    let judge = build_configured_judge_engine(data_dir).await?;
+    let judge = build_configured_judge_engine(
+        data_dir,
+        model_manager,
+        model_provider,
+        runtime_supervisor,
+    )
+    .await?;
     let category_name = category.as_str();
     let mut successes = 0u64;
     let mut created_findings: Vec<FindingDto> = Vec::new();
 
     for attempt in &result.attempts {
         let eval = &attempt.evaluation;
-
-        let normalized = NormalizedResponse::from_http(
-            attempt.response.status,
-            attempt.response.body.clone(),
-            runtime.harness_kind.as_str(),
-        );
+        let normalized = &attempt.response.normalized;
 
         let verdict: JudgeVerdict = judge
             .judge_normalized(
                 attempt.payload_id.clone(),
                 category_name,
                 attempt.mutated_content.clone(),
-                &normalized,
+                normalized,
             )
             .await
             .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
@@ -142,6 +149,7 @@ pub async fn run_category_on_endpoint(
                     "status": attempt.response.status,
                     "body": attempt.response.body,
                     "duration_ms": attempt.response.duration_ms,
+                    "normalized": normalized,
                 })),
                 evaluated_json: Some(serde_json::json!({
                     "attack_evaluation": {
@@ -259,6 +267,8 @@ pub async fn attack_run_prompt_injection_op(
         .await;
 
     let category = AttackCategory::PromptInjection;
+    let manager = state.model_manager().lock().await;
+    let mut supervisor = state.runtime_supervisor().lock().await;
     let run = match run_category_on_endpoint(
         &repos,
         &scan.id,
@@ -268,6 +278,9 @@ pub async fn attack_run_prompt_injection_op(
         category,
         runtime,
         state.data_dir(),
+        &manager,
+        state.model_provider().clone(),
+        &mut supervisor,
     )
     .await
     {

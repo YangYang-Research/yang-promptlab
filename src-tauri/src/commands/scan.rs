@@ -6,10 +6,13 @@ use std::time::Duration;
 
 use aisec_auth::AuthEngineConfig;
 use aisec_attack::AttackCategory;
+use aisec_models::LocalModelManager;
+use aisec_runtime::{RuntimeSupervisor, SharedModelProvider};
 use aisec_storage::{
     CreateScan, EndpointRepository, FindingRepository, ProjectRepository, Repositories,
     ScanRepository, TargetRepository, UpdateScan,
 };
+use tauri::async_runtime::Mutex as AsyncMutex;
 use tauri::State;
 use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
@@ -102,6 +105,9 @@ async fn run_scan_job(
     progress: Arc<Mutex<ScanProgress>>,
     data_dir: std::path::PathBuf,
     auth_config: AuthEngineConfig,
+    model_manager: Arc<AsyncMutex<LocalModelManager>>,
+    model_provider: SharedModelProvider,
+    runtime_supervisor: Arc<AsyncMutex<RuntimeSupervisor>>,
 ) {
     let repos = db.repositories();
     let default_runtime = fallback_attack_runtime();
@@ -167,6 +173,8 @@ async fn run_scan_job(
                 }
             }
 
+            let manager = model_manager.lock().await;
+            let mut supervisor = runtime_supervisor.lock().await;
             match run_category_on_endpoint(
                 &repos,
                 &scan_id,
@@ -176,6 +184,9 @@ async fn run_scan_job(
                 *category,
                 attack_runtime.clone(),
                 &data_dir,
+                &manager,
+                model_provider.clone(),
+                &mut supervisor,
             )
             .await
             {
@@ -339,6 +350,9 @@ pub async fn scan_start_op(
     let scan_id = scan.id.clone();
     let data_dir = state.data_dir().to_path_buf();
     let auth_config = state.auth_engine_config().clone();
+    let model_manager = Arc::clone(state.model_manager());
+    let model_provider = state.model_provider().clone();
+    let runtime_supervisor = Arc::clone(state.runtime_supervisor());
 
     tauri::async_runtime::spawn(async move {
         run_scan_job(
@@ -354,6 +368,9 @@ pub async fn scan_start_op(
             progress,
             data_dir,
             auth_config,
+            model_manager,
+            model_provider,
+            runtime_supervisor,
         )
         .await;
     });

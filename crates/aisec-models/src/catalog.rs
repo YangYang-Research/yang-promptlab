@@ -1,117 +1,41 @@
-use crate::types::{ModelCapabilities, ModelCatalogEntry, ModelProvider};
+//! Curated model catalog — backed by `resources/models.json` at runtime.
 
-/// Curated models available for browse/install.
-pub fn curated_catalog() -> Vec<ModelCatalogEntry> {
-    vec![
-        ModelCatalogEntry {
-            id: "hf-llama3-8b-q4".into(),
-            name: "Llama 3 8B Instruct Q4_K_M".into(),
-            provider: ModelProvider::HuggingFace,
-            version: "Meta-Llama-3-8B-Instruct".into(),
-            description: "Meta Llama 3 8B instruct, Q4_K_M GGUF".into(),
-            size_bytes: Some(4_920_000_000),
-            quant: Some("Q4_K_M".into()),
-            capabilities: ModelCapabilities::gguf(),
-            repo: Some("QuantFactory/Meta-Llama-3-8B-Instruct-GGUF".into()),
-            filename: Some("Meta-Llama-3-8B-Instruct.Q4_K_M.gguf".into()),
-            ollama_tag: None,
-        },
-        ModelCatalogEntry {
-            id: "hf-qwen25-7b-q4".into(),
-            name: "Qwen 2.5 7B Instruct Q4_K_M".into(),
-            provider: ModelProvider::HuggingFace,
-            version: "Qwen2.5-7B-Instruct".into(),
-            description: "Alibaba Qwen 2.5 7B instruct, Q4_K_M GGUF".into(),
-            size_bytes: Some(4_680_000_000),
-            quant: Some("Q4_K_M".into()),
-            capabilities: ModelCapabilities::gguf(),
-            repo: Some("Qwen/Qwen2.5-7B-Instruct-GGUF".into()),
-            filename: Some("qwen2.5-7b-instruct-q4_k_m.gguf".into()),
-            ollama_tag: None,
-        },
-        ModelCatalogEntry {
-            id: "hf-deepseek-r1-7b-q4".into(),
-            name: "DeepSeek R1 Distill Qwen 7B Q4_K_M".into(),
-            provider: ModelProvider::HuggingFace,
-            version: "DeepSeek-R1-Distill-Qwen-7B".into(),
-            description: "DeepSeek R1 distilled reasoning model, Q4_K_M GGUF".into(),
-            size_bytes: Some(4_700_000_000),
-            quant: Some("Q4_K_M".into()),
-            capabilities: ModelCapabilities::gguf(),
-            repo: Some("bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF".into()),
-            filename: Some("DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf".into()),
-            ollama_tag: None,
-        },
-        ModelCatalogEntry {
-            id: "hf-gemma2-9b-q4".into(),
-            name: "Gemma 2 9B Instruct Q4_K_M".into(),
-            provider: ModelProvider::HuggingFace,
-            version: "gemma-2-9b-it".into(),
-            description: "Google Gemma 2 9B instruct, Q4_K_M GGUF".into(),
-            size_bytes: Some(5_700_000_000),
-            quant: Some("Q4_K_M".into()),
-            capabilities: ModelCapabilities::gguf(),
-            repo: Some("bartowski/gemma-2-9b-it-GGUF".into()),
-            filename: Some("gemma-2-9b-it-Q4_K_M.gguf".into()),
-            ollama_tag: None,
-        },
-        ModelCatalogEntry {
-            id: "ollama-llama3".into(),
-            name: "Llama 3 (Ollama)".into(),
-            provider: ModelProvider::Ollama,
-            version: "llama3".into(),
-            description: "Meta Llama 3 via Ollama pull".into(),
-            size_bytes: None,
-            quant: None,
-            capabilities: ModelCapabilities::ollama(),
-            repo: None,
-            filename: None,
-            ollama_tag: Some("llama3".into()),
-        },
-        ModelCatalogEntry {
-            id: "ollama-qwen25".into(),
-            name: "Qwen 2.5 (Ollama)".into(),
-            provider: ModelProvider::Ollama,
-            version: "qwen2.5".into(),
-            description: "Alibaba Qwen 2.5 via Ollama pull".into(),
-            size_bytes: None,
-            quant: None,
-            capabilities: ModelCapabilities::ollama(),
-            repo: None,
-            filename: None,
-            ollama_tag: Some("qwen2.5".into()),
-        },
-        ModelCatalogEntry {
-            id: "ollama-deepseek-r1".into(),
-            name: "DeepSeek R1 (Ollama)".into(),
-            provider: ModelProvider::Ollama,
-            version: "deepseek-r1".into(),
-            description: "DeepSeek R1 via Ollama pull".into(),
-            size_bytes: None,
-            quant: None,
-            capabilities: ModelCapabilities::ollama(),
-            repo: None,
-            filename: None,
-            ollama_tag: Some("deepseek-r1".into()),
-        },
-        ModelCatalogEntry {
-            id: "ollama-gemma2".into(),
-            name: "Gemma 2 (Ollama)".into(),
-            provider: ModelProvider::Ollama,
-            version: "gemma2".into(),
-            description: "Google Gemma 2 via Ollama pull".into(),
-            size_bytes: None,
-            quant: None,
-            capabilities: ModelCapabilities::ollama(),
-            repo: None,
-            filename: None,
-            ollama_tag: Some("gemma2".into()),
-        },
-    ]
+use crate::builtin_catalog::BuiltinCatalog;
+use crate::types::ModelCatalogEntry;
+
+/// Lookup a catalog entry by id from the provided catalog slice.
+pub fn find_catalog_entry<'a>(
+    catalog: &'a [ModelCatalogEntry],
+    catalog_id: &str,
+) -> Option<&'a ModelCatalogEntry> {
+    catalog.iter().find(|entry| entry.id == catalog_id)
 }
 
-pub fn find_catalog_entry(catalog_id: &str) -> Option<ModelCatalogEntry> {
-    curated_catalog()
-        .into_iter()
-        .find(|entry| entry.id == catalog_id)
+/// Deprecated hardcoded catalog — returns empty; use [`BuiltinCatalog`] instead.
+#[deprecated(note = "use BuiltinCatalog loaded from resources/models.json")]
+pub fn curated_catalog() -> Vec<ModelCatalogEntry> {
+    Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::builtin_catalog::{BuiltinRegistryEntry, entry_to_catalog};
+
+    #[test]
+    fn find_in_catalog_slice() {
+        let entry = entry_to_catalog(&BuiltinRegistryEntry {
+            id: "test".into(),
+            name: "Test".into(),
+            purpose: "general".into(),
+            recommended: false,
+            provider: "ollama".into(),
+            repo: None,
+            file: None,
+            ollama_tag: Some("llama3".into()),
+            sha256: None,
+        });
+        let catalog = vec![entry];
+        assert!(find_catalog_entry(&catalog, "test").is_some());
+    }
 }

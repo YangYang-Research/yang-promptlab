@@ -20,6 +20,7 @@ required-features = ["llama"]
 aisec-core = { workspace = true }
 aisec-harness = { workspace = true }
 aisec-models = { workspace = true }
+aisec-runtime = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 regex = { workspace = true }

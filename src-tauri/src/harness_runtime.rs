@@ -2,64 +2,18 @@
 
 use std::path::Path;
 
-use aisec_attack::{AttackResult, TargetTransport, TransportRequest, TransportResponse};
-use aisec_auth::{AuthSessionManager, SessionAuthContext, SessionValidationStatus};
-use aisec_harness::{
-    adapter::descriptor_from_parts, AuthMaterial, HarnessAttackTransport, HarnessFactory,
-    PlaywrightHarness, TargetDescriptor,
-};
+use aisec_attack::HarnessTransport;
+use aisec_auth::{resolve_descriptor_for_runtime, AuthSessionManager, SecretStore, SessionAuthContext, SessionValidationStatus};
+use aisec_harness::{AuthMaterial, HarnessFactory, PlaywrightHarness, TargetDescriptor};
+
 use aisec_storage::Database;
-use async_trait::async_trait;
 
 use crate::error::CommandResult;
 use crate::session_auth::{auth_session_manager_from_parts, browser_session_id};
 use crate::state::AppState;
 
-pub struct HarnessTargetTransport {
-    inner: HarnessAttackTransport,
-}
-
-impl Clone for HarnessTargetTransport {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-impl HarnessTargetTransport {
-    pub fn new(inner: HarnessAttackTransport) -> Self {
-        Self { inner }
-    }
-}
-
-#[async_trait]
-impl TargetTransport for HarnessTargetTransport {
-    async fn send(&self, request: TransportRequest) -> AttackResult<TransportResponse> {
-        let payload = request.body.clone().unwrap_or_default();
-        let response = self
-            .inner
-            .send_payload(
-                &payload,
-                Some(&request.method),
-                request.headers,
-                None,
-                request.timeout_ms,
-            )
-            .await
-            .map_err(|err| aisec_attack::AttackError::transport(err))?;
-
-        Ok(TransportResponse {
-            status: response.status,
-            headers: response.headers,
-            body: response.body,
-            duration_ms: response.duration_ms,
-        })
-    }
-}
-
 pub struct HarnessAttackRuntime {
-    pub transport: HarnessTargetTransport,
+    pub transport: HarnessTransport,
     pub session: Option<SessionAuthContext>,
     pub descriptor: TargetDescriptor,
     pub factory: HarnessFactory,
@@ -87,10 +41,14 @@ pub async fn build_harness_attack_runtime_parts(
     descriptor_json: &str,
     probe_url: &str,
 ) -> CommandResult<HarnessAttackRuntime> {
+    let secrets = SecretStore::new().map_err(crate::error::CommandError::from)?;
+    let descriptor_json =
+        resolve_descriptor_for_runtime(descriptor_json, &secrets).map_err(crate::error::CommandError::from)?;
+
     let mut auth = AuthMaterial::default();
     let mut session: Option<SessionAuthContext> = None;
 
-    if let Some(session_id) = browser_session_id(descriptor_json) {
+    if let Some(session_id) = browser_session_id(&descriptor_json) {
         let manager = auth_session_manager_from_parts(db.clone(), data_dir, auth_config.clone()).await?;
         let ctx = manager
             .validate_session(&session_id, Some(probe_url))
@@ -114,7 +72,7 @@ pub async fn build_harness_attack_runtime_parts(
         session = Some(ctx);
     }
 
-    let descriptor = descriptor_from_parts(descriptor_json, probe_url, auth.clone());
+    let descriptor = aisec_harness::adapter::descriptor_from_parts(&descriptor_json, probe_url, auth.clone());
     let mut factory = HarnessFactory::new().map_err(crate::error::CommandError::from)?;
 
     if descriptor.preferred_harness() == aisec_harness::HarnessKind::Playwright {
@@ -137,11 +95,7 @@ pub async fn build_harness_attack_runtime_parts(
         }
     }
 
-    let transport = HarnessTargetTransport::new(HarnessAttackTransport::new(
-        factory.clone(),
-        descriptor.clone(),
-        probe_url.to_string(),
-    ));
+    let transport = HarnessTransport::from_parts(factory.clone(), descriptor.clone(), probe_url.to_string());
 
     Ok(HarnessAttackRuntime {
         transport,

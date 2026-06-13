@@ -6,13 +6,37 @@
 flowchart TB
     D[Discovery] --> F[Fingerprint]
     F --> A[Attack Engine]
-    A --> H[Execution Harness]
-    H --> T[Target]
-    T --> N[Response Normalizer]
+    A --> HT[HarnessTransport]
+    HT --> HF[HarnessFactory]
+    HF --> H[Harness]
+    H --> N[NormalizedResponse]
     N --> J[Judge Engine]
     J --> FD[Findings]
     FD --> R[Reports]
 ```
+
+## Single execution path
+
+All production attack delivery follows one chain:
+
+```
+AttackExecutor
+  → TargetTransport (HarnessTransport)
+    → HarnessAttackTransport
+      → HarnessFactory::execute
+        → HttpHarness | OpenAiHarness | PlaywrightHarness
+          → NormalizedResponse
+```
+
+There is **no** direct `reqwest` transport in `aisec-attack`. HTTP I/O lives inside `aisec-harness` providers only.
+
+| Layer | Crate / module |
+|-------|----------------|
+| Attack orchestration | `aisec-attack` (`AttackExecutor`, `PayloadRunner`) |
+| Transport trait impl | `aisec-attack::HarnessTransport` |
+| Harness resolution | `aisec-harness::HarnessFactory` |
+| Target delivery | `aisec-harness` providers |
+| Judge input | `aisec-harness::NormalizedResponse` (end-to-end, no reconstruction) |
 
 ## New crates
 
@@ -32,7 +56,7 @@ pub trait Harness {
 }
 ```
 
-The Judge Engine consumes **only** `NormalizedResponse` via `JudgeEngine::judge_normalized()`.
+The Judge Engine consumes **only** the original `NormalizedResponse` from the transport layer via `JudgeEngine::judge_normalized()`. The IPC attack path reads `attempt.response.normalized` — it must not rebuild normalization from raw HTTP bodies.
 
 ## Harness selection
 
@@ -64,10 +88,15 @@ APIs: `record_session`, `finish_record_session`, `validate_session`, `load_sessi
 
 ## Integration points
 
-- **Attack path**: `src-tauri/src/harness_runtime.rs` → `HarnessTargetTransport` implements `TargetTransport`
+- **Attack path**: `src-tauri/src/harness_runtime.rs` builds `aisec_attack::HarnessTransport` with session-aware `HarnessFactory`
+- **Scanner**: `aisec-attack::PromptInjectionScanner` builds `HarnessTransport::for_attack_target` per scan
 - **Discovery**: unchanged HTTP/browser auth injection via `session_auth.rs`
-- **Judge**: `aisec-judge` depends on `aisec-harness::NormalizedResponse`
+- **Judge**: `attempt.response.normalized` → `judge_normalized()`
 - **Scan wizard**: Playwright recording IPC unchanged; sessions reusable via descriptor `auth.session_id`
+
+## Test doubles
+
+`MockTransport` remains in `aisec-attack` for unit tests only. It returns a synthetic `NormalizedResponse` alongside canned HTTP bodies.
 
 ## Extension without rewriting attacks
 

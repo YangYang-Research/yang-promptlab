@@ -1,5 +1,5 @@
 use aisec_attack::{
-    apply_descriptor_auth, AttackCategory, AttackContext, AttackPayload, AttackTarget, HttpTransport,
+    apply_descriptor_auth, AttackCategory, AttackContext, AttackPayload, AttackTarget, HarnessTransport,
     PayloadRunner,
 };
 use wiremock::{
@@ -28,13 +28,14 @@ async fn api_key_descriptor_sends_header_on_attack_request() {
     });
 
     let target = apply_descriptor_auth(AttackTarget::llm_api(server.uri()), &descriptor.to_string());
-    let transport = HttpTransport::new();
+    let transport = HarnessTransport::for_attack_target(&target).unwrap();
     let runner = PayloadRunner::new(&transport);
     let ctx = AttackContext::new("scan-1", "probe-1", target);
     let payload = AttackPayload::new("p1", "test", AttackCategory::PromptInjection, "hello");
 
     let response = runner.execute(&ctx, &payload, "hello").await.unwrap();
     assert_eq!(response.status, 200);
+    assert!(!response.normalized.content.is_empty());
 }
 
 #[tokio::test]
@@ -58,7 +59,7 @@ async fn basic_descriptor_sends_authorization_header() {
     });
 
     let target = apply_descriptor_auth(AttackTarget::llm_api(server.uri()), &descriptor.to_string());
-    let transport = HttpTransport::new();
+    let transport = HarnessTransport::for_attack_target(&target).unwrap();
     let runner = PayloadRunner::new(&transport);
     let ctx = AttackContext::new("scan-1", "probe-1", target);
     let payload = AttackPayload::new("p1", "test", AttackCategory::PromptInjection, "hello");

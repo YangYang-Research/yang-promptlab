@@ -217,6 +217,8 @@ pub struct EvaluatorResult {
     pub category: Option<String>,
     pub rationale: String,
     pub indicators: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structured: Option<serde_json::Value>,
 }
 
 /// Consensus aggregation metadata.
@@ -245,6 +247,50 @@ pub struct JudgeVerdict {
     pub consensus: ConsensusReport,
     pub evaluator_results: Vec<EvaluatorResult>,
     pub judged_at: OffsetDateTime,
+}
+
+/// Canonical structured JSON shape for judge output (reports, IPC, storage).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JudgeStructuredOutput {
+    pub probe_id: String,
+    pub verdict: String,
+    pub vulnerable: bool,
+    pub confidence: f32,
+    pub severity: Option<String>,
+    pub category: Option<String>,
+    pub summary: String,
+    pub reasoning: String,
+    pub evidence: Vec<String>,
+    pub mode: String,
+    pub consensus: ConsensusReport,
+    pub evaluator_results: Vec<EvaluatorResult>,
+    pub judged_at: String,
+}
+
+impl JudgeVerdict {
+    pub fn to_structured_output(&self) -> JudgeStructuredOutput {
+        JudgeStructuredOutput {
+            probe_id: self.probe_id.clone(),
+            verdict: self.verdict.clone(),
+            vulnerable: self.vulnerable,
+            confidence: self.confidence,
+            severity: self.severity.map(|s| format!("{s:?}").to_ascii_lowercase()),
+            category: self.category.clone(),
+            summary: self.summary.clone(),
+            reasoning: self.reasoning.clone(),
+            evidence: self.evidence.clone(),
+            mode: self.mode.as_str().into(),
+            consensus: self.consensus.clone(),
+            evaluator_results: self.evaluator_results.clone(),
+            judged_at: self.judged_at.to_string(),
+        }
+    }
+
+    pub fn to_json_string(&self) -> crate::error::JudgeResult<String> {
+        serde_json::to_string_pretty(&self.to_structured_output())
+            .map_err(|err| crate::error::JudgeError::evaluation(err.to_string()))
+    }
 }
 
 /// Engine configuration.

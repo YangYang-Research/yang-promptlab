@@ -29,7 +29,18 @@ aisec-harness = { workspace = true, features = ["playwright"] }
 **Before**
 
 ```rust
-SessionAwareTransport::Http(HttpTransport::new())
+### Attack transport (post-consolidation)
+
+```rust
+// Production — always harness-backed
+let runtime = build_attack_runtime_parts(...).await?;
+let executor = attack_executor(runtime.transport); // HarnessTransport
+
+// Library helper
+let executor = default_executor_for("https://api.example.com/v1/chat/completions")?;
+```
+
+Do **not** instantiate HTTP transports directly. `MockTransport` is for tests only.
 // or PlaywrightSessionTransport
 ```
 
@@ -56,9 +67,17 @@ judge.judge_normalized(probe_id, category, payload, &normalized).await?;
 
 ## Auth session storage
 
-New canonical vault path: `{data_dir}/AuthSessions/` via `aisec-browser::auth_sessions_dir`.
+Canonical vault: `{data_dir}/AuthSessions/` via `aisec_auth::auth_sessions_dir`.
 
-Existing sessions under `{data_dir}/auth-vault/` remain valid. New recordings can migrate by re-saving sessions or continuing with existing `auth-vault` paths until re-recorded.
+Secrets (passwords, tokens, cookies) are stored in the OS keychain (`keyring`), referenced by `credential_reference_id` in SQLite. Playwright storageState files are AES-256-GCM encrypted as `{session_id}.storage.enc`.
+
+On startup the desktop app runs backward-compatible migration:
+
+1. `migrate_legacy_auth_data` — moves plaintext SQLite secrets to keychain
+2. `migrate_legacy_target_descriptors` — strips inline secrets from target JSON
+3. `migrate_legacy_storage_artifacts` — re-encrypts legacy `{auth-vault}/*.storage.json`
+
+See [AUTH_SECURITY.md](./AUTH_SECURITY.md) for the full model.
 
 ## Model registry
 
@@ -75,7 +94,16 @@ runtime/ollama        # macOS / Linux
 runtime/ollama.exe    # Windows
 ```
 
-`RuntimeSupervisor::ensure_running()` starts it automatically when present.
+On startup the desktop app:
+
+1. Resolves the binary (bundle → repo `runtime/` → system `PATH`)
+2. Starts `ollama serve` with `OLLAMA_MODELS={app_data}/models`
+3. Verifies health via `GET /api/tags`
+4. Watches and auto-restarts on crash or failed health
+
+IPC: `runtime_status`, `runtime_restart`, `runtime_stop`.
+
+See [RUNTIME.md](./RUNTIME.md).
 
 ## Verification checklist
 

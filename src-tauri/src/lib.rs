@@ -13,7 +13,10 @@ pub mod jobs;
 pub mod logging;
 pub mod harness_runtime;
 pub mod judge_config;
+pub mod model_registry;
+pub mod ollama_runtime;
 pub mod playwright_runtime;
+pub mod runtime_watch;
 pub mod session_auth;
 pub mod state;
 
@@ -30,10 +33,14 @@ pub fn run() {
     };
 
     app.run(|app_handle, event| {
-        // 4. Graceful shutdown: flush and close the SQLite pool on exit.
         if let RunEvent::Exit = event {
             if let Some(state) = app_handle.try_state::<AppState>() {
-                tauri::async_runtime::block_on(state.database().close());
+                tauri::async_runtime::block_on(async {
+                    let mut supervisor = state.runtime_supervisor().lock().await;
+                    let _ = supervisor.stop().await;
+                    tracing::info!("embedded runtime stopped (graceful shutdown)");
+                    state.database().close().await;
+                });
                 tracing::info!("SQLite database closed (graceful shutdown)");
             }
         }
@@ -59,14 +66,66 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             let database = tauri::async_runtime::block_on(db::open_database(&db_path))
                 .map_err(crate::error::CommandError::from)?;
 
+            let vault_dir = aisec_auth::auth_sessions_dir(&data_dir);
             let auth_engine_config =
                 playwright_runtime::resolve_auth_engine_config(app.handle())
+                    .map_err(crate::error::CommandError::from)?
+                    .with_vault_dir(vault_dir.clone());
+
+            tauri::async_runtime::block_on(async {
+                let store = aisec_auth::SessionStore::new(database.clone(), vault_dir.clone())
+                    .await
                     .map_err(crate::error::CommandError::from)?;
+                aisec_auth::migrate_legacy_auth_data(&database, store.secrets())
+                    .await
+                    .map_err(crate::error::CommandError::from)?;
+                aisec_auth::migrate_legacy_target_descriptors(&database, store.secrets())
+                    .await
+                    .map_err(crate::error::CommandError::from)?;
+                aisec_auth::migrate_legacy_storage_artifacts(
+                    &database,
+                    &data_dir,
+                    &store.encrypted_vault(),
+                )
+                .await
+                .map_err(crate::error::CommandError::from)?;
+                Ok::<(), crate::error::CommandError>(())
+            })?;
 
-            // 3. Store Database + repository manager inside AppState for commands.
-            app.manage(AppState::new(database, data_dir, log_guard, auth_engine_config));
+            let runtime_config =
+                ollama_runtime::resolve_runtime_config(app.handle(), &data_dir);
+            let (runtime_supervisor, started) =
+                tauri::async_runtime::block_on(ollama_runtime::start_embedded_runtime(
+                    runtime_config,
+                ))
+                .map_err(crate::error::CommandError::from)?;
 
-            tracing::info!("AISec backend integration ready (database + repositories)");
+            let (model_manager, model_catalog_meta) = tauri::async_runtime::block_on(
+                model_registry::open_model_manager_with_registry(app.handle(), &data_dir),
+            )
+            .map_err(crate::error::CommandError::from)?;
+
+            let model_manager_arc = std::sync::Arc::new(AsyncMutex::new(model_manager));
+            let model_provider: aisec_runtime::SharedModelProvider = std::sync::Arc::new(
+                aisec_runtime::EmbeddedModelProvider::new(model_manager_arc.clone()),
+            );
+
+            app.manage(AppState::new(
+                database,
+                data_dir,
+                log_guard,
+                auth_engine_config,
+                runtime_supervisor,
+                model_manager_arc,
+                model_provider,
+                model_catalog_meta,
+            ));
+
+            if started {
+                runtime_watch::spawn_runtime_watch(app.handle().clone());
+            }
+
+            tracing::info!("AISec backend integration ready (database + repositories + runtime)");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -110,13 +169,24 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::judge::judge_test_connectivity,
             commands::judge::judge_test_model,
             commands::models::models_list,
+            commands::models::models_registry_info,
             commands::models::models_browse,
             commands::models::models_install,
+            commands::models::models_import_gguf,
+            commands::models::models_import_zip,
+            commands::models::models_download_start,
+            commands::models::models_download_status,
+            commands::models::models_download_pause,
+            commands::models::models_download_resume,
+            commands::models::models_download_cancel,
             commands::models::models_remove,
             commands::models::models_verify,
             commands::models::models_test_inference,
             commands::models::models_test_embeddings,
             commands::models::models_vault_path,
+            commands::runtime::runtime_status,
+            commands::runtime::runtime_restart,
+            commands::runtime::runtime_stop,
         ])
         .manage(AsyncMutex::new(commands::auth::AuthRecordingState::new()))
         .build(tauri::generate_context!())?;

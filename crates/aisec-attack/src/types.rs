@@ -156,6 +156,7 @@ pub struct AttackResponse {
     pub headers: HashMap<String, String>,
     pub body: String,
     pub duration_ms: u64,
+    pub normalized: aisec_harness::NormalizedResponse,
 }
 
 /// Severity of a successful attack evaluation.

@@ -13,6 +13,7 @@ pub mod mock_runtime;
 pub mod prompts;
 pub mod providers;
 pub mod roles;
+pub mod runtime_context;
 pub mod scoring;
 pub mod types;
 
@@ -27,6 +28,7 @@ pub use evaluators::{LlmEvaluator, RegexEvaluator, RuleBasedEvaluator};
 pub use factory::{build_judge_engine, test_connectivity, test_model};
 pub use mock_runtime::JsonMockRuntime;
 pub use roles::ModelRolePool;
+pub use runtime_context::JudgeRuntimeContext;
 pub use types::*;
 
 /// Build a judge engine with default config and empty model pool (deterministic-only).

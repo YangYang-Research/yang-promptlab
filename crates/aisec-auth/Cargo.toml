@@ -13,6 +13,9 @@ aisec-storage = { workspace = true }
 async-trait = { workspace = true }
 base64 = "0.22"
 jsonwebtoken = "9"
+keyring = { workspace = true }
+aes-gcm = { workspace = true }
+rand = { workspace = true }
 reqwest = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }

@@ -63,6 +63,18 @@ impl LlmResponseParser {
             category,
             rationale,
             indicators,
+            structured: Some(value),
+        })
+    }
+
+    pub fn structured_json(parsed: &ParsedLlmVerdict) -> serde_json::Value {
+        serde_json::json!({
+            "vulnerable": parsed.vulnerable,
+            "confidence": parsed.confidence,
+            "severity": parsed.severity.map(|s| format!("{s:?}").to_ascii_lowercase()),
+            "category": parsed.category,
+            "rationale": parsed.rationale,
+            "indicators": parsed.indicators,
         })
     }
 
@@ -118,6 +130,7 @@ impl LlmResponseParser {
             } else {
                 vec![]
             },
+            structured: None,
         }
     }
 }
@@ -130,6 +143,7 @@ pub struct ParsedLlmVerdict {
     pub category: Option<String>,
     pub rationale: String,
     pub indicators: Vec<String>,
+    pub structured: Option<serde_json::Value>,
 }
 
 fn extract_json_object(text: &str) -> String {
@@ -200,6 +214,11 @@ impl LlmEvaluator {
 
         let parsed = LlmResponseParser::parse(&response.text)?;
 
+        let structured = parsed
+            .structured
+            .clone()
+            .or_else(|| Some(LlmResponseParser::structured_json(&parsed)));
+
         Ok(EvaluatorResult {
             evaluator_id: self.id.clone(),
             kind: EvaluatorKind::Llm,
@@ -210,6 +229,7 @@ impl LlmEvaluator {
             category: parsed.category,
             rationale: parsed.rationale,
             indicators: parsed.indicators,
+            structured,
         })
     }
 }

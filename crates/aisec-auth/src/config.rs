@@ -25,7 +25,7 @@ pub struct AuthEngineConfig {
 impl Default for AuthEngineConfig {
     fn default() -> Self {
         Self {
-            vault_dir: PathBuf::from("./data/auth-vault"),
+            vault_dir: PathBuf::from("./data/AuthSessions"),
             playwright_runner: None,
             runner_workdir: None,
             playwright_browsers_path: None,

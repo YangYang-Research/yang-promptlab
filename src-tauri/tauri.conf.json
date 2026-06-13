@@ -30,7 +30,9 @@
     "active": true,
     "targets": "all",
     "resources": {
-      "resources/playwright/": "playwright/"
+      "resources/playwright/": "playwright/",
+      "../runtime/": "runtime/",
+      "../resources/models.json": "resources/models.json"
     },
     "icon": [
       "icons/32x32.png",

@@ -160,6 +160,7 @@ impl RuleBasedEvaluator {
                     category: Some(rules.category.clone()),
                     rationale: "Model refusal detected without success indicators".into(),
                     indicators: vec!["refusal".into()],
+                    structured: None,
                 });
             }
         }
@@ -194,6 +195,7 @@ impl RuleBasedEvaluator {
                 category: Some(rules.category),
                 rationale: "No rule-based success indicators matched".into(),
                 indicators: vec![],
+                structured: None,
             });
         }
 
@@ -207,6 +209,7 @@ impl RuleBasedEvaluator {
             category: Some(rules.category),
             rationale: format!("Matched {} rule indicator(s)", indicators.len()),
             indicators,
+            structured: None,
         })
     }
 }

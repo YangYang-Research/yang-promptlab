@@ -136,6 +136,8 @@ pub struct ModelCatalogEntry {
     pub provider: ModelProvider,
     pub version: String,
     pub description: String,
+    pub purpose: String,
+    pub recommended: bool,
     pub size_bytes: Option<u64>,
     pub quant: Option<String>,
     pub capabilities: ModelCapabilities,

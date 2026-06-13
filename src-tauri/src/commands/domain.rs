@@ -4,6 +4,7 @@
 //! function that takes `&AppState`, so the same logic is exercised by the
 //! integration tests without a Tauri runtime.
 
+use aisec_auth::{sanitize_target_descriptor, SecretStore};
 use aisec_core::AisecError;
 use aisec_report::{
     ReportDataBuilder, ReportFormat, ReportKind, ReportingEngine, StorageFindingRow,
@@ -52,6 +53,21 @@ pub async fn target_create_op(
     target_type: String,
     descriptor: Option<serde_json::Value>,
 ) -> CommandResult<TargetDto> {
+    let descriptor_json = if let Some(descriptor) = descriptor {
+        let raw = serde_json::to_string(&descriptor).map_err(|err| {
+            CommandError::from(AisecError::invalid_input(err.to_string()))
+        })?;
+        let secrets = SecretStore::new().map_err(CommandError::from)?;
+        let (sanitized, _) = sanitize_target_descriptor(&raw, &secrets).map_err(CommandError::from)?;
+        Some(
+            serde_json::from_str(&sanitized).map_err(|err| {
+                CommandError::from(AisecError::invalid_input(err.to_string()))
+            })?,
+        )
+    } else {
+        None
+    };
+
     let target = state
         .repositories()
         .targets()
@@ -59,7 +75,7 @@ pub async fn target_create_op(
             project_id,
             name,
             target_type,
-            descriptor_json: descriptor,
+            descriptor_json,
         })
         .await
         .map_err(CommandError::from)?;

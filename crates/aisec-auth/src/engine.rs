@@ -7,6 +7,7 @@ use crate::config::AuthEngineConfig;
 use crate::cookies::{CookieManager, TokenExtractor};
 use crate::mock::SharedPlaywrightDriver;
 use crate::playwright::{parse_cookies, parse_tokens, PlaywrightClient};
+use crate::secrets::migrate::resolve_auth_config_secrets;
 use crate::session::SessionStore;
 use crate::types::{
     AuthConfig, AuthMethod, AuthProfile, AuthSession, AuthenticateResult, ExtractedToken,
@@ -53,6 +54,9 @@ impl AuthEngine {
         profile: &AuthProfile,
         options: RecordLoginOptions,
     ) -> AisecResult<(AuthSession, LoginRecording)> {
+        let mut profile = profile.clone();
+        resolve_auth_config_secrets(&mut profile.config, self.store.secrets())?;
+
         if !profile.method.uses_browser() {
             return Err(AisecError::invalid_input(format!(
                 "method {} does not support browser recording",
@@ -248,9 +252,14 @@ impl AuthEngine {
 }
 
 async fn authenticate_jwt(profile: &AuthProfile, store: &SessionStore) -> AisecResult<AuthenticateResult> {
-    let AuthConfig::Jwt { token, header_name, prefix } = &profile.config else {
+    let mut profile = profile.clone();
+    resolve_auth_config_secrets(&mut profile.config, store.secrets())?;
+    let AuthConfig::Jwt { token, header_name, prefix, .. } = &profile.config else {
         return Err(AisecError::invalid_input("expected jwt config"));
     };
+    if token.is_empty() {
+        return Err(AisecError::invalid_input("jwt token is missing"));
+    }
     TokenExtractor::validate_jwt_structure(token)?;
     let extracted =
         TokenExtractor::from_jwt_config(token, header_name.as_deref(), prefix.as_deref());
@@ -264,7 +273,9 @@ async fn authenticate_jwt(profile: &AuthProfile, store: &SessionStore) -> AisecR
 }
 
 async fn authenticate_api_key(profile: &AuthProfile, store: &SessionStore) -> AisecResult<AuthenticateResult> {
-    let AuthConfig::ApiKey { key, header_name, prefix } = &profile.config else {
+    let mut profile = profile.clone();
+    resolve_auth_config_secrets(&mut profile.config, store.secrets())?;
+    let AuthConfig::ApiKey { key, header_name, prefix, .. } = &profile.config else {
         return Err(AisecError::invalid_input("expected api_key config"));
     };
     if key.is_empty() {
@@ -370,6 +381,7 @@ mod tests {
                 login_url: "https://example.com/login".into(),
                 username: Some("user".into()),
                 password: Some("pass".into()),
+                password_credential_id: None,
                 username_selector: "#user".into(),
                 password_selector: "#pass".into(),
                 submit_selector: "#submit".into(),
@@ -406,6 +418,7 @@ mod tests {
             method: AuthMethod::Jwt,
             config: AuthConfig::Jwt {
                 token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyIn0.sig".into(),
+                token_credential_id: None,
                 header_name: Some("Authorization".into()),
                 prefix: Some("Bearer".into()),
             },
@@ -431,6 +444,7 @@ mod tests {
             method: AuthMethod::ApiKey,
             config: AuthConfig::ApiKey {
                 key: "secret-key".into(),
+                key_credential_id: None,
                 header_name: "X-API-Key".into(),
                 prefix: None,
             },

@@ -8,7 +8,7 @@ pub fn default_data_root() -> PathBuf {
     PathBuf::from(".aisec")
 }
 
-/// Auth session vault directory.
+/// Auth session vault directory for encrypted Playwright artifacts.
 ///
 /// - Windows: `%LOCALAPPDATA%/AISec/AuthSessions`
 /// - macOS: `~/Library/Application Support/AISec/AuthSessions`

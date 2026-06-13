@@ -44,7 +44,18 @@ async fn database_is_accessible_via_app_state() {
     let dir = tempfile::tempdir().unwrap();
     let db = open_database(&dir.path().join("aisec.db")).await.unwrap();
     let guard = init_logging(LogOptions::bootstrap("aisec-it")).unwrap();
-    let state = AppState::new(db, dir.path().to_path_buf(), guard, aisec_auth::AuthEngineConfig::default());
+    let (manager, provider, meta) =
+        aisec_desktop_lib::model_registry::open_test_model_stack(dir.path()).expect("model stack");
+    let state = AppState::new(
+        db,
+        dir.path().to_path_buf(),
+        guard,
+        aisec_auth::AuthEngineConfig::default(),
+        aisec_runtime::RuntimeSupervisor::new("", dir.path()),
+        manager,
+        provider,
+        meta,
+    );
 
     let before = state.repositories().projects().list().await.unwrap().len();
     state

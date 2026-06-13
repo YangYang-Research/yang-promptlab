@@ -1,6 +1,6 @@
 //! Integration tests for harness execution.
 
-use aisec_harness::{AttackRequest, HarnessFactory, HttpHarness, NormalizedResponse};
+use aisec_harness::{AttackRequest, HarnessFactory, NormalizedResponse};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

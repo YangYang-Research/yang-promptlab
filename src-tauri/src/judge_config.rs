@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use aisec_core::AisecError;
-use aisec_judge::JudgeProviderConfig;
+use aisec_judge::{JudgeMode, JudgeProviderConfig, JudgeRuntimeContext, LocalProvider};
 use aisec_models::{LocalModelManager, ModelSource};
+use aisec_runtime::{RuntimeSupervisor, SharedModelProvider};
 use tokio::fs;
 
 use crate::error::{CommandError, CommandResult};
@@ -59,31 +60,70 @@ pub fn resolve_judge_local_settings(
 
     match &entry.source {
         ModelSource::Ollama { model, base_url } => {
-            config.local.provider = aisec_judge::LocalProvider::Ollama;
+            config.local.provider = LocalProvider::Ollama;
             config.local.model = model.clone();
             config.local.base_url = base_url.clone();
             config.local.model_path = None;
         }
         _ => {
-            config.local.provider = aisec_judge::LocalProvider::LlamaCpp;
+            config.local.provider = LocalProvider::LlamaCpp;
             config.local.model = entry.name.clone();
             config.local.model_path = Some(entry.file_path.clone());
         }
     }
 }
 
+/// Prepare runtime bridge context for local judge modes.
+pub async fn prepare_judge_runtime_context(
+    config: &mut JudgeProviderConfig,
+    manager: &LocalModelManager,
+    model_provider: SharedModelProvider,
+    runtime_supervisor: &mut RuntimeSupervisor,
+) -> CommandResult<Option<JudgeRuntimeContext>> {
+    resolve_judge_local_settings(config, manager);
+
+    match config.mode {
+        JudgeMode::LocalLlm | JudgeMode::Consensus => {
+            let vault_id = config.local.vault_model_id.clone().ok_or_else(|| {
+                CommandError::invalid_input(
+                    "select an active vault model on the Models page for local judge modes",
+                )
+            })?;
+
+            if config.local.provider == LocalProvider::Ollama {
+                runtime_supervisor
+                    .ensure_running()
+                    .await
+                    .map_err(|err| CommandError::from(AisecError::internal(err.to_string())))?;
+                config.local.base_url = runtime_supervisor.base_url().to_string();
+            }
+
+            Ok(Some(JudgeRuntimeContext::new(model_provider, vault_id)))
+        }
+        _ => Ok(None),
+    }
+}
+
 pub async fn build_configured_judge_engine(
     data_dir: &Path,
+    manager: &LocalModelManager,
+    model_provider: SharedModelProvider,
+    runtime_supervisor: &mut RuntimeSupervisor,
 ) -> CommandResult<aisec_judge::JudgeEngine> {
-    let manager = open_model_manager(data_dir)?;
     let mut config = load_judge_config(data_dir).await?;
-    resolve_judge_local_settings(&mut config, &manager);
-    aisec_judge::build_judge_engine(&config)
+    let runtime =
+        prepare_judge_runtime_context(&mut config, manager, model_provider, runtime_supervisor)
+            .await?;
+    aisec_judge::build_judge_engine(&config, runtime)
         .await
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
 }
 
-pub fn open_model_manager(data_dir: &Path) -> CommandResult<LocalModelManager> {
+pub fn open_model_manager(
+    data_dir: &Path,
+    catalog: aisec_models::BuiltinCatalog,
+) -> CommandResult<LocalModelManager> {
     LocalModelManager::new(models_vault_path(data_dir))
+        .map(|mgr| mgr.with_catalog(catalog))
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
 }

@@ -64,6 +64,13 @@ impl AuthProfileRepository for SqliteAuthProfileRepository {
         .map_storage()
     }
 
+    async fn list_all(&self) -> AisecResult<Vec<AuthProfile>> {
+        sqlx::query_as::<_, AuthProfile>("SELECT * FROM auth_profiles ORDER BY created_at ASC")
+            .fetch_all(&self.pool)
+            .await
+            .map_storage()
+    }
+
     async fn update(&self, id: &str, input: UpdateAuthProfile) -> AisecResult<AuthProfile> {
         let existing = self.get(id).await?;
         let name = input.name.unwrap_or(existing.name);
@@ -84,6 +91,28 @@ impl AuthProfileRepository for SqliteAuthProfileRepository {
         .await
         .map_storage()?;
 
+        ensure_rows_affected(result, "auth_profile")?;
+        self.get(id).await
+    }
+
+    async fn update_config_and_reference(
+        &self,
+        id: &str,
+        config_json: &serde_json::Value,
+        credential_reference_id: Option<&str>,
+    ) -> AisecResult<AuthProfile> {
+        let config = json_required(config_json)?;
+        let ts = now();
+        let result = sqlx::query(
+            "UPDATE auth_profiles SET config_json = ?, credential_reference_id = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(&config)
+        .bind(credential_reference_id)
+        .bind(ts)
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_storage()?;
         ensure_rows_affected(result, "auth_profile")?;
         self.get(id).await
     }
@@ -124,14 +153,15 @@ impl AuthSessionRepository for SqliteAuthSessionRepository {
 
         sqlx::query(
             "INSERT INTO auth_sessions (id, profile_id, status, cookies_json, tokens_json,
-             storage_state_path, expires_at, validation_status, user_identity, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             credential_reference_id, storage_state_path, expires_at, validation_status, user_identity, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(&input.profile_id)
         .bind(&status)
         .bind(&cookies)
         .bind(&tokens)
+        .bind(&input.credential_reference_id)
         .bind(&input.storage_state_path)
         .bind(input.expires_at)
         .bind(&validation_status)
@@ -163,6 +193,46 @@ impl AuthSessionRepository for SqliteAuthSessionRepository {
         .map_storage()
     }
 
+    async fn list_all(&self) -> AisecResult<Vec<AuthSessionRecord>> {
+        sqlx::query_as::<_, AuthSessionRecord>(
+            "SELECT * FROM auth_sessions ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_storage()
+    }
+
+    async fn list_legacy_with_plaintext_secrets(&self) -> AisecResult<Vec<AuthSessionRecord>> {
+        sqlx::query_as::<_, AuthSessionRecord>(
+            "SELECT * FROM auth_sessions
+             WHERE cookies_json IS NOT NULL OR tokens_json IS NOT NULL
+             ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_storage()
+    }
+
+    async fn apply_secure_migration(
+        &self,
+        id: &str,
+        credential_reference_id: &str,
+    ) -> AisecResult<AuthSessionRecord> {
+        let result = sqlx::query(
+            "UPDATE auth_sessions
+             SET credential_reference_id = ?, cookies_json = NULL, tokens_json = NULL, updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(credential_reference_id)
+        .bind(now())
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_storage()?;
+        ensure_rows_affected(result, "auth_session")?;
+        self.get(id).await
+    }
+
     async fn update(&self, id: &str, input: UpdateAuthSessionRecord) -> AisecResult<AuthSessionRecord> {
         let existing = self.get(id).await?;
         let status = input.status.unwrap_or(existing.status);
@@ -174,6 +244,9 @@ impl AuthSessionRepository for SqliteAuthSessionRepository {
             Some(v) => Some(json_required(&v)?),
             None => existing.tokens_json,
         };
+        let credential_reference_id = input
+            .credential_reference_id
+            .or(existing.credential_reference_id);
         let storage_state_path = input.storage_state_path.or(existing.storage_state_path);
         let expires_at = input.expires_at.or(existing.expires_at);
         let validation_status = input
@@ -187,12 +260,13 @@ impl AuthSessionRepository for SqliteAuthSessionRepository {
 
         let result = sqlx::query(
             "UPDATE auth_sessions SET status = ?, cookies_json = ?, tokens_json = ?,
-             storage_state_path = ?, expires_at = ?, validation_status = ?,
+             credential_reference_id = ?, storage_state_path = ?, expires_at = ?, validation_status = ?,
              last_validated_at = ?, user_identity = ?, updated_at = ? WHERE id = ?",
         )
         .bind(&status)
         .bind(&cookies)
         .bind(&tokens)
+        .bind(&credential_reference_id)
         .bind(&storage_state_path)
         .bind(expires_at)
         .bind(&validation_status)
@@ -309,10 +383,13 @@ mod tests {
             .create(CreateAuthSessionRecord {
                 profile_id: profile.id.clone(),
                 status: None,
-                cookies_json: Some(serde_json::json!([{"name":"sid","value":"abc"}])),
+                cookies_json: None,
                 tokens_json: None,
+                credential_reference_id: Some("cred-test-1".into()),
                 storage_state_path: Some("/vault/session.json".into()),
                 expires_at: None,
+                validation_status: None,
+                user_identity: None,
             })
             .await
             .unwrap();

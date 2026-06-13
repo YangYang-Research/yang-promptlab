@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use aisec_models::{InferenceRequest, InferenceRuntime, LocalModelManager};
+use aisec_models::runtime::InferenceRuntime;
+use aisec_models::{InferenceRequest, LocalModelManager};
 use tokio::sync::Mutex;
 
 use crate::error::RuntimeResult;
@@ -9,14 +10,12 @@ use crate::provider::{ModelProvider, ModelProviderHealth};
 
 /// Bridges the embedded runtime supervisor to `aisec-models` vault operations.
 pub struct EmbeddedModelProvider {
-    manager: Mutex<LocalModelManager>,
+    manager: Arc<Mutex<LocalModelManager>>,
 }
 
 impl EmbeddedModelProvider {
-    pub fn new(manager: LocalModelManager) -> Self {
-        Self {
-            manager: Mutex::new(manager),
-        }
+    pub fn new(manager: Arc<Mutex<LocalModelManager>>) -> Self {
+        Self { manager }
     }
 }
 
@@ -44,27 +43,48 @@ impl ModelProvider for EmbeddedModelProvider {
     }
 
     async fn run_inference(&self, model_id: &str, prompt: &str) -> RuntimeResult<String> {
-        let mut manager = self.manager.lock().await;
-        manager.load(model_id).await?;
-        let response = manager
-            .complete(InferenceRequest {
-                prompt: prompt.to_string(),
-                max_tokens: 512,
-                temperature: 0.1,
-            })
+        let response = self
+            .complete_for_model(
+                model_id,
+                &InferenceRequest {
+                    prompt: prompt.to_string(),
+                    max_tokens: 512,
+                    temperature: 0.1,
+                },
+            )
             .await?;
         Ok(response.text)
     }
 
+    async fn complete_for_model(
+        &self,
+        model_id: &str,
+        request: &InferenceRequest,
+    ) -> RuntimeResult<aisec_models::types::InferenceResponse> {
+        let manager = self.manager.lock().await;
+        let engine = manager.inference_engine(model_id).await?;
+        engine
+            .complete(request.clone())
+            .await
+            .map_err(|err| crate::error::RuntimeError::Model(err.to_string()))
+    }
+
     async fn health(&self) -> RuntimeResult<ModelProviderHealth> {
         let manager = self.manager.lock().await;
+        if manager.list_models().is_empty() {
+            return Ok(ModelProviderHealth {
+                healthy: false,
+                message: "no models installed in vault".into(),
+            });
+        }
+
         let healthy = manager.runtime().health().await.unwrap_or(false);
         Ok(ModelProviderHealth {
             healthy,
             message: if healthy {
-                "local inference runtime is healthy".into()
+                "vault inference runtime is healthy".into()
             } else {
-                "local inference runtime is unavailable".into()
+                "vault inference runtime is unavailable".into()
             },
         })
     }

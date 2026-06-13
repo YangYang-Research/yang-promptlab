@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::error::{CommandError, CommandResult};
-use crate::judge_config::{load_judge_config, save_judge_config};
+use crate::judge_config::{load_judge_config, prepare_judge_runtime_context, save_judge_config};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,12 +151,21 @@ pub async fn judge_test_connectivity(
     state: State<'_, AppState>,
     config: Option<JudgeConfigDto>,
 ) -> CommandResult<aisec_judge::JudgeConnectivityResult> {
-    let provider_config = if let Some(dto) = config {
+    let mut provider_config = if let Some(dto) = config {
         dto_to_config(dto)?
     } else {
         load_judge_config(state.data_dir()).await?
     };
-    test_connectivity(&provider_config)
+    let manager = state.model_manager().lock().await;
+    let mut supervisor = state.runtime_supervisor().lock().await;
+    let runtime = prepare_judge_runtime_context(
+        &mut provider_config,
+        &manager,
+        state.model_provider().clone(),
+        &mut supervisor,
+    )
+    .await?;
+    test_connectivity(&provider_config, runtime)
         .await
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
 }
@@ -166,12 +175,21 @@ pub async fn judge_test_model(
     state: State<'_, AppState>,
     config: Option<JudgeConfigDto>,
 ) -> CommandResult<aisec_judge::JudgeConnectivityResult> {
-    let provider_config = if let Some(dto) = config {
+    let mut provider_config = if let Some(dto) = config {
         dto_to_config(dto)?
     } else {
         load_judge_config(state.data_dir()).await?
     };
-    test_model(&provider_config)
+    let manager = state.model_manager().lock().await;
+    let mut supervisor = state.runtime_supervisor().lock().await;
+    let runtime = prepare_judge_runtime_context(
+        &mut provider_config,
+        &manager,
+        state.model_provider().clone(),
+        &mut supervisor,
+    )
+    .await?;
+    test_model(&provider_config, runtime)
         .await
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
 }

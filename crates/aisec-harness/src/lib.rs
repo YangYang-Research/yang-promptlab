@@ -21,5 +21,6 @@ pub use models::{
 };
 pub use registry::HarnessRegistry;
 pub use traits::{Harness, ResponseNormalizer};
+pub use providers::{HttpHarness, OpenAiHarness};
 #[cfg(feature = "playwright")]
 pub use providers::PlaywrightHarness;
