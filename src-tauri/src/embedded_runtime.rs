@@ -1,31 +1,35 @@
-//! Resolve bundled Ollama binary paths for release, with dev and system fallbacks.
+//! Resolve bundled llama.cpp (`llama-server`) binary paths for release, with dev and system fallbacks.
 
 use std::path::{Path, PathBuf};
 
 use aisec_core::AisecResult;
-use aisec_runtime::{bundled_ollama_binary, bundled_runtime_dir, RuntimeConfig};
+use aisec_runtime::{bundled_llama_server_binary, bundled_runtime_dir, RuntimeConfig};
 use tauri::{AppHandle, Manager};
 use tracing::info;
 
 fn bundled_binary(resource_dir: &Path) -> PathBuf {
-    bundled_ollama_binary(resource_dir)
+    bundled_llama_server_binary(resource_dir)
 }
 
 fn dev_binary() -> Option<PathBuf> {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let binary = bundled_ollama_binary(&repo_root);
+    let binary = bundled_llama_server_binary(&repo_root);
     if binary.is_file() {
         return Some(binary);
     }
     None
 }
 
-fn system_ollama_binary() -> Option<PathBuf> {
-    let name = if cfg!(windows) { "ollama.exe" } else { "ollama" };
+fn system_llama_server_binary() -> Option<PathBuf> {
+    let name = if cfg!(windows) {
+        "llama-server.exe"
+    } else {
+        "llama-server"
+    };
     which::which(name).ok()
 }
 
-/// Resolve the best available Ollama binary and runtime configuration.
+/// Resolve the best available llama-server binary and runtime configuration.
 pub fn resolve_runtime_config(app: &AppHandle, data_dir: &Path) -> RuntimeConfig {
     let mut config = RuntimeConfig::new("", data_dir);
 
@@ -34,7 +38,7 @@ pub fn resolve_runtime_config(app: &AppHandle, data_dir: &Path) -> RuntimeConfig
         if bundled.is_file() {
             info!(
                 binary = %bundled.display(),
-                "using bundled embedded Ollama runtime"
+                "using bundled embedded llama.cpp runtime"
             );
             return RuntimeConfig::new(&resource_dir, data_dir).with_binary(bundled);
         }
@@ -44,27 +48,27 @@ pub fn resolve_runtime_config(app: &AppHandle, data_dir: &Path) -> RuntimeConfig
     if let Some(dev) = dev_binary() {
         info!(
             binary = %dev.display(),
-            "using development embedded Ollama runtime from repo runtime/"
+            "using development embedded llama.cpp runtime from repo runtime/"
         );
         return config.with_binary(dev);
     }
 
-    if let Some(system) = system_ollama_binary() {
+    if let Some(system) = system_llama_server_binary() {
         info!(
             binary = %system.display(),
-            "using system Ollama binary (fallback)"
+            "using system llama-server binary (fallback)"
         );
         return config.with_binary(system);
     }
 
     info!(
         expected = %bundled_runtime_dir("").join(if cfg!(windows) {
-            "ollama.exe"
+            "llama-server.exe"
         } else {
-            "ollama"
+            "llama-server"
         })
         .display(),
-        "embedded Ollama runtime not found; local model install requires runtime/ollama"
+        "embedded llama.cpp runtime not found; place llama-server under runtime/"
     );
     config
 }
@@ -86,12 +90,16 @@ pub async fn start_embedded_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aisec_runtime::bundled_ollama_binary;
+    use aisec_runtime::bundled_llama_server_binary;
 
     #[test]
     fn dev_binary_path_is_under_repo_runtime() {
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-        let expected = bundled_ollama_binary(&repo_root);
-        assert!(expected.ends_with(if cfg!(windows) { "ollama.exe" } else { "ollama" }));
+        let expected = bundled_llama_server_binary(&repo_root);
+        assert!(expected.ends_with(if cfg!(windows) {
+            "llama-server.exe"
+        } else {
+            "llama-server"
+        }));
     }
 }

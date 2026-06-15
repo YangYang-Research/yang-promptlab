@@ -13,7 +13,7 @@ use crate::hardware::detect_hardware;
 use crate::registry::ModelRegistry;
 use crate::runtime::{
     infer_capabilities, infer_provider, infer_version, InferenceRuntime, LocalInferenceEngine,
-    LlamaCppConfig, LlamaCppRuntime, OllamaConfig, OllamaRuntime,
+    LlamaCppConfig, LlamaCppRuntime,
 };
 use crate::types::{
     ChatMessage, ChatRequest, DownloadProgress, DownloadStatus, HardwareProfile, HuggingFaceDownloadRequest,
@@ -60,6 +60,14 @@ impl LocalModelManager {
     pub fn with_catalog(mut self, catalog: BuiltinCatalog) -> Self {
         self.catalog_meta = catalog.meta().clone();
         self.catalog = catalog.entries().to_vec();
+        self
+    }
+
+    /// Point the vault inference runtime at a bundled or system `llama-server` binary.
+    pub fn with_llama_binary(mut self, binary: impl AsRef<Path>) -> Self {
+        let mut config = self.llama_config();
+        config.binary_path = binary.as_ref().to_path_buf();
+        self.runtime = LlamaCppRuntime::new(config);
         self
     }
 
@@ -156,6 +164,7 @@ impl LocalModelManager {
         catalog_id: &str,
         ollama_base_url: Option<String>,
     ) -> ModelResult<ModelEntry> {
+        let _ = ollama_base_url;
         let catalog = self
             .find_catalog_entry(catalog_id)
             .ok_or_else(|| ModelError::not_found(format!("catalog entry: {catalog_id}")))?
@@ -163,23 +172,9 @@ impl LocalModelManager {
 
         match catalog.provider {
             ModelProvider::Ollama => {
-                let tag = catalog
-                    .ollama_tag
-                    .ok_or_else(|| ModelError::invalid("catalog entry missing ollama tag"))?;
-                let base_url = ollama_base_url.unwrap_or_else(|| "http://127.0.0.1:11434".into());
-                let runtime = OllamaRuntime::new(OllamaConfig {
-                    base_url: base_url.clone(),
-                    model: tag.clone(),
-                });
-                runtime.pull_model().await?;
-                let entry = self.registry.register_ollama(
-                    &self.vault_path,
-                    catalog.name,
-                    tag,
-                    base_url,
-                )?;
-                self.persist()?;
-                Ok(entry)
+                return Err(ModelError::invalid(
+                    "Ollama catalog installs are deprecated; use a HuggingFace GGUF catalog entry or import a .gguf file",
+                ));
             }
             ModelProvider::HuggingFace => {
                 let repo = catalog

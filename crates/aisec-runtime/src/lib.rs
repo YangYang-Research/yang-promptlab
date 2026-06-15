@@ -8,16 +8,25 @@ pub mod inference_adapter;
 pub mod paths;
 pub mod provider;
 pub mod registry;
+pub mod runtime;
 pub mod supervisor;
 pub mod watch;
 
-pub use config::{default_ollama_base_url, RuntimeConfig};
-pub use discovery::{check_health, discover_models, DiscoveredModel};
+pub use config::{default_llama_base_url, RuntimeConfig};
+#[allow(deprecated)]
+pub use config::default_ollama_base_url;
+pub use discovery::{check_health, discover_models, discover_models_in_dir, DiscoveredModel};
 pub use embedded::{EmbeddedModelProvider, SharedModelProvider};
 pub use inference_adapter::ModelProviderRuntime;
 pub use error::{RuntimeError, RuntimeResult};
-pub use paths::{bundled_ollama_binary, bundled_runtime_dir, models_dir};
+pub use paths::{
+    bundled_llama_server_binary, bundled_ollama_binary, bundled_runtime_dir, models_dir,
+};
 pub use provider::{ModelProvider, ModelProviderHealth};
 pub use registry::{BuiltinModelRegistry, RegistryEntry, RegistryUpdateResult};
+pub use runtime::{
+    detect_quantization, validate_gguf_model, GgufQuantization, InferRequest, InferResponse,
+    LlamaCppRuntime, LlamaCppRuntimeConfig,
+};
 pub use supervisor::{RuntimeProcessState, RuntimeSupervisor};
 pub use watch::run_supervisor_watch;

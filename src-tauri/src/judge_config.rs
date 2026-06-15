@@ -96,6 +96,22 @@ pub async fn prepare_judge_runtime_context(
                     .await
                     .map_err(|err| CommandError::from(AisecError::internal(err.to_string())))?;
                 config.local.base_url = runtime_supervisor.base_url().to_string();
+            } else if config.local.provider == LocalProvider::LlamaCpp {
+                runtime_supervisor
+                    .ensure_running()
+                    .await
+                    .map_err(|err| CommandError::from(AisecError::internal(err.to_string())))?;
+                if let Some(entry) = manager.get_model(&vault_id) {
+                    if entry.file_path.exists() {
+                        runtime_supervisor
+                            .ensure_model_loaded(&entry.file_path)
+                            .await
+                            .map_err(|err| {
+                                CommandError::from(AisecError::internal(err.to_string()))
+                            })?;
+                    }
+                }
+                config.local.base_url = runtime_supervisor.base_url().to_string();
             }
 
             Ok(Some(JudgeRuntimeContext::new(model_provider, vault_id)))

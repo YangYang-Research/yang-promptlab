@@ -1,4 +1,4 @@
-//! Embedded Ollama runtime IPC — status, lifecycle, model discovery.
+//! Embedded llama.cpp runtime IPC — status, lifecycle, GGUF discovery.
 
 use aisec_runtime::{DiscoveredModel, RuntimeProcessState};
 use serde::Serialize;
@@ -65,7 +65,7 @@ pub async fn runtime_status_op(state: &AppState) -> CommandResult<RuntimeStatusD
         RuntimeProcessState::Starting => "embedded runtime is starting".into(),
         RuntimeProcessState::Failed => "embedded runtime failed to start".into(),
         RuntimeProcessState::Stopped if !binary_available => {
-            "embedded runtime binary not found; place ollama under runtime/".into()
+            "embedded runtime binary not found; place llama-server under runtime/".into()
         }
         RuntimeProcessState::Stopped => "embedded runtime is stopped".into(),
     };

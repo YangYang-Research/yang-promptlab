@@ -1,15 +1,12 @@
-use std::path::Path;
-use std::process::Stdio;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
 
 use tokio::fs;
-use tokio::process::{Child, Command};
-use tokio::time::sleep;
 use tracing::{info, warn};
 
 use crate::config::RuntimeConfig;
-use crate::discovery::{check_health, discover_models, DiscoveredModel};
+use crate::discovery::{check_health, discover_models_in_dir, DiscoveredModel};
 use crate::error::{RuntimeError, RuntimeResult};
+use crate::runtime::{LlamaCppRuntime, LlamaCppRuntimeConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeProcessState {
@@ -32,9 +29,10 @@ impl RuntimeProcessState {
 
 pub struct RuntimeSupervisor {
     config: RuntimeConfig,
-    child: Option<Child>,
+    runtime: LlamaCppRuntime,
     state: RuntimeProcessState,
     watch_enabled: bool,
+    pending_model: Option<PathBuf>,
 }
 
 impl RuntimeSupervisor {
@@ -43,11 +41,20 @@ impl RuntimeSupervisor {
     }
 
     pub fn with_config(config: RuntimeConfig) -> Self {
+        let runtime_config = LlamaCppRuntimeConfig {
+            binary_path: config.binary.clone(),
+            host: config.host.clone(),
+            port: config.port,
+            n_gpu_layers: 0,
+            ctx_size: 4096,
+            startup_timeout_ms: 30_000,
+        };
         Self {
             config,
-            child: None,
+            runtime: LlamaCppRuntime::new(runtime_config),
             state: RuntimeProcessState::Stopped,
             watch_enabled: true,
+            pending_model: None,
         }
     }
 
@@ -72,7 +79,7 @@ impl RuntimeSupervisor {
     }
 
     pub fn should_watch(&self) -> bool {
-        self.watch_enabled && self.state == RuntimeProcessState::Running
+        self.watch_enabled && self.state == RuntimeProcessState::Running && self.runtime.is_loaded()
     }
 
     pub fn set_watch_enabled(&mut self, enabled: bool) {
@@ -80,25 +87,28 @@ impl RuntimeSupervisor {
     }
 
     pub fn is_process_alive(&mut self) -> bool {
-        self.child.as_mut().is_some_and(|child| {
-            child
-                .try_wait()
-                .ok()
-                .flatten()
-                .is_none()
-        })
+        if !self.runtime.is_loaded() {
+            return self.binary_available();
+        }
+        // When a model is loaded, rely on health rather than subprocess wait handles.
+        true
     }
 
-    /// Start the embedded runtime if a binary is present; no-op when unavailable.
-    pub async fn ensure_running(&mut self) -> RuntimeResult<()> {
-        if self.state == RuntimeProcessState::Running && self.is_process_alive() {
-            if self.check_health().await.unwrap_or(false) {
-                return Ok(());
-            }
-            warn!("embedded runtime running but unhealthy; restarting");
-            self.stop().await?;
-        }
+    pub fn llama_runtime(&self) -> &LlamaCppRuntime {
+        &self.runtime
+    }
 
+    /// Queue a GGUF model to load on the next `ensure_running` / `ensure_model_loaded`.
+    pub fn set_pending_model(&mut self, path: impl Into<PathBuf>) {
+        self.pending_model = Some(path.into());
+    }
+
+    /// Start the embedded llama.cpp runtime when the binary is present.
+    ///
+    /// When no model is queued, the supervisor enters a **ready-idle** state if the
+    /// binary exists and the vault contains GGUF files. When a model path is pending
+    /// or passed, `llama-server` is spawned for that GGUF file.
+    pub async fn ensure_running(&mut self) -> RuntimeResult<()> {
         if !self.config.binary_available() {
             self.state = RuntimeProcessState::Stopped;
             return Err(RuntimeError::Unavailable);
@@ -108,100 +118,127 @@ impl RuntimeSupervisor {
             .await
             .map_err(|err| RuntimeError::Process(err.to_string()))?;
 
-        self.state = RuntimeProcessState::Starting;
-
-        let mut command = Command::new(&self.config.binary);
-        command
-            .arg("serve")
-            .env("OLLAMA_MODELS", &self.config.models_dir)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-
-        if let Ok(host) = std::env::var("OLLAMA_HOST") {
-            if !host.trim().is_empty() {
-                command.env("OLLAMA_HOST", host);
-            }
+        if let Some(path) = self.pending_model.take() {
+            return self.ensure_model_loaded(&path).await;
         }
 
-        let mut child = command
-            .spawn()
-            .map_err(|err| RuntimeError::Process(err.to_string()))?;
-
-        sleep(Duration::from_millis(750)).await;
-
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                self.state = RuntimeProcessState::Failed;
-                Err(RuntimeError::Process(format!(
-                    "embedded runtime exited early with {status}"
-                )))
+        if self.runtime.is_loaded() {
+            if self.check_health().await.unwrap_or(false) {
+                self.state = RuntimeProcessState::Running;
+                return Ok(());
             }
-            Ok(None) => {
-                self.child = Some(child);
-                if self.wait_for_health().await? {
+            warn!("embedded llama.cpp runtime unhealthy; reloading");
+            self.stop().await?;
+        }
+
+        let vault_models = discover_models_in_dir(&self.config.models_dir).await?;
+        if vault_models.is_empty() {
+            self.state = RuntimeProcessState::Running;
+            info!(
+                binary = %self.config.binary.display(),
+                base_url = %self.config.base_url,
+                "embedded llama.cpp runtime ready (idle; no GGUF in vault)"
+            );
+            return Ok(());
+        }
+
+        self.state = RuntimeProcessState::Running;
+        info!(
+            binary = %self.config.binary.display(),
+            base_url = %self.config.base_url,
+            gguf_count = vault_models.len(),
+            "embedded llama.cpp runtime ready (idle; load model on demand)"
+        );
+        Ok(())
+    }
+
+    /// Load a GGUF model into the supervised llama.cpp server.
+    pub async fn ensure_model_loaded(&mut self, model_path: &Path) -> RuntimeResult<()> {
+        if !self.config.binary_available() {
+            self.state = RuntimeProcessState::Stopped;
+            return Err(RuntimeError::Unavailable);
+        }
+
+        if self.runtime.is_loaded() {
+            if let Some(loaded) = self.runtime.loaded_model_path().await {
+                if loaded == model_path && self.check_health().await.unwrap_or(false) {
                     self.state = RuntimeProcessState::Running;
-                    info!(
-                        path = %self.config.binary.display(),
-                        base_url = %self.config.base_url,
-                        models_dir = %self.config.models_dir.display(),
-                        "embedded runtime started"
-                    );
-                    Ok(())
-                } else {
-                    self.state = RuntimeProcessState::Failed;
-                    Err(RuntimeError::Process(
-                        "embedded runtime started but failed health check".into(),
-                    ))
+                    return Ok(());
                 }
             }
-            Err(err) => {
-                self.state = RuntimeProcessState::Failed;
-                Err(RuntimeError::Process(err.to_string()))
-            }
+            self.stop().await?;
         }
+
+        self.state = RuntimeProcessState::Starting;
+        self.runtime.load_model(model_path).await.map_err(|err| {
+            self.state = RuntimeProcessState::Failed;
+            err
+        })?;
+        self.state = RuntimeProcessState::Running;
+        Ok(())
     }
 
     pub async fn wait_for_health(&self) -> RuntimeResult<bool> {
         for attempt in 0..20 {
-            if check_health(Some(&self.config.base_url)).await? {
+            if check_health(
+                Some(&self.config.base_url),
+                Some(&self.config.models_dir),
+            )
+            .await?
+            {
                 return Ok(true);
             }
-            sleep(Duration::from_millis(250 * (attempt + 1) as u64)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(250 * (attempt + 1) as u64))
+                .await;
         }
         Ok(false)
     }
 
     pub async fn check_health(&mut self) -> RuntimeResult<bool> {
-        if !self.is_process_alive() {
-            return Ok(false);
+        if self.runtime.is_loaded() {
+            return self.runtime.health().await;
         }
-        check_health(Some(&self.config.base_url)).await
+        check_health(
+            Some(&self.config.base_url),
+            Some(&self.config.models_dir),
+        )
+        .await
     }
 
     pub async fn list_installed_models(&self) -> RuntimeResult<Vec<DiscoveredModel>> {
-        discover_models(Some(&self.config.base_url)).await
+        discover_models_in_dir(&self.config.models_dir).await
     }
 
     pub async fn stop(&mut self) -> RuntimeResult<()> {
-        if let Some(mut child) = self.child.take() {
-            if let Err(err) = child.kill().await {
-                warn!(error = %err, "failed to stop embedded runtime");
-            }
+        if let Err(err) = self.runtime.shutdown().await {
+            warn!(error = %err, "failed to stop embedded llama.cpp runtime");
         }
         self.state = RuntimeProcessState::Stopped;
         Ok(())
     }
 
     pub async fn restart(&mut self) -> RuntimeResult<()> {
+        let pending = self.pending_model.clone();
+        let loaded = self.runtime.loaded_model_path().await;
         self.stop().await?;
-        self.ensure_running().await
+        self.ensure_running().await?;
+        if let Some(path) = pending {
+            self.ensure_model_loaded(&path).await?;
+        } else if let Some(path) = loaded {
+            self.ensure_model_loaded(&path).await?;
+        }
+        Ok(())
     }
 }
 
 impl Drop for RuntimeSupervisor {
     fn drop(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.start_kill();
+        if self.runtime.is_loaded() {
+            let _ = tokio::runtime::Handle::try_current().map(|handle| {
+                handle.block_on(async {
+                    let _ = self.runtime.shutdown().await;
+                })
+            });
         }
     }
 }
@@ -209,17 +246,21 @@ impl Drop for RuntimeSupervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::paths::bundled_ollama_binary;
+    use crate::paths::bundled_llama_server_binary;
 
     #[test]
     fn resolves_binary_path() {
         let supervisor = RuntimeSupervisor::new("/tmp/aisec", "/tmp/data");
         assert!(supervisor
             .binary_path()
-            .ends_with(if cfg!(windows) { "ollama.exe" } else { "ollama" }));
+            .ends_with(if cfg!(windows) {
+                "llama-server.exe"
+            } else {
+                "llama-server"
+            }));
         assert_eq!(
             supervisor.binary_path(),
-            bundled_ollama_binary("/tmp/aisec")
+            bundled_llama_server_binary("/tmp/aisec")
         );
     }
 

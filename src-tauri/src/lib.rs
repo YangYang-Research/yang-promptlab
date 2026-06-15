@@ -14,7 +14,7 @@ pub mod logging;
 pub mod harness_runtime;
 pub mod judge_config;
 pub mod model_registry;
-pub mod ollama_runtime;
+pub mod embedded_runtime;
 pub mod playwright_runtime;
 pub mod runtime_watch;
 pub mod session_auth;
@@ -93,17 +93,19 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             })?;
 
             let runtime_config =
-                ollama_runtime::resolve_runtime_config(app.handle(), &data_dir);
+                embedded_runtime::resolve_runtime_config(app.handle(), &data_dir);
+            let llama_binary = runtime_config.binary.clone();
             let (runtime_supervisor, started) =
-                tauri::async_runtime::block_on(ollama_runtime::start_embedded_runtime(
+                tauri::async_runtime::block_on(embedded_runtime::start_embedded_runtime(
                     runtime_config,
                 ))
                 .map_err(crate::error::CommandError::from)?;
 
-            let (model_manager, model_catalog_meta) = tauri::async_runtime::block_on(
+            let (mut model_manager, model_catalog_meta) = tauri::async_runtime::block_on(
                 model_registry::open_model_manager_with_registry(app.handle(), &data_dir),
             )
             .map_err(crate::error::CommandError::from)?;
+            model_manager = model_manager.with_llama_binary(llama_binary);
 
             let model_manager_arc = std::sync::Arc::new(AsyncMutex::new(model_manager));
             let model_provider: aisec_runtime::SharedModelProvider = std::sync::Arc::new(

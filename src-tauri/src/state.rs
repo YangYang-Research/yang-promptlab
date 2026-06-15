@@ -91,12 +91,12 @@ impl AppState {
         &self.model_provider
     }
 
-    /// Embedded Ollama runtime supervisor.
+    /// Embedded llama.cpp runtime supervisor.
     pub fn runtime_supervisor(&self) -> &Arc<AsyncMutex<RuntimeSupervisor>> {
         &self.runtime_supervisor
     }
 
-    /// Default Ollama base URL for model install when the client omits one.
+    /// Default llama-server base URL for legacy install IPC fields.
     pub async fn ollama_base_url(&self) -> String {
         self.runtime_supervisor.lock().await.base_url().to_string()
     }
