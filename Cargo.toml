@@ -8,6 +8,9 @@ members = [
     "crates/aisec-judge",
     "crates/aisec-report",
     "crates/aisec-fingerprint",
+    "crates/aisec-planner",
+    "crates/aisec-generator",
+    "crates/aisec-agent",
     "crates/aisec-plugin-host",
     "crates/aisec-auth",
     "crates/aisec-discovery",
@@ -32,6 +35,9 @@ aisec-models = { path = "crates/aisec-models" }
 aisec-judge = { path = "crates/aisec-judge" }
 aisec-report = { path = "crates/aisec-report" }
 aisec-fingerprint = { path = "crates/aisec-fingerprint" }
+aisec-planner = { path = "crates/aisec-planner" }
+aisec-generator = { path = "crates/aisec-generator" }
+aisec-agent = { path = "crates/aisec-agent" }
 aisec-plugin-host = { path = "crates/aisec-plugin-host" }
 aisec-auth = { path = "crates/aisec-auth" }
 aisec-harness = { path = "crates/aisec-harness" }

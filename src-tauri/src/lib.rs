@@ -15,7 +15,12 @@ pub mod harness_runtime;
 pub mod judge_config;
 pub mod model_registry;
 pub mod embedded_runtime;
+pub mod plugin_service;
+pub mod plugin_transport;
 pub mod playwright_runtime;
+pub mod agent_service;
+pub mod planner_service;
+pub mod generator_service;
 pub mod runtime_watch;
 pub mod session_auth;
 pub mod state;
@@ -51,6 +56,7 @@ pub fn run() {
 /// it in shared state. Separated from [`run`] so startup wiring is unit-testable.
 fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // 5. Logging.
             let log_guard = logging::init_app_logging(app)?;
@@ -89,6 +95,11 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 )
                 .await
                 .map_err(crate::error::CommandError::from)?;
+                let _ = crate::judge_config::migrate_judge_config_secrets(
+                    &data_dir,
+                    store.secrets(),
+                )
+                .await;
                 Ok::<(), crate::error::CommandError>(())
             })?;
 
@@ -112,11 +123,20 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 aisec_runtime::EmbeddedModelProvider::new(model_manager_arc.clone()),
             );
 
+            let harness_factory = aisec_harness::HarnessFactory::new()
+                .map_err(crate::error::CommandError::from)?;
+            let plugin_manager = std::sync::Arc::new(AsyncMutex::new(
+                crate::plugin_service::bootstrap_plugin_manager(&data_dir)
+                    .map_err(crate::error::CommandError::from)?,
+            ));
+
             app.manage(AppState::new(
                 database,
                 data_dir,
                 log_guard,
                 auth_engine_config,
+                harness_factory,
+                plugin_manager,
                 runtime_supervisor,
                 model_manager_arc,
                 model_provider,
@@ -172,6 +192,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::judge::judge_test_model,
             commands::models::models_list,
             commands::models::models_registry_info,
+            commands::models::models_registry_diagnostics,
             commands::models::models_browse,
             commands::models::models_install,
             commands::models::models_import_gguf,
@@ -186,9 +207,19 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::models::models_test_inference,
             commands::models::models_test_embeddings,
             commands::models::models_vault_path,
+            commands::models::models_vault_stats,
+            commands::planner::planner_generate,
+            commands::generator::generator_generate,
             commands::runtime::runtime_status,
             commands::runtime::runtime_restart,
             commands::runtime::runtime_stop,
+            commands::security::security_audit,
+            commands::security::security_migrate_secrets,
+            commands::plugins::plugins_list,
+            commands::plugins::plugins_refresh,
+            commands::plugins::plugins_enable,
+            commands::plugins::plugins_disable,
+            commands::plugins::plugins_info,
         ])
         .manage(AsyncMutex::new(commands::auth::AuthRecordingState::new()))
         .build(tauri::generate_context!())?;

@@ -226,7 +226,12 @@ export type AttackPlanConfig = {
   customCategories: AttackCategoryId[];
   disabledTests: string[];
   categories: AttackCategoryId[];
+  generatorMode: GeneratorMode;
+  agentMode: boolean;
+  maxAgentAttempts: number;
 };
+
+export type GeneratorMode = "static_pack" | "template_mutation" | "local_llm";
 
 export type ScanEstimateInput = {
   selectedEndpointCount: number;

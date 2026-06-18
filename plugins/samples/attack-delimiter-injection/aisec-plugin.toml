@@ -21,5 +21,5 @@ log = true
 [hooks]
 execute_attack = "execute_attack"
 
-[permissions.rationale]
+[permissions]
 probe_mutate = "Mutate attack payloads before execution"

@@ -29,11 +29,11 @@ mod tests {
             name: "Test".into(),
             purpose: "general".into(),
             recommended: false,
-            provider: "ollama".into(),
-            repo: None,
-            file: None,
-            ollama_tag: Some("llama3".into()),
+            engine: "llama.cpp".into(),
+            format: "gguf".into(),
+            size: None,
             sha256: None,
+            download_url: "https://example.com/test.Q4_K_M.gguf".into(),
         });
         let catalog = vec![entry];
         assert!(find_catalog_entry(&catalog, "test").is_some());

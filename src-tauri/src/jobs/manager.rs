@@ -14,6 +14,14 @@ pub struct ScanProgress {
     pub total: u64,
     pub findings: u64,
     pub started_at: Option<String>,
+    #[serde(default)]
+    pub agent_mode: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_phase: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_attempt: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_retry: Option<u32>,
 }
 
 impl ScanProgress {
@@ -30,6 +38,10 @@ impl ScanProgress {
                     .format(&time::format_description::well_known::Rfc3339)
                     .unwrap_or_default(),
             ),
+            agent_mode: false,
+            current_phase: None,
+            current_attempt: None,
+            current_retry: None,
         }
     }
 

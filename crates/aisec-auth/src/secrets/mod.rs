@@ -2,14 +2,21 @@
 
 mod store;
 mod vault;
-pub(crate) mod migrate;
+pub mod migrate;
+pub mod audit;
 mod descriptor;
 
 pub use store::{CredentialReferenceId, SecretScope, SecretStore};
 pub use vault::EncryptedVault;
 pub use migrate::{
     migrate_legacy_auth_data, migrate_legacy_storage_artifacts, migrate_legacy_target_descriptors,
-    resolve_auth_config_secrets, session_secrets_from_json, session_secrets_to_json,
-    store_auth_config_secrets,
+    profile_config_has_plaintext, resolve_auth_config_secrets, run_database_secret_migration,
+    session_secrets_from_json, session_secrets_to_json, store_auth_config_secrets,
+    SecretMigrationResult,
 };
-pub use descriptor::{resolve_descriptor_for_runtime, sanitize_target_descriptor};
+pub use audit::{
+    audit_database_secrets, merge_judge_config_audit, SecretAuditItem, SecretMigrationAudit,
+};
+pub use descriptor::{
+    descriptor_has_plaintext_secrets, resolve_descriptor_for_runtime, sanitize_target_descriptor,
+};

@@ -13,6 +13,8 @@ export type AttackScanPlaybook = {
   categories: string[];
   disabledTests: string[];
   endpointIds: string[];
+  agentMode?: boolean;
+  maxAgentAttempts?: number;
 };
 
 export type DiscoveryScanPlaybook = {
@@ -43,6 +45,9 @@ export function parseAttackPlaybook(playbook: unknown): AttackScanPlaybook | nul
     categories: asStringArray(obj.categories),
     disabledTests: asStringArray(obj.disabled_tests),
     endpointIds: asStringArray(obj.endpoint_ids),
+    agentMode: obj.agent_mode === true,
+    maxAgentAttempts:
+      typeof obj.max_agent_attempts === "number" ? obj.max_agent_attempts : undefined,
   };
 }
 

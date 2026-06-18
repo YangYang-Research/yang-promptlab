@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use aisec_attack::{AttackExecutor, AttackRegistry, HarnessTransport};
+use aisec_attack::{AttackExecutor, AttackRegistry};
 use aisec_auth::{
     auth_sessions_dir, AuthEngineConfig, AuthSessionManager, SessionAuthContext, SessionStore,
     SessionValidationStatus,
@@ -14,6 +14,7 @@ use aisec_storage::Database;
 
 use crate::error::{CommandError, CommandResult};
 use crate::harness_runtime::build_harness_attack_runtime_parts;
+use crate::plugin_transport::PluginAwareTransport;
 use crate::state::AppState;
 
 pub async fn auth_session_manager_from_parts(
@@ -110,7 +111,7 @@ pub async fn resolve_discovery_auth(
 }
 
 pub struct AttackRuntime {
-    pub transport: HarnessTransport,
+    pub transport: PluginAwareTransport,
     pub session: Option<SessionAuthContext>,
     pub harness_kind: HarnessKind,
 }
@@ -134,6 +135,8 @@ pub async fn build_attack_runtime(
         state.database().clone(),
         state.data_dir(),
         state.auth_engine_config().clone(),
+        state.harness_factory(),
+        state.plugin_manager().clone(),
         descriptor_json,
         probe_url,
     )
@@ -144,6 +147,8 @@ pub async fn build_attack_runtime_parts(
     db: Database,
     data_dir: &Path,
     auth_config: AuthEngineConfig,
+    harness_factory: &HarnessFactory,
+    plugin_manager: std::sync::Arc<tauri::async_runtime::Mutex<aisec_plugin_host::PluginManager>>,
     descriptor_json: &str,
     probe_url: &str,
 ) -> CommandResult<AttackRuntime> {
@@ -151,13 +156,14 @@ pub async fn build_attack_runtime_parts(
         db,
         data_dir,
         auth_config,
+        harness_factory,
         descriptor_json,
         probe_url,
     )
     .await?;
 
     Ok(AttackRuntime {
-        transport: runtime.transport,
+        transport: PluginAwareTransport::new(runtime.transport, plugin_manager),
         session: runtime.session,
         harness_kind: runtime.descriptor.preferred_harness(),
     })
@@ -169,18 +175,23 @@ pub fn fallback_attack_runtime() -> AttackRuntime {
         url: "https://localhost".into(),
         ..TargetDescriptor::default()
     };
+    let harness = aisec_attack::HarnessTransport::from_parts(
+        factory,
+        descriptor,
+        "https://localhost".to_string(),
+    );
+    let plugins = std::sync::Arc::new(tauri::async_runtime::Mutex::new(
+        aisec_plugin_host::PluginManager::new(std::env::temp_dir().join("aisec-test-plugins"))
+            .expect("plugin manager"),
+    ));
     AttackRuntime {
-        transport: HarnessTransport::from_parts(
-            factory,
-            descriptor,
-            "https://localhost".to_string(),
-        ),
+        transport: PluginAwareTransport::new(harness, plugins),
         session: None,
         harness_kind: HarnessKind::Http,
     }
 }
 
-pub fn attack_executor(transport: HarnessTransport) -> AttackExecutor<HarnessTransport> {
+pub fn attack_executor(transport: PluginAwareTransport) -> AttackExecutor<PluginAwareTransport> {
     AttackExecutor::new(AttackRegistry::with_builtins(), transport)
 }
 

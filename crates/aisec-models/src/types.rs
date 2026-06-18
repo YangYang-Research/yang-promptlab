@@ -143,7 +143,13 @@ pub struct ModelCatalogEntry {
     pub capabilities: ModelCapabilities,
     pub repo: Option<String>,
     pub filename: Option<String>,
-    pub ollama_tag: Option<String>,
+    #[serde(default)]
+    pub engine: String,
+    #[serde(default)]
+    pub format: String,
+    pub download_url: Option<String>,
+    pub sha256: Option<String>,
+    pub size_label: Option<String>,
 }
 
 /// HuggingFace download request.
@@ -166,8 +172,21 @@ pub struct DownloadProgress {
     pub destination: PathBuf,
     pub downloaded_bytes: u64,
     pub total_bytes: Option<u64>,
+    #[serde(default)]
+    pub speed_bytes_per_sec: Option<f64>,
+    #[serde(default)]
+    pub eta_seconds: Option<u64>,
     pub resumed: bool,
     pub updated_at: OffsetDateTime,
+}
+
+/// Vault storage summary for desktop UI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultStats {
+    pub model_count: usize,
+    pub installed_bytes: u64,
+    pub disk_usage_bytes: u64,
+    pub vault_path: PathBuf,
 }
 
 /// SHA256 verification outcome.

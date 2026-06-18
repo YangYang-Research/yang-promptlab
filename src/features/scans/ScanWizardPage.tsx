@@ -242,6 +242,9 @@ export function ScanWizardPage() {
         categories: session.attackPlan.categories,
         profile: session.attackPlan.profileId,
         disabledTests: session.attackPlan.disabledTests,
+        generatorMode: session.attackPlan.generatorMode,
+        agentMode: session.attackPlan.agentMode,
+        maxAgentAttempts: session.attackPlan.maxAgentAttempts,
       });
       await actions.refresh();
       updateSession({ submittedScanId: result.scan_id });
@@ -314,6 +317,8 @@ export function ScanWizardPage() {
         return session.discovery.selectedEndpointIds.length > 0 ? (
           <AttackPlanStep
             selectedEndpointCount={session.discovery.selectedEndpointIds.length}
+            endpoints={session.discovery.endpoints}
+            selectedEndpointIds={session.discovery.selectedEndpointIds}
             planUi={session.attackPlanUi}
             onPlanUiChange={(patch) =>
               setSession((prev) => {

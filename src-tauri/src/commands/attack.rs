@@ -8,10 +8,11 @@
 //! responses normalized by the harness layer.
 
 use aisec_attack::{
-    apply_descriptor_auth, AttackCategory, AttackContext, AttackTarget, FindingSeverity,
+    apply_descriptor_auth, AttackCategory, AttackContext, AttackPayload, AttackTarget, FindingSeverity,
 };
 use aisec_auth::{resolve_descriptor_for_runtime, AuthSessionManager, SecretStore};
 use aisec_judge::{JudgeVerdict, Severity as JudgeSeverity};
+use aisec_plugin_host::evaluate_with_judge_plugins;
 use aisec_runtime::{RuntimeSupervisor, SharedModelProvider};
 use aisec_storage::{
     AttackResultRepository, CreateAttackResult, CreateFinding, CreateScan, Endpoint,
@@ -22,16 +23,30 @@ use tauri::State;
 use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
 
+use std::sync::Arc;
+use std::collections::HashMap;
+
+use tauri::async_runtime::Mutex as AsyncMutex;
+
 use crate::dto::{AttackRunDto, FindingDto, ScanDto};
 use crate::error::{CommandError, CommandResult};
 use crate::judge_config::build_configured_judge_engine;
 use crate::session_auth::{attack_executor, build_attack_runtime, AttackRuntime};
 use crate::state::AppState;
 
+pub struct JudgedAttemptSummary {
+    pub payload_id: String,
+    pub payload_name: String,
+    pub vulnerable: bool,
+    pub confidence: f32,
+    pub summary: String,
+}
+
 pub struct CategoryRunResult {
     pub attempts: usize,
     pub successes: u64,
     pub findings: Vec<FindingDto>,
+    pub judged: Vec<JudgedAttemptSummary>,
 }
 
 fn severity_str(severity: FindingSeverity) -> &'static str {
@@ -71,6 +86,8 @@ pub async fn run_category_on_endpoint(
     model_manager: &aisec_models::LocalModelManager,
     model_provider: SharedModelProvider,
     runtime_supervisor: &mut RuntimeSupervisor,
+    plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
+    generated_payloads: Option<&HashMap<AttackCategory, Vec<AttackPayload>>>,
 ) -> CommandResult<CategoryRunResult> {
     let mut target = AttackTarget::llm_api(endpoint.url.clone());
     if let Some(tid) = &target_id {
@@ -95,6 +112,9 @@ pub async fn run_category_on_endpoint(
     let probe_id = format!("{}-{}", endpoint.id, category.as_str());
     let mut ctx = AttackContext::new(scan_id, probe_id, target);
     ctx.target_id = target_id.clone();
+    if let Some(payloads) = generated_payloads {
+        ctx = ctx.with_generated_payloads(payloads.clone());
+    }
     let executor = attack_executor(runtime.transport);
 
     info!(
@@ -120,12 +140,13 @@ pub async fn run_category_on_endpoint(
     let category_name = category.as_str();
     let mut successes = 0u64;
     let mut created_findings: Vec<FindingDto> = Vec::new();
+    let mut judged: Vec<JudgedAttemptSummary> = Vec::new();
 
     for attempt in &result.attempts {
         let eval = &attempt.evaluation;
         let normalized = &attempt.response.normalized;
 
-        let verdict: JudgeVerdict = judge
+        let mut verdict: JudgeVerdict = judge
             .judge_normalized(
                 attempt.payload_id.clone(),
                 category_name,
@@ -134,6 +155,30 @@ pub async fn run_category_on_endpoint(
             )
             .await
             .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
+
+        {
+            let mut plugins = plugin_manager.lock().await;
+            if let Ok(signals) = evaluate_with_judge_plugins(
+                &mut plugins,
+                &attempt.response.body,
+                category_name,
+            )
+            .await
+            {
+                for signal in signals {
+                    if signal.vulnerable
+                        && (signal.confidence > verdict.confidence || !verdict.vulnerable)
+                    {
+                        verdict.vulnerable = true;
+                        verdict.confidence = verdict.confidence.max(signal.confidence);
+                        verdict.summary = format!(
+                            "{} [plugin {}: {}]",
+                            verdict.summary, signal.plugin_id, signal.summary
+                        );
+                    }
+                }
+            }
+        }
 
         let judge_json = serde_json::to_value(&verdict).unwrap_or(serde_json::Value::Null);
 
@@ -198,12 +243,21 @@ pub async fn run_category_on_endpoint(
                 .map_err(CommandError::from)?;
             created_findings.push(FindingDto::from(finding));
         }
+
+        judged.push(JudgedAttemptSummary {
+            payload_id: attempt.payload_id.clone(),
+            payload_name: attempt.payload_name.clone(),
+            vulnerable: verdict.vulnerable,
+            confidence: verdict.confidence,
+            summary: verdict.summary.clone(),
+        });
     }
 
     Ok(CategoryRunResult {
         attempts: result.attempts.len(),
         successes,
         findings: created_findings,
+        judged,
     })
 }
 
@@ -281,6 +335,8 @@ pub async fn attack_run_prompt_injection_op(
         &manager,
         state.model_provider().clone(),
         &mut supervisor,
+        state.plugin_manager().clone(),
+        None,
     )
     .await
     {

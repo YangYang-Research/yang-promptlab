@@ -187,6 +187,8 @@ impl DownloadManager {
             destination: destination.to_path_buf(),
             downloaded_bytes: downloaded,
             total_bytes,
+            speed_bytes_per_sec: None,
+            eta_seconds: None,
             resumed,
             updated_at: OffsetDateTime::now_utc(),
         })
@@ -299,6 +301,9 @@ impl DownloadManager {
         let mut stream = response.bytes_stream();
         use futures_util::StreamExt;
 
+        let mut last_bytes = downloaded;
+        let mut last_tick = std::time::Instant::now();
+
         while let Some(chunk) = stream
             .next()
             .await
@@ -317,6 +322,24 @@ impl DownloadManager {
                 slot.total_bytes = total_bytes;
                 slot.status = DownloadStatus::Downloading;
                 slot.updated_at = OffsetDateTime::now_utc();
+
+                let now = std::time::Instant::now();
+                let elapsed = now.duration_since(last_tick).as_secs_f64();
+                if elapsed >= 0.5 {
+                    let delta = downloaded.saturating_sub(last_bytes);
+                    let speed = delta as f64 / elapsed;
+                    slot.speed_bytes_per_sec = Some(speed);
+                    slot.eta_seconds = total_bytes.and_then(|total| {
+                        let remaining = total.saturating_sub(downloaded);
+                        if speed > 1.0 && remaining > 0 {
+                            Some((remaining as f64 / speed).ceil() as u64)
+                        } else {
+                            None
+                        }
+                    });
+                    last_bytes = downloaded;
+                    last_tick = now;
+                }
             }
 
             Self::save_state(&ResumeState {
@@ -339,6 +362,8 @@ impl DownloadManager {
             destination: destination.to_path_buf(),
             downloaded_bytes: downloaded,
             total_bytes,
+            speed_bytes_per_sec: None,
+            eta_seconds: Some(0),
             resumed,
             updated_at: OffsetDateTime::now_utc(),
         };

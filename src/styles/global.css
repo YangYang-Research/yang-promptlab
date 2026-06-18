@@ -969,6 +969,109 @@ a:hover {
   margin: 0 0 1rem;
 }
 
+.models-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.models-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.models-summary-card__label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.models-summary-card__value {
+  font-size: 1.375rem;
+  line-height: 1.2;
+}
+
+.models-summary-card__value--runtime {
+  text-transform: capitalize;
+}
+
+.import-path-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.import-path-row .input {
+  flex: 1 1 16rem;
+  min-width: 12rem;
+}
+
+.download-manager__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.download-manager__status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.download-manager__status--downloading {
+  color: var(--accent);
+}
+
+.download-manager__status--paused {
+  color: var(--warning, #d4a017);
+}
+
+.download-manager__status--failed {
+  color: var(--danger);
+}
+
+.download-manager__bar {
+  height: 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.download-manager__bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-muted, var(--accent)));
+  transition: width 0.3s ease;
+}
+
+.download-manager__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.download-manager__stat-label {
+  display: block;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 0.125rem;
+}
+
 .model-catalog {
   display: flex;
   flex-direction: column;
@@ -2229,6 +2332,36 @@ a:hover {
 }
 
 /* Scan wizard — step 4 (attack planning) */
+.wizard-planner-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.wizard-planner-rationales {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.wizard-fingerprint-summary {
+  margin-bottom: 1.25rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+}
+
+.wizard-fingerprint-summary__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
 .wizard-attack-profiles {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));

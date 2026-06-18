@@ -1,4 +1,4 @@
-import { Button, ProgressBar, StatusBadge } from "@/shared/components";
+import { Badge, Button, ProgressBar, StatusBadge } from "@/shared/components";
 import { formatDurationMs, formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import type { ScanStatusDto } from "@/shared/ipc";
 import type { ScanRun } from "@/shared/types";
@@ -62,6 +62,7 @@ export function ScanMonitorCard({
           <p className="text-muted text-sm mono">{scan.id}</p>
         </div>
         <StatusBadge status={status.status as ScanRun["status"]} />
+        {status.agent_mode && <Badge variant="info">Agent</Badge>}
       </div>
 
       {isActive && (
@@ -91,6 +92,18 @@ export function ScanMonitorCard({
           <dt>Current test</dt>
           <dd>{status.current_test ?? (isActive ? "—" : "—")}</dd>
         </div>
+        {status.agent_mode && (
+          <div className="scan-monitor-card__metric--wide">
+            <dt>Agent phase</dt>
+            <dd>
+              {status.current_phase ?? "—"}
+              {status.current_attempt != null ? ` · attempt ${status.current_attempt}` : ""}
+              {status.current_retry != null && status.current_retry > 0
+                ? ` · retry ${status.current_retry}`
+                : ""}
+            </dd>
+          </div>
+        )}
       </dl>
 
       {isActive && (

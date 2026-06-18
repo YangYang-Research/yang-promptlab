@@ -157,49 +157,88 @@ impl LocalModelManager {
         Ok(entry)
     }
 
-    /// Install from catalog entry id (HuggingFace download or Ollama registration).
+    /// Install from catalog entry id (GGUF download from registry URL).
     #[instrument(skip(self))]
     pub async fn install_catalog(
         &mut self,
         catalog_id: &str,
-        ollama_base_url: Option<String>,
+        _ollama_base_url: Option<String>,
     ) -> ModelResult<ModelEntry> {
-        let _ = ollama_base_url;
+        let _ = _ollama_base_url;
+        self.download_catalog_entry(catalog_id).await
+    }
+
+    async fn download_catalog_entry(&mut self, catalog_id: &str) -> ModelResult<ModelEntry> {
         let catalog = self
             .find_catalog_entry(catalog_id)
             .ok_or_else(|| ModelError::not_found(format!("catalog entry: {catalog_id}")))?
             .clone();
 
-        match catalog.provider {
-            ModelProvider::Ollama => {
-                return Err(ModelError::invalid(
-                    "Ollama catalog installs are deprecated; use a HuggingFace GGUF catalog entry or import a .gguf file",
-                ));
-            }
-            ModelProvider::HuggingFace => {
-                let repo = catalog
-                    .repo
-                    .ok_or_else(|| ModelError::invalid("catalog entry missing repo"))?;
-                let filename = catalog
-                    .filename
-                    .ok_or_else(|| ModelError::invalid("catalog entry missing filename"))?;
-                self.download_huggingface(HuggingFaceDownloadRequest {
-                    name: catalog.name,
-                    repo,
-                    filename,
-                    revision: Some(catalog.version.clone()),
-                    expected_sha256: None,
-                    expected_size_bytes: catalog.size_bytes,
-                })
-                .await
-            }
-            ModelProvider::Gguf => Err(ModelError::invalid(
-                "catalog GGUF entries must be installed via HuggingFace or import",
-            )),
+        let url = catalog
+            .download_url
+            .as_deref()
+            .filter(|u| !u.is_empty())
+            .ok_or_else(|| ModelError::invalid("catalog entry missing download_url"))?;
+
+        let filename = catalog
+            .filename
+            .clone()
+            .or_else(|| crate::builtin_catalog::filename_from_url(url))
+            .ok_or_else(|| ModelError::invalid("could not infer filename from download_url"))?;
+
+        if !filename.to_lowercase().ends_with(".gguf") {
+            return Err(ModelError::invalid("registry download must target a .gguf file"));
         }
+
+        let model_id = Uuid::new_v4().to_string();
+        let model_dir = ModelRegistry::model_dir(&self.vault_path, &model_id);
+        tokio::fs::create_dir_all(&model_dir).await.map_err(ModelError::Io)?;
+        let destination = model_dir.join(&filename);
+
+        info!(url = %url, file = %filename, "starting registry GGUF download");
+
+        let mut progress = self
+            .downloader
+            .download(url, &destination)
+            .await?;
+        progress.model_id = model_id.clone();
+        progress.status = DownloadStatus::Completed;
+
+        let verification = self
+            .verify_file(&destination, catalog.sha256.as_deref())
+            .await?;
+        if !verification.valid {
+            return Err(ModelError::verification("post-download checksum mismatch"));
+        }
+
+        let source = ModelSource::Local {
+            path: destination.clone(),
+        };
+        let provider = ModelProvider::Gguf;
+        let now = OffsetDateTime::now_utc();
+        let entry = ModelEntry {
+            id: model_id,
+            name: catalog.name,
+            format: ModelFormat::Gguf,
+            provider,
+            version: filename,
+            capabilities: infer_capabilities(provider),
+            source,
+            file_path: destination,
+            size_bytes: Some(verification.size_bytes),
+            checksum_sha256: Some(verification.actual_sha256),
+            verified: true,
+            created_at: now,
+            updated_at: now,
+            metadata: serde_json::json!({ "download": progress, "registry_id": catalog_id }),
+        };
+
+        self.registry.register_entry(entry.clone())?;
+        self.persist()?;
+        Ok(entry)
     }
 
-    /// Start a background HuggingFace download for a registry catalog entry.
+    /// Start a background GGUF download for a registry catalog entry.
     pub async fn start_catalog_download(
         &mut self,
         catalog_id: &str,
@@ -209,18 +248,17 @@ impl LocalModelManager {
             .ok_or_else(|| ModelError::not_found(format!("catalog entry: {catalog_id}")))?
             .clone();
 
-        if catalog.provider != ModelProvider::HuggingFace {
-            return Err(ModelError::invalid(
-                "background download supports HuggingFace registry entries only",
-            ));
-        }
+        let url = catalog
+            .download_url
+            .as_deref()
+            .filter(|u| !u.is_empty())
+            .ok_or_else(|| ModelError::invalid("catalog entry missing download_url"))?;
 
-        let repo = catalog
-            .repo
-            .ok_or_else(|| ModelError::invalid("catalog entry missing repo"))?;
         let filename = catalog
             .filename
-            .ok_or_else(|| ModelError::invalid("catalog entry missing filename"))?;
+            .clone()
+            .or_else(|| crate::builtin_catalog::filename_from_url(url))
+            .ok_or_else(|| ModelError::invalid("could not infer filename from download_url"))?;
 
         let model_id = Uuid::new_v4().to_string();
         let model_dir = ModelRegistry::model_dir(&self.vault_path, &model_id);
@@ -228,17 +266,12 @@ impl LocalModelManager {
         let destination = model_dir.join(&filename);
 
         self.download_coordinator
-            .start_huggingface(
+            .start_url_download(
                 catalog_id,
-                HuggingFaceDownloadRequest {
-                    name: catalog.name,
-                    repo,
-                    filename,
-                    revision: Some(catalog.version.clone()),
-                    expected_sha256: None,
-                    expected_size_bytes: catalog.size_bytes,
-                },
+                url,
                 destination,
+                catalog.sha256.clone(),
+                catalog.size_bytes,
             )
             .await
     }
@@ -272,24 +305,24 @@ impl LocalModelManager {
             .ok_or_else(|| ModelError::not_found(format!("catalog entry: {catalog_id}")))?
             .clone();
 
-        let verification = self.verify_file(&destination, None).await?;
+        let verification = self
+            .verify_file(&destination, catalog.sha256.as_deref())
+            .await?;
         if !verification.valid {
             return Err(ModelError::verification("post-download checksum mismatch"));
         }
 
-        let source = ModelSource::HuggingFace {
-            repo: catalog.repo.clone().unwrap_or_default(),
-            filename: catalog.filename.clone().unwrap_or_default(),
-            revision: Some(catalog.version.clone()),
+        let source = ModelSource::Local {
+            path: destination.clone(),
         };
-        let provider = infer_provider(&source);
+        let provider = ModelProvider::Gguf;
         let now = OffsetDateTime::now_utc();
         let entry = ModelEntry {
             id: Uuid::new_v4().to_string(),
             name: catalog.name,
             format: ModelFormat::Gguf,
             provider,
-            version: infer_version(&source),
+            version: catalog.version.clone(),
             capabilities: infer_capabilities(provider),
             source,
             file_path: destination,
@@ -512,9 +545,41 @@ impl LocalModelManager {
         self.registry.list()
     }
 
+    /// Aggregate installed model sizes and on-disk vault usage.
+    pub fn vault_stats(&self) -> ModelResult<crate::types::VaultStats> {
+        let models = self.list_models();
+        let installed_bytes = models
+            .iter()
+            .filter_map(|entry| entry.size_bytes)
+            .sum();
+        Ok(crate::types::VaultStats {
+            model_count: models.len(),
+            installed_bytes,
+            disk_usage_bytes: dir_size(&self.vault_path)?,
+            vault_path: self.vault_path.clone(),
+        })
+    }
+
     pub fn get_model(&self, model_id: &str) -> Option<&ModelEntry> {
         self.registry.get(model_id)
     }
+}
+
+fn dir_size(path: &Path) -> ModelResult<u64> {
+    let metadata = std::fs::metadata(path).map_err(ModelError::Io)?;
+    if metadata.is_file() {
+        return Ok(metadata.len());
+    }
+    if !metadata.is_dir() {
+        return Ok(0);
+    }
+
+    let mut total = 0u64;
+    for entry in std::fs::read_dir(path).map_err(ModelError::Io)? {
+        let entry = entry.map_err(ModelError::Io)?;
+        total = total.saturating_add(dir_size(&entry.path())?);
+    }
+    Ok(total)
 }
 
 #[cfg(test)]

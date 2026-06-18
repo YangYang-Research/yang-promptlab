@@ -53,6 +53,12 @@ export function SubmitStep({
       { label: "Profile", value: profileLabel },
       { label: "Categories", value: attackPlan.categories.join(", ") },
       {
+        label: "Mode",
+        value: attackPlan.agentMode
+          ? `Agentic (max ${attackPlan.maxAgentAttempts} attempts/category)`
+          : "Batch",
+      },
+      {
         label: "Est. requests",
         value: estimateRequests(estimateInput).toLocaleString(),
       },

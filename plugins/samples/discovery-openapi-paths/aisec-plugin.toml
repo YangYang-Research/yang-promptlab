@@ -21,6 +21,6 @@ log = true
 [hooks]
 discover = "discover"
 
-[permissions.rationale]
+[permissions]
 finding_emit = "Emit discovered endpoints as findings"
 log = "Structured logging during discovery"

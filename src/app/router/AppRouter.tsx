@@ -37,6 +37,9 @@ const ReportsPage = lazy(() =>
 const ModelsPage = lazy(() =>
   import("@/features/models/ModelsPage").then((m) => ({ default: m.ModelsPage })),
 );
+const PluginsPage = lazy(() =>
+  import("@/features/plugins/PluginsPage").then((m) => ({ default: m.PluginsPage })),
+);
 const SettingsPage = lazy(() =>
   import("@/features/settings/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 );
@@ -178,6 +181,14 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <ModelsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="plugins"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <PluginsPage />
               </Suspense>
             }
           />

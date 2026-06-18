@@ -178,6 +178,15 @@ export function mapEndpoints(endpoints: EndpointDto[]): DiscoveredEndpoint[] {
           methodsUsed: e.fingerprint.methodsUsed,
           primaryProvider: e.fingerprint.primaryProvider,
           apiStyle: e.fingerprint.apiStyle,
+          platformProfile: e.fingerprint.platformProfile ?? {
+            platform: "",
+            version: "",
+            authType: "",
+            llmProvider: "",
+            memoryEnabled: false,
+            toolsEnabled: false,
+            ragEnabled: false,
+          },
         }
       : null,
   }));

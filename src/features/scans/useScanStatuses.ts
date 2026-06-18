@@ -59,5 +59,9 @@ export function mergeScanStatus(
     current_endpoint: null,
     current_test: null,
     started_at: null,
+    agent_mode: false,
+    current_phase: null,
+    current_attempt: null,
+    current_retry: null,
   };
 }

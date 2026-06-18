@@ -18,6 +18,47 @@ pub fn sanitize_target_descriptor(
     Ok((value.to_string(), changed))
 }
 
+/// Returns true when a descriptor JSON still contains inline auth secrets.
+pub fn descriptor_has_plaintext_secrets(descriptor_json: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(descriptor_json) else {
+        return false;
+    };
+    descriptor_value_has_plaintext(&value)
+}
+
+fn descriptor_value_has_plaintext(value: &Value) -> bool {
+    let Some(auth) = value.get("auth") else {
+        return false;
+    };
+    let Some(obj) = auth.as_object() else {
+        return false;
+    };
+
+    if let Some(config) = obj.get("config").and_then(|v| v.as_object()) {
+        for key in ["password", "token", "key", "value"] {
+            if config
+                .get(key)
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| !s.is_empty())
+            {
+                return true;
+            }
+        }
+    }
+
+    for key in ["password", "token", "key", "value"] {
+        if obj
+            .get(key)
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| !s.is_empty())
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Resolve credential references inside a descriptor for runtime transport/auth use.
 pub fn resolve_descriptor_for_runtime(
     descriptor_json: &str,

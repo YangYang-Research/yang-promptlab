@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::error::{CommandError, CommandResult};
-use crate::judge_config::{load_judge_config, prepare_judge_runtime_context, save_judge_config};
+use crate::judge_config::{load_judge_config, prepare_judge_runtime_context, resolve_judge_config_secrets, save_judge_config};
 use crate::state::AppState;
+use aisec_auth::SecretStore;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +29,8 @@ pub struct JudgeConfigDto {
     pub remote_model: String,
     pub remote_api_key: String,
     pub remote_api_key_env: Option<String>,
+    #[serde(default)]
+    pub remote_api_key_configured: bool,
     pub consensus_threshold: f32,
     pub min_confidence: f32,
     pub llm_max_tokens: u32,
@@ -62,8 +65,10 @@ impl From<JudgeProviderConfig> for JudgeConfigDto {
             .into(),
             remote_base_url: config.remote.base_url,
             remote_model: config.remote.model,
-            remote_api_key: config.remote.api_key,
-            remote_api_key_env: config.remote.api_key_env,
+            remote_api_key: config.remote.api_key.clone(),
+            remote_api_key_env: config.remote.api_key_env.clone(),
+            remote_api_key_configured: config.remote.api_key_credential_id.is_some()
+                || !config.remote.api_key.trim().is_empty(),
             consensus_threshold: config.consensus_threshold,
             min_confidence: config.min_confidence,
             llm_max_tokens: config.llm_max_tokens,
@@ -121,6 +126,7 @@ fn dto_to_config(dto: JudgeConfigDto) -> Result<JudgeProviderConfig, CommandErro
             base_url: dto.remote_base_url,
             model: dto.remote_model,
             api_key: dto.remote_api_key,
+            api_key_credential_id: None,
             api_key_env: dto.remote_api_key_env,
         },
         consensus_threshold: dto.consensus_threshold,
@@ -141,7 +147,8 @@ pub async fn judge_config_save(
     state: State<'_, AppState>,
     config: JudgeConfigDto,
 ) -> CommandResult<JudgeConfigDto> {
-    let parsed = dto_to_config(config)?;
+    let mut parsed = dto_to_config(config)?;
+    crate::commands::security::sanitize_judge_on_save(&mut parsed)?;
     let saved = save_judge_config(state.data_dir(), &parsed).await?;
     Ok(JudgeConfigDto::from(saved))
 }
@@ -156,6 +163,9 @@ pub async fn judge_test_connectivity(
     } else {
         load_judge_config(state.data_dir()).await?
     };
+    if let Ok(secrets) = SecretStore::new() {
+        let _ = resolve_judge_config_secrets(&mut provider_config, &secrets);
+    }
     let manager = state.model_manager().lock().await;
     let mut supervisor = state.runtime_supervisor().lock().await;
     let runtime = prepare_judge_runtime_context(
@@ -180,6 +190,9 @@ pub async fn judge_test_model(
     } else {
         load_judge_config(state.data_dir()).await?
     };
+    if let Ok(secrets) = SecretStore::new() {
+        let _ = resolve_judge_config_secrets(&mut provider_config, &secrets);
+    }
     let manager = state.model_manager().lock().await;
     let mut supervisor = state.runtime_supervisor().lock().await;
     let runtime = prepare_judge_runtime_context(

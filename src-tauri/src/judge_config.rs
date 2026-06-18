@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use aisec_auth::{CredentialReferenceId, SecretScope, SecretStore};
 use aisec_core::AisecError;
 use aisec_judge::{JudgeMode, JudgeProviderConfig, JudgeRuntimeContext, LocalProvider};
 use aisec_models::{LocalModelManager, ModelSource};
@@ -14,6 +15,62 @@ pub fn judge_config_path(data_dir: &Path) -> PathBuf {
 
 pub fn models_vault_path(data_dir: &Path) -> PathBuf {
     data_dir.join("models")
+}
+
+/// True when the judge config still stores a plaintext remote API key on disk.
+pub fn judge_config_has_legacy_secrets(config: &JudgeProviderConfig) -> bool {
+    !config.remote.api_key.trim().is_empty()
+}
+
+pub async fn audit_judge_config_legacy(data_dir: &Path) -> CommandResult<bool> {
+    let config = load_judge_config(data_dir).await?;
+    Ok(judge_config_has_legacy_secrets(&config))
+}
+
+/// Move a plaintext remote API key into the OS keychain and clear the on-disk field.
+pub fn sanitize_judge_config_secrets(
+    config: &mut JudgeProviderConfig,
+    secrets: &SecretStore,
+) -> CommandResult<bool> {
+    if config.remote.api_key.trim().is_empty() {
+        return Ok(false);
+    }
+    let id = secrets
+        .store(SecretScope::Judge, config.remote.api_key.trim())
+        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+    config.remote.api_key_credential_id = Some(id.to_string());
+    config.remote.api_key.clear();
+    Ok(true)
+}
+
+/// Load a keychain-backed API key into memory for runtime use (not persisted).
+pub fn resolve_judge_config_secrets(
+    config: &mut JudgeProviderConfig,
+    secrets: &SecretStore,
+) -> CommandResult<()> {
+    if !config.remote.api_key.trim().is_empty() {
+        return Ok(());
+    }
+    let Some(id) = config.remote.api_key_credential_id.clone() else {
+        return Ok(());
+    };
+    let key = secrets
+        .load(SecretScope::Judge, &CredentialReferenceId::parse(id))
+        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+    config.remote.api_key = key;
+    Ok(())
+}
+
+pub async fn migrate_judge_config_secrets(
+    data_dir: &Path,
+    secrets: &SecretStore,
+) -> CommandResult<u32> {
+    let mut config = load_judge_config(data_dir).await?;
+    if !sanitize_judge_config_secrets(&mut config, secrets)? {
+        return Ok(0);
+    }
+    save_judge_config(data_dir, &config).await?;
+    Ok(1)
 }
 
 pub async fn load_judge_config(data_dir: &Path) -> CommandResult<JudgeProviderConfig> {
@@ -127,6 +184,9 @@ pub async fn build_configured_judge_engine(
     runtime_supervisor: &mut RuntimeSupervisor,
 ) -> CommandResult<aisec_judge::JudgeEngine> {
     let mut config = load_judge_config(data_dir).await?;
+    if let Ok(secrets) = SecretStore::new() {
+        let _ = resolve_judge_config_secrets(&mut config, &secrets);
+    }
     let runtime =
         prepare_judge_runtime_context(&mut config, manager, model_provider, runtime_supervisor)
             .await?;

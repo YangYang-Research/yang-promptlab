@@ -96,6 +96,8 @@ pub struct RemoteProviderSettings {
     #[serde(default)]
     pub api_key: String,
     #[serde(default)]
+    pub api_key_credential_id: Option<String>,
+    #[serde(default)]
     pub api_key_env: Option<String>,
 }
 
@@ -110,6 +112,7 @@ impl Default for RemoteProviderSettings {
             base_url: None,
             model: default_remote_model(),
             api_key: String::new(),
+            api_key_credential_id: None,
             api_key_env: Some("OPENAI_API_KEY".into()),
         }
     }

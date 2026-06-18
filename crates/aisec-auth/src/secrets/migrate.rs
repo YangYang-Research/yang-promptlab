@@ -169,6 +169,49 @@ pub async fn migrate_legacy_storage_artifacts(
     Ok(migrated)
 }
 
+/// Result of migrating database-backed and on-disk session secrets.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretMigrationResult {
+    pub auth_migrated: u32,
+    pub targets_migrated: u32,
+    pub storage_migrated: u32,
+}
+
+/// Run all SQLite + encrypted vault migrations (excluding judge config file).
+pub async fn run_database_secret_migration(
+    db: &Database,
+    data_dir: &Path,
+    secrets: &SecretStore,
+    vault: &EncryptedVault,
+) -> AisecResult<SecretMigrationResult> {
+    let auth_migrated = migrate_legacy_auth_data(db, secrets).await?;
+    let targets_migrated = migrate_legacy_target_descriptors(db, secrets).await?;
+    let storage_migrated = migrate_legacy_storage_artifacts(db, data_dir, vault).await?;
+    Ok(SecretMigrationResult {
+        auth_migrated,
+        targets_migrated,
+        storage_migrated,
+    })
+}
+
+/// Returns true when a profile config JSON still stores inline secrets.
+pub fn profile_config_has_plaintext(config: &serde_json::Value) -> bool {
+    let Some(obj) = config.as_object() else {
+        return false;
+    };
+    for key in ["password", "token", "key"] {
+        if obj
+            .get(key)
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| !s.is_empty())
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn migrate_profile_config(
     config: &mut serde_json::Value,
     secrets: &SecretStore,

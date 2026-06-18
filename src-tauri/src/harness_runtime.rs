@@ -28,6 +28,7 @@ pub async fn build_harness_attack_runtime(
         state.database().clone(),
         state.data_dir(),
         state.auth_engine_config().clone(),
+        state.harness_factory(),
         descriptor_json,
         probe_url,
     )
@@ -38,6 +39,7 @@ pub async fn build_harness_attack_runtime_parts(
     db: Database,
     data_dir: &Path,
     auth_config: aisec_auth::AuthEngineConfig,
+    base_factory: &HarnessFactory,
     descriptor_json: &str,
     probe_url: &str,
 ) -> CommandResult<HarnessAttackRuntime> {
@@ -73,7 +75,7 @@ pub async fn build_harness_attack_runtime_parts(
     }
 
     let descriptor = aisec_harness::adapter::descriptor_from_parts(&descriptor_json, probe_url, auth.clone());
-    let mut factory = HarnessFactory::new().map_err(crate::error::CommandError::from)?;
+    let mut factory = base_factory.clone();
 
     if descriptor.preferred_harness() == aisec_harness::HarnessKind::Playwright {
         if let Some(ctx) = &session {

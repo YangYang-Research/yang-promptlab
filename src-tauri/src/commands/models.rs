@@ -49,7 +49,11 @@ pub struct ModelCatalogEntryDto {
     pub size_gb: Option<f64>,
     pub quant: Option<String>,
     pub capabilities: ModelCapabilitiesDto,
-    pub ollama_tag: Option<String>,
+    pub engine: String,
+    pub format: String,
+    pub download_url: Option<String>,
+    pub sha256: Option<String>,
+    pub size_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +63,29 @@ pub struct ModelRegistryInfoDto {
     pub remote_merged: bool,
     pub remote_url: Option<String>,
     pub source_path: Option<String>,
+    pub total_models: usize,
+    pub valid_models: usize,
+    pub invalid_models: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryValidationIssueDto {
+    pub id: String,
+    pub field: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelRegistryDiagnosticsDto {
+    pub total_models: usize,
+    pub valid_models: usize,
+    pub invalid_models: usize,
+    pub valid_ids: Vec<String>,
+    pub invalid_ids: Vec<String>,
+    pub issues: Vec<RegistryValidationIssueDto>,
+    pub healthy: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,9 +115,23 @@ pub struct ModelDownloadProgressDto {
     pub status: String,
     pub downloaded_bytes: u64,
     pub total_bytes: Option<u64>,
+    pub remaining_bytes: Option<u64>,
     pub percent: Option<f64>,
+    pub speed_bytes_per_sec: Option<f64>,
+    pub eta_seconds: Option<u64>,
     pub resumed: bool,
     pub destination: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelVaultStatsDto {
+    pub vault_path: String,
+    pub model_count: usize,
+    pub installed_bytes: u64,
+    pub installed_gb: f64,
+    pub disk_usage_bytes: u64,
+    pub disk_usage_gb: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,7 +199,11 @@ fn catalog_to_dto(entry: &ModelCatalogEntry) -> ModelCatalogEntryDto {
             completion: entry.capabilities.completion,
             embeddings: entry.capabilities.embeddings,
         },
-        ollama_tag: entry.ollama_tag.clone(),
+        engine: entry.engine.clone(),
+        format: entry.format.clone(),
+        download_url: entry.download_url.clone(),
+        sha256: entry.sha256.clone(),
+        size_label: entry.size_label.clone(),
     }
 }
 
@@ -181,12 +226,18 @@ fn progress_to_dto(progress: &DownloadProgress) -> ModelDownloadProgressDto {
             Some((progress.downloaded_bytes as f64 / total as f64) * 100.0)
         }
     });
+    let remaining_bytes = progress
+        .total_bytes
+        .map(|total| total.saturating_sub(progress.downloaded_bytes));
     ModelDownloadProgressDto {
         catalog_id: progress.model_id.clone(),
         status: status_str(progress.status).into(),
         downloaded_bytes: progress.downloaded_bytes,
         total_bytes: progress.total_bytes,
+        remaining_bytes,
         percent,
+        speed_bytes_per_sec: progress.speed_bytes_per_sec,
+        eta_seconds: progress.eta_seconds,
         resumed: progress.resumed,
         destination: progress.destination.to_string_lossy().into_owned(),
     }
@@ -226,6 +277,7 @@ pub async fn models_registry_info(state: State<'_, AppState>) -> CommandResult<M
 
 pub fn models_registry_info_op(state: &AppState) -> CommandResult<ModelRegistryInfoDto> {
     let meta = state.model_catalog_meta();
+    let validation = &meta.validation;
     Ok(ModelRegistryInfoDto {
         entry_count: meta.entry_count,
         remote_merged: meta.remote_merged,
@@ -234,7 +286,38 @@ pub fn models_registry_info_op(state: &AppState) -> CommandResult<ModelRegistryI
             .source_path
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned()),
+        total_models: validation.total,
+        valid_models: validation.valid,
+        invalid_models: validation.invalid,
     })
+}
+
+pub fn models_registry_diagnostics_op(state: &AppState) -> CommandResult<ModelRegistryDiagnosticsDto> {
+    let validation = &state.model_catalog_meta().validation;
+    Ok(ModelRegistryDiagnosticsDto {
+        total_models: validation.total,
+        valid_models: validation.valid,
+        invalid_models: validation.invalid,
+        valid_ids: validation.valid_ids.clone(),
+        invalid_ids: validation.invalid_ids.clone(),
+        issues: validation
+            .issues
+            .iter()
+            .map(|issue| RegistryValidationIssueDto {
+                id: issue.id.clone(),
+                field: issue.field.clone(),
+                message: issue.message.clone(),
+            })
+            .collect(),
+        healthy: validation.is_healthy(),
+    })
+}
+
+#[tauri::command]
+pub async fn models_registry_diagnostics(
+    state: State<'_, AppState>,
+) -> CommandResult<ModelRegistryDiagnosticsDto> {
+    models_registry_diagnostics_op(state.inner())
 }
 
 #[tauri::command]
@@ -257,11 +340,8 @@ pub async fn models_install(
     request: ModelInstallRequest,
 ) -> CommandResult<ModelEntryDto> {
     let mut manager = state.model_manager().lock().await;
-    let base_url = request
-        .ollama_base_url
-        .or(Some(state.ollama_base_url().await));
     let entry = manager
-        .install_catalog(&request.catalog_id, base_url)
+        .install_catalog(&request.catalog_id, None)
         .await
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
     Ok(entry_to_dto(&entry))
@@ -448,6 +528,26 @@ pub async fn models_vault_path(state: State<'_, AppState>) -> CommandResult<Stri
     Ok(state.models_dir().to_string_lossy().into_owned())
 }
 
+#[tauri::command]
+pub async fn models_vault_stats(state: State<'_, AppState>) -> CommandResult<ModelVaultStatsDto> {
+    models_vault_stats_op(state.inner()).await
+}
+
+pub async fn models_vault_stats_op(state: &AppState) -> CommandResult<ModelVaultStatsDto> {
+    let manager = state.model_manager().lock().await;
+    let stats = manager
+        .vault_stats()
+        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+    Ok(ModelVaultStatsDto {
+        vault_path: stats.vault_path.to_string_lossy().into_owned(),
+        model_count: stats.model_count,
+        installed_bytes: stats.installed_bytes,
+        installed_gb: stats.installed_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+        disk_usage_bytes: stats.disk_usage_bytes,
+        disk_usage_gb: stats.disk_usage_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,9 +561,14 @@ mod tests {
             destination: std::path::PathBuf::from("/tmp/model.gguf"),
             downloaded_bytes: 500,
             total_bytes: Some(1000),
+            speed_bytes_per_sec: Some(100.0),
+            eta_seconds: Some(5),
             resumed: false,
             updated_at: time::OffsetDateTime::now_utc(),
         });
         assert_eq!(dto.percent, Some(50.0));
+        assert_eq!(dto.remaining_bytes, Some(500));
+        assert_eq!(dto.speed_bytes_per_sec, Some(100.0));
+        assert_eq!(dto.eta_seconds, Some(5));
     }
 }

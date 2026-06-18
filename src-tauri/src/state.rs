@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use aisec_auth::AuthEngineConfig;
 use aisec_core::LogGuard;
+use aisec_harness::HarnessFactory;
 use aisec_models::{BuiltinCatalogMeta, LocalModelManager};
+use aisec_plugin_host::PluginManager;
 use aisec_runtime::{RuntimeSupervisor, SharedModelProvider};
 use aisec_storage::{Database, Repositories};
 use tauri::async_runtime::Mutex as AsyncMutex;
@@ -17,6 +19,8 @@ pub struct AppState {
     data_dir: PathBuf,
     jobs: ScanJobManager,
     auth_engine_config: AuthEngineConfig,
+    harness_factory: HarnessFactory,
+    plugin_manager: Arc<AsyncMutex<PluginManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
     model_catalog_meta: BuiltinCatalogMeta,
@@ -30,6 +34,8 @@ impl AppState {
         data_dir: PathBuf,
         log_guard: LogGuard,
         auth_engine_config: AuthEngineConfig,
+        harness_factory: HarnessFactory,
+        plugin_manager: Arc<AsyncMutex<PluginManager>>,
         runtime_supervisor: RuntimeSupervisor,
         model_manager: Arc<AsyncMutex<LocalModelManager>>,
         model_provider: SharedModelProvider,
@@ -40,6 +46,8 @@ impl AppState {
             data_dir,
             jobs: ScanJobManager::default(),
             auth_engine_config,
+            harness_factory,
+            plugin_manager,
             model_manager,
             model_provider,
             model_catalog_meta,
@@ -104,5 +112,20 @@ impl AppState {
     /// Auth engine configuration (bundled Playwright paths resolved at startup).
     pub fn auth_engine_config(&self) -> &AuthEngineConfig {
         &self.auth_engine_config
+    }
+
+    /// Shared harness factory backed by [`HarnessRegistry`].
+    pub fn harness_factory(&self) -> &HarnessFactory {
+        &self.harness_factory
+    }
+
+    /// Plugin manager (discovery / attack / judge extensions).
+    pub fn plugin_manager(&self) -> &Arc<AsyncMutex<PluginManager>> {
+        &self.plugin_manager
+    }
+
+    /// Installed plugins directory under the app data dir.
+    pub fn plugins_dir(&self) -> PathBuf {
+        self.data_dir.join("plugins")
     }
 }

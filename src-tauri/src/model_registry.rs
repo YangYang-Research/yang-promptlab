@@ -42,6 +42,8 @@ pub async fn load_builtin_catalog(app: &AppHandle) -> AisecResult<(BuiltinCatalo
     info!(
         path = %path.display(),
         entries = meta.entry_count,
+        valid = meta.validation.valid,
+        invalid = meta.validation.invalid,
         remote_merged = meta.remote_merged,
         "loaded built-in model registry"
     );
@@ -63,13 +65,23 @@ pub fn open_test_model_stack(
     std::sync::Arc<tokio::sync::Mutex<LocalModelManager>>,
     SharedModelProvider,
     BuiltinCatalogMeta,
+    aisec_harness::HarnessFactory,
+    std::sync::Arc<tauri::async_runtime::Mutex<aisec_plugin_host::PluginManager>>,
 )> {
     let (catalog, meta) = load_repo_catalog_for_tests()?;
     let manager = crate::judge_config::open_model_manager(data_dir, catalog)
         .map_err(|err| aisec_core::AisecError::internal(err.to_string()))?;
     let manager = std::sync::Arc::new(tokio::sync::Mutex::new(manager));
     let provider = std::sync::Arc::new(EmbeddedModelProvider::new(manager.clone()));
-    Ok((manager, provider, meta))
+    let harness_factory = aisec_harness::HarnessFactory::new()
+        .map_err(|err| aisec_core::AisecError::internal(err.to_string()))?;
+    let plugin_manager = std::sync::Arc::new(tauri::async_runtime::Mutex::new(
+        crate::plugin_service::bootstrap_plugin_manager(data_dir).unwrap_or_else(|_| {
+            aisec_plugin_host::PluginManager::new(data_dir.join("plugins"))
+                .expect("plugin manager")
+        }),
+    ));
+    Ok((manager, provider, meta, harness_factory, plugin_manager))
 }
 
 pub async fn open_model_manager_with_registry(

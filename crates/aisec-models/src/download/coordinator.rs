@@ -91,6 +91,86 @@ impl DownloadCoordinator {
         None
     }
 
+    pub async fn start_url_download(
+        &self,
+        catalog_id: impl Into<String>,
+        url: &str,
+        destination: PathBuf,
+        expected_sha256: Option<String>,
+        expected_size_bytes: Option<u64>,
+    ) -> ModelResult<DownloadProgress> {
+        let catalog_id = catalog_id.into();
+        let mut guard = self.active.lock().await;
+        if guard.is_some() {
+            return Err(ModelError::invalid("another download is already active"));
+        }
+
+        let control = DownloadControl::new();
+        let progress = Arc::new(Mutex::new(DownloadProgress {
+            model_id: catalog_id.clone(),
+            status: DownloadStatus::Downloading,
+            url: url.to_string(),
+            destination: destination.clone(),
+            downloaded_bytes: if destination.exists() {
+                std::fs::metadata(&destination).map(|m| m.len()).unwrap_or(0)
+            } else {
+                0
+            },
+            total_bytes: expected_size_bytes,
+            speed_bytes_per_sec: None,
+            eta_seconds: None,
+            resumed: destination.exists(),
+            updated_at: OffsetDateTime::now_utc(),
+        }));
+
+        let downloader = self.downloader.clone();
+        let control_clone = control.clone();
+        let progress_task = progress.clone();
+        let url_owned = url.to_string();
+        let destination_for_task = destination.clone();
+        let _expected_sha256 = expected_sha256;
+
+        let task = tokio::spawn(async move {
+            let result = downloader
+                .download_controlled(
+                    &url_owned,
+                    &destination_for_task,
+                    &control_clone,
+                    progress_task.clone(),
+                )
+                .await;
+
+            let mut slot = progress_task.lock().await;
+            match result {
+                Ok(done) => {
+                    *slot = done;
+                }
+                Err(err) => {
+                    warn!(error = %err, "controlled download failed");
+                    slot.status = if control_clone.cancel.is_cancelled() {
+                        DownloadStatus::Failed
+                    } else if control_clone.pause.load(Ordering::SeqCst) {
+                        DownloadStatus::Paused
+                    } else {
+                        DownloadStatus::Failed
+                    };
+                    slot.updated_at = OffsetDateTime::now_utc();
+                }
+            }
+        });
+
+        *guard = Some(ActiveDownload {
+            catalog_id,
+            destination,
+            control,
+            progress: progress.clone(),
+            task,
+        });
+
+        let snapshot = progress.lock().await.clone();
+        Ok(snapshot)
+    }
+
     pub async fn start_huggingface(
         &self,
         catalog_id: impl Into<String>,
@@ -115,6 +195,8 @@ impl DownloadCoordinator {
                 0
             },
             total_bytes: request.expected_size_bytes,
+            speed_bytes_per_sec: None,
+            eta_seconds: None,
             resumed: destination.exists(),
             updated_at: OffsetDateTime::now_utc(),
         }));
@@ -176,6 +258,8 @@ impl DownloadCoordinator {
         active.control.pause();
         let mut progress = active.progress.lock().await;
         progress.status = DownloadStatus::Paused;
+        progress.speed_bytes_per_sec = None;
+        progress.eta_seconds = None;
         progress.updated_at = OffsetDateTime::now_utc();
         Ok(progress.clone())
     }

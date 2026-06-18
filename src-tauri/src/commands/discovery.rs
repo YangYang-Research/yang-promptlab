@@ -6,6 +6,7 @@
 //! scan (used to display results and reload after restart).
 
 use aisec_discovery::{DiscoveryConfig, DiscoveryEngine};
+use aisec_plugin_host::collect_discovery_endpoints;
 use aisec_storage::{
     CreateEndpoint, CreateScan, EndpointRepository, ScanRepository, TargetRepository, UpdateScan,
 };
@@ -96,6 +97,19 @@ pub async fn endpoint_create_op(
     let url = absolute_endpoint_url(&origin, &path)?;
     let method = normalize_http_method(method)?;
 
+    let fingerprint_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
+    let fingerprint_json = fingerprint_endpoint_url(
+        &fingerprint_client,
+        &url,
+        Some(method.as_str()),
+        "rest_api",
+    )
+    .await
+    .map(|report| fingerprint_json(&report));
+
     let endpoint = repos
         .endpoints()
         .create(CreateEndpoint {
@@ -108,7 +122,7 @@ pub async fn endpoint_create_op(
             evidence: Some("Manual entry".into()),
             source_url: Some("manual".into()),
             discovered_at: OffsetDateTime::now_utc(),
-            fingerprint_json: None,
+            fingerprint_json,
         })
         .await
         .map_err(CommandError::from)?;
@@ -232,6 +246,49 @@ pub async fn discovery_run_op(
             discovered_at: e.discovered_at,
             fingerprint_json,
         });
+    }
+
+    {
+        let mut plugin_manager = state.plugin_manager().lock().await;
+        if let Ok(plugin_endpoints) = collect_discovery_endpoints(&mut plugin_manager, &seed_url).await
+        {
+            let existing: std::collections::HashSet<String> =
+                inputs.iter().map(|e| e.url.clone()).collect();
+            for endpoint in plugin_endpoints {
+                if existing.contains(&endpoint.url) {
+                    continue;
+                }
+                let method = endpoint.method.clone();
+                let fingerprint_json = fingerprint_endpoint_url(
+                    &fingerprint_client,
+                    &endpoint.url,
+                    method.as_deref(),
+                    if endpoint.kind.is_empty() {
+                        "rest_api"
+                    } else {
+                        endpoint.kind.as_str()
+                    },
+                )
+                .await
+                .map(|report| fingerprint_json(&report));
+                inputs.push(CreateEndpoint {
+                    scan_id: scan.id.clone(),
+                    target_id: Some(target.id.clone()),
+                    url: endpoint.url,
+                    kind: if endpoint.kind.is_empty() {
+                        "plugin".into()
+                    } else {
+                        endpoint.kind
+                    },
+                    method,
+                    confidence: 0.6,
+                    evidence: Some("Discovered by plugin".into()),
+                    source_url: Some(seed_url.clone()),
+                    discovered_at: OffsetDateTime::now_utc(),
+                    fingerprint_json,
+                });
+            }
+        }
     }
 
     let saved = repos

@@ -24,11 +24,12 @@ import {
   browseModels,
   cancelModelDownload,
   getModelDownloadStatus,
+  getModelsRegistryDiagnostics,
   getModelsRegistryInfo,
   getModelsVaultPath,
+  getModelsVaultStats,
   importModelGguf,
   importModelZip,
-  installModel,
   listModels,
   pauseModelDownload,
   removeModel,
@@ -39,8 +40,14 @@ import {
   type ModelCatalogEntryDto,
   type ModelDownloadProgressDto,
   type ModelEntryDto,
+  type ModelRegistryDiagnosticsDto,
   type ModelRegistryInfoDto,
+  type ModelVaultStatsDto,
 } from "@/shared/ipc/models";
+import { pickModelImportFile } from "@/shared/ipc/dialog";
+import { getRuntimeStatus, type RuntimeStatusDto } from "@/shared/ipc/runtime";
+import { formatBytes } from "@/shared/utils/format";
+import { DownloadManagerCard } from "./DownloadManagerCard";
 
 export function ModelsPage() {
   const [backendConnected, setBackendConnected] = useState(false);
@@ -48,10 +55,14 @@ export function ModelsPage() {
   const [installed, setInstalled] = useState<ModelEntryDto[]>([]);
   const [catalog, setCatalog] = useState<ModelCatalogEntryDto[]>([]);
   const [registryInfo, setRegistryInfo] = useState<ModelRegistryInfoDto | null>(null);
+  const [registryDiagnostics, setRegistryDiagnostics] =
+    useState<ModelRegistryDiagnosticsDto | null>(null);
   const [vaultPath, setVaultPath] = useState<string>("");
+  const [vaultStats, setVaultStats] = useState<ModelVaultStatsDto | null>(null);
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatusDto | null>(null);
   const [importName, setImportName] = useState("");
   const [importPath, setImportPath] = useState("");
-  const [importBusy, setImportBusy] = useState<"gguf" | "zip" | null>(null);
+  const [importBusy, setImportBusy] = useState<"gguf" | "zip" | "browse-gguf" | "browse-zip" | null>(null);
   const [downloadProgress, setDownloadProgress] =
     useState<ModelDownloadProgressDto | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -66,14 +77,20 @@ export function ModelsPage() {
   const [saved, setSaved] = useState(false);
 
   const refreshModels = useCallback(async () => {
-    const [models, entries, info] = await Promise.all([
+    const [models, entries, info, diagnostics, stats, runtime] = await Promise.all([
       listModels(),
       browseModels(),
       getModelsRegistryInfo(),
+      getModelsRegistryDiagnostics(),
+      getModelsVaultStats(),
+      getRuntimeStatus(),
     ]);
     setInstalled(models);
     setCatalog(entries);
     setRegistryInfo(info);
+    setRegistryDiagnostics(diagnostics);
+    setVaultStats(stats);
+    setRuntimeStatus(runtime);
   }, []);
 
   const pollDownloadStatus = useCallback(async () => {
@@ -84,7 +101,13 @@ export function ModelsPage() {
       await refreshModels();
       return;
     }
-    setDownloadProgress(status.progress);
+    if (status.progress) {
+      setDownloadProgress(status.progress);
+      setDownloadingId(status.progress.catalogId);
+    } else {
+      setDownloadProgress(null);
+      setDownloadingId(null);
+    }
   }, [refreshModels]);
 
   useEffect(() => {
@@ -104,6 +127,7 @@ export function ModelsPage() {
       getJudgeConfig(),
       refreshModels(),
       getModelsVaultPath(),
+      pollDownloadStatus(),
     ])
       .then(([loaded, , path]) => {
         setConfig(loaded);
@@ -111,7 +135,19 @@ export function ModelsPage() {
       })
       .catch((err) => setError(toAppError(err).message))
       .finally(() => setLoading(false));
-  }, [backendConnected, refreshModels]);
+  }, [backendConnected, refreshModels, pollDownloadStatus]);
+
+  useEffect(() => {
+    if (!backendConnected) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void getRuntimeStatus()
+        .then(setRuntimeStatus)
+        .catch(() => undefined);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [backendConnected]);
 
   useEffect(() => {
     if (!backendConnected || !downloadProgress) {
@@ -119,9 +155,32 @@ export function ModelsPage() {
     }
     const timer = window.setInterval(() => {
       void pollDownloadStatus().catch((err) => setError(toAppError(err).message));
-    }, 1000);
+    }, 750);
     return () => window.clearInterval(timer);
   }, [backendConnected, downloadProgress, pollDownloadStatus]);
+
+  async function handleBrowseImport(kind: "gguf" | "zip") {
+    setError(null);
+    setImportBusy(kind === "gguf" ? "browse-gguf" : "browse-zip");
+    try {
+      const path = await pickModelImportFile(kind);
+      if (!path) {
+        return;
+      }
+      setImportPath(path);
+      if (!importName.trim()) {
+        const base = path.split(/[/\\]/).pop() ?? "";
+        const stem = base.replace(/\.(gguf|zip)$/i, "");
+        if (stem) {
+          setImportName(stem);
+        }
+      }
+    } catch (err) {
+      setError(toAppError(err).message);
+    } finally {
+      setImportBusy(null);
+    }
+  }
 
   function patch(patchValue: Partial<JudgeConfigDto>) {
     setSaved(false);
@@ -174,18 +233,9 @@ export function ModelsPage() {
     setError(null);
     setInstallingId(entry.id);
     try {
-      if (entry.provider === "huggingface") {
-        const progress = await startModelDownload({ catalogId: entry.id });
-        setDownloadingId(entry.id);
-        setDownloadProgress(progress);
-      } else {
-        await installModel({
-          catalogId: entry.id,
-          ollamaBaseUrl:
-            entry.provider === "ollama" ? config.localBaseUrl : null,
-        });
-        await refreshModels();
-      }
+      const progress = await startModelDownload({ catalogId: entry.id });
+      setDownloadingId(entry.id);
+      setDownloadProgress(progress);
     } catch (err) {
       setError(toAppError(err).message);
     } finally {
@@ -265,34 +315,25 @@ export function ModelsPage() {
   function selectVaultModel(modelId: string) {
     const entry = installed.find((m) => m.id === modelId);
     if (!entry) return;
-    if (entry.provider === "ollama") {
-      patch({
-        localVaultModelId: modelId,
-        localProvider: "ollama",
-        localModel: entry.version,
-      });
-    } else {
-      patch({
-        localVaultModelId: modelId,
-        localProvider: "llama_cpp",
-        localModelPath: entry.path,
-        localModel: entry.name,
-      });
-    }
+    patch({
+      localVaultModelId: modelId,
+      localProvider: "llama_cpp",
+      localModelPath: entry.path,
+      localModel: entry.name,
+    });
   }
 
   const showLocal = config.mode === "local_llm" || config.mode === "consensus";
   const showRemote = config.mode === "remote_llm";
   const ggufModels = installed.filter(
-    (m) => m.provider === "gguf" || m.provider === "huggingface",
+    (m) => m.provider === "gguf" || m.provider === "huggingface" || m.format === "gguf",
   );
-  const ollamaModels = installed.filter((m) => m.provider === "ollama");
 
   return (
     <div className="page">
       <PageHeader
         title="Models"
-        description="Install local models (Ollama, HuggingFace, GGUF) and configure the hybrid judge engine"
+        description="Install GGUF models via the built-in registry and configure the hybrid judge engine"
         actions={
           <Button variant="primary" disabled={saving || loading} onClick={() => void handleSave()}>
             {saving ? "Saving…" : saved ? "Saved" : "Save Judge Config"}
@@ -312,9 +353,55 @@ export function ModelsPage() {
         </p>
       )}
 
+      {backendConnected && vaultStats && (
+        <div className="models-summary-grid">
+          <Card className="models-summary-card">
+            <span className="models-summary-card__label">Installed models</span>
+            <strong className="models-summary-card__value">{vaultStats.modelCount}</strong>
+            <p className="text-muted text-sm">
+              {formatBytes(vaultStats.installedBytes)} registered
+            </p>
+          </Card>
+          <Card className="models-summary-card">
+            <span className="models-summary-card__label">Installed size</span>
+            <strong className="models-summary-card__value">
+              {vaultStats.installedGb.toFixed(2)} GB
+            </strong>
+            <p className="text-muted text-sm">{formatBytes(vaultStats.installedBytes)}</p>
+          </Card>
+          <Card className="models-summary-card">
+            <span className="models-summary-card__label">Vault disk usage</span>
+            <strong className="models-summary-card__value">
+              {vaultStats.diskUsageGb.toFixed(2)} GB
+            </strong>
+            <p className="text-muted text-sm">{formatBytes(vaultStats.diskUsageBytes)} on disk</p>
+          </Card>
+          <Card className="models-summary-card">
+            <span className="models-summary-card__label">Runtime status</span>
+            <strong className="models-summary-card__value models-summary-card__value--runtime">
+              {runtimeStatus?.healthy
+                ? "Healthy"
+                : runtimeStatus?.state === "running"
+                  ? "Running"
+                  : runtimeStatus?.state === "starting"
+                    ? "Starting"
+                    : runtimeStatus?.state === "failed"
+                      ? "Failed"
+                      : "Stopped"}
+            </strong>
+            <p className="text-muted text-sm">
+              {runtimeStatus?.message ?? "Checking embedded llama.cpp runtime…"}
+            </p>
+          </Card>
+        </div>
+      )}
+
       {registryInfo && (
         <p className="text-muted text-sm">
-          Registry: {registryInfo.entryCount} entries
+          Registry: {registryInfo.validModels} valid / {registryInfo.totalModels} total
+          {registryInfo.invalidModels > 0
+            ? ` · ${registryInfo.invalidModels} invalid`
+            : ""}
           {registryInfo.remoteMerged ? " · online merge active" : " · offline"}
           {registryInfo.sourcePath ? (
             <>
@@ -325,11 +412,74 @@ export function ModelsPage() {
         </p>
       )}
 
+      {registryDiagnostics && (
+        <Card className="model-card model-card--wide">
+          <h3 className="card__title">Registry Diagnostics</h3>
+          <p className="text-muted text-sm">
+            Startup validation for <code>resources/models.json</code> (GGUF-first schema).
+          </p>
+          <div className="model-catalog__row">
+            <div>
+              <p className="text-sm">
+                <strong>Total:</strong> {registryDiagnostics.totalModels}
+              </p>
+              <p className="text-sm">
+                <strong>Valid:</strong> {registryDiagnostics.validModels}
+              </p>
+              <p className="text-sm">
+                <strong>Invalid:</strong> {registryDiagnostics.invalidModels}
+              </p>
+            </div>
+            <StatusBadge status={registryDiagnostics.healthy ? "completed" : "failed"} />
+          </div>
+          {registryDiagnostics.issues.length > 0 && (
+            <div className="model-catalog">
+              {registryDiagnostics.issues.map((issue, index) => (
+                <div key={`${issue.id}-${issue.field}-${index}`} className="model-catalog__row">
+                  <div>
+                    <strong className="mono">{issue.id || "(missing id)"}</strong>
+                    <p className="text-muted text-sm">
+                      {issue.field}: {issue.message}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
       <div className="models-grid">
+        {downloadProgress && (
+          <DownloadManagerCard
+            progress={downloadProgress}
+            backendConnected={backendConnected}
+            onPause={() =>
+              void pauseModelDownload()
+                .then(setDownloadProgress)
+                .catch((err) => setError(toAppError(err).message))
+            }
+            onResume={() =>
+              void resumeModelDownload()
+                .then(setDownloadProgress)
+                .catch((err) => setError(toAppError(err).message))
+            }
+            onCancel={() =>
+              void cancelModelDownload()
+                .then(() => {
+                  setDownloadProgress(null);
+                  setDownloadingId(null);
+                })
+                .catch((err) => setError(toAppError(err).message))
+            }
+          />
+        )}
+
         <Card className="model-card model-card--wide">
           <h3 className="card__title">Import Local Model</h3>
           <p className="text-muted text-sm">
-            Register a local GGUF file or extract one from a ZIP package into the vault.
+            Use the native file picker to register a GGUF file or extract one from a ZIP package
+            into the vault.
           </p>
           <div className="wizard-auth-fields">
             <div className="settings-field">
@@ -343,15 +493,31 @@ export function ModelsPage() {
               />
             </div>
             <div className="settings-field">
-              <label htmlFor="importPath">File path</label>
-              <input
-                id="importPath"
-                className="input mono"
-                value={importPath}
-                onChange={(e) => setImportPath(e.target.value)}
-                placeholder="/path/to/model.gguf or package.zip"
-                disabled={!backendConnected || importBusy !== null}
-              />
+              <label htmlFor="importPath">Selected file</label>
+              <div className="import-path-row">
+                <input
+                  id="importPath"
+                  className="input mono"
+                  value={importPath}
+                  readOnly
+                  placeholder="Browse for a .gguf or .zip file"
+                  disabled={!backendConnected || importBusy !== null}
+                />
+                <Button
+                  variant="secondary"
+                  disabled={!backendConnected || importBusy !== null}
+                  onClick={() => void handleBrowseImport("gguf")}
+                >
+                  {importBusy === "browse-gguf" ? "Opening…" : "Browse GGUF"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={!backendConnected || importBusy !== null}
+                  onClick={() => void handleBrowseImport("zip")}
+                >
+                  {importBusy === "browse-zip" ? "Opening…" : "Browse ZIP"}
+                </Button>
+              </div>
             </div>
           </div>
           <div className="model-card__actions">
@@ -375,60 +541,9 @@ export function ModelsPage() {
         <Card className="model-card model-card--wide">
           <h3 className="card__title">Browse Registry</h3>
           <p className="text-muted text-sm">
-            Built-in catalog from <code>resources/models.json</code>. Ollama entries call{" "}
-            <code>ollama pull</code>; HuggingFace entries download into the vault with
-            pause/resume/cancel.
+            Built-in GGUF catalog from <code>resources/models.json</code>. Entries download
+            directly from <code>download_url</code> into the vault.
           </p>
-          {downloadProgress && (
-            <div className="model-download-status">
-              <p className="text-sm">
-                Downloading {downloadProgress.catalogId}
-                {downloadProgress.percent != null
-                  ? ` · ${downloadProgress.percent.toFixed(1)}%`
-                  : ` · ${(downloadProgress.downloadedBytes / (1024 * 1024)).toFixed(1)} MB`}
-                {" · "}
-                {downloadProgress.status}
-              </p>
-              <div className="model-card__actions">
-                <Button
-                  variant="ghost"
-                  disabled={!backendConnected}
-                  onClick={() =>
-                    void pauseModelDownload()
-                      .then(setDownloadProgress)
-                      .catch((err) => setError(toAppError(err).message))
-                  }
-                >
-                  Pause
-                </Button>
-                <Button
-                  variant="ghost"
-                  disabled={!backendConnected}
-                  onClick={() =>
-                    void resumeModelDownload()
-                      .then(setDownloadProgress)
-                      .catch((err) => setError(toAppError(err).message))
-                  }
-                >
-                  Resume
-                </Button>
-                <Button
-                  variant="ghost"
-                  disabled={!backendConnected}
-                  onClick={() =>
-                    void cancelModelDownload()
-                      .then(() => {
-                        setDownloadProgress(null);
-                        setDownloadingId(null);
-                      })
-                      .catch((err) => setError(toAppError(err).message))
-                  }
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          )}
           <div className="model-catalog">
             {catalog.map((entry) => (
               <div key={entry.id} className="model-catalog__row">
@@ -439,8 +554,9 @@ export function ModelsPage() {
                   </strong>
                   <p className="text-muted text-sm">{entry.description}</p>
                   <p className="text-muted text-sm">
-                    {entry.provider} · {entry.purpose}
+                    {entry.engine} · {entry.format} · {entry.purpose}
                     {entry.quant ? ` · ${entry.quant}` : ""}
+                    {entry.sizeLabel ? ` · ${entry.sizeLabel}` : ""}
                     {entry.sizeGb != null ? ` · ${entry.sizeGb.toFixed(1)} GB` : ""}
                   </p>
                 </div>
@@ -456,10 +572,8 @@ export function ModelsPage() {
                   {downloadingId === entry.id
                     ? "Downloading…"
                     : installingId === entry.id
-                      ? "Installing…"
-                      : entry.provider === "huggingface"
-                        ? "Download"
-                        : "Install"}
+                      ? "Starting…"
+                      : "Download"}
                 </Button>
               </div>
             ))}
@@ -479,7 +593,11 @@ export function ModelsPage() {
                       <h4 className="model-card__name">{model.name}</h4>
                       <p className="text-muted text-sm">
                         {model.provider} · v{model.version}
-                        {model.sizeGb > 0 ? ` · ${model.sizeGb.toFixed(2)} GB` : ""}
+                        {model.sizeBytes != null
+                          ? ` · ${formatBytes(model.sizeBytes)}`
+                          : model.sizeGb > 0
+                            ? ` · ${model.sizeGb.toFixed(2)} GB`
+                            : ""}
                       </p>
                     </div>
                     <StatusBadge status={model.verified ? "installed" : "available"} />
@@ -572,20 +690,11 @@ export function ModelsPage() {
                   }}
                 >
                   <option value="">Manual configuration</option>
-                  <optgroup label="GGUF / HuggingFace">
-                    {ggufModels.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="Ollama">
-                    {ollamaModels.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </optgroup>
+                  {ggufModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
                 </Select>
               </div>
 
@@ -598,60 +707,36 @@ export function ModelsPage() {
                     patch({ localProvider: e.target.value as JudgeConfigDto["localProvider"] })
                   }
                 >
-                  {LOCAL_PROVIDERS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
+                  {LOCAL_PROVIDERS.filter((option) => option.value === "llama_cpp").map(
+                    (option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ),
+                  )}
                 </Select>
               </div>
 
-              {config.localProvider === "ollama" ? (
-                <>
-                  <div className="settings-field">
-                    <label htmlFor="localBaseUrl">Ollama Base URL</label>
-                    <input
-                      id="localBaseUrl"
-                      className="input mono"
-                      value={config.localBaseUrl}
-                      onChange={(e) => patch({ localBaseUrl: e.target.value })}
-                    />
-                  </div>
-                  <div className="settings-field">
-                    <label htmlFor="localModel">Model</label>
-                    <input
-                      id="localModel"
-                      className="input"
-                      placeholder="llama3, qwen2.5, deepseek-r1, gemma2"
-                      value={config.localModel}
-                      onChange={(e) => patch({ localModel: e.target.value })}
-                    />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="settings-field">
-                    <label htmlFor="localModelPath">GGUF Model Path</label>
-                    <input
-                      id="localModelPath"
-                      className="input mono"
-                      value={config.localModelPath ?? ""}
-                      onChange={(e) =>
-                        patch({ localModelPath: e.target.value.trim() || null })
-                      }
-                    />
-                  </div>
-                  <div className="settings-field">
-                    <label htmlFor="localLlamaBinary">llama-server Binary</label>
-                    <input
-                      id="localLlamaBinary"
-                      className="input mono"
-                      value={config.localLlamaBinary}
-                      onChange={(e) => patch({ localLlamaBinary: e.target.value })}
-                    />
-                  </div>
-                </>
-              )}
+              <div className="settings-field">
+                <label htmlFor="localModelPath">GGUF Model Path</label>
+                <input
+                  id="localModelPath"
+                  className="input mono"
+                  value={config.localModelPath ?? ""}
+                  onChange={(e) =>
+                    patch({ localModelPath: e.target.value.trim() || null })
+                  }
+                />
+              </div>
+              <div className="settings-field">
+                <label htmlFor="localLlamaBinary">llama-server Binary</label>
+                <input
+                  id="localLlamaBinary"
+                  className="input mono"
+                  value={config.localLlamaBinary}
+                  onChange={(e) => patch({ localLlamaBinary: e.target.value })}
+                />
+              </div>
             </div>
           )}
 

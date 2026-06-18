@@ -6,6 +6,7 @@
 pub mod engine;
 pub mod evaluator;
 pub mod openapi;
+pub mod profile;
 pub mod recommendations;
 pub mod rules;
 pub mod scoring;
@@ -15,9 +16,10 @@ pub use engine::FingerprintEngine;
 pub use openapi::inputs_from_openapi;
 pub use recommendations::generate_attack_recommendations;
 pub use rules::rule_catalog;
+pub use profile::build_platform_profile;
 pub use types::{
     AgentFramework, AiComponent, AiProvider, ApiStyle, AttackRecommendation,
     DEFAULT_CONFIDENCE_THRESHOLD, DetectedComponent, DetectedFramework, DetectedTechnology,
-    FingerprintInput, FingerprintMethod, FingerprintReport, MatchedSignal, ProviderFingerprint,
-    StackFingerprintReport,
+    FingerprintInput, FingerprintMethod, FingerprintReport, MatchedSignal, PlatformProfile,
+    ProviderFingerprint, StackFingerprintReport,
 };

@@ -89,7 +89,9 @@ pub fn generate_attack_recommendations(report: &StackFingerprintReport) -> Vec<A
             AgentFramework::OpenWebUi
             | AgentFramework::AnythingLlm
             | AgentFramework::Flowise
-            | AgentFramework::Dify => {
+            | AgentFramework::Dify
+            | AgentFramework::Langflow
+            | AgentFramework::LibreChat => {
                 push(
                     "rag_leakage",
                     &format!(
@@ -195,6 +197,7 @@ mod tests {
             },
             attack_recommendations: vec![],
             methods_used: vec![],
+            platform_profile: Default::default(),
             analyzed_at: OffsetDateTime::now_utc(),
         };
         let recs = generate_attack_recommendations(&report);
@@ -222,6 +225,7 @@ mod tests {
             },
             attack_recommendations: vec![],
             methods_used: vec![],
+            platform_profile: Default::default(),
             analyzed_at: OffsetDateTime::now_utc(),
         };
         let recs = generate_attack_recommendations(&report);

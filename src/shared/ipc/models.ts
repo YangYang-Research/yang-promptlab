@@ -33,7 +33,11 @@ export type ModelCatalogEntryDto = {
   sizeGb: number | null;
   quant: string | null;
   capabilities: ModelCapabilitiesDto;
-  ollamaTag: string | null;
+  engine: string;
+  format: string;
+  downloadUrl: string | null;
+  sha256: string | null;
+  sizeLabel: string | null;
 };
 
 export type ModelRegistryInfoDto = {
@@ -41,11 +45,29 @@ export type ModelRegistryInfoDto = {
   remoteMerged: boolean;
   remoteUrl: string | null;
   sourcePath: string | null;
+  totalModels: number;
+  validModels: number;
+  invalidModels: number;
+};
+
+export type RegistryValidationIssueDto = {
+  id: string;
+  field: string;
+  message: string;
+};
+
+export type ModelRegistryDiagnosticsDto = {
+  totalModels: number;
+  validModels: number;
+  invalidModels: number;
+  validIds: string[];
+  invalidIds: string[];
+  issues: RegistryValidationIssueDto[];
+  healthy: boolean;
 };
 
 export type ModelInstallRequest = {
   catalogId: string;
-  ollamaBaseUrl?: string | null;
 };
 
 export type ModelImportRequest = {
@@ -62,9 +84,21 @@ export type ModelDownloadProgressDto = {
   status: string;
   downloadedBytes: number;
   totalBytes: number | null;
+  remainingBytes: number | null;
   percent: number | null;
+  speedBytesPerSec: number | null;
+  etaSeconds: number | null;
   resumed: boolean;
   destination: string;
+};
+
+export type ModelVaultStatsDto = {
+  vaultPath: string;
+  modelCount: number;
+  installedBytes: number;
+  installedGb: number;
+  diskUsageBytes: number;
+  diskUsageGb: number;
 };
 
 export type ModelDownloadStatusDto = {
@@ -86,6 +120,10 @@ export function listModels(): Promise<ModelEntryDto[]> {
 
 export function getModelsRegistryInfo(): Promise<ModelRegistryInfoDto> {
   return invokeCommand<ModelRegistryInfoDto>("models_registry_info");
+}
+
+export function getModelsRegistryDiagnostics(): Promise<ModelRegistryDiagnosticsDto> {
+  return invokeCommand<ModelRegistryDiagnosticsDto>("models_registry_diagnostics");
 }
 
 export function browseModels(): Promise<ModelCatalogEntryDto[]> {
@@ -154,4 +192,8 @@ export function testModelEmbeddings(
 
 export function getModelsVaultPath(): Promise<string> {
   return invokeCommand<string>("models_vault_path");
+}
+
+export function getModelsVaultStats(): Promise<ModelVaultStatsDto> {
+  return invokeCommand<ModelVaultStatsDto>("models_vault_stats");
 }

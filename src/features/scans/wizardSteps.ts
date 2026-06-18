@@ -30,13 +30,13 @@ export const WIZARD_STEPS: WizardStepDefinition[] = [
     id: 3,
     label: "Discovery",
     title: "Discovery",
-    hint: "Run discovery, review endpoints, and select targets for the scan",
+    hint: "Run discovery, fingerprint AI platforms, and select endpoints for attack planning",
   },
   {
     id: 4,
     label: "Attack Planning",
     title: "Attack planning",
-    hint: "Choose a profile and tune attack categories",
+    hint: "Review fingerprint-based attack suggestions and choose a profile",
   },
   {
     id: 5,

@@ -11,6 +11,96 @@ import type { AppSettings } from "@/app/store/types";
 import { getJudgeConfig, saveJudgeConfig, type JudgeConfigDto } from "@/shared/ipc/judge";
 import { listModels, type ModelEntryDto } from "@/shared/ipc/models";
 import { toAppError } from "@/shared/errors";
+import {
+  securityAudit,
+  securityMigrateSecrets,
+  type SecretMigrationAudit,
+} from "@/shared/ipc/security";
+
+function SecuritySecretsCard({ backendConnected }: { backendConnected: boolean }) {
+  const [audit, setAudit] = useState<SecretMigrationAudit | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastMigrated, setLastMigrated] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!backendConnected) {
+      setAudit(null);
+      return;
+    }
+    void securityAudit()
+      .then(setAudit)
+      .catch(() => setAudit(null));
+  }, [backendConnected, lastMigrated]);
+
+  async function handleMigrate() {
+    setBusy(true);
+    setError(null);
+    try {
+      const report = await securityMigrateSecrets();
+      setAudit(report.auditAfter);
+      setLastMigrated(
+        report.authMigrated +
+          report.targetsMigrated +
+          report.storageMigrated +
+          report.judgeMigrated,
+      );
+    } catch (err) {
+      setError(toAppError(err).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const legacyCount = audit?.legacyCount ?? 0;
+
+  return (
+    <>
+      <p className="text-muted text-sm">
+        Move plaintext credentials from targets, auth profiles, sessions, and judge config into the
+        OS keychain and encrypted session vault.
+      </p>
+      {!backendConnected ? (
+        <p className="text-muted text-sm">Connect to the Tauri backend to audit secrets.</p>
+      ) : audit ? (
+        <dl className="about-list">
+          <div>
+            <dt>Legacy records</dt>
+            <dd>{legacyCount === 0 ? "None" : legacyCount}</dd>
+          </div>
+          {legacyCount > 0 ? (
+            <>
+              <div>
+                <dt>Targets</dt>
+                <dd>{audit.targetsLegacy}</dd>
+              </div>
+              <div>
+                <dt>Auth profiles</dt>
+                <dd>{audit.authProfilesLegacy}</dd>
+              </div>
+              <div>
+                <dt>Sessions</dt>
+                <dd>{audit.sessionsLegacy + audit.sessionStorageLegacy}</dd>
+              </div>
+              <div>
+                <dt>Judge config</dt>
+                <dd>{audit.judgeConfigLegacy}</dd>
+              </div>
+            </>
+          ) : null}
+        </dl>
+      ) : null}
+      {error ? <p className="text-danger text-sm">{error}</p> : null}
+      <Button
+        variant="secondary"
+        disabled={!backendConnected || busy || legacyCount === 0}
+        onClick={() => void handleMigrate()}
+      >
+        {busy ? "Migrating…" : "Migrate Secrets"}
+      </Button>
+    </>
+  );
+}
 
 export function SettingsPage() {
   const { settings, dispatch, backendVersion, backendConnected } = useAppStore();
@@ -104,6 +194,11 @@ export function SettingsPage() {
           {!backendConnected ? (
             <p className="text-muted text-sm">Connect to the Tauri backend to configure judge models.</p>
           ) : null}
+        </Card>
+
+        <Card>
+          <h3 className="card__title">Security</h3>
+          <SecuritySecretsCard backendConnected={backendConnected} />
         </Card>
 
         <Card>

@@ -11,6 +11,7 @@ pub mod hardware;
 pub mod import_pack;
 pub mod manager;
 pub mod registry;
+pub mod registry_validate;
 pub mod runtime;
 pub mod types;
 pub mod verify;
@@ -29,6 +30,7 @@ pub use runtime::{
 #[cfg(feature = "llama")]
 pub use runtime::{LlamaInProcessRuntime, LlamaModelConfig};
 pub use types::*;
+pub use registry_validate::{validate_registry, RegistryValidationIssue, RegistryValidationReport};
 pub use verify::VerificationEngine;
 
 /// Create a model manager with default vault at `~/.aisec/models` or `./data/models`.

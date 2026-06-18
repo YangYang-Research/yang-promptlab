@@ -225,9 +225,11 @@ impl FingerprintEngine {
             provider_report,
             attack_recommendations: vec![],
             methods_used,
+            platform_profile: Default::default(),
             analyzed_at: OffsetDateTime::now_utc(),
         };
         report.attack_recommendations = generate_attack_recommendations(&report);
+        report.platform_profile = crate::profile::build_platform_profile(&report, input);
         report
     }
 
@@ -430,6 +432,38 @@ mod tests {
             .attack_recommendations
             .iter()
             .any(|r| r.category == "mcp_abuse"));
+    }
+
+    #[test]
+    fn stack_detects_langflow() {
+        let engine = FingerprintEngine::new();
+        let report = engine.fingerprint_stack(&input(
+            "https://example.com/api/v1/run",
+            200,
+            HashMap::new(),
+            Some(r#"{"outputs":[],"langflow":true}"#),
+        ));
+        assert!(report
+            .agent_frameworks
+            .iter()
+            .any(|f| f.framework == crate::types::AgentFramework::Langflow));
+        assert_eq!(report.platform_profile.platform, "langflow");
+    }
+
+    #[test]
+    fn stack_detects_librechat() {
+        let engine = FingerprintEngine::new();
+        let report = engine.fingerprint_stack(&input(
+            "https://example.com/api/ask",
+            200,
+            HashMap::new(),
+            Some(r#"{"text":"ok","LibreChat":true}"#),
+        ));
+        assert!(report
+            .agent_frameworks
+            .iter()
+            .any(|f| f.framework == crate::types::AgentFramework::LibreChat));
+        assert!(report.platform_profile.memory_enabled);
     }
 
     #[test]

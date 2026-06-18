@@ -25,7 +25,7 @@ import { ScanHistoryCard, ScanMonitorCard } from "./ScanMonitorCard";
 import { mergeScanStatus, useScanStatuses } from "./useScanStatuses";
 
 function isAttackScan(scan: ScanRun): boolean {
-  return scan.name.startsWith("Scan (");
+  return scan.name.startsWith("Scan (") || scan.name.startsWith("Agent Scan (");
 }
 
 function scanDuration(scan: ScanRun): string {

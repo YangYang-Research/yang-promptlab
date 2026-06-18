@@ -9,7 +9,7 @@ import {
   validateTargetStep,
 } from "./targetDescriptor";
 import type { WizardStepId } from "./wizardSteps";
-import type { DiscoveryStatsDto } from "@/shared/ipc";
+import type { DiscoveryStatsDto, EndpointDto } from "@/shared/ipc";
 import type { Target } from "@/shared/types";
 
 const STORAGE_KEY = "aisec:scan-wizard";
@@ -20,6 +20,7 @@ export type DiscoveryWizardState = {
   selectedEndpointIds: string[];
   completed: boolean;
   stats: DiscoveryStatsDto | null;
+  endpoints: EndpointDto[];
   manualMethod: string;
   manualPath: string;
 };
@@ -29,6 +30,12 @@ export type AttackPlanUiState = {
   customCategories: AttackCategoryId[];
   expandedCategory: AttackCategoryId | null;
   disabledTests: string[];
+  plannerSummary: string | null;
+  plannerMode: "deterministic" | "local_llm" | null;
+  generatorMode: "static_pack" | "template_mutation" | "local_llm";
+  generatorSummary: string | null;
+  agentMode: boolean;
+  maxAgentAttempts: number;
 };
 
 export type ScanWizardSession = {
@@ -55,6 +62,7 @@ export function createInitialDiscoveryState(): DiscoveryWizardState {
     selectedEndpointIds: [],
     completed: false,
     stats: null,
+    endpoints: [],
     manualMethod: "GET",
     manualPath: "",
   };
@@ -76,6 +84,12 @@ export function createInitialAttackPlanUi(): AttackPlanUiState {
     ],
     expandedCategory: null,
     disabledTests: [],
+    plannerSummary: null,
+    plannerMode: null,
+    generatorMode: "static_pack",
+    generatorSummary: null,
+    agentMode: false,
+    maxAgentAttempts: 5,
   };
 }
 

@@ -193,6 +193,19 @@ pub struct EndpointFingerprintDto {
     pub methods_used: Vec<String>,
     pub primary_provider: Option<String>,
     pub api_style: Option<String>,
+    pub platform_profile: PlatformProfileDto,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlatformProfileDto {
+    pub platform: String,
+    pub version: String,
+    pub auth_type: String,
+    pub llm_provider: String,
+    pub memory_enabled: bool,
+    pub tools_enabled: bool,
+    pub rag_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -311,6 +324,15 @@ fn parse_fingerprint_json(raw: &str) -> Option<EndpointFingerprintDto> {
             }
             .into()
         }),
+        platform_profile: PlatformProfileDto {
+            platform: report.platform_profile.platform,
+            version: report.platform_profile.version,
+            auth_type: report.platform_profile.auth_type,
+            llm_provider: report.platform_profile.llm_provider,
+            memory_enabled: report.platform_profile.memory_enabled,
+            tools_enabled: report.platform_profile.tools_enabled,
+            rag_enabled: report.platform_profile.rag_enabled,
+        },
     })
 }
 
@@ -405,4 +427,8 @@ pub struct ScanStatusDto {
     pub current_endpoint: Option<String>,
     pub current_test: Option<String>,
     pub started_at: Option<String>,
+    pub agent_mode: bool,
+    pub current_phase: Option<String>,
+    pub current_attempt: Option<u32>,
+    pub current_retry: Option<u32>,
 }

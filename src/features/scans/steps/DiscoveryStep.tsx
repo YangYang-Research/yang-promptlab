@@ -18,6 +18,11 @@ import {
   endpointSourceLabel,
   phaseStatuses,
 } from "../discoveryPhases";
+import {
+  aggregatePlatformSummary,
+  endpointPlatformLabel,
+  platformLabel,
+} from "../fingerprintPlan";
 import type { DiscoveryWizardState } from "../wizardState";
 
 export type DiscoverySelection = {
@@ -55,7 +60,14 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
   const [addingManual, setAddingManual] = useState(false);
   const [loadingEndpoints, setLoadingEndpoints] = useState(false);
 
-  const { scanId, selectedEndpointIds, completed, stats, manualMethod, manualPath } = discovery;
+  const { scanId, selectedEndpointIds, completed, stats, manualMethod, manualPath, endpoints: cachedEndpoints } =
+    discovery;
+
+  useEffect(() => {
+    if (cachedEndpoints.length > 0) {
+      setEndpoints(cachedEndpoints);
+    }
+  }, [cachedEndpoints]);
 
   useEffect(() => {
     if (!running || completed) return;
@@ -111,6 +123,7 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
         scanId: result.scan.id,
         completed: true,
         stats: result.stats,
+        endpoints: result.endpoints,
         selectedEndpointIds: ids,
       });
       notify(
@@ -148,6 +161,7 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
       setEndpoints(rows);
       onDiscoveryChange({
         selectedEndpointIds: [...selectedEndpointIds, created.id],
+        endpoints: rows,
         manualPath: "",
       });
       notify("Manual endpoint added", "success");
@@ -175,6 +189,7 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
 
   const rows = toRows(endpoints, selectedEndpointIds);
   const allSelected = endpoints.length > 0 && selectedEndpointIds.length === endpoints.length;
+  const platformSummary = aggregatePlatformSummary(endpoints, selectedEndpointIds);
 
   const columns = [
     {
@@ -205,6 +220,19 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
           {row.evidence && <div className="text-muted text-sm">{row.evidence}</div>}
         </div>
       ),
+    },
+    {
+      key: "platform",
+      header: "Platform",
+      width: "130px",
+      render: (row: EndpointRow) => {
+        const label = endpointPlatformLabel(row);
+        return label === "—" ? (
+          <span className="text-muted">—</span>
+        ) : (
+          <Badge variant="info">{label}</Badge>
+        );
+      },
     },
     {
       key: "confidence",
@@ -250,6 +278,13 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
         <p className="text-muted text-sm wizard-discovery-stats">
           {stats.pages_fetched} pages · {stats.probes_sent} probes · {stats.endpoint_count}{" "}
           endpoints · {stats.duration_ms}ms
+          {platformSummary.length > 0 && (
+            <>
+              {" "}
+              · Detected:{" "}
+              {platformSummary.map((p) => platformLabel(p.platform)).join(", ")}
+            </>
+          )}
         </p>
       )}
 

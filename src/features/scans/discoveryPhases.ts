@@ -1,4 +1,4 @@
-export type DiscoveryPhaseId = "crawl" | "js" | "api" | "graphql" | "openapi";
+export type DiscoveryPhaseId = "crawl" | "js" | "api" | "graphql" | "openapi" | "fingerprint";
 
 export type DiscoveryPhase = {
   id: DiscoveryPhaseId;
@@ -11,6 +11,7 @@ export const DISCOVERY_PHASES: DiscoveryPhase[] = [
   { id: "api", label: "API" },
   { id: "graphql", label: "GraphQL" },
   { id: "openapi", label: "OpenAPI" },
+  { id: "fingerprint", label: "Fingerprint" },
 ];
 
 export type PhaseStatus = "pending" | "active" | "complete";

@@ -95,6 +95,17 @@ export type EndpointFingerprintDto = {
   methodsUsed: string[];
   primaryProvider: string | null;
   apiStyle: string | null;
+  platformProfile: PlatformProfileDto;
+};
+
+export type PlatformProfileDto = {
+  platform: string;
+  version: string;
+  authType: string;
+  llmProvider: string;
+  memoryEnabled: boolean;
+  toolsEnabled: boolean;
+  ragEnabled: boolean;
 };
 
 export type FingerprintTechnologyDto = {
@@ -160,6 +171,9 @@ export type ScanStartRequest = {
   profile: string;
   categories: string[];
   disabledTests?: string[];
+  generatorMode?: string;
+  agentMode?: boolean;
+  maxAgentAttempts?: number;
 };
 
 export type ScanStatusDto = {
@@ -172,6 +186,10 @@ export type ScanStatusDto = {
   current_endpoint: string | null;
   current_test: string | null;
   started_at: string | null;
+  agent_mode: boolean;
+  current_phase: string | null;
+  current_attempt: number | null;
+  current_retry: number | null;
 };
 
 export type ReportDto = {
@@ -279,6 +297,9 @@ export const startScan = (request: ScanStartRequest) =>
     profile: request.profile,
     categories: request.categories,
     disabledTests: request.disabledTests ?? [],
+    generatorMode: request.generatorMode ?? "static_pack",
+    agentMode: request.agentMode ?? false,
+    maxAgentAttempts: request.maxAgentAttempts ?? 5,
   });
 
 export const getScanStatus = (scanId: string) =>

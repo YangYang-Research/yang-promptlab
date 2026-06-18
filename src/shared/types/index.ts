@@ -121,6 +121,17 @@ export type EndpointFingerprint = {
   methodsUsed: string[];
   primaryProvider: string | null;
   apiStyle: string | null;
+  platformProfile: PlatformProfile;
+};
+
+export type PlatformProfile = {
+  platform: string;
+  version: string;
+  authType: string;
+  llmProvider: string;
+  memoryEnabled: boolean;
+  toolsEnabled: boolean;
+  ragEnabled: boolean;
 };
 
 export type FingerprintTechnology = {

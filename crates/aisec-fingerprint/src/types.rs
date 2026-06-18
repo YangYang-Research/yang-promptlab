@@ -74,6 +74,8 @@ pub enum AgentFramework {
     AnythingLlm,
     Flowise,
     Dify,
+    Langflow,
+    LibreChat,
     CrewAi,
     AutoGen,
 }
@@ -88,6 +90,8 @@ impl AgentFramework {
             Self::AnythingLlm => "anythingllm",
             Self::Flowise => "flowise",
             Self::Dify => "dify",
+            Self::Langflow => "langflow",
+            Self::LibreChat => "librechat",
             Self::CrewAi => "crewai",
             Self::AutoGen => "autogen",
         }
@@ -102,6 +106,8 @@ impl AgentFramework {
             Self::AnythingLlm => "AnythingLLM",
             Self::Flowise => "Flowise",
             Self::Dify => "Dify",
+            Self::Langflow => "Langflow",
+            Self::LibreChat => "LibreChat",
             Self::CrewAi => "CrewAI",
             Self::AutoGen => "AutoGen",
         }
@@ -117,6 +123,8 @@ impl AgentFramework {
             AnythingLlm,
             Flowise,
             Dify,
+            Langflow,
+            LibreChat,
             CrewAi,
             AutoGen,
         ]
@@ -322,6 +330,18 @@ impl FingerprintReport {
     }
 }
 
+/// Normalized platform profile for attack planning (pre-attack identification).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct PlatformProfile {
+    pub platform: String,
+    pub version: String,
+    pub auth_type: String,
+    pub llm_provider: String,
+    pub memory_enabled: bool,
+    pub tools_enabled: bool,
+    pub rag_enabled: bool,
+}
+
 /// Full AI stack fingerprint including providers, frameworks, components, and attack plan.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StackFingerprintReport {
@@ -333,6 +353,8 @@ pub struct StackFingerprintReport {
     pub provider_report: FingerprintReport,
     pub attack_recommendations: Vec<AttackRecommendation>,
     pub methods_used: Vec<String>,
+    #[serde(default)]
+    pub platform_profile: PlatformProfile,
     pub analyzed_at: OffsetDateTime,
 }
 
