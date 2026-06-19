@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use time::OffsetDateTime;
-use tracing::{info, instrument};
+use tracing::{info, instrument, warn};
 use uuid::Uuid;
 
 use crate::builtin_catalog::BuiltinCatalog;
@@ -204,9 +204,14 @@ impl LocalModelManager {
         progress.model_id = model_id.clone();
         progress.status = DownloadStatus::Completed;
 
-        let verification = self
-            .verify_file(&destination, catalog.sha256.as_deref())
-            .await?;
+        let expected_sha256 = catalog.sha256.as_deref().filter(|s| !s.is_empty());
+        if expected_sha256.is_none() {
+            warn!(
+                catalog_id = %catalog_id,
+                "registry entry has no sha256; installing without integrity verification"
+            );
+        }
+        let verification = self.verify_file(&destination, expected_sha256).await?;
         if !verification.valid {
             return Err(ModelError::verification("post-download checksum mismatch"));
         }
@@ -305,9 +310,14 @@ impl LocalModelManager {
             .ok_or_else(|| ModelError::not_found(format!("catalog entry: {catalog_id}")))?
             .clone();
 
-        let verification = self
-            .verify_file(&destination, catalog.sha256.as_deref())
-            .await?;
+        let expected_sha256 = catalog.sha256.as_deref().filter(|s| !s.is_empty());
+        if expected_sha256.is_none() {
+            warn!(
+                catalog_id = %catalog_id,
+                "registry entry has no sha256; installing without integrity verification"
+            );
+        }
+        let verification = self.verify_file(&destination, expected_sha256).await?;
         if !verification.valid {
             return Err(ModelError::verification("post-download checksum mismatch"));
         }

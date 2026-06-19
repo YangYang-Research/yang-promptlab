@@ -178,6 +178,9 @@ pub struct DownloadProgress {
     pub eta_seconds: Option<u64>,
     pub resumed: bool,
     pub updated_at: OffsetDateTime,
+    /// Human-readable failure reason when `status == Failed`.
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 /// Vault storage summary for desktop UI.

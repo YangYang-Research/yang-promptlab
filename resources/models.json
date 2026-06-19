@@ -8,8 +8,8 @@
       "engine": "llama.cpp",
       "format": "gguf",
       "size": "4.7GB",
-      "sha256": "",
-      "download_url": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/qwen3-8b-q4_k_m.gguf"
+      "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+      "download_url": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf"
     },
     {
       "id": "llama3-8b-q4",
@@ -19,7 +19,7 @@
       "engine": "llama.cpp",
       "format": "gguf",
       "size": "4.9GB",
-      "sha256": "",
+      "sha256": "86c8ea6c8b755687d0b723176fcd0b2411ef80533d23e2a5030f845d13ab2db7",
       "download_url": "https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf"
     },
     {
@@ -30,7 +30,7 @@
       "engine": "llama.cpp",
       "format": "gguf",
       "size": "4.1GB",
-      "sha256": "",
+      "sha256": "3e0039fd0273fcbebb49228943b17831aadd55cbcbf56f0af00499be2040ccf9",
       "download_url": "https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf"
     }
   ]

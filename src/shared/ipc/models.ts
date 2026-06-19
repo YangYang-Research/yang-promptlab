@@ -90,6 +90,7 @@ export type ModelDownloadProgressDto = {
   etaSeconds: number | null;
   resumed: boolean;
   destination: string;
+  error: string | null;
 };
 
 export type ModelVaultStatsDto = {

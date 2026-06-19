@@ -101,6 +101,19 @@ impl DownloadCoordinator {
     ) -> ModelResult<DownloadProgress> {
         let catalog_id = catalog_id.into();
         let mut guard = self.active.lock().await;
+        // Replace a previous download that already finished (completed/failed) so the user can retry.
+        let existing_terminal = match guard.as_ref() {
+            Some(active) => matches!(
+                active.progress.lock().await.status,
+                DownloadStatus::Completed | DownloadStatus::Failed
+            ),
+            None => false,
+        };
+        if existing_terminal {
+            if let Some(active) = guard.take() {
+                active.task.abort();
+            }
+        }
         if guard.is_some() {
             return Err(ModelError::invalid("another download is already active"));
         }
@@ -121,6 +134,7 @@ impl DownloadCoordinator {
             eta_seconds: None,
             resumed: destination.exists(),
             updated_at: OffsetDateTime::now_utc(),
+            error: None,
         }));
 
         let downloader = self.downloader.clone();
@@ -147,13 +161,16 @@ impl DownloadCoordinator {
                 }
                 Err(err) => {
                     warn!(error = %err, "controlled download failed");
-                    slot.status = if control_clone.cancel.is_cancelled() {
-                        DownloadStatus::Failed
-                    } else if control_clone.pause.load(Ordering::SeqCst) {
-                        DownloadStatus::Paused
+                    let cancelled = control_clone.cancel.is_cancelled();
+                    let paused = control_clone.pause.load(Ordering::SeqCst);
+                    if !cancelled && paused {
+                        slot.status = DownloadStatus::Paused;
                     } else {
-                        DownloadStatus::Failed
-                    };
+                        slot.status = DownloadStatus::Failed;
+                        slot.error = Some(err.to_string());
+                    }
+                    slot.speed_bytes_per_sec = None;
+                    slot.eta_seconds = None;
                     slot.updated_at = OffsetDateTime::now_utc();
                 }
             }
@@ -179,6 +196,19 @@ impl DownloadCoordinator {
     ) -> ModelResult<DownloadProgress> {
         let catalog_id = catalog_id.into();
         let mut guard = self.active.lock().await;
+        // Replace a previous download that already finished (completed/failed) so the user can retry.
+        let existing_terminal = match guard.as_ref() {
+            Some(active) => matches!(
+                active.progress.lock().await.status,
+                DownloadStatus::Completed | DownloadStatus::Failed
+            ),
+            None => false,
+        };
+        if existing_terminal {
+            if let Some(active) = guard.take() {
+                active.task.abort();
+            }
+        }
         if guard.is_some() {
             return Err(ModelError::invalid("another download is already active"));
         }
@@ -199,6 +229,7 @@ impl DownloadCoordinator {
             eta_seconds: None,
             resumed: destination.exists(),
             updated_at: OffsetDateTime::now_utc(),
+            error: None,
         }));
 
         let downloader = self.downloader.clone();
@@ -226,13 +257,16 @@ impl DownloadCoordinator {
                 }
                 Err(err) => {
                     warn!(error = %err, "controlled download failed");
-                    slot.status = if control_clone.cancel.is_cancelled() {
-                        DownloadStatus::Failed
-                    } else if control_clone.pause.load(Ordering::SeqCst) {
-                        DownloadStatus::Paused
+                    let cancelled = control_clone.cancel.is_cancelled();
+                    let paused = control_clone.pause.load(Ordering::SeqCst);
+                    if !cancelled && paused {
+                        slot.status = DownloadStatus::Paused;
                     } else {
-                        DownloadStatus::Failed
-                    };
+                        slot.status = DownloadStatus::Failed;
+                        slot.error = Some(err.to_string());
+                    }
+                    slot.speed_bytes_per_sec = None;
+                    slot.eta_seconds = None;
                     slot.updated_at = OffsetDateTime::now_utc();
                 }
             }
