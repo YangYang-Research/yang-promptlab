@@ -1,17 +1,152 @@
+import { useEffect, useState } from "react";
+
 import { useAppStore } from "@/app/store/AppStore";
 import {
   Button,
   Card,
   PageHeader,
+  Select,
 } from "@/shared/components";
 import type { AppSettings } from "@/app/store/types";
+import { getJudgeConfig, saveJudgeConfig, type JudgeConfigDto } from "@/shared/ipc/judge";
+import { listModels, type ModelEntryDto } from "@/shared/ipc/models";
+import { toAppError } from "@/shared/errors";
+import {
+  securityAudit,
+  securityMigrateSecrets,
+  type SecretMigrationAudit,
+} from "@/shared/ipc/security";
+
+function SecuritySecretsCard({ backendConnected }: { backendConnected: boolean }) {
+  const [audit, setAudit] = useState<SecretMigrationAudit | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastMigrated, setLastMigrated] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!backendConnected) {
+      setAudit(null);
+      return;
+    }
+    void securityAudit()
+      .then(setAudit)
+      .catch(() => setAudit(null));
+  }, [backendConnected, lastMigrated]);
+
+  async function handleMigrate() {
+    setBusy(true);
+    setError(null);
+    try {
+      const report = await securityMigrateSecrets();
+      setAudit(report.auditAfter);
+      setLastMigrated(
+        report.authMigrated +
+          report.targetsMigrated +
+          report.storageMigrated +
+          report.judgeMigrated,
+      );
+    } catch (err) {
+      setError(toAppError(err).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const legacyCount = audit?.legacyCount ?? 0;
+
+  return (
+    <>
+      <p className="text-muted text-sm">
+        Move plaintext credentials from targets, auth profiles, sessions, and judge config into the
+        OS keychain and encrypted session vault.
+      </p>
+      {!backendConnected ? (
+        <p className="text-muted text-sm">Connect to the Tauri backend to audit secrets.</p>
+      ) : audit ? (
+        <dl className="about-list">
+          <div>
+            <dt>Legacy records</dt>
+            <dd>{legacyCount === 0 ? "None" : legacyCount}</dd>
+          </div>
+          {legacyCount > 0 ? (
+            <>
+              <div>
+                <dt>Targets</dt>
+                <dd>{audit.targetsLegacy}</dd>
+              </div>
+              <div>
+                <dt>Auth profiles</dt>
+                <dd>{audit.authProfilesLegacy}</dd>
+              </div>
+              <div>
+                <dt>Sessions</dt>
+                <dd>{audit.sessionsLegacy + audit.sessionStorageLegacy}</dd>
+              </div>
+              <div>
+                <dt>Judge config</dt>
+                <dd>{audit.judgeConfigLegacy}</dd>
+              </div>
+            </>
+          ) : null}
+        </dl>
+      ) : null}
+      {error ? <p className="text-danger text-sm">{error}</p> : null}
+      <Button
+        variant="secondary"
+        disabled={!backendConnected || busy || legacyCount === 0}
+        onClick={() => void handleMigrate()}
+      >
+        {busy ? "Migrating…" : "Migrate Secrets"}
+      </Button>
+    </>
+  );
+}
 
 export function SettingsPage() {
-  const { settings, dispatch, backendVersion, backendConnected, projects, ui } = useAppStore();
+  const { settings, dispatch, backendVersion, backendConnected } = useAppStore();
+  const [judgeConfig, setJudgeConfig] = useState<JudgeConfigDto | null>(null);
+  const [installedModels, setInstalledModels] = useState<ModelEntryDto[]>([]);
+  const [judgeBusy, setJudgeBusy] = useState(false);
+  const [judgeError, setJudgeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!backendConnected) return;
+    void Promise.all([getJudgeConfig(), listModels()])
+      .then(([config, models]) => {
+        setJudgeConfig(config);
+        setInstalledModels(models);
+      })
+      .catch(() => {
+        setJudgeConfig(null);
+        setInstalledModels([]);
+      });
+  }, [backendConnected]);
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     dispatch({ type: "UPDATE_SETTING", key, value });
   };
+
+  async function handleJudgeModelChange(modelId: string) {
+    if (!judgeConfig) return;
+    setJudgeBusy(true);
+    setJudgeError(null);
+    try {
+      const next =
+        modelId === "none"
+          ? { ...judgeConfig, mode: "deterministic" as const, localVaultModelId: null }
+          : {
+              ...judgeConfig,
+              mode: "local_llm" as const,
+              localVaultModelId: modelId,
+            };
+      const saved = await saveJudgeConfig(next);
+      setJudgeConfig(saved);
+    } catch (err) {
+      setJudgeError(toAppError(err).message);
+    } finally {
+      setJudgeBusy(false);
+    }
+  }
 
   return (
     <div className="page settings-page">
@@ -25,32 +160,45 @@ export function SettingsPage() {
           <h3 className="card__title">General</h3>
           <div className="settings-field">
             <label htmlFor="theme">Theme</label>
-            <select
+            <Select
               id="theme"
-              className="settings-select"
               value={settings.theme}
               onChange={(e) => update("theme", e.target.value as AppSettings["theme"])}
             >
               <option value="dark">Dark</option>
               <option value="light">Light</option>
               <option value="system">System</option>
-            </select>
+            </Select>
           </div>
+        </Card>
+
+        <Card>
+          <h3 className="card__title">AI Models</h3>
           <div className="settings-field">
-            <label htmlFor="project">Default Project</label>
-            <select
-              id="project"
-              className="settings-select"
-              value={ui.selectedProjectId ?? ""}
-              onChange={(e) =>
-                dispatch({ type: "SET_SELECTED_PROJECT", projectId: e.target.value || null })
-              }
+            <label htmlFor="judgeModel">Judge Model</label>
+            <Select
+              id="judgeModel"
+              value={judgeConfig?.localVaultModelId ?? "none"}
+              disabled={!backendConnected || judgeBusy || !judgeConfig}
+              onChange={(e) => void handleJudgeModelChange(e.target.value)}
             >
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
+              <option value="none">None (Deterministic rules only)</option>
+              {installedModels.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name}
+                </option>
               ))}
-            </select>
+            </Select>
           </div>
+          {judgeError ? <p className="text-danger text-sm">{judgeError}</p> : null}
+          {!backendConnected ? (
+            <p className="text-muted text-sm">Connect to the Tauri backend to configure judge models.</p>
+          ) : null}
+        </Card>
+
+        <Card>
+          <h3 className="card__title">Security</h3>
+          <SecuritySecretsCard backendConnected={backendConnected} />
         </Card>
 
         <Card>
@@ -87,7 +235,7 @@ export function SettingsPage() {
             <label htmlFor="pluginsDir">Plugins directory</label>
             <input
               id="pluginsDir"
-              className="settings-input mono"
+              className="input mono"
               value={settings.pluginsDir}
               onChange={(e) => update("pluginsDir", e.target.value)}
             />
@@ -96,7 +244,7 @@ export function SettingsPage() {
             <label htmlFor="modelsDir">Models directory</label>
             <input
               id="modelsDir"
-              className="settings-input mono"
+              className="input mono"
               value={settings.modelsDir}
               onChange={(e) => update("modelsDir", e.target.value)}
             />

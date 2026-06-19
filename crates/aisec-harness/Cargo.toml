@@ -1,0 +1,30 @@
+[package]
+name = "aisec-harness"
+description = "Execution harness layer — normalized attack delivery to heterogeneous AI targets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["http", "openai"]
+http = []
+openai = []
+playwright = ["dep:aisec-auth"]
+
+[dependencies]
+aisec-core = { workspace = true }
+aisec-auth = { workspace = true, optional = true }
+async-trait = { workspace = true }
+base64 = "0.22"
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6"

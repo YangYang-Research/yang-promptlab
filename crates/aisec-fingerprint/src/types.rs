@@ -15,6 +15,7 @@ pub enum AiProvider {
     Ollama,
     LiteLlm,
     Vllm,
+    OpenRouter,
 }
 
 impl AiProvider {
@@ -28,6 +29,7 @@ impl AiProvider {
             Self::Ollama => "ollama",
             Self::LiteLlm => "litellm",
             Self::Vllm => "vllm",
+            Self::OpenRouter => "openrouter",
         }
     }
 
@@ -41,6 +43,7 @@ impl AiProvider {
             Self::Ollama => "Ollama",
             Self::LiteLlm => "LiteLLM",
             Self::Vllm => "vLLM",
+            Self::OpenRouter => "OpenRouter",
         }
     }
 
@@ -55,7 +58,130 @@ impl AiProvider {
             Ollama,
             LiteLlm,
             Vllm,
+            OpenRouter,
         ]
+    }
+}
+
+/// Agent orchestration / UI framework detected on the target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentFramework {
+    LangChain,
+    LangGraph,
+    LangServe,
+    OpenWebUi,
+    AnythingLlm,
+    Flowise,
+    Dify,
+    Langflow,
+    LibreChat,
+    CrewAi,
+    AutoGen,
+}
+
+impl AgentFramework {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LangChain => "langchain",
+            Self::LangGraph => "langgraph",
+            Self::LangServe => "langserve",
+            Self::OpenWebUi => "openwebui",
+            Self::AnythingLlm => "anythingllm",
+            Self::Flowise => "flowise",
+            Self::Dify => "dify",
+            Self::Langflow => "langflow",
+            Self::LibreChat => "librechat",
+            Self::CrewAi => "crewai",
+            Self::AutoGen => "autogen",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::LangChain => "LangChain",
+            Self::LangGraph => "LangGraph",
+            Self::LangServe => "LangServe",
+            Self::OpenWebUi => "OpenWebUI",
+            Self::AnythingLlm => "AnythingLLM",
+            Self::Flowise => "Flowise",
+            Self::Dify => "Dify",
+            Self::Langflow => "Langflow",
+            Self::LibreChat => "LibreChat",
+            Self::CrewAi => "CrewAI",
+            Self::AutoGen => "AutoGen",
+        }
+    }
+
+    pub fn all() -> &'static [AgentFramework] {
+        use AgentFramework::*;
+        &[
+            LangChain,
+            LangGraph,
+            LangServe,
+            OpenWebUi,
+            AnythingLlm,
+            Flowise,
+            Dify,
+            Langflow,
+            LibreChat,
+            CrewAi,
+            AutoGen,
+        ]
+    }
+}
+
+/// AI deployment component (MCP, RAG, tools).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiComponent {
+    McpServer,
+    RagPipeline,
+    ToolOrchestration,
+}
+
+impl AiComponent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::McpServer => "mcp_server",
+            Self::RagPipeline => "rag_pipeline",
+            Self::ToolOrchestration => "tool_orchestration",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::McpServer => "MCP Server",
+            Self::RagPipeline => "RAG Pipeline",
+            Self::ToolOrchestration => "Tool Orchestration",
+        }
+    }
+}
+
+/// Fingerprint signal source method.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FingerprintMethod {
+    Headers,
+    Responses,
+    OpenApi,
+    GraphQl,
+    JavaScript,
+    KnownRoutes,
+    Metadata,
+}
+
+impl FingerprintMethod {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Headers => "headers",
+            Self::Responses => "responses",
+            Self::OpenApi => "openapi",
+            Self::GraphQl => "graphql",
+            Self::JavaScript => "javascript",
+            Self::KnownRoutes => "known_routes",
+            Self::Metadata => "metadata",
+        }
     }
 }
 
@@ -68,6 +194,10 @@ pub struct FingerprintInput {
     #[serde(default)]
     pub headers: HashMap<String, String>,
     pub body: Option<String>,
+    #[serde(default)]
+    pub content_type: Option<String>,
+    #[serde(default)]
+    pub kind_hint: Option<String>,
 }
 
 impl FingerprintInput {
@@ -83,6 +213,28 @@ impl FingerprintInput {
             status,
             headers,
             body,
+            content_type: None,
+            kind_hint: None,
+        }
+    }
+
+    pub fn from_snapshot(
+        url: impl Into<String>,
+        method: Option<String>,
+        status: u16,
+        headers: HashMap<String, String>,
+        content_type: Option<String>,
+        body: String,
+        kind_hint: Option<String>,
+    ) -> Self {
+        Self {
+            url: url.into(),
+            method,
+            status: Some(status),
+            headers,
+            body: Some(body),
+            content_type,
+            kind_hint,
         }
     }
 }
@@ -94,6 +246,51 @@ pub struct MatchedSignal {
     pub rule_id: String,
     pub description: String,
     pub weight: f32,
+}
+
+/// Matched stack signal for frameworks/components.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StackSignal {
+    pub rule_id: String,
+    pub description: String,
+    pub weight: f32,
+    pub method: FingerprintMethod,
+}
+
+/// Detected technology with confidence.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DetectedTechnology {
+    pub id: String,
+    pub name: String,
+    pub category: String,
+    pub confidence: f32,
+    pub signals: Vec<String>,
+}
+
+/// Detected agent framework.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DetectedFramework {
+    pub framework: AgentFramework,
+    pub name: String,
+    pub confidence: f32,
+    pub signals: Vec<String>,
+}
+
+/// Detected AI component.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DetectedComponent {
+    pub component: AiComponent,
+    pub name: String,
+    pub confidence: f32,
+    pub signals: Vec<String>,
+}
+
+/// Attack category recommendation derived from fingerprint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AttackRecommendation {
+    pub category: String,
+    pub reason: String,
+    pub priority: u8,
 }
 
 /// Provider fingerprint result with confidence score.
@@ -118,7 +315,7 @@ pub enum ApiStyle {
     Unknown,
 }
 
-/// Aggregated fingerprint report for an endpoint.
+/// Aggregated fingerprint report for an endpoint (providers only).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FingerprintReport {
     pub url: String,
@@ -133,5 +330,43 @@ impl FingerprintReport {
     }
 }
 
+/// Normalized platform profile for attack planning (pre-attack identification).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct PlatformProfile {
+    pub platform: String,
+    pub version: String,
+    pub auth_type: String,
+    pub llm_provider: String,
+    pub memory_enabled: bool,
+    pub tools_enabled: bool,
+    pub rag_enabled: bool,
+}
+
+/// Full AI stack fingerprint including providers, frameworks, components, and attack plan.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StackFingerprintReport {
+    pub url: String,
+    pub confidence: f32,
+    pub technologies: Vec<DetectedTechnology>,
+    pub agent_frameworks: Vec<DetectedFramework>,
+    pub ai_components: Vec<DetectedComponent>,
+    pub provider_report: FingerprintReport,
+    pub attack_recommendations: Vec<AttackRecommendation>,
+    pub methods_used: Vec<String>,
+    #[serde(default)]
+    pub platform_profile: PlatformProfile,
+    pub analyzed_at: OffsetDateTime,
+}
+
+impl StackFingerprintReport {
+    pub fn primary_technology(&self) -> Option<&DetectedTechnology> {
+        self.technologies.first()
+    }
+}
+
 /// Minimum confidence to include a provider in results.
 pub const DEFAULT_CONFIDENCE_THRESHOLD: f32 = 0.45;
+
+pub const FRAMEWORK_CONFIDENCE_THRESHOLD: f32 = 0.40;
+
+pub const COMPONENT_CONFIDENCE_THRESHOLD: f32 = 0.40;

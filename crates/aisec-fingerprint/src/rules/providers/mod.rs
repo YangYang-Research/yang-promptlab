@@ -7,6 +7,7 @@ mod gemini;
 mod litellm;
 mod ollama;
 mod openai;
+mod openrouter;
 mod vllm;
 
 use super::FingerprintRule;
@@ -21,5 +22,6 @@ pub fn all_rules() -> Vec<FingerprintRule> {
     rules.extend(ollama::rules());
     rules.extend(litellm::rules());
     rules.extend(vllm::rules());
+    rules.extend(openrouter::rules());
     rules
 }

@@ -7,6 +7,7 @@ use crate::config::AuthEngineConfig;
 use crate::cookies::{CookieManager, TokenExtractor};
 use crate::mock::SharedPlaywrightDriver;
 use crate::playwright::{parse_cookies, parse_tokens, PlaywrightClient};
+use crate::secrets::migrate::resolve_auth_config_secrets;
 use crate::session::SessionStore;
 use crate::types::{
     AuthConfig, AuthMethod, AuthProfile, AuthSession, AuthenticateResult, ExtractedToken,
@@ -53,6 +54,9 @@ impl AuthEngine {
         profile: &AuthProfile,
         options: RecordLoginOptions,
     ) -> AisecResult<(AuthSession, LoginRecording)> {
+        let mut profile = profile.clone();
+        resolve_auth_config_secrets(&mut profile.config, self.store.secrets())?;
+
         if !profile.method.uses_browser() {
             return Err(AisecError::invalid_input(format!(
                 "method {} does not support browser recording",
@@ -76,6 +80,32 @@ impl AuthEngine {
             )
             .await?;
 
+        self.persist_record_result(&profile.id, result).await
+    }
+
+    /// Launch a headed browser for manual login at `login_url`.
+    pub async fn begin_interactive_recording(
+        &self,
+        login_url: &str,
+        options: RecordLoginOptions,
+    ) -> AisecResult<()> {
+        self.driver.begin_interactive_login(login_url, options).await
+    }
+
+    /// Capture browser state after the user finishes manual login.
+    pub async fn finish_interactive_recording(
+        &self,
+        profile_id: &str,
+    ) -> AisecResult<(AuthSession, LoginRecording)> {
+        let result = self.driver.finish_interactive_login().await?;
+        self.persist_record_result(profile_id, result).await
+    }
+
+    async fn persist_record_result(
+        &self,
+        profile_id: &str,
+        result: crate::playwright::RecordLoginResult,
+    ) -> AisecResult<(AuthSession, LoginRecording)> {
         let cookies = parse_cookies(&serde_json::Value::Array(result.cookies))?;
         let tokens = parse_tokens(&serde_json::Value::Array(result.tokens))?;
         let steps: Vec<RecordedStep> = result
@@ -93,7 +123,7 @@ impl AuthEngine {
 
         let mut session = self
             .store
-            .persist_session(&profile.id, &cookies, &tokens, None)
+            .persist_session(profile_id, &cookies, &tokens, None)
             .await?;
 
         let storage_path = self
@@ -105,13 +135,12 @@ impl AuthEngine {
             .update_storage_path(&session.id, &storage_path)
             .await?;
 
-        // Reflect the persisted storageState path on the returned session.
         session.storage_state_path = Some(storage_path.to_string_lossy().into_owned());
 
         let recording = self
             .store
             .save_recording(
-                &profile.id,
+                profile_id,
                 &steps,
                 Some(storage_path.clone()),
                 serde_json::json!({"final_url": result.final_url}),
@@ -223,9 +252,14 @@ impl AuthEngine {
 }
 
 async fn authenticate_jwt(profile: &AuthProfile, store: &SessionStore) -> AisecResult<AuthenticateResult> {
-    let AuthConfig::Jwt { token, header_name, prefix } = &profile.config else {
+    let mut profile = profile.clone();
+    resolve_auth_config_secrets(&mut profile.config, store.secrets())?;
+    let AuthConfig::Jwt { token, header_name, prefix, .. } = &profile.config else {
         return Err(AisecError::invalid_input("expected jwt config"));
     };
+    if token.is_empty() {
+        return Err(AisecError::invalid_input("jwt token is missing"));
+    }
     TokenExtractor::validate_jwt_structure(token)?;
     let extracted =
         TokenExtractor::from_jwt_config(token, header_name.as_deref(), prefix.as_deref());
@@ -239,7 +273,9 @@ async fn authenticate_jwt(profile: &AuthProfile, store: &SessionStore) -> AisecR
 }
 
 async fn authenticate_api_key(profile: &AuthProfile, store: &SessionStore) -> AisecResult<AuthenticateResult> {
-    let AuthConfig::ApiKey { key, header_name, prefix } = &profile.config else {
+    let mut profile = profile.clone();
+    resolve_auth_config_secrets(&mut profile.config, store.secrets())?;
+    let AuthConfig::ApiKey { key, header_name, prefix, .. } = &profile.config else {
         return Err(AisecError::invalid_input("expected api_key config"));
     };
     if key.is_empty() {
@@ -345,6 +381,7 @@ mod tests {
                 login_url: "https://example.com/login".into(),
                 username: Some("user".into()),
                 password: Some("pass".into()),
+                password_credential_id: None,
                 username_selector: "#user".into(),
                 password_selector: "#pass".into(),
                 submit_selector: "#submit".into(),
@@ -381,6 +418,7 @@ mod tests {
             method: AuthMethod::Jwt,
             config: AuthConfig::Jwt {
                 token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyIn0.sig".into(),
+                token_credential_id: None,
                 header_name: Some("Authorization".into()),
                 prefix: Some("Bearer".into()),
             },
@@ -406,6 +444,7 @@ mod tests {
             method: AuthMethod::ApiKey,
             config: AuthConfig::ApiKey {
                 key: "secret-key".into(),
+                key_credential_id: None,
                 header_name: "X-API-Key".into(),
                 prefix: None,
             },

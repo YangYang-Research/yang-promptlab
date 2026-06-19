@@ -5,7 +5,16 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::error::{ModelError, ModelResult};
-use crate::types::{ModelEntry, ModelFormat, ModelSource};
+use crate::runtime::{infer_capabilities, infer_provider, infer_version};
+use crate::types::{ModelEntry, ModelFormat, ModelProvider, ModelSource};
+
+const REGISTRY_VERSION: u32 = 1;
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct RegistrySnapshot {
+    version: u32,
+    entries: Vec<ModelEntry>,
+}
 
 /// In-memory model registry with vault-backed paths.
 #[derive(Debug, Default)]
@@ -16,6 +25,36 @@ pub struct ModelRegistry {
 impl ModelRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn registry_path(vault: &Path) -> PathBuf {
+        vault.join("registry.json")
+    }
+
+    pub fn load_from_vault(vault: &Path) -> ModelResult<Self> {
+        let path = Self::registry_path(vault);
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+        let raw = std::fs::read_to_string(&path).map_err(ModelError::Io)?;
+        let snapshot: RegistrySnapshot =
+            serde_json::from_str(&raw).map_err(|e| ModelError::invalid(e.to_string()))?;
+        let mut registry = Self::new();
+        for entry in snapshot.entries {
+            registry.entries.insert(entry.id.clone(), entry);
+        }
+        Ok(registry)
+    }
+
+    pub fn save_to_vault(&self, vault: &Path) -> ModelResult<()> {
+        std::fs::create_dir_all(vault).map_err(ModelError::Io)?;
+        let snapshot = RegistrySnapshot {
+            version: REGISTRY_VERSION,
+            entries: self.entries.values().cloned().collect(),
+        };
+        let json = serde_json::to_string_pretty(&snapshot)
+            .map_err(|e| ModelError::invalid(e.to_string()))?;
+        std::fs::write(Self::registry_path(vault), json).map_err(ModelError::Io)
     }
 
     pub fn len(&self) -> usize {
@@ -56,6 +95,8 @@ impl ModelRegistry {
         let format = ModelFormat::from_path(&path)
             .ok_or_else(|| ModelError::invalid("only .gguf models are supported"))?;
 
+        let source = ModelSource::Local { path: path.clone() };
+        let provider = infer_provider(&source);
         let size_bytes = std::fs::metadata(&path).ok().map(|m| m.len());
         let now = OffsetDateTime::now_utc();
         let id = Uuid::new_v4().to_string();
@@ -64,7 +105,10 @@ impl ModelRegistry {
             id: id.clone(),
             name: name.into(),
             format,
-            source: ModelSource::Local { path: path.clone() },
+            provider,
+            version: infer_version(&source),
+            capabilities: infer_capabilities(provider),
+            source,
             file_path: path,
             size_bytes,
             checksum_sha256: None,
@@ -72,6 +116,54 @@ impl ModelRegistry {
             created_at: now,
             updated_at: now,
             metadata: serde_json::json!({}),
+        };
+
+        self.entries.insert(id, entry.clone());
+        Ok(entry)
+    }
+
+    pub fn register_ollama(
+        &mut self,
+        vault: &Path,
+        name: impl Into<String>,
+        model: impl Into<String>,
+        base_url: impl Into<String>,
+    ) -> ModelResult<ModelEntry> {
+        let name = name.into();
+        let model = model.into();
+        let base_url = base_url.into();
+        let id = Uuid::new_v4().to_string();
+        let model_dir = Self::model_dir(vault, &id);
+        std::fs::create_dir_all(&model_dir).map_err(ModelError::Io)?;
+        let ref_path = model_dir.join("reference.json");
+        let source = ModelSource::Ollama {
+            model: model.clone(),
+            base_url: base_url.clone(),
+        };
+        let sidecar = serde_json::json!({
+            "model": model,
+            "base_url": base_url,
+        });
+        std::fs::write(&ref_path, serde_json::to_string_pretty(&sidecar).unwrap())
+            .map_err(ModelError::Io)?;
+
+        let now = OffsetDateTime::now_utc();
+        let provider = ModelProvider::Ollama;
+        let entry = ModelEntry {
+            id: id.clone(),
+            name,
+            format: ModelFormat::Gguf,
+            provider,
+            version: infer_version(&source),
+            capabilities: infer_capabilities(provider),
+            source,
+            file_path: ref_path,
+            size_bytes: None,
+            checksum_sha256: None,
+            verified: false,
+            created_at: now,
+            updated_at: now,
+            metadata: serde_json::json!({ "runtime": "ollama" }),
         };
 
         self.entries.insert(id, entry.clone());
@@ -134,6 +226,7 @@ mod tests {
         let mut registry = ModelRegistry::new();
         let entry = registry.register_local("test-model", &path).unwrap();
         assert_eq!(entry.format, ModelFormat::Gguf);
+        assert_eq!(entry.provider, ModelProvider::Gguf);
         assert_eq!(registry.len(), 1);
     }
 
@@ -145,5 +238,20 @@ mod tests {
 
         let mut registry = ModelRegistry::new();
         assert!(registry.register_local("bad", &path).is_err());
+    }
+
+    #[test]
+    fn persists_registry() {
+        let dir = tempdir().unwrap();
+        let vault = dir.path().join("vault");
+        let path = dir.path().join("test.gguf");
+        std::fs::write(&path, b"gguf-stub").unwrap();
+
+        let mut registry = ModelRegistry::new();
+        registry.register_local("test-model", &path).unwrap();
+        registry.save_to_vault(&vault).unwrap();
+
+        let loaded = ModelRegistry::load_from_vault(&vault).unwrap();
+        assert_eq!(loaded.len(), 1);
     }
 }

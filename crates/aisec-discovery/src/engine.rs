@@ -6,7 +6,7 @@ use tracing::{info, instrument, warn};
 
 use crate::browser::{BrowserConfig, BrowserCrawler};
 use crate::client::HttpClient;
-use crate::config::DiscoveryConfig;
+use crate::config::{DiscoveryConfig, SessionAuthMaterial};
 use crate::crawler::Crawler;
 use crate::detectors::{probe_ai_paths, probe_graphql_paths, probe_openapi_paths};
 use crate::types::{DiscoveryReport, DiscoveredEndpoint};
@@ -16,12 +16,24 @@ use crate::url_policy::{origin_of, validate_target_url};
 pub struct DiscoveryEngine {
     config: DiscoveryConfig,
     client: HttpClient,
+    session_auth: Option<SessionAuthMaterial>,
 }
 
 impl DiscoveryEngine {
     pub fn new(config: DiscoveryConfig) -> AisecResult<Self> {
         let client = HttpClient::new(config.clone())?;
-        Ok(Self { config, client })
+        Ok(Self {
+            config,
+            client,
+            session_auth: None,
+        })
+    }
+
+    /// Attach authenticated session cookies/tokens and optional Playwright storageState.
+    pub fn with_session_auth(mut self, auth: SessionAuthMaterial) -> AisecResult<Self> {
+        self.client = HttpClient::new(self.config.clone())?.with_auth_headers(auth.headers.clone());
+        self.session_auth = Some(auth);
+        Ok(self)
     }
 
     pub fn with_defaults() -> AisecResult<Self> {
@@ -35,6 +47,14 @@ impl DiscoveryEngine {
     /// Run full discovery against a seed URL.
     #[instrument(skip(self), fields(seed = %seed_url))]
     pub async fn discover(&self, seed_url: &str) -> AisecResult<DiscoveryReport> {
+        if self.uses_browser_session() {
+            let browser_config = self.browser_config_from_session();
+            return self.discover_with_browser(seed_url, browser_config).await;
+        }
+        self.discover_http_only(seed_url).await
+    }
+
+    async fn discover_http_only(&self, seed_url: &str) -> AisecResult<DiscoveryReport> {
         let started = Instant::now();
         let seed = validate_target_url(seed_url, &self.config)?;
         let origin = origin_of(&seed);
@@ -116,7 +136,7 @@ impl DiscoveryEngine {
         // Validate up-front under the same SSRF policy as HTTP discovery.
         validate_target_url(seed_url, &self.config)?;
 
-        let mut report = self.discover(seed_url).await?;
+        let mut report = self.discover_http_only(seed_url).await?;
 
         let crawler = BrowserCrawler::new(browser_config);
         match crawler.capture(seed_url).await {
@@ -141,6 +161,21 @@ impl DiscoveryEngine {
 
         let _ = crawler.close().await;
         Ok(report)
+    }
+
+    fn uses_browser_session(&self) -> bool {
+        self.session_auth
+            .as_ref()
+            .and_then(|auth| auth.storage_state_path.as_ref())
+            .is_some()
+    }
+
+    fn browser_config_from_session(&self) -> BrowserConfig {
+        let mut browser_config = BrowserConfig::default();
+        if let Some(auth) = &self.session_auth {
+            browser_config.storage_state_path = auth.storage_state_path.clone();
+        }
+        browser_config
     }
 }
 

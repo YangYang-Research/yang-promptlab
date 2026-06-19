@@ -51,7 +51,10 @@ pub enum AuthConfig {
     UsernamePassword {
         login_url: String,
         username: Option<String>,
+        #[serde(default, skip_serializing)]
         password: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        password_credential_id: Option<String>,
         username_selector: String,
         password_selector: String,
         submit_selector: String,
@@ -73,12 +76,18 @@ pub enum AuthConfig {
         idp_entity_id: Option<String>,
     },
     Jwt {
+        #[serde(default, skip_serializing)]
         token: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token_credential_id: Option<String>,
         header_name: Option<String>,
         prefix: Option<String>,
     },
     ApiKey {
+        #[serde(default, skip_serializing)]
         key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key_credential_id: Option<String>,
         header_name: String,
         prefix: Option<String>,
     },
@@ -148,6 +157,32 @@ pub struct PlaywrightStorageState {
     pub origins: Vec<serde_json::Value>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionValidationStatus {
+    Valid,
+    ExpiringSoon,
+    Expired,
+}
+
+impl SessionValidationStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Valid => "valid",
+            Self::ExpiringSoon => "expiring_soon",
+            Self::Expired => "expired",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "expiring_soon" => Self::ExpiringSoon,
+            "expired" => Self::Expired,
+            _ => Self::Valid,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthSession {
     pub id: String,
@@ -157,6 +192,10 @@ pub struct AuthSession {
     pub tokens: Vec<ExtractedToken>,
     pub storage_state_path: Option<String>,
     pub expires_at: Option<time::OffsetDateTime>,
+    pub validation_status: SessionValidationStatus,
+    pub last_validated_at: Option<time::OffsetDateTime>,
+    pub user_identity: Option<String>,
+    pub created_at: time::OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

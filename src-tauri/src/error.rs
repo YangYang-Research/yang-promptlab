@@ -31,6 +31,33 @@ impl From<AisecError> for CommandError {
     }
 }
 
+impl From<aisec_harness::HarnessError> for CommandError {
+    fn from(value: aisec_harness::HarnessError) -> Self {
+        Self {
+            code: ErrorCode::Internal.as_str().to_string(),
+            message: value.to_string(),
+        }
+    }
+}
+
+impl From<aisec_runtime::RuntimeError> for CommandError {
+    fn from(value: aisec_runtime::RuntimeError) -> Self {
+        Self {
+            code: ErrorCode::Internal.as_str().to_string(),
+            message: value.to_string(),
+        }
+    }
+}
+
+impl From<aisec_plugin_host::PluginError> for CommandError {
+    fn from(value: aisec_plugin_host::PluginError) -> Self {
+        Self {
+            code: ErrorCode::Internal.as_str().to_string(),
+            message: value.to_string(),
+        }
+    }
+}
+
 impl std::fmt::Display for CommandError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{}] {}", self.code, self.message)

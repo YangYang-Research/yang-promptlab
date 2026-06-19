@@ -102,6 +102,7 @@ impl RegexEvaluator {
                 category: Some(request.attack_category.clone()),
                 rationale: "No regex patterns matched".into(),
                 indicators: vec![],
+                structured: None,
             });
         }
 
@@ -115,6 +116,7 @@ impl RegexEvaluator {
             category: Some(request.attack_category.clone()),
             rationale: format!("Matched {} regex indicator(s)", indicators.len()),
             indicators,
+            structured: None,
         })
     }
 }

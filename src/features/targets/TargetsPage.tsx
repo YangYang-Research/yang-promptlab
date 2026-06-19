@@ -1,85 +1,125 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
   Badge,
   Button,
   Card,
+  ContentToolbar,
   DataTable,
+  ListCard,
   PageHeader,
-  StatusBadge,
+  Pagination,
+  RefreshButton,
 } from "@/shared/components";
-import type { Target } from "@/shared/types";
+import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
+import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
+import { useViewPreference } from "@/shared/hooks/useViewPreference";
+import {
+  buildTargetScanContext,
+  formatTargetTimestamp,
+} from "@/shared/targetScanContext";
+import type { Project, ScanRun, Target } from "@/shared/types";
 
 import { AddTargetModal } from "./AddTargetModal";
 
+type FlatTargetRow = Target & {
+  projectName: string;
+  scanContext: ReturnType<typeof buildTargetScanContext>;
+};
+
+function buildFlatTargets(
+  projects: Project[],
+  targets: Target[],
+  scans: ScanRun[],
+  filterProjectId: string | null,
+  query: string,
+): FlatTargetRow[] {
+  const normalizedQuery = query.toLowerCase().trim();
+
+  return targets
+    .filter((target) => !filterProjectId || target.projectId === filterProjectId)
+    .filter((target) => {
+      if (!normalizedQuery) return true;
+      const projectName =
+        projects.find((project) => project.id === target.projectId)?.name ?? "";
+      return (
+        target.name.toLowerCase().includes(normalizedQuery) ||
+        target.url.toLowerCase().includes(normalizedQuery) ||
+        projectName.toLowerCase().includes(normalizedQuery)
+      );
+    })
+    .map((target) => ({
+      ...target,
+      projectName: projects.find((project) => project.id === target.projectId)?.name ?? "—",
+      scanContext: buildTargetScanContext(target.id, scans),
+    }))
+    .sort((a, b) => a.projectName.localeCompare(b.projectName) || a.name.localeCompare(b.name));
+}
+
 export function TargetsPage() {
-  const { targets, projects, ui, loading, error, actions } = useAppStore();
+  const { targets, projects, scans, ui, loading, error, actions } = useAppStore();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const filterProjectId = searchParams.get("projectId");
   const [modalOpen, setModalOpen] = useState(false);
+  const [viewMode, setViewMode] = useViewPreference("targets");
+  const [pageSize, setPageSize] = usePageSizePreference("targets");
 
-  const filtered = targets.filter((t) => {
-    if (ui.selectedProjectId && t.projectId !== ui.selectedProjectId) return false;
-    const q = ui.searchQuery.toLowerCase();
-    if (!q) return true;
-    return (
-      t.name.toLowerCase().includes(q) ||
-      t.url.toLowerCase().includes(q) ||
-      t.tags.some((tag) => tag.includes(q))
-    );
-  });
+  const rows = useMemo(
+    () => buildFlatTargets(projects, targets, scans, filterProjectId, ui.searchQuery),
+    [projects, targets, scans, filterProjectId, ui.searchQuery],
+  );
 
-  const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? "—";
+  const { page, setPage, pagination } = usePaginatedList(rows, pageSize);
 
-  const columns = [
+  const tableColumns = [
     {
-      key: "name",
-      header: "Target",
-      render: (t: Target) => (
+      key: "url",
+      header: "Target URL",
+      render: (target: FlatTargetRow) => (
         <div>
-          <strong>{t.name}</strong>
-          <div className="text-muted text-sm mono">{t.url}</div>
+          <strong>{target.name}</strong>
+          <div className="mono text-sm text-muted">{target.url}</div>
         </div>
       ),
-    },
-    {
-      key: "type",
-      header: "Type",
-      width: "80px",
-      render: (t: Target) => <Badge variant="info">{t.type}</Badge>,
     },
     {
       key: "project",
       header: "Project",
-      width: "180px",
-      render: (t: Target) => projectName(t.projectId),
+      width: "150px",
+      render: (target: FlatTargetRow) => target.projectName,
     },
     {
-      key: "fingerprint",
-      header: "Fingerprint",
-      render: (t: Target) =>
-        t.fingerprint ? (
-          <span className="text-sm">{t.fingerprint}</span>
-        ) : (
-          <span className="text-muted">—</span>
-        ),
+      key: "auth",
+      header: "Authentication",
+      width: "130px",
+      render: (target: FlatTargetRow) => target.authType,
     },
     {
       key: "status",
-      header: "Status",
-      width: "110px",
-      render: (t: Target) => <StatusBadge status={t.status} />,
+      header: "Scan Status",
+      width: "120px",
+      render: (target: FlatTargetRow) => target.scanContext.scanStatusLabel,
     },
     {
-      key: "tags",
-      header: "Tags",
-      width: "140px",
-      render: (t: Target) => (
-        <div className="tag-list">
-          {t.tags.map((tag) => (
-            <Badge key={tag} variant="muted">{tag}</Badge>
-          ))}
-        </div>
-      ),
+      key: "lastScan",
+      header: "Last Scan",
+      width: "160px",
+      render: (target: FlatTargetRow) => formatTargetTimestamp(target.scanContext.lastScanTime),
+    },
+    {
+      key: "discovery",
+      header: "Latest Discovery",
+      width: "160px",
+      render: (target: FlatTargetRow) =>
+        formatTargetTimestamp(target.scanContext.latestDiscoveryTime),
+    },
+    {
+      key: "result",
+      header: "Latest Result",
+      render: (target: FlatTargetRow) => target.scanContext.latestScanResult,
     },
   ];
 
@@ -90,9 +130,7 @@ export function TargetsPage() {
         description="Endpoints, applications, and models under test"
         actions={
           <>
-            <Button variant="ghost" onClick={() => void actions.refresh()} disabled={loading}>
-              {loading ? "Refreshing…" : "Refresh"}
-            </Button>
+            <RefreshButton loading={loading} onClick={() => void actions.refresh()} />
             <Button variant="primary" onClick={() => setModalOpen(true)}>
               Add Target
             </Button>
@@ -106,16 +144,72 @@ export function TargetsPage() {
         </Card>
       )}
 
-      <Card padding="none">
-        <DataTable
-          columns={columns}
-          rows={filtered}
-          keyField="id"
-          emptyMessage={loading ? "Loading targets…" : "No targets yet. Add your first target."}
-        />
-      </Card>
+      {rows.length === 0 ? (
+        <Card>
+          <p className="text-muted">
+            {loading ? "Loading targets…" : "No targets yet. Add your first target."}
+          </p>
+        </Card>
+      ) : (
+        <>
+          <ContentToolbar
+            pageSize={pageSize}
+            onPageSizeChange={setPageSize}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+          />
 
-      <AddTargetModal open={modalOpen} onClose={() => setModalOpen(false)} />
+          {viewMode === "table" ? (
+            <Card padding="none">
+              <DataTable
+                columns={tableColumns}
+                rows={pagination.items}
+                keyField="id"
+                onRowClick={(target) => navigate(`/targets/${target.id}`)}
+                emptyMessage={loading ? "Loading targets…" : "No targets found"}
+              />
+            </Card>
+          ) : (
+            <div className="list-card-grid">
+              {pagination.items.map((target) => (
+                <ListCard
+                  key={target.id}
+                  title={target.name}
+                  status={<Badge variant="info">{target.type}</Badge>}
+                  metadata={[
+                    { label: "Project", value: target.projectName },
+                    { label: "URL", value: <span className="mono text-sm">{target.url}</span> },
+                    { label: "Authentication", value: target.authType },
+                    { label: "Scan Status", value: target.scanContext.scanStatusLabel },
+                    {
+                      label: "Latest Discovery",
+                      value: formatTargetTimestamp(target.scanContext.latestDiscoveryTime),
+                    },
+                    { label: "Latest Result", value: target.scanContext.latestScanResult },
+                  ]}
+                  footerMeta={`Last scan: ${formatTargetTimestamp(target.scanContext.lastScanTime)}`}
+                  onClick={() => navigate(`/targets/${target.id}`)}
+                />
+              ))}
+            </div>
+          )}
+
+          <Pagination
+            page={page}
+            totalItems={pagination.totalItems}
+            rangeStart={pagination.rangeStart}
+            rangeEnd={pagination.rangeEnd}
+            totalPages={pagination.totalPages}
+            onPageChange={setPage}
+          />
+        </>
+      )}
+
+      <AddTargetModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        defaultProjectId={filterProjectId}
+      />
     </div>
   );
 }

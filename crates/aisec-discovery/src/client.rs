@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use aisec_core::{AisecError, AisecResult};
-use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, USER_AGENT};
 use reqwest::{Client, Method, Response, StatusCode};
 use tracing::instrument;
 
@@ -14,6 +15,7 @@ use crate::types::HttpSnapshot;
 pub struct HttpClient {
     inner: Client,
     config: Arc<DiscoveryConfig>,
+    auth_headers: HashMap<String, String>,
 }
 
 impl HttpClient {
@@ -26,7 +28,16 @@ impl HttpClient {
             .build()
             .map_err(|err| AisecError::config(format!("failed to build HTTP client: {err}")))?;
 
-        Ok(Self { inner, config })
+        Ok(Self {
+            inner,
+            config,
+            auth_headers: HashMap::new(),
+        })
+    }
+
+    pub fn with_auth_headers(mut self, headers: HashMap<String, String>) -> Self {
+        self.auth_headers = headers;
+        self
     }
 
     pub fn config(&self) -> &DiscoveryConfig {
@@ -52,6 +63,7 @@ impl HttpClient {
         let label = format!("{method} {url}");
         let config = self.config.clone();
         let client = self.inner.clone();
+        let auth_headers = self.auth_headers.clone();
         let method_clone = method.clone();
         let url = url.to_string();
         let body = json_body.map(str::to_string);
@@ -61,12 +73,21 @@ impl HttpClient {
             let method = method_clone.clone();
             let url = url.clone();
             let body = body.clone();
+            let auth_headers = auth_headers.clone();
             async move {
                 let mut req = client.request(method, &url);
                 if let Some(payload) = body {
                     req = req
                         .header("Content-Type", "application/json")
                         .body(payload);
+                }
+                for (key, value) in &auth_headers {
+                    if let (Ok(name), Ok(val)) = (
+                        HeaderName::from_bytes(key.as_bytes()),
+                        HeaderValue::from_str(value),
+                    ) {
+                        req = req.header(name, val);
+                    }
                 }
                 req.send().await
             }

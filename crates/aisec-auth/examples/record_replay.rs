@@ -39,6 +39,7 @@ async fn main() {
             login_url: format!("{base}/login"),
             username: Some("alice".into()),
             password: Some("s3cret".into()),
+            password_credential_id: None,
             username_selector: "#user".into(),
             password_selector: "#pass".into(),
             submit_selector: "#submit".into(),

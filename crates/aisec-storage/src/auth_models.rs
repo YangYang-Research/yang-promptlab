@@ -9,6 +9,7 @@ pub struct AuthProfile {
     pub name: String,
     pub method: String,
     pub config_json: String,
+    pub credential_reference_id: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -20,8 +21,12 @@ pub struct AuthSessionRecord {
     pub status: String,
     pub cookies_json: Option<String>,
     pub tokens_json: Option<String>,
+    pub credential_reference_id: Option<String>,
     pub storage_state_path: Option<String>,
     pub expires_at: Option<OffsetDateTime>,
+    pub validation_status: String,
+    pub last_validated_at: Option<OffsetDateTime>,
+    pub user_identity: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -56,8 +61,11 @@ pub struct CreateAuthSessionRecord {
     pub status: Option<String>,
     pub cookies_json: Option<serde_json::Value>,
     pub tokens_json: Option<serde_json::Value>,
+    pub credential_reference_id: Option<String>,
     pub storage_state_path: Option<String>,
     pub expires_at: Option<OffsetDateTime>,
+    pub validation_status: Option<String>,
+    pub user_identity: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -65,8 +73,12 @@ pub struct UpdateAuthSessionRecord {
     pub status: Option<String>,
     pub cookies_json: Option<serde_json::Value>,
     pub tokens_json: Option<serde_json::Value>,
+    pub credential_reference_id: Option<String>,
     pub storage_state_path: Option<String>,
     pub expires_at: Option<OffsetDateTime>,
+    pub validation_status: Option<String>,
+    pub last_validated_at: Option<OffsetDateTime>,
+    pub user_identity: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

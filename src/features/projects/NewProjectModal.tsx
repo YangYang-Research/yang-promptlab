@@ -42,12 +42,12 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
     setSubmitting(true);
     setFormError(null);
     try {
-      const created = await actions.createProject(trimmed, description.trim() || null);
+      const project = await actions.createProject(trimmed, description.trim() || null);
       notify(`Project "${trimmed}" created`, "success");
       reset();
       onClose();
       // New Project flow: go straight into the Scan Wizard with the project locked.
-      navigate(`/scans/new?projectId=${encodeURIComponent(created.id)}`);
+      navigate(`/scans/new?projectId=${encodeURIComponent(project.id)}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create project";
       setFormError(message);

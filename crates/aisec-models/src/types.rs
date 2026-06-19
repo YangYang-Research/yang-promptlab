@@ -25,6 +25,61 @@ impl ModelFormat {
     }
 }
 
+/// Model provider / acquisition channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProvider {
+    Ollama,
+    HuggingFace,
+    Gguf,
+}
+
+impl ModelProvider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ollama => "ollama",
+            Self::HuggingFace => "huggingface",
+            Self::Gguf => "gguf",
+        }
+    }
+}
+
+/// Supported inference capabilities for a registered model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelCapabilities {
+    pub chat: bool,
+    pub completion: bool,
+    pub embeddings: bool,
+}
+
+impl Default for ModelCapabilities {
+    fn default() -> Self {
+        Self {
+            chat: true,
+            completion: true,
+            embeddings: false,
+        }
+    }
+}
+
+impl ModelCapabilities {
+    pub fn ollama() -> Self {
+        Self {
+            chat: true,
+            completion: true,
+            embeddings: true,
+        }
+    }
+
+    pub fn gguf() -> Self {
+        Self {
+            chat: true,
+            completion: true,
+            embeddings: false,
+        }
+    }
+}
+
 /// Model acquisition source.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -34,6 +89,10 @@ pub enum ModelSource {
         repo: String,
         filename: String,
         revision: Option<String>,
+    },
+    Ollama {
+        model: String,
+        base_url: String,
     },
 }
 
@@ -55,6 +114,9 @@ pub struct ModelEntry {
     pub id: String,
     pub name: String,
     pub format: ModelFormat,
+    pub provider: ModelProvider,
+    pub version: String,
+    pub capabilities: ModelCapabilities,
     pub source: ModelSource,
     pub file_path: PathBuf,
     pub size_bytes: Option<u64>,
@@ -64,6 +126,30 @@ pub struct ModelEntry {
     pub updated_at: OffsetDateTime,
     #[serde(default)]
     pub metadata: serde_json::Value,
+}
+
+/// Curated or discovered model available for installation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelCatalogEntry {
+    pub id: String,
+    pub name: String,
+    pub provider: ModelProvider,
+    pub version: String,
+    pub description: String,
+    pub purpose: String,
+    pub recommended: bool,
+    pub size_bytes: Option<u64>,
+    pub quant: Option<String>,
+    pub capabilities: ModelCapabilities,
+    pub repo: Option<String>,
+    pub filename: Option<String>,
+    #[serde(default)]
+    pub engine: String,
+    #[serde(default)]
+    pub format: String,
+    pub download_url: Option<String>,
+    pub sha256: Option<String>,
+    pub size_label: Option<String>,
 }
 
 /// HuggingFace download request.
@@ -86,8 +172,24 @@ pub struct DownloadProgress {
     pub destination: PathBuf,
     pub downloaded_bytes: u64,
     pub total_bytes: Option<u64>,
+    #[serde(default)]
+    pub speed_bytes_per_sec: Option<f64>,
+    #[serde(default)]
+    pub eta_seconds: Option<u64>,
     pub resumed: bool,
     pub updated_at: OffsetDateTime,
+    /// Human-readable failure reason when `status == Failed`.
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Vault storage summary for desktop UI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultStats {
+    pub model_count: usize,
+    pub installed_bytes: u64,
+    pub disk_usage_bytes: u64,
+    pub vault_path: PathBuf,
 }
 
 /// SHA256 verification outcome.
@@ -157,6 +259,43 @@ pub struct InferenceRequest {
 pub struct InferenceResponse {
     pub text: String,
     pub tokens_predicted: u32,
+    pub duration_ms: u64,
+}
+
+/// Chat message for multi-turn inference.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+/// Chat inference request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatRequest {
+    pub messages: Vec<ChatMessage>,
+    pub max_tokens: u32,
+    pub temperature: f32,
+}
+
+/// Chat inference response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatResponse {
+    pub message: ChatMessage,
+    pub tokens_predicted: u32,
+    pub duration_ms: u64,
+}
+
+/// Embedding inference request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingRequest {
+    pub input: String,
+}
+
+/// Embedding inference response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingResponse {
+    pub vector: Vec<f32>,
+    pub dimensions: usize,
     pub duration_ms: u64,
 }
 

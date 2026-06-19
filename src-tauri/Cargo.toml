@@ -24,13 +24,29 @@ aisec-storage = { workspace = true }
 aisec-report = { workspace = true }
 aisec-discovery = { workspace = true }
 aisec-attack = { workspace = true }
+aisec-auth = { workspace = true }
+aisec-harness = { workspace = true, features = ["playwright"] }
+aisec-runtime = { workspace = true }
 aisec-judge = { workspace = true }
+aisec-models = { workspace = true }
+aisec-fingerprint = { workspace = true }
+aisec-planner = { workspace = true }
+aisec-generator = { workspace = true }
+aisec-agent = { workspace = true }
+aisec-plugin-host = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 time = { workspace = true }
+url = { workspace = true }
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+reqwest = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing = { workspace = true }
+which = "7"
 
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+sqlx = { workspace = true, features = ["sqlite", "runtime-tokio"] }

@@ -1,136 +1,479 @@
-import { useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Badge, Button, Card, PageHeader } from "@/shared/components";
+import { mapProjects } from "@/app/store/mappers";
+import { Button, Card, PageHeader } from "@/shared/components";
+import { getProject, startScan } from "@/shared/ipc";
+import { useToast } from "@/shared/notifications";
+import type { Project, Target } from "@/shared/types";
 
-const WIZARD_STEPS = [
-  "Project",
-  "Target & Auth",
-  "Discovery",
-  "Attack Plan",
-  "Submit",
-] as const;
-
-function WizardProgress({ current }: { current: number }) {
-  return (
-    <ol className="wizard-steps">
-      {WIZARD_STEPS.map((label, i) => {
-        const step = i + 1;
-        const state = step < current ? "done" : step === current ? "active" : "upcoming";
-        return (
-          <li key={label} className={`wizard-steps__item wizard-steps__item--${state}`}>
-            <span className="wizard-steps__index">{step}</span>
-            <span className="wizard-steps__label">{label}</span>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
+import { AttackPlanStep } from "./steps/AttackPlanStep";
+import { DiscoveryStep } from "./steps/DiscoveryStep";
+import { ProjectStep } from "./steps/ProjectStep";
+import { ResultsStep } from "./steps/ResultsStep";
+import { SubmitStep } from "./steps/SubmitStep";
+import { TargetStep } from "./steps/TargetStep";
+import { mergeScanStatus, useScanStatuses } from "./useScanStatuses";
+import {
+  buildTargetDescriptor,
+  deriveTargetName,
+  targetFormFingerprint,
+  validateTargetStep,
+  type TargetFormState,
+} from "./targetDescriptor";
+import { WizardStepper } from "./WizardStepper";
+import {
+  buildWizardStore,
+  clearWizardSession,
+  loadWizardSession,
+  saveWizardSession,
+  shouldPersistTarget,
+  type ScanWizardSession,
+} from "./wizardState";
+import {
+  canNavigateToStep,
+  canProceedFromStep,
+  canStartScan,
+  getWizardStep,
+  type WizardDraft,
+  type WizardStepId,
+} from "./wizardSteps";
 
 export function ScanWizardPage() {
-  const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { projects, loading } = useAppStore();
+  const [searchParams] = useSearchParams();
+  const lockedProjectId = searchParams.get("projectId")?.trim() ?? "";
+  const { projects, targets, loading, error, dispatch, actions } = useAppStore();
+  const { notify } = useToast();
 
-  const lockedProjectId = params.get("projectId");
-  const locked = Boolean(lockedProjectId);
+  const [session, setSession] = useState<ScanWizardSession>(() =>
+    loadWizardSession(lockedProjectId),
+  );
+  const [resolvedProject, setResolvedProject] = useState<Project | null>(null);
+  const [resolveError, setResolveError] = useState<string | null>(null);
+  const [targetStepError, setTargetStepError] = useState<string | null>(null);
+  const [scanSubmitError, setScanSubmitError] = useState<string | null>(null);
+  const [persistingTarget, setPersistingTarget] = useState(false);
+  const [startingScan, setStartingScan] = useState(false);
 
-  // Scenario B (no projectId in URL): user must choose a project.
-  const [selectedProjectId, setSelectedProjectId] = useState("");
-
-  const lockedProject = useMemo(
-    () => (lockedProjectId ? projects.find((p) => p.id === lockedProjectId) ?? null : null),
-    [projects, lockedProjectId],
+  const store = useMemo(
+    () => buildWizardStore(session, targets),
+    [session, targets],
   );
 
-  const activeProjectId = locked ? lockedProjectId : selectedProjectId;
-  const canContinue = Boolean(activeProjectId) && (!locked || lockedProject !== null);
+  const storeProject = lockedProjectId
+    ? projects.find((project) => project.id === lockedProjectId)
+    : null;
+  const lockedProject = storeProject ?? resolvedProject;
+  const activeProjectId = lockedProjectId || session.selectedProjectId;
+
+  const draft: WizardDraft = useMemo(
+    () => ({
+      projectId: activeProjectId,
+      targetForm: session.targetForm,
+      target: store.savedTarget,
+      discovery: store.discoverySelection,
+      discoveryCompleted: session.discovery.completed,
+      attackPlan: session.attackPlan,
+      submittedScanId: session.submittedScanId,
+    }),
+    [
+      activeProjectId,
+      session.targetForm,
+      store.savedTarget,
+      store.discoverySelection,
+      session.discovery.completed,
+      session.attackPlan,
+      session.submittedScanId,
+    ],
+  );
+
+  const updateSession = useCallback((patch: Partial<ScanWizardSession>) => {
+    setSession((prev) => {
+      const next = { ...prev, ...patch };
+      saveWizardSession(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!lockedProjectId) {
+      setResolvedProject(null);
+      setResolveError(null);
+      return;
+    }
+
+    if (storeProject) {
+      setResolvedProject(null);
+      setResolveError(null);
+      dispatch({ type: "SET_SELECTED_PROJECT", projectId: storeProject.id });
+      return;
+    }
+
+    if (loading) return;
+
+    let cancelled = false;
+    setResolveError(null);
+
+    void getProject(lockedProjectId)
+      .then((dto) => {
+        if (cancelled) return;
+        const project = mapProjects([dto], [], [])[0];
+        setResolvedProject(project);
+        dispatch({ type: "SET_SELECTED_PROJECT", projectId: project.id });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : "Project not found";
+        setResolveError(message);
+        setResolvedProject(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lockedProjectId, storeProject, loading, dispatch]);
+
+  useEffect(() => {
+    if (!session.submittedScanId || session.currentStep < 5) return;
+    const timer = window.setInterval(() => void actions.refresh(), 3000);
+    return () => window.clearInterval(timer);
+  }, [session.submittedScanId, session.currentStep, actions]);
+
+  const submittedStatuses = useScanStatuses(
+    session.submittedScanId ? [session.submittedScanId] : [],
+    session.currentStep === 5 && session.submittedScanId !== null,
+  );
+  const submittedLiveStatus = session.submittedScanId
+    ? submittedStatuses.get(session.submittedScanId)
+    : undefined;
+  const submittedStatus = session.submittedScanId
+    ? mergeScanStatus(session.submittedScanId, "running", submittedLiveStatus, 0)
+    : null;
+
+  const stepDef = getWizardStep(session.currentStep);
+  const showFooterNext = session.currentStep < 5;
+  const showStartScan = session.currentStep === 5 && session.submittedScanId === null;
+  const showFooterDone = session.currentStep === 6;
+  const showViewResult =
+    session.currentStep === 5 && submittedStatus?.status === "completed";
+  const showRetryScan =
+    session.currentStep === 5 &&
+    submittedStatus !== null &&
+    (submittedStatus.status === "failed" || submittedStatus.status === "stopped");
+  const hideBack =
+    session.currentStep === 6 ||
+    (session.currentStep === 5 && session.submittedScanId !== null);
+  const nextDisabled = !canProceedFromStep(session.currentStep, draft);
+  const startScanDisabled = !canStartScan(draft) || startingScan;
+
+  function patchTargetForm(patch: Partial<TargetFormState>) {
+    setTargetStepError(null);
+    setSession((prev) => {
+      const next = { ...prev, targetForm: { ...prev.targetForm, ...patch } };
+      saveWizardSession(next);
+      return next;
+    });
+  }
+
+  async function persistTargetIfNeeded(): Promise<Target | null> {
+    const validationError = validateTargetStep(session.targetForm);
+    if (validationError) {
+      setTargetStepError(validationError);
+      return null;
+    }
+
+    const fingerprint = targetFormFingerprint(session.targetForm);
+    if (
+      store.savedTarget &&
+      !shouldPersistTarget(session.targetForm, store.savedTarget, session.savedTargetFingerprint)
+    ) {
+      // Reuse existing target when form unchanged.
+      return store.savedTarget;
+    }
+
+    setPersistingTarget(true);
+    setTargetStepError(null);
+    try {
+      const descriptor = buildTargetDescriptor(session.targetForm);
+      const name = deriveTargetName(session.targetForm.url);
+      const target = await actions.createTarget(activeProjectId, name, "web", descriptor);
+      updateSession({
+        savedTargetId: target.id,
+        savedTargetFingerprint: fingerprint,
+      });
+      notify(`Target "${name}" saved`, "success");
+      return target;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to save target";
+      setTargetStepError(message);
+      notify(message, "error");
+      return null;
+    } finally {
+      setPersistingTarget(false);
+    }
+  }
+
+  function handleStepChange(step: WizardStepId) {
+    if (canNavigateToStep(step, draft)) {
+      updateSession({ currentStep: step });
+    }
+  }
+
+  async function handleNext() {
+    if (session.currentStep >= 6) return;
+
+    if (session.currentStep === 2) {
+      const target = await persistTargetIfNeeded();
+      if (!target) return;
+      updateSession({ currentStep: 3 });
+      return;
+    }
+
+    if (!canProceedFromStep(session.currentStep, draft)) return;
+    updateSession({ currentStep: (session.currentStep + 1) as WizardStepId });
+  }
+
+  function handleBack() {
+    if (session.currentStep > 1) {
+      updateSession({ currentStep: (session.currentStep - 1) as WizardStepId });
+    }
+  }
+
+  function handleCancel() {
+    navigate("/scans");
+  }
+
+  async function handleStartScan() {
+    if (!canStartScan(draft) || !store.savedTarget || !session.attackPlan) return;
+    await submitScanJob();
+  }
+
+  async function submitScanJob() {
+    if (!store.savedTarget || !session.attackPlan) return;
+
+    setStartingScan(true);
+    setScanSubmitError(null);
+    try {
+      const result = await startScan({
+        projectId: activeProjectId,
+        targetId: store.savedTarget.id,
+        endpointIds: session.discovery.selectedEndpointIds,
+        categories: session.attackPlan.categories,
+        profile: session.attackPlan.profileId,
+        disabledTests: session.attackPlan.disabledTests,
+        generatorMode: session.attackPlan.generatorMode,
+        agentMode: session.attackPlan.agentMode,
+        maxAgentAttempts: session.attackPlan.maxAgentAttempts,
+      });
+      await actions.refresh();
+      updateSession({ submittedScanId: result.scan_id });
+      notify("Scan started in the background", "success");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to start scan";
+      setScanSubmitError(message);
+      notify(message, "error");
+    } finally {
+      setStartingScan(false);
+    }
+  }
+
+  async function handleRetryScan() {
+    if (!store.savedTarget || !session.attackPlan) return;
+    await submitScanJob();
+  }
+
+  function renderStepBody() {
+    switch (session.currentStep) {
+      case 1:
+        return (
+          <ProjectStep
+            lockedProjectId={lockedProjectId}
+            lockedProject={lockedProject}
+            resolveError={resolveError}
+            loading={loading}
+            projects={projects}
+            selectedProjectId={session.selectedProjectId}
+            onSelectProject={(projectId) => {
+              updateSession({ selectedProjectId: projectId });
+              dispatch({ type: "SET_SELECTED_PROJECT", projectId: projectId || null });
+            }}
+          />
+        );
+      case 2:
+        return activeProjectId ? (
+          <TargetStep
+            form={session.targetForm}
+            onChange={patchTargetForm}
+            error={targetStepError}
+          />
+        ) : (
+          <p className="text-muted">Select a project in step 1 to configure the target.</p>
+        );
+      case 3:
+        return store.savedTarget ? (
+          <DiscoveryStep
+            target={store.savedTarget}
+            discovery={session.discovery}
+            onDiscoveryChange={(patch) =>
+              setSession((prev) => {
+                const next = { ...prev, discovery: { ...prev.discovery, ...patch } };
+                saveWizardSession(next);
+                return next;
+              })
+            }
+          />
+        ) : (
+          <p className="text-muted">Complete step 2 to run discovery.</p>
+        );
+      case 4:
+        return session.discovery.selectedEndpointIds.length > 0 ? (
+          <AttackPlanStep
+            selectedEndpointCount={session.discovery.selectedEndpointIds.length}
+            endpoints={session.discovery.endpoints}
+            selectedEndpointIds={session.discovery.selectedEndpointIds}
+            planUi={session.attackPlanUi}
+            onPlanUiChange={(patch) =>
+              setSession((prev) => {
+                const next = { ...prev, attackPlanUi: { ...prev.attackPlanUi, ...patch } };
+                saveWizardSession(next);
+                return next;
+              })
+            }
+            onPlanChange={(plan) => updateSession({ attackPlan: plan })}
+          />
+        ) : (
+          <p className="text-muted">Select at least one endpoint in step 3 to plan attacks.</p>
+        );
+      case 5:
+        return activeProjectId &&
+          store.savedTarget &&
+          session.attackPlan &&
+          session.attackPlan.categories.length > 0 &&
+          session.discovery.selectedEndpointIds.length > 0 ? (
+          <>
+            <SubmitStep
+              target={store.savedTarget}
+              endpointIds={session.discovery.selectedEndpointIds}
+              attackPlan={session.attackPlan}
+              submittedScanId={session.submittedScanId}
+              onViewResult={() => updateSession({ currentStep: 6 })}
+              onRetryScan={() => void handleRetryScan()}
+            />
+            {scanSubmitError && <p className="text-danger">{scanSubmitError}</p>}
+          </>
+        ) : (
+          <p className="text-muted">Complete steps 1–4 before submitting the scan.</p>
+        );
+      case 6:
+        return session.submittedScanId && activeProjectId ? (
+          <ResultsStep
+            projectId={activeProjectId}
+            scanId={session.submittedScanId}
+            onDone={() => {
+              clearWizardSession();
+              navigate("/");
+            }}
+          />
+        ) : (
+          <p className="text-muted">Submit a scan in step 5 to review results.</p>
+        );
+      default:
+        return null;
+    }
+  }
 
   return (
     <div className="page">
       <PageHeader
         title="New Scan"
-        description="Configure and launch an AI security scan"
+        description="Configure a new security scan"
         actions={
-          <Button variant="ghost" onClick={() => navigate("/projects")}>
+          <Button variant="danger" onClick={handleCancel}>
             Cancel
           </Button>
         }
       />
 
-      <WizardProgress current={1} />
+      {error && (
+        <Card>
+          <p className="text-danger">{error}</p>
+        </Card>
+      )}
 
-      <Card>
-        <div className="card__header-row">
-          <h3 className="card__title">Step 1 · Project Selection</h3>
-          {locked && <Badge variant="muted">Locked</Badge>}
-        </div>
+      <WizardStepper
+        currentStep={session.currentStep}
+        draft={draft}
+        onStepChange={handleStepChange}
+      />
 
-        {/* Scenario A: arrived from Projects — project pre-selected and locked. */}
-        {locked ? (
-          loading && !lockedProject ? (
-            <p className="text-muted">Loading project…</p>
-          ) : lockedProject ? (
-            <div className="wizard-project-locked">
-              <div className="field">
-                <span className="field__label">Project</span>
-                {/* Disabled selector communicates the locked state. */}
-                <select className="input" value={lockedProject.id} disabled>
-                  <option value={lockedProject.id}>{lockedProject.name}</option>
-                </select>
-              </div>
-              <div className="field">
-                <span className="field__label">Description</span>
-                <p className="text-muted">
-                  {lockedProject.description || "No description"}
-                </p>
-              </div>
-              <p className="text-muted text-sm">
-                This scan is locked to <strong>{lockedProject.name}</strong>. To use a different
-                project, start the wizard from that project.
-              </p>
-            </div>
+      <Card className="wizard-panel">
+        <header className="wizard-panel__header">
+          <p className="wizard-panel__step-label text-muted">
+            Step {session.currentStep} of 6 · {stepDef.label}
+          </p>
+          <h2 className="wizard-panel__title">{stepDef.title}</h2>
+          <p className="wizard-panel__hint text-muted">{stepDef.hint}</p>
+        </header>
+
+        <div className="wizard-panel__body">{renderStepBody()}</div>
+
+        <footer className="wizard-panel__footer">
+          {!hideBack ? (
+            <Button variant="ghost" disabled={session.currentStep === 1} onClick={handleBack}>
+              Back
+            </Button>
           ) : (
-            <div>
-              <p className="text-danger">Project not found.</p>
-              <p className="text-muted text-sm">
-                The project in the link may have been deleted.{" "}
-                <Link to="/projects" className="link">
-                  Go to Projects
-                </Link>
-                .
-              </p>
-            </div>
-          )
-        ) : (
-          /* Scenario B: entered the wizard directly — choose a project. */
-          <div className="field">
-            <span className="field__label">Project</span>
-            <select
-              className="input"
-              value={selectedProjectId}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
-            >
-              <option value="">{loading ? "Loading…" : "Select a project…"}</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            <span />
+          )}
+          <div className="wizard-panel__footer-actions">
+            {showStartScan && (
+              <Button
+                variant="primary"
+                disabled={startScanDisabled}
+                onClick={() => void handleStartScan()}
+              >
+                {startingScan ? "Starting scan…" : "Start Scan"}
+              </Button>
+            )}
+            {showViewResult && (
+              <Button variant="primary" onClick={() => updateSession({ currentStep: 6 })}>
+                View Result
+              </Button>
+            )}
+            {showRetryScan && (
+              <Button
+                variant="primary"
+                disabled={startingScan}
+                onClick={() => void handleRetryScan()}
+              >
+                {startingScan ? "Retrying…" : "Retry Scan"}
+              </Button>
+            )}
+            {showFooterNext && (
+              <Button
+                variant="primary"
+                disabled={nextDisabled || persistingTarget}
+                onClick={() => void handleNext()}
+              >
+                {persistingTarget ? "Saving target…" : "Next"}
+              </Button>
+            )}
+            {showFooterDone && (
+              <Button
+                variant="primary"
+                onClick={() => {
+                  clearWizardSession();
+                  navigate("/");
+                }}
+              >
+                Done
+              </Button>
+            )}
           </div>
-        )}
+        </footer>
       </Card>
-
-      <div className="wizard-footer">
-        {/* Step 2+ are intentionally not implemented yet. */}
-        <Button variant="primary" disabled={!canContinue}>
-          Continue
-        </Button>
-        <span className="text-muted text-sm">Steps 2–5 are not implemented yet.</span>
-      </div>
     </div>
   );
 }

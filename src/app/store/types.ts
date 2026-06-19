@@ -11,7 +11,7 @@ import type {
   ScanRun,
   Target,
 } from "@/shared/types";
-import type { AttackRunDto, DiscoveryRunDto, ProjectDto } from "@/shared/ipc";
+import type { AttackRunDto, DiscoveryRunDto } from "@/shared/ipc";
 
 export type AppSettings = {
   theme: "dark" | "light" | "system";
@@ -50,7 +50,7 @@ export type AppDataState = {
 
 export type LoadedData = Pick<
   AppDataState,
-  "projects" | "targets" | "scans" | "endpoints" | "findings" | "reports"
+  "projects" | "targets" | "scans" | "endpoints" | "findings" | "reports" | "models"
 >;
 
 export type AppAction =
@@ -67,14 +67,15 @@ export type AppAction =
 
 export type AppActions = {
   refresh: () => Promise<void>;
-  createProject: (name: string, description?: string | null) => Promise<ProjectDto>;
+  createProject: (name: string, description?: string | null) => Promise<Project>;
+  updateProject: (id: string, name?: string | null, description?: string | null) => Promise<Project>;
   deleteProject: (id: string) => Promise<void>;
   createTarget: (
     projectId: string,
     name: string,
     targetType: string,
     descriptor?: unknown,
-  ) => Promise<void>;
+  ) => Promise<Target>;
   createScan: (
     projectId: string,
     name: string,
@@ -87,7 +88,7 @@ export type AppActions = {
     format?: string,
     kind?: string,
   ) => Promise<void>;
-  runDiscovery: (targetId: string) => Promise<DiscoveryRunDto>;
+  runDiscovery: (targetId: string, mergeScanId?: string | null) => Promise<DiscoveryRunDto>;
   runPromptInjection: (endpointId: string) => Promise<AttackRunDto>;
 };
 

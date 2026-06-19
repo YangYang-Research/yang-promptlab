@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use aisec_core::AisecResult;
 use serde_json::json;
 
-use crate::playwright::{PlaywrightDriver, RecordLoginResult, ReplaySessionResult};
+use crate::playwright::{ExecuteHttpResult, PlaywrightDriver, RecordLoginResult, ReplaySessionResult};
 use crate::types::{CookieRecord, ExtractedToken, RecordLoginOptions, ReplayOptions};
 
 /// In-memory Playwright driver for unit tests (no Node.js required).
@@ -71,6 +71,18 @@ impl PlaywrightDriver for MockPlaywrightDriver {
         Ok(self.record_result.clone())
     }
 
+    async fn begin_interactive_login(
+        &self,
+        _url: &str,
+        _options: RecordLoginOptions,
+    ) -> AisecResult<()> {
+        Ok(())
+    }
+
+    async fn finish_interactive_login(&self) -> AisecResult<RecordLoginResult> {
+        Ok(self.record_result.clone())
+    }
+
     async fn replay_session(
         &self,
         _url: &str,
@@ -91,6 +103,34 @@ impl PlaywrightDriver for MockPlaywrightDriver {
 
     async fn set_cookies(&self, cookies: Vec<CookieRecord>) -> AisecResult<Vec<CookieRecord>> {
         Ok(cookies)
+    }
+
+    async fn execute_http_request(
+        &self,
+        _url: &str,
+        _method: &str,
+        _headers: std::collections::HashMap<String, String>,
+        _body: Option<String>,
+        _storage_state_path: Option<&std::path::Path>,
+    ) -> AisecResult<ExecuteHttpResult> {
+        Ok(ExecuteHttpResult {
+            status: 200,
+            headers: std::collections::HashMap::new(),
+            body: String::new(),
+            duration_ms: 0,
+        })
+    }
+
+    async fn send_chat_prompt(
+        &self,
+        _url: &str,
+        prompt: &str,
+        _input_selector: &str,
+        _submit_selector: &str,
+        _response_selector: &str,
+        _storage_state_path: Option<&std::path::Path>,
+    ) -> AisecResult<String> {
+        Ok(format!("mock-response:{prompt}"))
     }
 }
 

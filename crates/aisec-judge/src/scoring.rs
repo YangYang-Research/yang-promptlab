@@ -113,6 +113,7 @@ mod tests {
             category: None,
             rationale: "test".into(),
             indicators: vec![],
+            structured: None,
         }
     }
 

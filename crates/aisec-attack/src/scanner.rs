@@ -5,7 +5,7 @@
 //!
 //! 1. **Load payload library** — the built-in prompt-injection payloads (and
 //!    their mutations) from the attack registry.
-//! 2. **Send payloads** — over **real HTTP** via [`HttpTransport`] (reqwest).
+//! 2. **Send payloads** — through [`HarnessTransport`] → [`HarnessFactory`].
 //! 3. **Capture responses** — the actual target responses, evaluated for
 //!    injection indicators.
 //! 4. **Store findings** — successful injections are persisted to SQLite via
@@ -22,7 +22,7 @@ use crate::category::AttackCategory;
 use crate::error::AttackResult;
 use crate::executor::AttackExecutor;
 use crate::registry::AttackRegistry;
-use crate::transport::HttpTransport;
+use crate::transport::HarnessTransport;
 use crate::types::{
     AttackBudget, AttackContext, AttackExecutionResult, AttackTarget, FindingSeverity, PayloadAttempt,
 };
@@ -56,7 +56,7 @@ impl ScanContext {
 /// Outcome of a prompt-injection scan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanSummary {
-    /// Number of payloads (including mutations) actually sent over HTTP.
+    /// Number of payloads (including mutations) actually sent through the harness.
     pub payloads_sent: usize,
     /// Number of responses captured.
     pub responses_captured: usize,
@@ -66,20 +66,15 @@ pub struct ScanSummary {
     pub highest_severity: Option<FindingSeverity>,
 }
 
-/// End-to-end prompt-injection scanner backed by real HTTP and SQLite storage.
+/// End-to-end prompt-injection scanner backed by harness transport and SQLite storage.
 pub struct PromptInjectionScanner {
     db: Database,
-    executor: AttackExecutor<HttpTransport>,
 }
 
 impl PromptInjectionScanner {
-    /// Build a scanner that sends payloads over a real HTTP transport and
-    /// persists findings to `db`.
+    /// Build a scanner that persists findings to `db`.
     pub fn new(db: Database) -> Self {
-        Self {
-            db,
-            executor: AttackExecutor::new(AttackRegistry::with_builtins(), HttpTransport::new()),
-        }
+        Self { db }
     }
 
     /// Run the prompt-injection scan against `target`, persisting results.
@@ -90,6 +85,9 @@ impl PromptInjectionScanner {
         scan: &ScanContext,
         budget: AttackBudget,
     ) -> AttackResult<ScanSummary> {
+        let transport = HarnessTransport::for_attack_target(&target)?;
+        let executor = AttackExecutor::new(AttackRegistry::with_builtins(), transport);
+
         let mut ctx = AttackContext::new(
             scan.scan_id.clone(),
             format!("{}-prompt-injection", scan.scan_id),
@@ -98,13 +96,10 @@ impl PromptInjectionScanner {
         ctx.budget = budget;
         ctx.target_id = scan.target_id.clone();
 
-        // Steps 1-3: load payloads, send them over real HTTP, capture + evaluate.
-        let result = self
-            .executor
+        let result = executor
             .execute_category(AttackCategory::PromptInjection, &ctx)
             .await?;
 
-        // Step 4: persist every probe and store findings for successful ones.
         let summary = self.persist(&result, scan).await?;
 
         info!(
@@ -125,7 +120,6 @@ impl PromptInjectionScanner {
         let mut highest: Option<FindingSeverity> = None;
 
         for attempt in &result.attempts {
-            // Persist every probe as an attack_result for full auditability.
             repos
                 .attack_results()
                 .create(CreateAttackResult {
@@ -192,5 +186,6 @@ fn evidence_json(attempt: &PayloadAttempt) -> serde_json::Value {
         "confidence": attempt.evaluation.confidence,
         "response_status": attempt.response.status,
         "response_excerpt": excerpt,
+        "normalized_content": attempt.response.normalized.content,
     })
 }

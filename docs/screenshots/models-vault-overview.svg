@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="200" viewBox="0 0 960 200">
+  <rect width="960" height="200" fill="#0f1117"/>
+  <text x="24" y="36" fill="#e8eaed" font-family="system-ui,sans-serif" font-size="18" font-weight="600">Models  Vault Overview</text>
+  <rect x="24" y="56" width="210" height="120" rx="8" fill="#1a1d27" stroke="#2a2f3d"/>
+  <text x="40" y="84" fill="#9aa0a6" font-size="11" font-family="system-ui,sans-serif">INSTALLED MODELS</text>
+  <text x="40" y="118" fill="#e8eaed" font-size="28" font-weight="700" font-family="system-ui,sans-serif">3</text>
+  <text x="40" y="142" fill="#9aa0a6" font-size="12" font-family="system-ui,sans-serif">14.2 GB registered</text>
+  <rect x="252" y="56" width="210" height="120" rx="8" fill="#1a1d27" stroke="#2a2f3d"/>
+  <text x="268" y="84" fill="#9aa0a6" font-size="11" font-family="system-ui,sans-serif">INSTALLED SIZE</text>
+  <text x="268" y="118" fill="#e8eaed" font-size="28" font-weight="700" font-family="system-ui,sans-serif">14.20 GB</text>
+  <rect x="480" y="56" width="210" height="120" rx="8" fill="#1a1d27" stroke="#2a2f3d"/>
+  <text x="496" y="84" fill="#9aa0a6" font-size="11" font-family="system-ui,sans-serif">VAULT DISK USAGE</text>
+  <text x="496" y="118" fill="#e8eaed" font-size="28" font-weight="700" font-family="system-ui,sans-serif">15.84 GB</text>
+  <rect x="708" y="56" width="228" height="120" rx="8" fill="#1a1d27" stroke="#2a2f3d"/>
+  <text x="724" y="84" fill="#9aa0a6" font-size="11" font-family="system-ui,sans-serif">RUNTIME STATUS</text>
+  <text x="724" y="118" fill="#34d399" font-size="28" font-weight="700" font-family="system-ui,sans-serif">Healthy</text>
+  <text x="724" y="142" fill="#9aa0a6" font-size="12" font-family="system-ui,sans-serif">embedded runtime is running</text>
+</svg>

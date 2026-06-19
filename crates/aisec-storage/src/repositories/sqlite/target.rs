@@ -67,6 +67,13 @@ impl TargetRepository for SqliteTargetRepository {
         .map_storage()
     }
 
+    async fn list_all(&self) -> AisecResult<Vec<Target>> {
+        sqlx::query_as::<_, Target>("SELECT * FROM targets ORDER BY created_at DESC")
+            .fetch_all(&self.pool)
+            .await
+            .map_storage()
+    }
+
     async fn update(&self, id: &str, input: UpdateTarget) -> AisecResult<Target> {
         let existing = self.get(id).await?;
         let name = input.name.unwrap_or(existing.name);
@@ -93,6 +100,21 @@ impl TargetRepository for SqliteTargetRepository {
         .await
         .map_storage()?;
 
+        ensure_rows_affected(result, "target")?;
+        self.get(id).await
+    }
+
+    async fn update_descriptor(&self, id: &str, descriptor_json: &str) -> AisecResult<Target> {
+        let updated_at = now();
+        let result = sqlx::query(
+            "UPDATE targets SET descriptor_json = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(descriptor_json)
+        .bind(updated_at)
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_storage()?;
         ensure_rows_affected(result, "target")?;
         self.get(id).await
     }

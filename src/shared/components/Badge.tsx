@@ -33,10 +33,14 @@ export function StatusBadge({ status }: { status: string }) {
   const variant =
     status === "running"
       ? "info"
+      : status === "paused"
+        ? "warning"
       : status === "completed" || status === "installed"
         ? "success"
         : status === "failed" || status === "error"
           ? "danger"
+          : status === "cancelled"
+            ? "muted"
           : status === "pending" || status === "available"
             ? "muted"
             : "default";

@@ -51,6 +51,7 @@ fn detect_total_memory() -> ModelResult<u64> {
             .map_err(|e| ModelError::Hardware(e.to_string()))?;
         let mem = match value {
             CtlValue::U64(v) | CtlValue::Ulong(v) => v,
+            CtlValue::S64(v) | CtlValue::Long(v) if v >= 0 => v as u64,
             other => {
                 return Err(ModelError::Hardware(format!(
                     "unexpected hw.memsize sysctl value: {other:?}"

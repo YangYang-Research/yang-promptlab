@@ -9,11 +9,18 @@ const DashboardPage = lazy(() =>
 const ProjectsPage = lazy(() =>
   import("@/features/projects/ProjectsPage").then((m) => ({ default: m.ProjectsPage })),
 );
+const ProjectDetailsPage = lazy(() =>
+  import("@/features/projects/ProjectDetailsPage").then((m) => ({
+    default: m.ProjectDetailsPage,
+  })),
+);
 const TargetsPage = lazy(() =>
   import("@/features/targets/TargetsPage").then((m) => ({ default: m.TargetsPage })),
 );
-const ScanWizardPage = lazy(() =>
-  import("@/features/scans/ScanWizardPage").then((m) => ({ default: m.ScanWizardPage })),
+const TargetDetailsPage = lazy(() =>
+  import("@/features/targets/TargetDetailsPage").then((m) => ({
+    default: m.TargetDetailsPage,
+  })),
 );
 const DiscoveryPage = lazy(() =>
   import("@/features/discovery/DiscoveryPage").then((m) => ({ default: m.DiscoveryPage })),
@@ -30,8 +37,25 @@ const ReportsPage = lazy(() =>
 const ModelsPage = lazy(() =>
   import("@/features/models/ModelsPage").then((m) => ({ default: m.ModelsPage })),
 );
+const PluginsPage = lazy(() =>
+  import("@/features/plugins/PluginsPage").then((m) => ({ default: m.PluginsPage })),
+);
 const SettingsPage = lazy(() =>
   import("@/features/settings/SettingsPage").then((m) => ({ default: m.SettingsPage })),
+);
+const ScanWizardPage = lazy(() =>
+  import("@/features/scans/ScanWizardPage").then((m) => ({ default: m.ScanWizardPage })),
+);
+const ScansPage = lazy(() =>
+  import("@/features/scans/ScansPage").then((m) => ({ default: m.ScansPage })),
+);
+const ScanDetailsPage = lazy(() =>
+  import("@/features/scans/ScanDetailsPage").then((m) => ({ default: m.ScanDetailsPage })),
+);
+const DiscoveryDetailsPage = lazy(() =>
+  import("@/features/discovery/DiscoveryDetailsPage").then((m) => ({
+    default: m.DiscoveryDetailsPage,
+  })),
 );
 
 function PageLoader() {
@@ -65,10 +89,18 @@ export function AppRouter() {
             }
           />
           <Route
-            path="targets"
+            path="projects/:projectId"
             element={
               <Suspense fallback={<PageLoader />}>
-                <TargetsPage />
+                <ProjectDetailsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="scans"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <ScansPage />
               </Suspense>
             }
           />
@@ -77,6 +109,38 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <ScanWizardPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="scans/:scanId"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <ScanDetailsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="targets/:targetId"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <TargetDetailsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="targets"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <TargetsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="discovery/:scanId"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <DiscoveryDetailsPage />
               </Suspense>
             }
           />
@@ -117,6 +181,14 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <ModelsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="plugins"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <PluginsPage />
               </Suspense>
             }
           />

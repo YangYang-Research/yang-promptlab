@@ -1,111 +1,178 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
-  Badge,
-  Button,
   Card,
+  ContentToolbar,
   DataTable,
   EmptyState,
+  IconButton,
+  IconDiscovery,
   PageHeader,
+  Pagination,
+  RefreshButton,
   StatusBadge,
 } from "@/shared/components";
+import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
+import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
+import { useViewPreference } from "@/shared/hooks/useViewPreference";
 import { useToast } from "@/shared/notifications";
-import type { DiscoveredEndpoint } from "@/shared/types";
-import type { DiscoveryStatsDto } from "@/shared/ipc";
+import type { Project, ScanRun, Target } from "@/shared/types";
 
-function kindVariant(kind: string): "default" | "success" | "warning" | "danger" | "info" | "muted" {
-  switch (kind) {
-    case "ai_endpoint":
-      return "danger";
-    case "openapi":
-    case "graphql":
-      return "warning";
-    case "rest_api":
-      return "info";
-    default:
-      return "muted";
+import { formatDurationMs, formatTimestamp } from "@/features/scans/scanDetailsHelpers";
+
+type DiscoveryTableRow = {
+  id: string;
+  targetId: string;
+  projectId: string;
+  projectName: string;
+  targetUrl: string;
+  targetName: string;
+  runLabel: string;
+  run: ScanRun | null;
+  endpointCount: number;
+  aiEndpointCount: number;
+  duration: string;
+  date: string;
+};
+
+function buildDiscoveryRows(
+  projects: Project[],
+  targets: Target[],
+  scans: ScanRun[],
+  endpointsByScan: Map<string, number>,
+  aiEndpointsByScan: Map<string, number>,
+): DiscoveryTableRow[] {
+  const discoveryRuns = scans
+    .filter((scan) => scan.name.startsWith("Discovery:"))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  const rows: DiscoveryTableRow[] = [];
+
+  for (const project of projects) {
+    const projectTargets = targets.filter((target) => target.projectId === project.id);
+    for (const target of projectTargets) {
+      const targetRuns = discoveryRuns.filter((run) => run.targetId === target.id);
+      if (targetRuns.length === 0) {
+        rows.push({
+          id: `target-${target.id}`,
+          targetId: target.id,
+          projectId: project.id,
+          projectName: project.name,
+          targetUrl: target.url,
+          targetName: target.name,
+          runLabel: "No runs yet",
+          run: null,
+          endpointCount: 0,
+          aiEndpointCount: 0,
+          duration: "—",
+          date: "—",
+        });
+        continue;
+      }
+
+      targetRuns.forEach((run, index) => {
+        rows.push({
+          id: run.id,
+          targetId: target.id,
+          projectId: project.id,
+          projectName: project.name,
+          targetUrl: target.url,
+          targetName: target.name,
+          runLabel: `Discovery #${targetRuns.length - index}`,
+          run,
+          endpointCount: endpointsByScan.get(run.id) ?? 0,
+          aiEndpointCount: aiEndpointsByScan.get(run.id) ?? 0,
+          duration: scanDuration(run),
+          date: formatTimestamp(run.completedAt ?? run.createdAt),
+        });
+      });
+    }
   }
+
+  return rows.sort((a, b) => {
+    const aTime = a.run?.createdAt ?? "";
+    const bTime = b.run?.createdAt ?? "";
+    return bTime.localeCompare(aTime);
+  });
 }
 
-const endpointColumns = [
-  {
-    key: "url",
-    header: "Endpoint",
-    render: (e: DiscoveredEndpoint) => (
-      <div>
-        <span className="mono text-sm">{e.url}</span>
-        {e.evidence && <div className="text-muted text-sm">{e.evidence}</div>}
-      </div>
-    ),
-  },
-  {
-    key: "kind",
-    header: "Kind",
-    width: "130px",
-    render: (e: DiscoveredEndpoint) => (
-      <Badge variant={kindVariant(e.kind)}>{e.kind.replace(/_/g, " ")}</Badge>
-    ),
-  },
-  {
-    key: "method",
-    header: "Method",
-    width: "90px",
-    render: (e: DiscoveredEndpoint) => e.method ?? "—",
-  },
-  {
-    key: "confidence",
-    header: "Confidence",
-    width: "100px",
-    render: (e: DiscoveredEndpoint) => `${Math.round(e.confidence * 100)}%`,
-  },
-];
+function scanDuration(run: ScanRun): string {
+  if (run.startedAt && run.completedAt) {
+    return formatDurationMs(
+      new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime(),
+    );
+  }
+  return "—";
+}
+
+function buildDiscoveryTree(
+  projects: Project[],
+  targets: Target[],
+  scans: ScanRun[],
+) {
+  const discoveryRuns = scans
+    .filter((scan) => scan.name.startsWith("Discovery:"))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  return projects
+    .map((project) => {
+      const projectTargets = targets.filter((target) => target.projectId === project.id);
+      const targetGroups = projectTargets.map((target) => ({
+        target,
+        runs: discoveryRuns.filter((run) => run.targetId === target.id),
+      }));
+
+      return { project, targets: targetGroups.filter((group) => group.runs.length > 0) };
+    })
+    .filter((group) => group.targets.length > 0);
+}
 
 export function DiscoveryPage() {
   const { targets, scans, endpoints, projects, loading, error, actions } = useAppStore();
   const { notify } = useToast();
-  const [targetId, setTargetId] = useState("");
-  const [running, setRunning] = useState(false);
-  const [lastStats, setLastStats] = useState<DiscoveryStatsDto | null>(null);
-
-  useEffect(() => {
-    if (!targetId && targets.length > 0) {
-      setTargetId(targets[0].id);
-    }
-  }, [targets, targetId]);
-
-  const targetName = (id: string | null) =>
-    id ? targets.find((t) => t.id === id)?.name ?? "—" : "—";
-  const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? "—";
+  const navigate = useNavigate();
+  const [viewMode, setViewMode] = useViewPreference("discovery");
+  const [pageSize, setPageSize] = usePageSizePreference("discovery");
+  const [runningTargetId, setRunningTargetId] = useState<string | null>(null);
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
+  const [collapsedTargets, setCollapsedTargets] = useState<Set<string>>(new Set());
 
   const endpointsByScan = useMemo(() => {
-    const map = new Map<string, DiscoveredEndpoint[]>();
-    for (const e of endpoints) {
-      const list = map.get(e.scanId) ?? [];
-      list.push(e);
-      map.set(e.scanId, list);
+    const map = new Map<string, number>();
+    for (const endpoint of endpoints) {
+      map.set(endpoint.scanId, (map.get(endpoint.scanId) ?? 0) + 1);
     }
     return map;
   }, [endpoints]);
 
-  // Show discovery runs newest first (attack scans are shown on the Attacks page).
-  const runs = useMemo(
-    () =>
-      scans
-        .filter((s) => s.name.startsWith("Discovery:"))
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-    [scans],
+  const aiEndpointsByScan = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const endpoint of endpoints) {
+      if (endpoint.kind !== "ai_endpoint") continue;
+      map.set(endpoint.scanId, (map.get(endpoint.scanId) ?? 0) + 1);
+    }
+    return map;
+  }, [endpoints]);
+
+  const tableRows = useMemo(
+    () => buildDiscoveryRows(projects, targets, scans, endpointsByScan, aiEndpointsByScan),
+    [projects, targets, scans, endpointsByScan, aiEndpointsByScan],
   );
 
-  const selectedTarget = targets.find((t) => t.id === targetId) ?? null;
+  const tree = useMemo(
+    () => buildDiscoveryTree(projects, targets, scans),
+    [projects, targets, scans],
+  );
 
-  async function handleStartScan() {
-    if (!targetId || running) return;
-    setRunning(true);
-    setLastStats(null);
+  const { page, setPage, pagination } = usePaginatedList(tableRows, pageSize);
+
+  async function handleRunDiscovery(targetId: string) {
+    if (runningTargetId) return;
+    setRunningTargetId(targetId);
     try {
       const result = await actions.runDiscovery(targetId);
-      setLastStats(result.stats);
       notify(
         `Discovery complete — ${result.stats.endpoint_count} endpoint(s) found`,
         "success",
@@ -114,9 +181,92 @@ export function DiscoveryPage() {
       const message = err instanceof Error ? err.message : "Discovery failed";
       notify(message, "error");
     } finally {
-      setRunning(false);
+      setRunningTargetId(null);
     }
   }
+
+  function toggleProject(projectId: string) {
+    setCollapsedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
+  }
+
+  function toggleTarget(targetIdToToggle: string) {
+    setCollapsedTargets((prev) => {
+      const next = new Set(prev);
+      if (next.has(targetIdToToggle)) next.delete(targetIdToToggle);
+      else next.add(targetIdToToggle);
+      return next;
+    });
+  }
+
+  const tableColumns = [
+    {
+      key: "project",
+      header: "Project",
+      render: (row: DiscoveryTableRow) => row.projectName,
+    },
+    {
+      key: "target",
+      header: "Target",
+      render: (row: DiscoveryTableRow) => <span className="mono text-sm">{row.targetUrl}</span>,
+    },
+    {
+      key: "run",
+      header: "Discovery Run",
+      render: (row: DiscoveryTableRow) => row.runLabel,
+    },
+    {
+      key: "status",
+      header: "Status",
+      width: "110px",
+      render: (row: DiscoveryTableRow) =>
+        row.run ? <StatusBadge status={row.run.status} /> : <span className="text-muted">Never run</span>,
+    },
+    {
+      key: "endpoints",
+      header: "Endpoints Found",
+      width: "130px",
+      render: (row: DiscoveryTableRow) => row.endpointCount,
+    },
+    {
+      key: "ai",
+      header: "AI Endpoints",
+      width: "120px",
+      render: (row: DiscoveryTableRow) => row.aiEndpointCount,
+    },
+    {
+      key: "duration",
+      header: "Duration",
+      width: "100px",
+      render: (row: DiscoveryTableRow) => row.duration,
+    },
+    {
+      key: "date",
+      header: "Date",
+      width: "160px",
+      render: (row: DiscoveryTableRow) => row.date,
+    },
+    {
+      key: "actions",
+      header: "",
+      width: "72px",
+      render: (row: DiscoveryTableRow) => (
+        <span className="table-actions" onClick={(event) => event.stopPropagation()}>
+          <IconButton
+            ariaLabel="Run discovery"
+            disabled={runningTargetId === row.targetId}
+            onClick={() => void handleRunDiscovery(row.targetId)}
+          >
+            <IconDiscovery />
+          </IconButton>
+        </span>
+      ),
+    },
+  ];
 
   const noTargets = targets.length === 0;
 
@@ -126,28 +276,7 @@ export function DiscoveryPage() {
         title="Discovery"
         description="Attack surface enumeration — crawl, API, OpenAPI, AI fingerprinting"
         actions={
-          <div className="discovery-controls">
-            <select
-              className="input"
-              value={targetId}
-              onChange={(e) => setTargetId(e.target.value)}
-              disabled={noTargets || running}
-            >
-              {noTargets && <option value="">No targets — add one first</option>}
-              {targets.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name} ({t.url || "no url"})
-                </option>
-              ))}
-            </select>
-            <Button
-              variant="primary"
-              onClick={handleStartScan}
-              disabled={noTargets || running || !targetId}
-            >
-              {running ? "Scanning…" : "Start Scan"}
-            </Button>
-          </div>
+          <RefreshButton loading={loading} onClick={() => void actions.refresh()} />
         }
       />
 
@@ -157,99 +286,138 @@ export function DiscoveryPage() {
         </Card>
       )}
 
-      {running && (
+      {runningTargetId && (
         <Card className="discovery-progress">
           <div className="discovery-progress__row">
             <div className="page-loader__spinner" />
             <div>
-              <strong>Scanning {selectedTarget?.name ?? "target"}…</strong>
-              <p className="text-muted text-sm">
-                Crawling {selectedTarget?.url} and probing for APIs, OpenAPI, GraphQL and AI endpoints.
-              </p>
+              <strong>Running discovery…</strong>
+              <p className="text-muted text-sm">Enumerating attack surface for the selected target.</p>
             </div>
           </div>
         </Card>
       )}
 
-      {lastStats && !running && (
-        <Card>
-          <h3 className="card__title">Last run</h3>
-          <div className="discovery-card__stats">
-            <div>
-              <span className="discovery-card__stat-value">{lastStats.endpoint_count}</span>
-              <span className="discovery-card__stat-label">Endpoints</span>
-            </div>
-            <div>
-              <span className="discovery-card__stat-value">{lastStats.pages_fetched}</span>
-              <span className="discovery-card__stat-label">Pages</span>
-            </div>
-            <div>
-              <span className="discovery-card__stat-value">{lastStats.probes_sent}</span>
-              <span className="discovery-card__stat-label">Probes</span>
-            </div>
-            <div>
-              <span className="discovery-card__stat-value">{lastStats.duration_ms} ms</span>
-              <span className="discovery-card__stat-label">Duration</span>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {runs.length === 0 && !running ? (
+      {tableRows.length === 0 && !loading ? (
         <EmptyState
-          title={loading ? "Loading…" : "No discovery runs yet"}
+          title={loading ? "Loading…" : "No targets available"}
           description={
             noTargets
-              ? "Add a target on the Targets page, then start a scan."
-              : "Select a target and click Start Scan to enumerate its attack surface."
+              ? "Add a target on the Targets page, then run discovery from the table."
+              : "No discovery data available yet."
           }
         />
       ) : (
-        <div className="discovery-runs">
-          {runs.map((run) => {
-            const runEndpoints = endpointsByScan.get(run.id) ?? [];
-            return (
-              <Card key={run.id} className="discovery-card">
-                <div className="discovery-card__header">
-                  <div>
-                    <h3 className="discovery-card__title">{targetName(run.targetId)}</h3>
-                    <p className="text-muted text-sm">
-                      {projectName(run.projectId)} ·{" "}
-                      {run.completedAt
-                        ? `Completed ${new Date(run.completedAt).toLocaleString()}`
-                        : run.startedAt
-                          ? `Started ${new Date(run.startedAt).toLocaleString()}`
-                          : `Created ${new Date(run.createdAt).toLocaleString()}`}
-                    </p>
-                  </div>
-                  <StatusBadge status={run.status} />
-                </div>
+        <>
+          <ContentToolbar
+            pageSize={pageSize}
+            onPageSizeChange={setPageSize}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+          />
 
-                <div className="discovery-card__stats">
-                  <div>
-                    <span className="discovery-card__stat-value">{runEndpoints.length}</span>
-                    <span className="discovery-card__stat-label">Endpoints</span>
-                  </div>
-                  <div>
-                    <span className="discovery-card__stat-value">
-                      {runEndpoints.filter((e) => e.kind === "ai_endpoint").length}
-                    </span>
-                    <span className="discovery-card__stat-label">AI endpoints</span>
-                  </div>
-                </div>
+          {viewMode === "table" ? (
+            <Card padding="none">
+              <DataTable
+                columns={tableColumns}
+                rows={pagination.items}
+                keyField="id"
+                onRowClick={(row) => row.run && navigate(`/discovery/${row.run.id}`)}
+                emptyMessage={loading ? "Loading discovery runs…" : "No discovery runs found"}
+              />
+            </Card>
+          ) : (
+            <div className="discovery-tree">
+              {tree.length === 0 ? (
+                <Card>
+                  <p className="text-muted">No discovery runs yet. Run discovery from table view.</p>
+                </Card>
+              ) : (
+                tree.map((projectGroup) => {
+                  const projectExpanded = !collapsedProjects.has(projectGroup.project.id);
+                  return (
+                    <Card key={projectGroup.project.id} className="discovery-tree__project">
+                      <button
+                        type="button"
+                        className="discovery-tree__header"
+                        onClick={() => toggleProject(projectGroup.project.id)}
+                      >
+                        <strong>{projectGroup.project.name}</strong>
+                        <span className="text-muted text-sm">
+                          {projectGroup.targets.length} target
+                          {projectGroup.targets.length === 1 ? "" : "s"}
+                        </span>
+                      </button>
 
-                {runEndpoints.length > 0 && (
-                  <DataTable
-                    columns={endpointColumns}
-                    rows={runEndpoints}
-                    keyField="id"
-                    emptyMessage="No endpoints"
-                  />
-                )}
-              </Card>
-            );
-          })}
-        </div>
+                      {projectExpanded &&
+                        projectGroup.targets.map((targetGroup) => {
+                          const targetExpanded = !collapsedTargets.has(targetGroup.target.id);
+                          return (
+                            <div key={targetGroup.target.id} className="discovery-tree__target">
+                              <div className="discovery-tree__target-header-row">
+                                <button
+                                  type="button"
+                                  className="discovery-tree__target-header"
+                                  onClick={() => toggleTarget(targetGroup.target.id)}
+                                >
+                                  <span className="mono text-sm">{targetGroup.target.url}</span>
+                                  <span className="text-muted text-sm">
+                                    {targetGroup.runs.length} run
+                                    {targetGroup.runs.length === 1 ? "" : "s"}
+                                  </span>
+                                </button>
+                                <IconButton
+                                  ariaLabel="Run discovery"
+                                  disabled={runningTargetId === targetGroup.target.id}
+                                  onClick={() => void handleRunDiscovery(targetGroup.target.id)}
+                                >
+                                  <IconDiscovery />
+                                </IconButton>
+                              </div>
+
+                              {targetExpanded && (
+                                <ul className="discovery-tree__runs">
+                                  {targetGroup.runs.map((run, index) => (
+                                    <li key={run.id}>
+                                      <Link to={`/discovery/${run.id}`} className="discovery-run-link">
+                                        <div>
+                                          <strong>Discovery #{targetGroup.runs.length - index}</strong>
+                                          <p className="card-footer-meta text-sm text-muted">
+                                            {formatTimestamp(run.completedAt ?? run.createdAt)}
+                                          </p>
+                                        </div>
+                                        <div className="discovery-run-link__meta">
+                                          <StatusBadge status={run.status} />
+                                          <span>{endpointsByScan.get(run.id) ?? 0} endpoints</span>
+                                          <span>{aiEndpointsByScan.get(run.id) ?? 0} AI</span>
+                                          <span>{scanDuration(run)}</span>
+                                        </div>
+                                      </Link>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          );
+                        })}
+                    </Card>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {viewMode === "table" && (
+            <Pagination
+              page={page}
+              totalItems={pagination.totalItems}
+              rangeStart={pagination.rangeStart}
+              rangeEnd={pagination.rangeEnd}
+              totalPages={pagination.totalPages}
+              onPageChange={setPage}
+            />
+          )}
+        </>
       )}
     </div>
   );

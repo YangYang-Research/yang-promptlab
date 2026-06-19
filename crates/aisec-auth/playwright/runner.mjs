@@ -44,6 +44,10 @@ async function handleCommand(req) {
   const { id, cmd } = req;
 
   switch (cmd) {
+    case 'begin_interactive_login':
+      return ok(id, await cmdBeginInteractiveLogin(req));
+    case 'finish_interactive_login':
+      return ok(id, await cmdFinishInteractiveLogin(req));
     case 'launch':
       return ok(id, await cmdLaunch(req));
     case 'close':
@@ -58,6 +62,10 @@ async function handleCommand(req) {
       return ok(id, await cmdGetCookies(req));
     case 'set_cookies':
       return ok(id, await cmdSetCookies(req));
+    case 'execute_http_request':
+      return ok(id, await cmdExecuteHttpRequest(req));
+    case 'send_chat_prompt':
+      return ok(id, await cmdSendChatPrompt(req));
     default:
       throw new Error(`unknown command: ${cmd}`);
   }
@@ -65,6 +73,50 @@ async function handleCommand(req) {
 
 function ok(id, result) {
   return { id, ok: true, result };
+}
+
+/** @type {boolean} */
+let interactiveRecording = false;
+
+async function cmdBeginInteractiveLogin(req) {
+  const { url, options } = req;
+  await ensureBrowser({
+    ...(options ?? {}),
+    headless: false,
+    headed: true,
+  });
+
+  if (!page) throw new Error('page not initialized');
+
+  capturedTokens.length = 0;
+  await page.goto(url, {
+    waitUntil: 'domcontentloaded',
+    timeout: options?.timeout_ms ?? 30000,
+  });
+  interactiveRecording = true;
+
+  return { recording: true, url: page.url() };
+}
+
+async function cmdFinishInteractiveLogin() {
+  if (!interactiveRecording) {
+    throw new Error('no interactive recording in progress');
+  }
+  if (!page || !context) throw new Error('browser not initialized');
+
+  const storageState = await context.storageState();
+  const cookies = await context.cookies();
+  const localTokens = await scrapeStorageTokens(page);
+  const result = {
+    steps: [{ action: 'interactive_login' }],
+    storage_state: storageState,
+    cookies,
+    tokens: dedupeTokens([...capturedTokens, ...localTokens]),
+    final_url: page.url(),
+  };
+
+  interactiveRecording = false;
+  return result;
 }
 
 async function cmdLaunch(req) {
@@ -83,6 +135,7 @@ async function cmdClose() {
     browser = null;
   }
   capturedTokens.length = 0;
+  interactiveRecording = false;
   return { closed: true };
 }
 
@@ -280,6 +333,82 @@ async function cmdSetCookies(req) {
     await context.addCookies(req.cookies);
   }
   return { cookies: await context.cookies() };
+}
+
+async function cmdSendChatPrompt(req) {
+  const {
+    url,
+    prompt,
+    input_selector: inputSelector,
+    submit_selector: submitSelector,
+    response_selector: responseSelector,
+    storage_state_path: storageStatePath,
+    options,
+  } = req;
+
+  if (context) {
+    await context.close();
+    context = null;
+    page = null;
+  }
+
+  const launchOpts = { ...(options ?? {}), headless: false, headed: true };
+  if (storageStatePath) {
+    launchOpts.storage_state_path = storageStatePath;
+  }
+
+  await ensureBrowser(launchOpts);
+  if (!page) throw new Error('page not initialized');
+
+  await page.goto(url, {
+    waitUntil: 'domcontentloaded',
+    timeout: options?.timeout_ms ?? 30000,
+  });
+
+  await page.fill(inputSelector, prompt ?? '');
+  await Promise.all([
+    page.waitForSelector(responseSelector, { timeout: options?.timeout_ms ?? 30000 }),
+    page.click(submitSelector),
+  ]);
+
+  const responseText = await page.locator(responseSelector).last().innerText();
+  return { response_text: responseText };
+}
+
+async function cmdExecuteHttpRequest(req) {
+  const { url, method, headers, body, storage_state_path, options } = req;
+
+  if (context) {
+    await context.close();
+    context = null;
+    page = null;
+  }
+
+  const launchOpts = { ...(options ?? {}), headless: true };
+  if (storage_state_path) {
+    launchOpts.storage_state_path = storage_state_path;
+  }
+
+  await ensureBrowser(launchOpts);
+  if (!context) throw new Error('context not initialized');
+
+  const started = Date.now();
+  const response = await context.request.fetch(url, {
+    method: method ?? 'GET',
+    headers: headers ?? {},
+    data: body ?? undefined,
+  });
+  const responseHeaders = {};
+  for (const [key, value] of Object.entries(response.headers())) {
+    responseHeaders[key] = value;
+  }
+
+  return {
+    status: response.status(),
+    headers: responseHeaders,
+    body: await response.text(),
+    duration_ms: Date.now() - started,
+  };
 }
 
 function dedupeTokens(tokens) {

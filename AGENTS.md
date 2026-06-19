@@ -33,7 +33,18 @@ Even so, the WebView may intermittently restart and briefly show the AISec boot/
 a Rust recompile and/or a webview reload. Avoid editing repo files while doing GUI demos.
 
 ### Tests / build status
-- Frontend: `npm test` (Vitest) and `npm run build` (tsc + vite) both pass.
+- Frontend: `npm test` (Vitest) passes **37/37 tests**, but **one suite fails to load**
+  (`tests/frontend/reportDownloads.test.ts`) and `npm run build` (tsc) **fails**, both because of a
+  **pre-existing repo bug**, not the environment: the source file
+  `src/features/reports/reportDownloads.ts` is imported by `ReportsPage`, `ScanDetailsPage`,
+  `ResultsStep`, and the test above, but was **never committed**. Root cause: `.gitignore`'s
+  `reports/` rule (last line) recursively ignores `src/features/reports/`, so the file is invisible
+  to git and absent on a fresh clone. Consequence in `npm run tauri dev`: the **Scans / Scan-wizard /
+  Scan-details / Reports** routes crash the WebView (Vite "Cannot find module" overlay). Note that
+  **creating a project navigates to `/scans/new`** (the scan wizard) on success, so it also hits this.
+  Safe core flows that work end-to-end: project create/edit/delete (Dashboard/Projects/Project-details)
+  and target/discovery actions. To actually fix: un-ignore the file (e.g. `!src/features/reports/`
+  or scope the rule to `/reports/`) and commit `reportDownloads.ts`.
 - Rust: the workspace **builds** (`cargo build --workspace`). However `cargo test --workspace`
   does NOT fully pass today due to **pre-existing** code/manifest bugs (not environment issues):
   - `aisec-storage` lib test: missing `create` method.

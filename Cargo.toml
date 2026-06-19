@@ -8,9 +8,14 @@ members = [
     "crates/aisec-judge",
     "crates/aisec-report",
     "crates/aisec-fingerprint",
+    "crates/aisec-planner",
+    "crates/aisec-generator",
+    "crates/aisec-agent",
     "crates/aisec-plugin-host",
     "crates/aisec-auth",
     "crates/aisec-discovery",
+    "crates/aisec-harness",
+    "crates/aisec-runtime",
     "crates/aisec-storage",
     "src-tauri",
     "tests/integration",
@@ -30,8 +35,13 @@ aisec-models = { path = "crates/aisec-models" }
 aisec-judge = { path = "crates/aisec-judge" }
 aisec-report = { path = "crates/aisec-report" }
 aisec-fingerprint = { path = "crates/aisec-fingerprint" }
+aisec-planner = { path = "crates/aisec-planner" }
+aisec-generator = { path = "crates/aisec-generator" }
+aisec-agent = { path = "crates/aisec-agent" }
 aisec-plugin-host = { path = "crates/aisec-plugin-host" }
 aisec-auth = { path = "crates/aisec-auth" }
+aisec-harness = { path = "crates/aisec-harness" }
+aisec-runtime = { path = "crates/aisec-runtime" }
 aisec-core = { path = "crates/aisec-core" }
 aisec-discovery = { path = "crates/aisec-discovery" }
 aisec-storage = { path = "crates/aisec-storage" }
@@ -51,3 +61,6 @@ scraper = "0.23"
 regex = "1"
 url = "2"
 dashmap = "6"
+keyring = "3.6"
+aes-gcm = "0.10"
+rand = "0.8"

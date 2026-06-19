@@ -59,3 +59,12 @@ pub struct ReplaySessionResult {
     pub cookies: Vec<serde_json::Value>,
     pub tokens: Vec<serde_json::Value>,
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ExecuteHttpResult {
+    pub status: u16,
+    #[serde(default)]
+    pub headers: std::collections::HashMap<String, String>,
+    pub body: String,
+    pub duration_ms: u64,
+}

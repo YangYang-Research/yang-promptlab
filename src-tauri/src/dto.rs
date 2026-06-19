@@ -73,6 +73,37 @@ impl From<Target> for TargetDto {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ScanDetailDto {
+    pub id: String,
+    pub project_id: String,
+    pub target_id: Option<String>,
+    pub name: String,
+    pub status: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub playbook: Option<serde_json::Value>,
+}
+
+impl ScanDetailDto {
+    pub fn from_scan(scan: Scan) -> Self {
+        Self {
+            id: scan.id,
+            project_id: scan.project_id,
+            target_id: scan.target_id,
+            name: scan.name,
+            status: scan.status,
+            started_at: ts_opt(scan.started_at),
+            completed_at: ts_opt(scan.completed_at),
+            created_at: ts(scan.created_at),
+            updated_at: ts(scan.updated_at),
+            playbook: json_opt(scan.playbook_json),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ScanDto {
     pub id: String,
     pub project_id: String,
@@ -148,10 +179,74 @@ pub struct EndpointDto {
     pub evidence: Option<String>,
     pub source_url: Option<String>,
     pub discovered_at: String,
+    pub fingerprint: Option<EndpointFingerprintDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndpointFingerprintDto {
+    pub confidence: f32,
+    pub technologies: Vec<FingerprintTechnologyDto>,
+    pub agent_frameworks: Vec<FingerprintFrameworkDto>,
+    pub ai_components: Vec<FingerprintComponentDto>,
+    pub attack_recommendations: Vec<FingerprintRecommendationDto>,
+    pub methods_used: Vec<String>,
+    pub primary_provider: Option<String>,
+    pub api_style: Option<String>,
+    pub platform_profile: PlatformProfileDto,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlatformProfileDto {
+    pub platform: String,
+    pub version: String,
+    pub auth_type: String,
+    pub llm_provider: String,
+    pub memory_enabled: bool,
+    pub tools_enabled: bool,
+    pub rag_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FingerprintTechnologyDto {
+    pub id: String,
+    pub name: String,
+    pub category: String,
+    pub confidence: f32,
+    pub signals: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FingerprintFrameworkDto {
+    pub id: String,
+    pub name: String,
+    pub confidence: f32,
+    pub signals: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FingerprintComponentDto {
+    pub id: String,
+    pub name: String,
+    pub confidence: f32,
+    pub signals: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FingerprintRecommendationDto {
+    pub category: String,
+    pub reason: String,
+    pub priority: u8,
 }
 
 impl From<Endpoint> for EndpointDto {
     fn from(e: Endpoint) -> Self {
+        let fingerprint = e.fingerprint_json.as_deref().and_then(parse_fingerprint_json);
         Self {
             id: e.id,
             scan_id: e.scan_id,
@@ -163,8 +258,82 @@ impl From<Endpoint> for EndpointDto {
             evidence: e.evidence,
             source_url: e.source_url,
             discovered_at: ts(e.discovered_at),
+            fingerprint,
         }
     }
+}
+
+fn parse_fingerprint_json(raw: &str) -> Option<EndpointFingerprintDto> {
+    let report: aisec_fingerprint::StackFingerprintReport = serde_json::from_str(raw).ok()?;
+    Some(EndpointFingerprintDto {
+        confidence: report.confidence,
+        technologies: report
+            .technologies
+            .into_iter()
+            .map(|t| FingerprintTechnologyDto {
+                id: t.id,
+                name: t.name,
+                category: t.category,
+                confidence: t.confidence,
+                signals: t.signals,
+            })
+            .collect(),
+        agent_frameworks: report
+            .agent_frameworks
+            .into_iter()
+            .map(|f| FingerprintFrameworkDto {
+                id: f.framework.as_str().into(),
+                name: f.name,
+                confidence: f.confidence,
+                signals: f.signals,
+            })
+            .collect(),
+        ai_components: report
+            .ai_components
+            .into_iter()
+            .map(|c| FingerprintComponentDto {
+                id: c.component.as_str().into(),
+                name: c.name,
+                confidence: c.confidence,
+                signals: c.signals,
+            })
+            .collect(),
+        attack_recommendations: report
+            .attack_recommendations
+            .into_iter()
+            .map(|r| FingerprintRecommendationDto {
+                category: r.category,
+                reason: r.reason,
+                priority: r.priority,
+            })
+            .collect(),
+        methods_used: report.methods_used,
+        primary_provider: report
+            .provider_report
+            .primary
+            .as_ref()
+            .map(|p| p.provider.as_str().into()),
+        api_style: report.provider_report.primary.as_ref().map(|p| {
+            match p.inferred_api_style {
+                aisec_fingerprint::ApiStyle::OpenAiCompatible => "openai_compatible",
+                aisec_fingerprint::ApiStyle::AnthropicMessages => "anthropic_messages",
+                aisec_fingerprint::ApiStyle::GeminiGenerateContent => "gemini_generate_content",
+                aisec_fingerprint::ApiStyle::BedrockInvoke => "bedrock_invoke",
+                aisec_fingerprint::ApiStyle::OllamaNative => "ollama_native",
+                aisec_fingerprint::ApiStyle::Unknown => "unknown",
+            }
+            .into()
+        }),
+        platform_profile: PlatformProfileDto {
+            platform: report.platform_profile.platform,
+            version: report.platform_profile.version,
+            auth_type: report.platform_profile.auth_type,
+            llm_provider: report.platform_profile.llm_provider,
+            memory_enabled: report.platform_profile.memory_enabled,
+            tools_enabled: report.platform_profile.tools_enabled,
+            rag_enabled: report.platform_profile.rag_enabled,
+        },
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -240,4 +409,26 @@ pub struct ReportContentDto {
     pub name: String,
     pub format: String,
     pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ScanStartDto {
+    pub scan_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ScanStatusDto {
+    pub scan_id: String,
+    pub status: String,
+    pub progress_percent: f64,
+    pub completed: u64,
+    pub total: u64,
+    pub findings_count: u64,
+    pub current_endpoint: Option<String>,
+    pub current_test: Option<String>,
+    pub started_at: Option<String>,
+    pub agent_mode: bool,
+    pub current_phase: Option<String>,
+    pub current_attempt: Option<u32>,
+    pub current_retry: Option<u32>,
 }

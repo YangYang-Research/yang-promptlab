@@ -42,15 +42,32 @@ export function DashboardPage() {
       />
 
       <div className="stat-grid">
-        <StatCard label="Projects" value={stats.projects} hint="2 active" />
-        <StatCard label="Targets" value={stats.targets} hint="1 scanning" accent="warning" />
+        <StatCard
+          label="Projects"
+          value={stats.projects}
+          hint={`${stats.activeProjects} active`}
+        />
+        <StatCard
+          label="Targets"
+          value={stats.targets}
+          hint={`${stats.scanningTargets} scanning`}
+          accent="warning"
+        />
         <StatCard
           label="Open Findings"
           value={stats.openFindings}
           hint={`${stats.criticalFindings} critical`}
           accent="critical"
         />
-        <StatCard label="Local Models" value={stats.installedModels} hint="1 downloading" />
+        <StatCard
+          label="Local Models"
+          value={stats.installedModels}
+          hint={
+            stats.downloadingModels > 0
+              ? `${stats.downloadingModels} downloading`
+              : "Ready"
+          }
+        />
       </div>
 
       <div className="dashboard-grid">

@@ -8,6 +8,7 @@ import {
   DataTable,
   EmptyState,
   PageHeader,
+  Select,
   SeverityBadge,
   StatusBadge,
 } from "@/shared/components";
@@ -122,8 +123,8 @@ export function AttacksPage() {
         description="OWASP LLM Top 10 aligned attack orchestration"
         actions={
           <div className="discovery-controls">
-            <select
-              className="input"
+            <Select
+              inline
               value={endpointId}
               onChange={(e) => setEndpointId(e.target.value)}
               disabled={noEndpoints || running}
@@ -134,9 +135,9 @@ export function AttacksPage() {
                   {e.kind} · {e.url}
                 </option>
               ))}
-            </select>
-            <select
-              className="input"
+            </Select>
+            <Select
+              inline
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               disabled={running}
@@ -147,7 +148,7 @@ export function AttacksPage() {
                   {c.enabled ? "" : " (soon)"}
                 </option>
               ))}
-            </select>
+            </Select>
             <Button
               variant="primary"
               onClick={handleLaunch}

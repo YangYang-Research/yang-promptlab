@@ -44,6 +44,7 @@ mod tests {
             category: None,
             rationale: String::new(),
             indicators: vec![],
+            structured: None,
         }
     }
 

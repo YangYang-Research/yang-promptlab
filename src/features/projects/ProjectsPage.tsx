@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
@@ -6,9 +6,16 @@ import {
   Badge,
   Button,
   Card,
+  ContentToolbar,
   DataTable,
+  ListCard,
   PageHeader,
+  Pagination,
+  RefreshButton,
 } from "@/shared/components";
+import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
+import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
+import { useViewPreference } from "@/shared/hooks/useViewPreference";
 import { useToast } from "@/shared/notifications";
 import type { Project } from "@/shared/types";
 
@@ -23,11 +30,13 @@ function formatDate(iso: string) {
 }
 
 export function ProjectsPage() {
-  const { projects, dispatch, ui, loading, error, actions } = useAppStore();
+  const { projects, ui, loading, error, actions } = useAppStore();
   const { notify } = useToast();
   const location = useLocation();
   const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
+  const [viewMode, setViewMode] = useViewPreference("projects");
+  const [pageSize, setPageSize] = usePageSizePreference("projects");
 
   useEffect(() => {
     const state = location.state as { openNewProject?: boolean } | null;
@@ -37,11 +46,20 @@ export function ProjectsPage() {
     }
   }, [location, navigate]);
 
-  const filtered = projects.filter((p) => {
-    const q = ui.searchQuery.toLowerCase();
-    if (!q) return true;
-    return p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q);
-  });
+  const filtered = useMemo(
+    () =>
+      projects.filter((project) => {
+        const q = ui.searchQuery.toLowerCase();
+        if (!q) return true;
+        return (
+          project.name.toLowerCase().includes(q) ||
+          project.description.toLowerCase().includes(q)
+        );
+      }),
+    [projects, ui.searchQuery],
+  );
+
+  const { page, setPage, pagination } = usePaginatedList(filtered, pageSize);
 
   async function handleDelete(project: Project) {
     try {
@@ -56,10 +74,10 @@ export function ProjectsPage() {
     {
       key: "name",
       header: "Project",
-      render: (p: Project) => (
+      render: (project: Project) => (
         <div>
-          <strong>{p.name}</strong>
-          <div className="text-muted text-sm">{p.description}</div>
+          <strong>{project.name}</strong>
+          <div className="text-muted text-sm">{project.description}</div>
         </div>
       ),
     },
@@ -67,9 +85,17 @@ export function ProjectsPage() {
       key: "status",
       header: "Status",
       width: "100px",
-      render: (p: Project) => (
-        <Badge variant={p.status === "active" ? "success" : p.status === "draft" ? "muted" : "default"}>
-          {p.status}
+      render: (project: Project) => (
+        <Badge
+          variant={
+            project.status === "active"
+              ? "success"
+              : project.status === "draft"
+                ? "muted"
+                : "default"
+          }
+        >
+          {project.status}
         </Badge>
       ),
     },
@@ -77,27 +103,27 @@ export function ProjectsPage() {
       key: "targets",
       header: "Targets",
       width: "80px",
-      render: (p: Project) => p.targetCount,
+      render: (project: Project) => project.targetCount,
     },
     {
       key: "findings",
       header: "Findings",
       width: "90px",
-      render: (p: Project) => p.findingCount,
+      render: (project: Project) => project.findingCount,
     },
     {
       key: "updated",
       header: "Updated",
       width: "120px",
-      render: (p: Project) => formatDate(p.updatedAt),
+      render: (project: Project) => formatDate(project.updatedAt),
     },
     {
       key: "actions",
       header: "",
-      width: "90px",
-      render: (p: Project) => (
-        <span onClick={(e) => e.stopPropagation()}>
-          <Button variant="danger" size="sm" onClick={() => handleDelete(p)}>
+      width: "80px",
+      render: (project: Project) => (
+        <span className="table-actions" onClick={(event) => event.stopPropagation()}>
+          <Button variant="danger" size="sm" onClick={() => void handleDelete(project)}>
             Delete
           </Button>
         </span>
@@ -112,9 +138,7 @@ export function ProjectsPage() {
         description="Organize security assessments by engagement or product"
         actions={
           <>
-            <Button variant="ghost" onClick={() => void actions.refresh()} disabled={loading}>
-              {loading ? "Refreshing…" : "Refresh"}
-            </Button>
+            <RefreshButton loading={loading} onClick={() => void actions.refresh()} />
             <Button variant="primary" onClick={() => setModalOpen(true)}>
               New Project
             </Button>
@@ -128,15 +152,76 @@ export function ProjectsPage() {
         </Card>
       )}
 
-      <Card padding="none">
-        <DataTable
-          columns={columns}
-          rows={filtered}
-          keyField="id"
-          onRowClick={(p) => dispatch({ type: "SET_SELECTED_PROJECT", projectId: p.id })}
-          emptyMessage={loading ? "Loading projects…" : "No projects yet. Create your first project."}
+      <ContentToolbar
+        pageSize={pageSize}
+        onPageSizeChange={setPageSize}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+      />
+
+      {viewMode === "table" ? (
+        <Card padding="none">
+          <DataTable
+            columns={columns}
+            rows={pagination.items}
+            keyField="id"
+            onRowClick={(project) => navigate(`/projects/${project.id}`)}
+            emptyMessage={loading ? "Loading projects…" : "No projects yet. Create your first project."}
+          />
+        </Card>
+      ) : (
+        <div className="list-card-grid">
+          {pagination.items.map((project) => (
+            <ListCard
+              key={project.id}
+              title={project.name}
+              status={
+                <Badge
+                  variant={
+                    project.status === "active"
+                      ? "success"
+                      : project.status === "draft"
+                        ? "muted"
+                        : "default"
+                  }
+                >
+                  {project.status}
+                </Badge>
+              }
+              metadata={[
+                { label: "Targets", value: project.targetCount },
+                { label: "Findings", value: project.findingCount },
+                { label: "Description", value: project.description || "—" },
+              ]}
+              footerMeta={`Updated: ${formatDate(project.updatedAt)}`}
+              actions={
+                <Button variant="danger" size="sm" onClick={() => void handleDelete(project)}>
+                  Delete
+                </Button>
+              }
+              onClick={() => navigate(`/projects/${project.id}`)}
+            />
+          ))}
+          {pagination.items.length === 0 && (
+            <Card>
+              <p className="text-muted">
+                {loading ? "Loading projects…" : "No projects yet. Create your first project."}
+              </p>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {filtered.length > 0 && (
+        <Pagination
+          page={page}
+          totalItems={pagination.totalItems}
+          rangeStart={pagination.rangeStart}
+          rangeEnd={pagination.rangeEnd}
+          totalPages={pagination.totalPages}
+          onPageChange={setPage}
         />
-      </Card>
+      )}
 
       <NewProjectModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </div>

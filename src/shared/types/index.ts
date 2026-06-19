@@ -1,6 +1,6 @@
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
 
-export type JobStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+export type JobStatus = "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
 
 export type ProjectStatus = "active" | "archived" | "draft";
 
@@ -43,6 +43,7 @@ export type Target = {
   lastScanAt: string | null;
   fingerprint: string | null;
   tags: string[];
+  authType: string;
 };
 
 export type DiscoveryJob = {
@@ -108,12 +109,65 @@ export type DiscoveredEndpoint = {
   evidence: string | null;
   sourceUrl: string | null;
   discoveredAt: string;
+  fingerprint: EndpointFingerprint | null;
+};
+
+export type EndpointFingerprint = {
+  confidence: number;
+  technologies: FingerprintTechnology[];
+  agentFrameworks: FingerprintFramework[];
+  aiComponents: FingerprintComponent[];
+  attackRecommendations: FingerprintRecommendation[];
+  methodsUsed: string[];
+  primaryProvider: string | null;
+  apiStyle: string | null;
+  platformProfile: PlatformProfile;
+};
+
+export type PlatformProfile = {
+  platform: string;
+  version: string;
+  authType: string;
+  llmProvider: string;
+  memoryEnabled: boolean;
+  toolsEnabled: boolean;
+  ragEnabled: boolean;
+};
+
+export type FingerprintTechnology = {
+  id: string;
+  name: string;
+  category: string;
+  confidence: number;
+  signals: string[];
+};
+
+export type FingerprintFramework = {
+  id: string;
+  name: string;
+  confidence: number;
+  signals: string[];
+};
+
+export type FingerprintComponent = {
+  id: string;
+  name: string;
+  confidence: number;
+  signals: string[];
+};
+
+export type FingerprintRecommendation = {
+  category: string;
+  reason: string;
+  priority: number;
 };
 
 export type Report = {
   id: string;
   projectId: string;
   projectName: string;
+  scanId: string | null;
+  scanName: string;
   title: string;
   format: ReportFormat;
   status: JobStatus;
@@ -144,9 +198,12 @@ export type ActivityItem = {
 
 export type DashboardStats = {
   projects: number;
+  activeProjects: number;
   targets: number;
+  scanningTargets: number;
   openFindings: number;
   criticalFindings: number;
   runningScans: number;
   installedModels: number;
+  downloadingModels: number;
 };

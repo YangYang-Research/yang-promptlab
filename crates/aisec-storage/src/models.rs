@@ -69,6 +69,7 @@ pub struct Endpoint {
     pub source_url: Option<String>,
     pub discovered_at: OffsetDateTime,
     pub created_at: OffsetDateTime,
+    pub fingerprint_json: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
@@ -221,6 +222,12 @@ pub struct CreateEndpoint {
     pub evidence: Option<String>,
     pub source_url: Option<String>,
     pub discovered_at: OffsetDateTime,
+    pub fingerprint_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UpdateEndpoint {
+    pub method: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

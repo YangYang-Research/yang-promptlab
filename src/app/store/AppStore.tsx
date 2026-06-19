@@ -9,23 +9,27 @@ import {
   type ReactNode,
 } from "react";
 
+import { listen } from "@tauri-apps/api/event";
+
 import {
   createProject as createProjectCmd,
   createScan as createScanCmd,
   createTarget as createTargetCmd,
   deleteProject as deleteProjectCmd,
+  updateProject as updateProjectCmd,
   generateReport as generateReportCmd,
   listEndpoints,
-  listFindings,
+  listFindingsAll,
+  listReportsAll,
   listProjects,
-  listReports,
   listScans,
   listTargets,
   runDiscovery as runDiscoveryCmd,
   runPromptInjection as runPromptInjectionCmd,
+  listModels,
   type EndpointDto,
   type FindingDto,
-  type ReportDto,
+  type ModelEntryDto,
   type ScanDto,
 } from "@/shared/ipc";
 import { toAppError } from "@/shared/errors";
@@ -47,6 +51,21 @@ import type {
   AppStoreValue,
   LoadedData,
 } from "./types";
+import type { LocalModel, ModelStatus } from "@/shared/types";
+
+function mapLocalModels(entries: ModelEntryDto[]): LocalModel[] {
+  return entries.map((entry) => ({
+    id: entry.id,
+    name: entry.name,
+    provider: entry.provider,
+    sizeGb: entry.sizeGb,
+    status: (entry.status as ModelStatus) || "available",
+    downloadProgress: entry.status === "downloading" ? 50 : entry.status === "installed" ? 100 : 0,
+    quant: entry.format,
+    path: entry.path || null,
+    sha256: entry.sha256,
+  }));
+}
 
 const log = createLogger("AppStore");
 
@@ -138,21 +157,21 @@ type AppStoreProviderProps = {
 async function loadAll(): Promise<LoadedData> {
   const projectDtos = await listProjects();
 
-  const [targetGroups, scanGroups, reportGroups] = await Promise.all([
+  const [targetGroups, scanGroups, reportDtos] = await Promise.all([
     Promise.all(projectDtos.map((p) => listTargets(p.id))),
     Promise.all(projectDtos.map((p) => listScans(p.id))),
-    Promise.all(projectDtos.map((p) => listReports(p.id))),
+    listReportsAll(),
   ]);
 
   const targetDtos = targetGroups.flat();
   const scanDtos: ScanDto[] = scanGroups.flat();
-  const reportDtos: ReportDto[] = reportGroups.flat();
 
-  const [findingGroups, endpointGroups] = await Promise.all([
-    Promise.all(scanDtos.map((s) => listFindings(s.id))),
+  const [findingGroups, endpointGroups, modelEntries] = await Promise.all([
+    listFindingsAll(),
     Promise.all(scanDtos.map((s) => listEndpoints(s.id))),
+    listModels().catch(() => [] as ModelEntryDto[]),
   ]);
-  const findingDtos: FindingDto[] = findingGroups.flat();
+  const findingDtos: FindingDto[] = findingGroups;
   const endpointDtos: EndpointDto[] = endpointGroups.flat();
 
   return {
@@ -161,7 +180,8 @@ async function loadAll(): Promise<LoadedData> {
     scans: mapScans(scanDtos),
     endpoints: mapEndpoints(endpointDtos),
     findings: mapFindings(findingDtos, targetDtos),
-    reports: mapReports(reportDtos, projectDtos),
+    reports: mapReports(reportDtos, projectDtos, scanDtos),
+    models: mapLocalModels(modelEntries),
   };
 }
 
@@ -213,9 +233,9 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
       refresh,
       createProject: async (name, description) => {
         try {
-          const created = await createProjectCmd(name, description);
+          const dto = await createProjectCmd(name, description);
           await refresh();
-          return created;
+          return mapProjects([dto], [], [])[0];
         } catch (error) {
           const appError = toAppError(error);
           log.error("mutation failed: createProject", { error: appError });
@@ -224,19 +244,39 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
         }
       },
       deleteProject: (id) => runMutation("deleteProject", () => deleteProjectCmd(id)),
-      createTarget: (projectId, name, targetType, descriptor) =>
-        runMutation("createTarget", () =>
-          createTargetCmd(projectId, name, targetType, descriptor),
-        ),
+      updateProject: async (id, name, description) => {
+        try {
+          const dto = await updateProjectCmd(id, name, description);
+          await refresh();
+          return mapProjects([dto], [], [])[0];
+        } catch (error) {
+          const appError = toAppError(error);
+          log.error("mutation failed: updateProject", { error: appError });
+          dispatch({ type: "SET_ERROR", error: appError.message });
+          throw appError;
+        }
+      },
+      createTarget: async (projectId, name, targetType, descriptor) => {
+        try {
+          const dto = await createTargetCmd(projectId, name, targetType, descriptor);
+          await refresh();
+          return mapTargets([dto])[0];
+        } catch (error) {
+          const appError = toAppError(error);
+          log.error("mutation failed: createTarget", { error: appError });
+          dispatch({ type: "SET_ERROR", error: appError.message });
+          throw appError;
+        }
+      },
       createScan: (projectId, name, targetId, status) =>
         runMutation("createScan", () => createScanCmd(projectId, name, targetId, status)),
       generateReport: (projectId, scanId, format, kind) =>
         runMutation("generateReport", () =>
           generateReportCmd(projectId, scanId, format, kind),
         ),
-      runDiscovery: async (targetId) => {
+      runDiscovery: async (targetId, mergeScanId) => {
         try {
-          const result = await runDiscoveryCmd(targetId);
+          const result = await runDiscoveryCmd(targetId, mergeScanId);
           await refresh();
           return result;
         } catch (error) {
@@ -264,6 +304,15 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
 
   useEffect(() => {
     void refresh();
+    let unlisten: (() => void) | undefined;
+    void listen("app-data-changed", () => {
+      void refresh();
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      void unlisten?.();
+    };
   }, [refresh]);
 
   const value = useMemo<AppStoreValue>(() => {

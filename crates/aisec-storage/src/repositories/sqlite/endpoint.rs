@@ -4,7 +4,7 @@ use sqlx::SqlitePool;
 use aisec_core::AisecResult;
 
 use crate::error::StorageResultExt;
-use crate::models::{CreateEndpoint, Endpoint};
+use crate::models::{CreateEndpoint, Endpoint, UpdateEndpoint};
 use crate::repositories::EndpointRepository;
 use crate::util::{new_id, now};
 
@@ -29,9 +29,9 @@ impl EndpointRepository for SqliteEndpointRepository {
             r#"
             INSERT INTO endpoints (
                 id, scan_id, target_id, url, kind, method,
-                confidence, evidence, source_url, discovered_at, created_at
+                confidence, evidence, source_url, discovered_at, created_at, fingerprint_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&id)
@@ -45,6 +45,7 @@ impl EndpointRepository for SqliteEndpointRepository {
         .bind(&input.source_url)
         .bind(input.discovered_at)
         .bind(created_at)
+        .bind(&input.fingerprint_json)
         .execute(&self.pool)
         .await
         .map_storage()?;
@@ -76,6 +77,18 @@ impl EndpointRepository for SqliteEndpointRepository {
         .fetch_all(&self.pool)
         .await
         .map_storage()
+    }
+
+    async fn update(&self, id: &str, input: UpdateEndpoint) -> AisecResult<Endpoint> {
+        if let Some(method) = &input.method {
+            sqlx::query("UPDATE endpoints SET method = ? WHERE id = ?")
+                .bind(method)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_storage()?;
+        }
+        self.get(id).await
     }
 
     async fn delete_by_scan(&self, scan_id: &str) -> AisecResult<u64> {
@@ -134,6 +147,7 @@ mod tests {
                     evidence: Some("known AI path".into()),
                     source_url: Some("https://example.com/".into()),
                     discovered_at: now(),
+                    fingerprint_json: None,
                 },
                 CreateEndpoint {
                     scan_id: scan.id.clone(),
@@ -145,6 +159,7 @@ mod tests {
                     evidence: Some("openapi marker".into()),
                     source_url: None,
                     discovered_at: now(),
+                    fingerprint_json: None,
                 },
             ])
             .await

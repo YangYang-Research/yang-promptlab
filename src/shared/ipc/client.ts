@@ -1,11 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
-
-import { createAppError, type AppError, type ErrorCode } from "@/shared/errors";
-
-type CommandErrorPayload = {
-  code: string;
-  message: string;
-};
+import { invokeCommand } from "./invoke";
 
 export type HealthResponse = {
   status: string;
@@ -17,28 +10,6 @@ export type AppInfoResponse = {
   version: string;
   identifier: string;
 };
-
-function mapCommandError(payload: CommandErrorPayload): AppError {
-  const code = payload.code as ErrorCode;
-  return createAppError(code, payload.message);
-}
-
-async function invokeCommand<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  try {
-    return await invoke<T>(command, args);
-  } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      "message" in error
-    ) {
-      throw mapCommandError(error as CommandErrorPayload);
-    }
-
-    throw createAppError("IPC", "IPC invocation failed", error);
-  }
-}
 
 export function healthCheck(): Promise<HealthResponse> {
   return invokeCommand<HealthResponse>("health");
@@ -52,13 +23,13 @@ export function getAppInfo(): Promise<AppInfoResponse> {
 // Domain DTOs (mirror the Rust command responses; timestamps are RFC 3339)
 // ---------------------------------------------------------------------------
 
-export type ProjectDto = {
-  id: string;
-  name: string;
-  description: string | null;
-  created_at: string;
-  updated_at: string;
-};
+export type { ProjectDto } from "./projects";
+export {
+  createProject,
+  deleteProject,
+  getProject,
+  listProjects,
+} from "./projects";
 
 export type TargetDto = {
   id: string;
@@ -80,6 +51,10 @@ export type ScanDto = {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type ScanDetailDto = ScanDto & {
+  playbook: unknown | null;
 };
 
 export type FindingDto = {
@@ -108,6 +83,57 @@ export type EndpointDto = {
   evidence: string | null;
   source_url: string | null;
   discovered_at: string;
+  fingerprint: EndpointFingerprintDto | null;
+};
+
+export type EndpointFingerprintDto = {
+  confidence: number;
+  technologies: FingerprintTechnologyDto[];
+  agentFrameworks: FingerprintFrameworkDto[];
+  aiComponents: FingerprintComponentDto[];
+  attackRecommendations: FingerprintRecommendationDto[];
+  methodsUsed: string[];
+  primaryProvider: string | null;
+  apiStyle: string | null;
+  platformProfile: PlatformProfileDto;
+};
+
+export type PlatformProfileDto = {
+  platform: string;
+  version: string;
+  authType: string;
+  llmProvider: string;
+  memoryEnabled: boolean;
+  toolsEnabled: boolean;
+  ragEnabled: boolean;
+};
+
+export type FingerprintTechnologyDto = {
+  id: string;
+  name: string;
+  category: string;
+  confidence: number;
+  signals: string[];
+};
+
+export type FingerprintFrameworkDto = {
+  id: string;
+  name: string;
+  confidence: number;
+  signals: string[];
+};
+
+export type FingerprintComponentDto = {
+  id: string;
+  name: string;
+  confidence: number;
+  signals: string[];
+};
+
+export type FingerprintRecommendationDto = {
+  category: string;
+  reason: string;
+  priority: number;
 };
 
 export type DiscoveryStatsDto = {
@@ -134,6 +160,50 @@ export type AttackRunDto = {
   findings: FindingDto[];
 };
 
+export type ScanStartDto = {
+  scan_id: string;
+};
+
+export type ScanStartRequest = {
+  projectId: string;
+  targetId: string;
+  endpointIds: string[];
+  profile: string;
+  categories: string[];
+  disabledTests?: string[];
+  generatorMode?: string;
+  agentMode?: boolean;
+  maxAgentAttempts?: number;
+};
+
+export type ScanStatusDto = {
+  scan_id: string;
+  status: string;
+  progress_percent: number;
+  completed: number;
+  total: number;
+  findings_count: number;
+  current_endpoint: string | null;
+  current_test: string | null;
+  started_at: string | null;
+  agent_mode: boolean;
+  current_phase: string | null;
+  current_attempt: number | null;
+  current_retry: number | null;
+};
+
+export type ScanProgressEvent = {
+  scanId: string;
+  timestamp: string;
+  level: "INFO" | "WARN" | "ERROR";
+  message: string;
+  endpoint?: string;
+  payload?: string;
+  statusCode?: number;
+  latency?: number;
+  findingId?: string;
+};
+
 export type ReportDto = {
   id: string;
   project_id: string;
@@ -158,19 +228,10 @@ export type ReportContentDto = {
 // Domain command wrappers (Tauri auto-maps snake_case Rust args -> camelCase JS)
 // ---------------------------------------------------------------------------
 
-export const listProjects = () => invokeCommand<ProjectDto[]>("project_list");
-
-export const createProject = (name: string, description?: string | null) =>
-  invokeCommand<ProjectDto>("project_create", { name, description: description ?? null });
-
-export const getProject = (id: string) =>
-  invokeCommand<ProjectDto>("project_get", { id });
-
-export const deleteProject = (id: string) =>
-  invokeCommand<null>("project_delete", { id });
-
 export const listTargets = (projectId: string) =>
   invokeCommand<TargetDto[]>("target_list", { projectId });
+
+export const getTarget = (id: string) => invokeCommand<TargetDto>("target_get", { id });
 
 export const createTarget = (
   projectId: string,
@@ -181,6 +242,8 @@ export const createTarget = (
 
 export const listScans = (projectId: string) =>
   invokeCommand<ScanDto[]>("scan_list", { projectId });
+
+export const getScan = (id: string) => invokeCommand<ScanDetailDto>("scan_get", { id });
 
 export const createScan = (
   projectId: string,
@@ -198,6 +261,9 @@ export const createScan = (
 export const listFindings = (scanId: string) =>
   invokeCommand<FindingDto[]>("finding_list", { scanId });
 
+export const listFindingsAll = () =>
+  invokeCommand<FindingDto[]>("finding_list_all");
+
 export const generateReport = (
   projectId: string,
   scanId: string,
@@ -209,17 +275,59 @@ export const generateReport = (
 export const listReports = (projectId: string) =>
   invokeCommand<ReportDto[]>("report_list", { projectId });
 
+export const listReportsAll = () =>
+  invokeCommand<ReportDto[]>("report_list_all");
+
 export const readReport = (id: string) =>
   invokeCommand<ReportContentDto>("report_read", { id });
 
 export const exportReport = (id: string) =>
   invokeCommand<string>("report_export", { id });
 
-export const runDiscovery = (targetId: string) =>
-  invokeCommand<DiscoveryRunDto>("discovery_run", { targetId });
+export const runDiscovery = (targetId: string, mergeScanId?: string | null) =>
+  invokeCommand<DiscoveryRunDto>("discovery_run", {
+    targetId,
+    mergeScanId: mergeScanId ?? null,
+  });
 
 export const listEndpoints = (scanId: string) =>
   invokeCommand<EndpointDto[]>("endpoint_list", { scanId });
 
+export const createEndpoint = (
+  scanId: string,
+  targetId: string,
+  method: string,
+  path: string,
+) =>
+  invokeCommand<EndpointDto>("endpoint_create", { scanId, targetId, method, path });
+
+export const updateEndpoint = (endpointId: string, method: string) =>
+  invokeCommand<EndpointDto>("endpoint_update", { endpointId, method });
+
 export const runPromptInjection = (endpointId: string) =>
   invokeCommand<AttackRunDto>("attack_run_prompt_injection", { endpointId });
+
+export const startScan = (request: ScanStartRequest) =>
+  invokeCommand<ScanStartDto>("scan_start", {
+    projectId: request.projectId,
+    targetId: request.targetId,
+    endpointIds: request.endpointIds,
+    profile: request.profile,
+    categories: request.categories,
+    disabledTests: request.disabledTests ?? [],
+    generatorMode: request.generatorMode ?? "static_pack",
+    agentMode: request.agentMode ?? false,
+    maxAgentAttempts: request.maxAgentAttempts ?? 5,
+  });
+
+export const getScanStatus = (scanId: string) =>
+  invokeCommand<ScanStatusDto>("scan_status", { scanId });
+
+export const pauseScan = (scanId: string) =>
+  invokeCommand<ScanStatusDto>("scan_pause", { scanId });
+
+export const resumeScan = (scanId: string) =>
+  invokeCommand<ScanStatusDto>("scan_resume", { scanId });
+
+export const stopScan = (scanId: string) =>
+  invokeCommand<ScanStatusDto>("scan_stop", { scanId });

@@ -17,7 +17,9 @@ pub trait TargetRepository: Send + Sync {
     async fn create(&self, input: CreateTarget) -> AisecResult<Target>;
     async fn get(&self, id: &str) -> AisecResult<Target>;
     async fn list_by_project(&self, project_id: &str) -> AisecResult<Vec<Target>>;
+    async fn list_all(&self) -> AisecResult<Vec<Target>>;
     async fn update(&self, id: &str, input: UpdateTarget) -> AisecResult<Target>;
+    async fn update_descriptor(&self, id: &str, descriptor_json: &str) -> AisecResult<Target>;
     async fn delete(&self, id: &str) -> AisecResult<()>;
 }
 
@@ -36,6 +38,7 @@ pub trait EndpointRepository: Send + Sync {
     async fn create_many(&self, inputs: Vec<CreateEndpoint>) -> AisecResult<Vec<Endpoint>>;
     async fn get(&self, id: &str) -> AisecResult<Endpoint>;
     async fn list_by_scan(&self, scan_id: &str) -> AisecResult<Vec<Endpoint>>;
+    async fn update(&self, id: &str, input: UpdateEndpoint) -> AisecResult<Endpoint>;
     async fn delete_by_scan(&self, scan_id: &str) -> AisecResult<u64>;
 }
 

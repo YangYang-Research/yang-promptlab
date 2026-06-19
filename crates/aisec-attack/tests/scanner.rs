@@ -1,9 +1,9 @@
 //! Prompt Injection Scanner integration tests.
 //!
 //! These use a real local HTTP server (wiremock) as the *target under test* and
-//! exercise the full scanner path: real reqwest HTTP requests, real response
-//! capture, real evaluation, and real SQLite persistence. Nothing about the
-//! scanner is mocked, and findings are derived from actual responses.
+//! exercise the full scanner path: harness transport, real response capture,
+//! real evaluation, and real SQLite persistence. Nothing about the scanner is
+//! mocked, and findings are derived from actual responses.
 #![cfg(feature = "storage")]
 
 use aisec_attack::scanner::{PromptInjectionScanner, ScanContext};

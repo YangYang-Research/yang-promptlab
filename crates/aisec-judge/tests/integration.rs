@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use aisec_judge::{
-    deterministic_engine, JsonMockRuntime, JudgeConfig, JudgeEngine, JudgeRequest, ModelRole,
-    ModelRolePool,
+    deterministic_engine, JsonMockRuntime, JudgeConfig, JudgeEngine, JudgeMode, JudgeRequest,
+    ModelRole, ModelRolePool,
 };
 use tokio::sync::Mutex;
 
@@ -20,7 +20,10 @@ async fn multi_model_consensus_all_roles() {
         r#"{"vulnerable": true, "confidence": 0.85, "severity": "high", "rationale": "complied", "indicators": ["compliance"]}"#,
     ))));
 
-    let engine = JudgeEngine::new(JudgeConfig::default(), pool);
+    let mut config = JudgeConfig::default();
+    config.mode = JudgeMode::LocalLlm;
+    config.enable_llm = true;
+    let engine = JudgeEngine::new(config, pool);
     let verdict = engine
         .judge(JudgeRequest {
             probe_id: "consensus-1".into(),
@@ -34,7 +37,7 @@ async fn multi_model_consensus_all_roles() {
 
     assert!(verdict.vulnerable);
     assert!(verdict.confidence > 0.6);
-    assert_eq!(verdict.consensus.participating_evaluators, 5);
+    assert_eq!(verdict.consensus.participating_evaluators, 3);
     assert!(verdict
         .evaluator_results
         .iter()

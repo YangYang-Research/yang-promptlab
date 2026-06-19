@@ -27,6 +27,8 @@ tokio = { workspace = true, features = ["fs", "io-util", "process", "sync"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
 futures-util = "0.3"
+tokio-util = { version = "0.7", features = ["rt"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 llama-cpp-2 = { version = "0.1.146", optional = true }
 
 [[example]]

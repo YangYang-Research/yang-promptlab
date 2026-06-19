@@ -50,6 +50,7 @@ function coerceJobStatus(value: string, fallback: JobStatus = "completed"): JobS
   switch (value.toLowerCase()) {
     case "pending":
     case "running":
+    case "paused":
     case "completed":
     case "failed":
     case "cancelled":
@@ -65,12 +66,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function extractUrl(descriptor: unknown): string {
-  const obj = asRecord(descriptor);
-  if (obj && typeof obj.url === "string") return obj.url;
-  if (obj && typeof obj.base_url === "string") return obj.base_url as string;
-  return "";
-}
+import { extractAuthType, extractTargetUrl } from "@/features/scans/scanDetailsHelpers";
 
 function extractConfidence(evidence: unknown): number {
   const obj = asRecord(evidence);
@@ -118,12 +114,13 @@ export function mapTargets(targets: TargetDto[]): Target[] {
     id: t.id,
     projectId: t.project_id,
     name: t.name,
-    url: extractUrl(t.descriptor),
+    url: extractTargetUrl(t.descriptor),
     type: coerceTargetType(t.target_type),
     status: "pending",
     lastScanAt: null,
     fingerprint: null,
     tags: [],
+    authType: extractAuthType(t.descriptor),
   }));
 }
 
@@ -171,15 +168,43 @@ export function mapEndpoints(endpoints: EndpointDto[]): DiscoveredEndpoint[] {
     evidence: e.evidence,
     sourceUrl: e.source_url,
     discoveredAt: e.discovered_at,
+    fingerprint: e.fingerprint
+      ? {
+          confidence: e.fingerprint.confidence,
+          technologies: e.fingerprint.technologies,
+          agentFrameworks: e.fingerprint.agentFrameworks,
+          aiComponents: e.fingerprint.aiComponents,
+          attackRecommendations: e.fingerprint.attackRecommendations,
+          methodsUsed: e.fingerprint.methodsUsed,
+          primaryProvider: e.fingerprint.primaryProvider,
+          apiStyle: e.fingerprint.apiStyle,
+          platformProfile: e.fingerprint.platformProfile ?? {
+            platform: "",
+            version: "",
+            authType: "",
+            llmProvider: "",
+            memoryEnabled: false,
+            toolsEnabled: false,
+            ragEnabled: false,
+          },
+        }
+      : null,
   }));
 }
 
-export function mapReports(reports: ReportDto[], projects: ProjectDto[]): Report[] {
+export function mapReports(
+  reports: ReportDto[],
+  projects: ProjectDto[],
+  scans: ScanDto[] = [],
+): Report[] {
   const projectNames = new Map(projects.map((p) => [p.id, p.name]));
+  const scanNames = new Map(scans.map((s) => [s.id, s.name]));
   return reports.map((r) => ({
     id: r.id,
     projectId: r.project_id,
     projectName: projectNames.get(r.project_id) ?? "",
+    scanId: r.scan_id,
+    scanName: r.scan_id ? scanNames.get(r.scan_id) ?? r.scan_id.slice(0, 8) : "—",
     title: r.name,
     format: coerceReportFormat(r.format),
     status: coerceJobStatus(r.status),

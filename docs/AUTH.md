@@ -109,13 +109,22 @@ During recording/replay, the runner intercepts:
 
 ### Setup
 
+**Development** (system Node.js):
+
 ```bash
-cd crates/aisec-auth/playwright
-npm install
-npx playwright install chromium
+npm run setup:playwright
 ```
 
-Set `AuthEngineConfig.playwright_runner` if not using default crate path.
+**Release build** bundles Node.js + Playwright + Chromium automatically via `npm run bundle:playwright`
+(wired into `beforeBuildCommand` for `tauri build`). End users do not install Node or Playwright separately.
+
+Manual bundle (optional, also used by dev after bundling once):
+
+```bash
+npm run bundle:playwright
+```
+
+Bundled assets land in `src-tauri/resources/playwright/` (gitignored, ~300MB).
 
 ---
 

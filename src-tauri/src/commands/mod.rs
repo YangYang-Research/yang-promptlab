@@ -7,8 +7,18 @@ use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
 
 pub mod attack;
+pub mod auth;
 pub mod discovery;
 pub mod domain;
+pub mod generator;
+pub mod judge;
+pub mod models;
+pub mod planner;
+pub mod plugins;
+pub mod projects;
+pub mod runtime;
+pub mod scan;
+pub mod security;
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
@@ -38,7 +48,7 @@ pub fn app_info() -> CommandResult<AppInfoResponse> {
     Ok(AppInfoResponse {
         name: env!("CARGO_PKG_NAME"),
         version: env!("CARGO_PKG_VERSION"),
-        identifier: "com.aisec.desktop",
+        identifier: "yangyang.aisec.app",
     })
 }
 

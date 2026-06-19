@@ -5,6 +5,7 @@ pub fn huggingface_url(repo: &str, filename: &str, revision: Option<&str>) -> St
 }
 
 /// HuggingFace HTTP client helpers.
+#[derive(Clone)]
 pub struct HuggingFaceClient {
     client: reqwest::Client,
 }

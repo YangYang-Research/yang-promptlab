@@ -83,6 +83,9 @@ pub struct AttackContext {
     pub target_id: Option<String>,
     pub target: AttackTarget,
     pub budget: AttackBudget,
+    /// Payloads produced by `aisec-generator`; override attack builtins per category.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated_payloads: Option<HashMap<AttackCategory, Vec<AttackPayload>>>,
     #[serde(default)]
     pub metadata: HashMap<String, serde_json::Value>,
 }
@@ -95,8 +98,17 @@ impl AttackContext {
             target_id: None,
             target,
             budget: AttackBudget::default(),
+            generated_payloads: None,
             metadata: HashMap::new(),
         }
+    }
+
+    pub fn with_generated_payloads(
+        mut self,
+        payloads: HashMap<AttackCategory, Vec<AttackPayload>>,
+    ) -> Self {
+        self.generated_payloads = Some(payloads);
+        self
     }
 }
 
@@ -156,6 +168,7 @@ pub struct AttackResponse {
     pub headers: HashMap<String, String>,
     pub body: String,
     pub duration_ms: u64,
+    pub normalized: aisec_harness::NormalizedResponse,
 }
 
 /// Severity of a successful attack evaluation.

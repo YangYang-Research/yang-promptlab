@@ -154,17 +154,38 @@ fn select_payloads(
     plan: &crate::types::AttackPlan,
     ctx: &AttackContext,
 ) -> Vec<AttackPayload> {
-    let defaults = attack.default_payloads();
-    if plan.payload_ids.is_empty() {
-        return defaults
-            .into_iter()
-            .take(ctx.budget.max_payloads)
-            .collect();
+    let category = attack.category();
+    if let Some(map) = &ctx.generated_payloads {
+        if let Some(generated) = map.get(&category) {
+            let filtered = filter_payload_list(generated, plan);
+            if !filtered.is_empty() {
+                return filtered
+                    .into_iter()
+                    .take(ctx.budget.max_payloads)
+                    .collect();
+            }
+        }
     }
 
-    defaults
+    let defaults = attack.default_payloads();
+    let filtered = filter_payload_list(&defaults, plan);
+    filtered
         .into_iter()
+        .take(ctx.budget.max_payloads)
+        .collect()
+}
+
+fn filter_payload_list(
+    payloads: &[AttackPayload],
+    plan: &crate::types::AttackPlan,
+) -> Vec<AttackPayload> {
+    if plan.payload_ids.is_empty() {
+        return payloads.to_vec();
+    }
+    payloads
+        .iter()
         .filter(|p| plan.payload_ids.iter().any(|id| id == &p.id))
+        .cloned()
         .collect()
 }
 

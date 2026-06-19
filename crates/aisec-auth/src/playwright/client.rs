@@ -13,8 +13,8 @@ use tracing::instrument;
 
 use crate::config::AuthEngineConfig;
 use crate::playwright::protocol::{
-    PlaywrightOptions, PlaywrightResponse, RecordLoginRequest, RecordLoginResult,
-    ReplaySessionRequest, ReplaySessionResult,
+    ExecuteHttpResult, PlaywrightOptions, PlaywrightResponse, RecordLoginRequest,
+    RecordLoginResult, ReplaySessionRequest, ReplaySessionResult,
 };
 use crate::types::{CookieRecord, ExtractedToken, RecordLoginOptions, ReplayOptions};
 
@@ -30,6 +30,12 @@ pub trait PlaywrightDriver: Send + Sync {
         config: Value,
         options: RecordLoginOptions,
     ) -> AisecResult<RecordLoginResult>;
+    async fn begin_interactive_login(
+        &self,
+        url: &str,
+        options: RecordLoginOptions,
+    ) -> AisecResult<()>;
+    async fn finish_interactive_login(&self) -> AisecResult<RecordLoginResult>;
     async fn replay_session(
         &self,
         url: &str,
@@ -40,6 +46,23 @@ pub trait PlaywrightDriver: Send + Sync {
     async fn extract_tokens(&self, url: Option<&str>) -> AisecResult<Vec<ExtractedToken>>;
     async fn get_cookies(&self, url: Option<&str>) -> AisecResult<Vec<CookieRecord>>;
     async fn set_cookies(&self, cookies: Vec<CookieRecord>) -> AisecResult<Vec<CookieRecord>>;
+    async fn execute_http_request(
+        &self,
+        url: &str,
+        method: &str,
+        headers: std::collections::HashMap<String, String>,
+        body: Option<String>,
+        storage_state_path: Option<&Path>,
+    ) -> AisecResult<ExecuteHttpResult>;
+    async fn send_chat_prompt(
+        &self,
+        url: &str,
+        prompt: &str,
+        input_selector: &str,
+        submit_selector: &str,
+        response_selector: &str,
+        storage_state_path: Option<&Path>,
+    ) -> AisecResult<String>;
 }
 
 pub struct PlaywrightClient {
@@ -89,12 +112,22 @@ impl PlaywrightClient {
         }
 
         let runner = self.runner_path()?;
-        let mut child = Command::new(&self.config.node_bin)
+        let mut command = Command::new(&self.config.node_bin);
+        command
             .arg(&runner)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+
+        if let Some(workdir) = &self.config.runner_workdir {
+            command.current_dir(workdir);
+        }
+        if let Some(browsers_path) = &self.config.playwright_browsers_path {
+            command.env("PLAYWRIGHT_BROWSERS_PATH", browsers_path);
+        }
+
+        let mut child = command
             .spawn()
             .map_err(|err| AisecError::internal(format!("failed to spawn playwright runner: {err}")))?;
 
@@ -234,6 +267,43 @@ impl PlaywrightDriver for PlaywrightClient {
             .await
     }
 
+    async fn begin_interactive_login(
+        &self,
+        url: &str,
+        options: RecordLoginOptions,
+    ) -> AisecResult<()> {
+        self.launch(PlaywrightOptions {
+            headless: false,
+            headed: true,
+            timeout_ms: options.timeout_ms,
+            interactive_timeout_ms: options.interactive_timeout_ms,
+            ..Default::default()
+        })
+        .await?;
+
+        let _: serde_json::Value = self
+            .call(
+                "begin_interactive_login",
+                serde_json::json!({
+                    "url": url,
+                    "options": PlaywrightOptions {
+                        headless: false,
+                        headed: true,
+                        timeout_ms: options.timeout_ms,
+                        interactive_timeout_ms: options.interactive_timeout_ms,
+                        ..Default::default()
+                    }
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn finish_interactive_login(&self) -> AisecResult<RecordLoginResult> {
+        self.call("finish_interactive_login", serde_json::json!({}))
+            .await
+    }
+
     async fn replay_session(
         &self,
         url: &str,
@@ -279,6 +349,67 @@ impl PlaywrightDriver for PlaywrightClient {
             .call("set_cookies", serde_json::json!({ "cookies": cookies }))
             .await?;
         parse_cookies(&result["cookies"])
+    }
+
+    async fn execute_http_request(
+        &self,
+        url: &str,
+        method: &str,
+        headers: std::collections::HashMap<String, String>,
+        body: Option<String>,
+        storage_state_path: Option<&Path>,
+    ) -> AisecResult<ExecuteHttpResult> {
+        self.call(
+            "execute_http_request",
+            serde_json::json!({
+                "url": url,
+                "method": method,
+                "headers": headers,
+                "body": body,
+                "storage_state_path": storage_state_path.map(|p| p.to_string_lossy().into_owned()),
+                "options": PlaywrightOptions {
+                    headless: true,
+                    storage_state_path: storage_state_path.map(|p| p.to_string_lossy().into_owned()),
+                    ..Default::default()
+                },
+            }),
+        )
+        .await
+    }
+
+    async fn send_chat_prompt(
+        &self,
+        url: &str,
+        prompt: &str,
+        input_selector: &str,
+        submit_selector: &str,
+        response_selector: &str,
+        storage_state_path: Option<&Path>,
+    ) -> AisecResult<String> {
+        let result: serde_json::Value = self
+            .call(
+                "send_chat_prompt",
+                serde_json::json!({
+                    "url": url,
+                    "prompt": prompt,
+                    "input_selector": input_selector,
+                    "submit_selector": submit_selector,
+                    "response_selector": response_selector,
+                    "storage_state_path": storage_state_path.map(|p| p.to_string_lossy().into_owned()),
+                    "options": PlaywrightOptions {
+                        headless: false,
+                        headed: true,
+                        storage_state_path: storage_state_path.map(|p| p.to_string_lossy().into_owned()),
+                        ..Default::default()
+                    },
+                }),
+            )
+            .await?;
+        result
+            .get("response_text")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| aisec_core::AisecError::internal("missing response_text from chat prompt"))
     }
 }
 
