@@ -44,7 +44,7 @@ import {
   type ModelRegistryInfoDto,
   type ModelVaultStatsDto,
 } from "@/shared/ipc/models";
-import { pickModelImportFile } from "@/shared/ipc/dialog";
+import { pickAnyModelImportFile } from "@/shared/ipc/dialog";
 import { getRuntimeStatus, type RuntimeStatusDto } from "@/shared/ipc/runtime";
 import { formatBytes } from "@/shared/utils/format";
 import { DownloadManagerCard } from "./DownloadManagerCard";
@@ -62,7 +62,7 @@ export function ModelsPage() {
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatusDto | null>(null);
   const [importName, setImportName] = useState("");
   const [importPath, setImportPath] = useState("");
-  const [importBusy, setImportBusy] = useState<"gguf" | "zip" | "browse-gguf" | "browse-zip" | null>(null);
+  const [importBusy, setImportBusy] = useState<"browse" | "import" | null>(null);
   const [downloadProgress, setDownloadProgress] =
     useState<ModelDownloadProgressDto | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -169,11 +169,11 @@ export function ModelsPage() {
     return () => window.clearInterval(timer);
   }, [backendConnected, downloadProgress, pollDownloadStatus]);
 
-  async function handleBrowseImport(kind: "gguf" | "zip") {
+  async function handleBrowse() {
     setError(null);
-    setImportBusy(kind === "gguf" ? "browse-gguf" : "browse-zip");
+    setImportBusy("browse");
     try {
-      const path = await pickModelImportFile(kind);
+      const path = await pickAnyModelImportFile();
       if (!path) {
         return;
       }
@@ -240,6 +240,12 @@ export function ModelsPage() {
   }
 
   async function handleInstall(entry: ModelCatalogEntryDto) {
+    // Only one download can run at a time. Ignore clicks while one is active
+    // (the button is also disabled in this state) so we never clear the
+    // in-flight progress card or trigger an "already active" error.
+    if (downloadingId !== null) {
+      return;
+    }
     setError(null);
     // Clear any previous terminal (failed/completed) download card before retrying.
     setDownloadProgress(null);
@@ -255,13 +261,16 @@ export function ModelsPage() {
     }
   }
 
-  async function handleImport(kind: "gguf" | "zip") {
+  async function handleImport() {
     if (!importName.trim() || !importPath.trim()) {
       setError("Import name and file path are required");
       return;
     }
+    const kind: "gguf" | "zip" = importPath.trim().toLowerCase().endsWith(".zip")
+      ? "zip"
+      : "gguf";
     setError(null);
-    setImportBusy(kind);
+    setImportBusy("import");
     try {
       const request = { name: importName.trim(), path: importPath.trim() };
       if (kind === "gguf") {
@@ -344,7 +353,7 @@ export function ModelsPage() {
   return (
     <div className="page">
       <PageHeader
-        title="Models"
+        title="AI Models"
         description="Install GGUF models via the built-in registry and configure the hybrid judge engine"
         actions={
           <Button variant="primary" disabled={saving || loading} onClick={() => void handleSave()}>
@@ -488,7 +497,55 @@ export function ModelsPage() {
         )}
 
         <Card className="model-card model-card--wide">
-          <h3 className="card__title">Import Local Model</h3>
+          <h3 className="card__title">Huggingface Models</h3>
+          <p className="text-muted text-sm">
+            Built-in GGUF catalog from <code>resources/models.json</code>. Entries download
+            directly from <code>download_url</code> into the vault.
+          </p>
+          <div className="model-catalog">
+            {catalog.map((entry) => {
+              const alreadyAdded = installed.some((model) => model.name === entry.name);
+              return (
+                <div key={entry.id} className="model-catalog__row">
+                  <div>
+                    <strong>
+                      {entry.name}
+                      {entry.recommended ? " · recommended" : ""}
+                    </strong>
+                    <p className="text-muted text-sm">{entry.description}</p>
+                    <p className="text-muted text-sm">
+                      {entry.engine} · {entry.format} · {entry.purpose}
+                      {entry.quant ? ` · ${entry.quant}` : ""}
+                      {entry.sizeLabel ? ` · ${entry.sizeLabel}` : ""}
+                      {entry.sizeGb != null ? ` · ${entry.sizeGb.toFixed(1)} GB` : ""}
+                    </p>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    disabled={
+                      !backendConnected ||
+                      installingId !== null ||
+                      downloadingId !== null ||
+                      alreadyAdded
+                    }
+                    onClick={() => void handleInstall(entry)}
+                  >
+                    {alreadyAdded
+                      ? "Added"
+                      : downloadingId === entry.id
+                        ? "Downloading…"
+                        : installingId === entry.id
+                          ? "Starting…"
+                          : "Add"}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+
+        <Card className="model-card model-card--wide">
+          <h3 className="card__title">Import Model</h3>
           <p className="text-muted text-sm">
             Use the native file picker to register a GGUF file or extract one from a ZIP package
             into the vault.
@@ -518,16 +575,9 @@ export function ModelsPage() {
                 <Button
                   variant="secondary"
                   disabled={!backendConnected || importBusy !== null}
-                  onClick={() => void handleBrowseImport("gguf")}
+                  onClick={() => void handleBrowse()}
                 >
-                  {importBusy === "browse-gguf" ? "Opening…" : "Browse GGUF"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  disabled={!backendConnected || importBusy !== null}
-                  onClick={() => void handleBrowseImport("zip")}
-                >
-                  {importBusy === "browse-zip" ? "Opening…" : "Browse ZIP"}
+                  {importBusy === "browse" ? "Opening…" : "Browse"}
                 </Button>
               </div>
             </div>
@@ -536,59 +586,10 @@ export function ModelsPage() {
             <Button
               variant="secondary"
               disabled={!backendConnected || importBusy !== null}
-              onClick={() => void handleImport("gguf")}
+              onClick={() => void handleImport()}
             >
-              {importBusy === "gguf" ? "Importing…" : "Import GGUF"}
+              {importBusy === "import" ? "Importing…" : "Import"}
             </Button>
-            <Button
-              variant="ghost"
-              disabled={!backendConnected || importBusy !== null}
-              onClick={() => void handleImport("zip")}
-            >
-              {importBusy === "zip" ? "Importing…" : "Import ZIP"}
-            </Button>
-          </div>
-        </Card>
-
-        <Card className="model-card model-card--wide">
-          <h3 className="card__title">Browse Registry</h3>
-          <p className="text-muted text-sm">
-            Built-in GGUF catalog from <code>resources/models.json</code>. Entries download
-            directly from <code>download_url</code> into the vault.
-          </p>
-          <div className="model-catalog">
-            {catalog.map((entry) => (
-              <div key={entry.id} className="model-catalog__row">
-                <div>
-                  <strong>
-                    {entry.name}
-                    {entry.recommended ? " · recommended" : ""}
-                  </strong>
-                  <p className="text-muted text-sm">{entry.description}</p>
-                  <p className="text-muted text-sm">
-                    {entry.engine} · {entry.format} · {entry.purpose}
-                    {entry.quant ? ` · ${entry.quant}` : ""}
-                    {entry.sizeLabel ? ` · ${entry.sizeLabel}` : ""}
-                    {entry.sizeGb != null ? ` · ${entry.sizeGb.toFixed(1)} GB` : ""}
-                  </p>
-                </div>
-                <Button
-                  variant="secondary"
-                  disabled={
-                    !backendConnected ||
-                    installingId !== null ||
-                    (downloadingId !== null && downloadingId !== entry.id)
-                  }
-                  onClick={() => void handleInstall(entry)}
-                >
-                  {downloadingId === entry.id
-                    ? "Downloading…"
-                    : installingId === entry.id
-                      ? "Starting…"
-                      : "Download"}
-                </Button>
-              </div>
-            ))}
           </div>
         </Card>
 

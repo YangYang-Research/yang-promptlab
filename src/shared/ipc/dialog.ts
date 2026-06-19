@@ -24,3 +24,20 @@ export async function pickModelImportFile(kind: ModelImportKind): Promise<string
   }
   return selected;
 }
+
+/** Native OS file picker accepting either a GGUF model or a ZIP package. */
+export async function pickAnyModelImportFile(): Promise<string | null> {
+  const selected = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "Model file (GGUF or ZIP)", extensions: ["gguf", "zip"] }],
+  });
+
+  if (selected === null) {
+    return null;
+  }
+  if (Array.isArray(selected)) {
+    return selected[0] ?? null;
+  }
+  return selected;
+}
