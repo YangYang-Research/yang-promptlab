@@ -46,6 +46,7 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
       notify(`Project "${trimmed}" created`, "success");
       reset();
       onClose();
+      // New Project flow: go straight into the Scan Wizard with the project locked.
       navigate(`/scans/new?projectId=${encodeURIComponent(project.id)}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create project";
