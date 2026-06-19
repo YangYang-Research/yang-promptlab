@@ -191,6 +191,7 @@ impl DownloadManager {
             eta_seconds: None,
             resumed,
             updated_at: OffsetDateTime::now_utc(),
+            error: None,
         })
     }
 
@@ -366,6 +367,7 @@ impl DownloadManager {
             eta_seconds: Some(0),
             resumed,
             updated_at: OffsetDateTime::now_utc(),
+            error: None,
         };
         *progress_slot.lock().await = done.clone();
         Ok(done)

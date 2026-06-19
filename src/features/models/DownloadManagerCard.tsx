@@ -100,6 +100,17 @@ export function DownloadManagerCard({
         </div>
       </div>
 
+      {progress.status === "failed" && (
+        <div className="download-manager__error">
+          <p className="text-danger">{progress.error ?? "Download failed."}</p>
+          <div className="model-card__actions">
+            <Button variant="ghost" disabled={!backendConnected} onClick={onCancel}>
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      )}
+
       {isActive && (
         <div className="model-card__actions">
           <Button

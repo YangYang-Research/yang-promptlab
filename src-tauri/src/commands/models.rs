@@ -121,6 +121,7 @@ pub struct ModelDownloadProgressDto {
     pub eta_seconds: Option<u64>,
     pub resumed: bool,
     pub destination: String,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -240,6 +241,7 @@ fn progress_to_dto(progress: &DownloadProgress) -> ModelDownloadProgressDto {
         eta_seconds: progress.eta_seconds,
         resumed: progress.resumed,
         destination: progress.destination.to_string_lossy().into_owned(),
+        error: progress.error.clone(),
     }
 }
 
@@ -252,7 +254,9 @@ async fn sync_download_state(state: &AppState) -> CommandResult<Option<ModelEntr
     {
         return Ok(Some(entry_to_dto(&entry)));
     }
-    manager.download_coordinator().clear_if_finished().await;
+    // Note: do NOT clear failed downloads here — they must remain queryable so the
+    // frontend can surface the failure reason. Completed downloads are consumed by
+    // `finalize_active_download` above; failed ones are replaced on the next start.
     Ok(None)
 }
 
@@ -565,6 +569,7 @@ mod tests {
             eta_seconds: Some(5),
             resumed: false,
             updated_at: time::OffsetDateTime::now_utc(),
+            error: None,
         });
         assert_eq!(dto.percent, Some(50.0));
         assert_eq!(dto.remaining_bytes, Some(500));

@@ -103,7 +103,12 @@ export function ModelsPage() {
     }
     if (status.progress) {
       setDownloadProgress(status.progress);
-      setDownloadingId(status.progress.catalogId);
+      if (status.progress.status === "failed") {
+        setDownloadingId(null);
+        setError(status.progress.error ?? "Model download failed");
+      } else {
+        setDownloadingId(status.progress.catalogId);
+      }
     } else {
       setDownloadProgress(null);
       setDownloadingId(null);
@@ -151,6 +156,11 @@ export function ModelsPage() {
 
   useEffect(() => {
     if (!backendConnected || !downloadProgress) {
+      return;
+    }
+    // Stop polling once the download reaches a terminal state so the failed/completed
+    // card (and its error message) stays visible instead of being cleared.
+    if (downloadProgress.status === "failed" || downloadProgress.status === "completed") {
       return;
     }
     const timer = window.setInterval(() => {
@@ -231,6 +241,8 @@ export function ModelsPage() {
 
   async function handleInstall(entry: ModelCatalogEntryDto) {
     setError(null);
+    // Clear any previous terminal (failed/completed) download card before retrying.
+    setDownloadProgress(null);
     setInstallingId(entry.id);
     try {
       const progress = await startModelDownload({ catalogId: entry.id });
