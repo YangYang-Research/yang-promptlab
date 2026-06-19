@@ -240,6 +240,12 @@ export function ModelsPage() {
   }
 
   async function handleInstall(entry: ModelCatalogEntryDto) {
+    // Only one download can run at a time. Ignore clicks while one is active
+    // (the button is also disabled in this state) so we never clear the
+    // in-flight progress card or trigger an "already active" error.
+    if (downloadingId !== null) {
+      return;
+    }
     setError(null);
     // Clear any previous terminal (failed/completed) download card before retrying.
     setDownloadProgress(null);
@@ -577,7 +583,7 @@ export function ModelsPage() {
                   disabled={
                     !backendConnected ||
                     installingId !== null ||
-                    (downloadingId !== null && downloadingId !== entry.id)
+                    downloadingId !== null
                   }
                   onClick={() => void handleInstall(entry)}
                 >
