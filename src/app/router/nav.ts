@@ -15,7 +15,7 @@ export const navItems: NavItem[] = [
   { id: "attacks", label: "Attacks", path: "/attacks", icon: "attacks", section: "main" },
   { id: "findings", label: "Findings", path: "/findings", icon: "findings", section: "main" },
   { id: "reports", label: "Reports", path: "/reports", icon: "reports", section: "main" },
-  { id: "models", label: "Models", path: "/models", icon: "models", section: "system" },
+  { id: "models", label: "AI Models", path: "/models", icon: "models", section: "system" },
   { id: "plugins", label: "Plugins", path: "/plugins", icon: "plugins", section: "system" },
   { id: "settings", label: "Settings", path: "/settings", icon: "settings", section: "system" },
 ];
