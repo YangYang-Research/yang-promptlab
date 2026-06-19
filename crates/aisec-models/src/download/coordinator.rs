@@ -168,6 +168,8 @@ impl DownloadCoordinator {
                     } else {
                         slot.status = DownloadStatus::Failed;
                         slot.error = Some(err.to_string());
+                        let state_path = destination_for_task.with_extension("download.json");
+                        let _ = tokio::fs::remove_file(state_path).await;
                     }
                     slot.speed_bytes_per_sec = None;
                     slot.eta_seconds = None;
@@ -264,6 +266,8 @@ impl DownloadCoordinator {
                     } else {
                         slot.status = DownloadStatus::Failed;
                         slot.error = Some(err.to_string());
+                        let state_path = destination_for_task.with_extension("download.json");
+                        let _ = tokio::fs::remove_file(state_path).await;
                     }
                     slot.speed_bytes_per_sec = None;
                     slot.eta_seconds = None;

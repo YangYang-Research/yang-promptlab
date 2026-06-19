@@ -3,7 +3,7 @@ export type NavItem = {
   label: string;
   path: string;
   icon: string;
-  section?: "main" | "system";
+  section?: "main" | "ai" | "advanced" | "system";
 };
 
 export const navItems: NavItem[] = [
@@ -15,8 +15,9 @@ export const navItems: NavItem[] = [
   { id: "attacks", label: "Attacks", path: "/attacks", icon: "attacks", section: "main" },
   { id: "findings", label: "Findings", path: "/findings", icon: "findings", section: "main" },
   { id: "reports", label: "Reports", path: "/reports", icon: "reports", section: "main" },
-  { id: "models", label: "AI Models", path: "/models", icon: "models", section: "system" },
-  { id: "plugins", label: "Plugins", path: "/plugins", icon: "plugins", section: "system" },
+  { id: "judge", label: "Judge Provider", path: "/judge", icon: "judge", section: "ai" },
+  { id: "models", label: "Models", path: "/models", icon: "models", section: "ai" },
+  { id: "plugins", label: "Plugins", path: "/plugins", icon: "plugins", section: "advanced" },
   { id: "settings", label: "Settings", path: "/settings", icon: "settings", section: "system" },
 ];
 

@@ -143,6 +143,19 @@ export function importModelZip(request: ModelImportRequest): Promise<ModelEntryD
   return invokeCommand<ModelEntryDto>("models_import_zip", { request });
 }
 
+export type ThirdPartyModelSaveRequest = {
+  provider: string;
+  model: string;
+  baseUrl?: string | null;
+  region?: string | null;
+};
+
+export function saveThirdPartyModel(
+  request: ThirdPartyModelSaveRequest,
+): Promise<ModelEntryDto> {
+  return invokeCommand<ModelEntryDto>("models_save_third_party", { request });
+}
+
 export function startModelDownload(request: ModelDownloadRequest): Promise<ModelDownloadProgressDto> {
   return invokeCommand<ModelDownloadProgressDto>("models_download_start", { request });
 }

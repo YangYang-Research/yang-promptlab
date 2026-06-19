@@ -22,6 +22,7 @@ use async_trait::async_trait;
 use tauri::async_runtime::Mutex as AsyncMutex;
 use crate::commands::attack::run_category_on_endpoint;
 use crate::jobs::ScanProgress;
+use crate::events::ScanProgressEmitter;
 use crate::session_auth::AttackRuntime;
 
 pub struct ScanAgentHost<'a> {
@@ -43,6 +44,7 @@ pub struct ScanAgentHost<'a> {
     pub progress: Arc<Mutex<ScanProgress>>,
     pub completed_units: Arc<Mutex<u64>>,
     pub findings_total: Arc<Mutex<u64>>,
+    pub progress_emitter: Option<ScanProgressEmitter>,
 }
 
 #[async_trait]
@@ -132,7 +134,7 @@ impl AgentHost for ScanAgentHost<'_> {
             self.runtime_supervisor,
             self.plugin_manager.clone(),
             Some(&map),
-            None,
+            self.progress_emitter.as_ref(),
         )
         .await
         .map_err(|err| AgentError::Attack(err.to_string()))?;

@@ -13,7 +13,29 @@ function formatLine(event: ScanProgressEvent): string {
   const stamp = Number.isNaN(time.getTime())
     ? "--:--:--"
     : time.toLocaleTimeString(undefined, { hour12: false });
-  return `[${stamp}] ${event.message}`;
+
+  const parts = [`[${stamp}]`, event.message];
+  if (event.endpoint) {
+    const path = (() => {
+      try {
+        return new URL(event.endpoint).pathname;
+      } catch {
+        return event.endpoint;
+      }
+    })();
+    parts.push(`@ ${path}`);
+  }
+  if (event.payload) {
+    parts.push(`(${event.payload})`);
+  }
+  if (event.statusCode != null) {
+    const latency = event.latency != null ? ` ${event.latency}ms` : "";
+    parts.push(`→ ${event.statusCode}${latency}`);
+  }
+  if (event.findingId) {
+    parts.push(`[finding ${event.findingId.slice(0, 8)}]`);
+  }
+  return parts.join(" ");
 }
 
 export function ScanConsole({ scanId }: ScanConsoleProps) {

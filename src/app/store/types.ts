@@ -50,7 +50,16 @@ export type AppDataState = {
 
 export type LoadedData = Pick<
   AppDataState,
-  "projects" | "targets" | "scans" | "endpoints" | "findings" | "reports" | "models"
+  | "projects"
+  | "targets"
+  | "scans"
+  | "endpoints"
+  | "findings"
+  | "reports"
+  | "models"
+  | "discoveryJobs"
+  | "attackRuns"
+  | "activity"
 >;
 
 export type AppAction =

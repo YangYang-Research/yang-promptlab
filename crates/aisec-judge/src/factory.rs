@@ -136,7 +136,16 @@ fn build_remote_backend(
     let api_key = config.resolved_api_key().ok_or_else(|| {
         JudgeError::config("remote judge requires an API key or api_key_env")
     })?;
-    Ok(Arc::new(RemoteLlmBackend::new(settings.clone(), api_key)))
+    let aws_secret_access_key = config.resolved_aws_secret_access_key();
+    let mut settings = settings.clone();
+    if let Some(token) = config.resolved_aws_session_token() {
+        settings.aws_session_token = token;
+    }
+    Ok(Arc::new(RemoteLlmBackend::new(
+        settings,
+        api_key,
+        aws_secret_access_key,
+    )))
 }
 
 /// Validate connectivity for the configured judge provider.
@@ -171,6 +180,9 @@ pub async fn test_connectivity(
             })
         }
         JudgeMode::RemoteLlm => {
+            config
+                .validate_remote_for_test(false)
+                .map_err(JudgeError::config)?;
             let backend = build_remote_backend(&config.remote, config)?;
             match backend.health_check().await {
                 Ok(true) => Ok(JudgeConnectivityResult {

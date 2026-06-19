@@ -8,12 +8,14 @@ use time::OffsetDateTime;
 #[serde(rename_all = "lowercase")]
 pub enum ModelFormat {
     Gguf,
+    Api,
 }
 
 impl ModelFormat {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Gguf => "gguf",
+            Self::Api => "api",
         }
     }
 
@@ -32,6 +34,7 @@ pub enum ModelProvider {
     Ollama,
     HuggingFace,
     Gguf,
+    Remote,
 }
 
 impl ModelProvider {
@@ -40,6 +43,7 @@ impl ModelProvider {
             Self::Ollama => "ollama",
             Self::HuggingFace => "huggingface",
             Self::Gguf => "gguf",
+            Self::Remote => "remote",
         }
     }
 }
@@ -93,6 +97,12 @@ pub enum ModelSource {
     Ollama {
         model: String,
         base_url: String,
+    },
+    Remote {
+        provider: String,
+        model: String,
+        base_url: Option<String>,
+        region: Option<String>,
     },
 }
 

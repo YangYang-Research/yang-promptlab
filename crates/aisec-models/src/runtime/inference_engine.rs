@@ -35,6 +35,9 @@ impl LocalInferenceEngine {
                     llama: None,
                 })
             }
+            ModelProvider::Remote => Err(ModelError::invalid(
+                "remote cloud models use the third-party provider API, not local inference",
+            )),
             ModelProvider::HuggingFace | ModelProvider::Gguf => {
                 if !entry.file_path.exists() {
                     return Err(ModelError::invalid(format!(
@@ -135,6 +138,7 @@ pub fn infer_provider(source: &ModelSource) -> ModelProvider {
         ModelSource::Ollama { .. } => ModelProvider::Ollama,
         ModelSource::HuggingFace { .. } => ModelProvider::HuggingFace,
         ModelSource::Local { .. } => ModelProvider::Gguf,
+        ModelSource::Remote { .. } => ModelProvider::Remote,
     }
 }
 
@@ -144,6 +148,7 @@ pub fn infer_version(source: &ModelSource) -> String {
             .clone()
             .unwrap_or_else(|| filename.clone()),
         ModelSource::Ollama { model, .. } => model.clone(),
+        ModelSource::Remote { model, .. } => model.clone(),
         ModelSource::Local { path } => path
             .file_name()
             .and_then(|n| n.to_str())
@@ -155,7 +160,7 @@ pub fn infer_version(source: &ModelSource) -> String {
 pub fn infer_capabilities(provider: ModelProvider) -> crate::types::ModelCapabilities {
     match provider {
         ModelProvider::Ollama => crate::types::ModelCapabilities::ollama(),
-        ModelProvider::HuggingFace | ModelProvider::Gguf => {
+        ModelProvider::HuggingFace | ModelProvider::Gguf | ModelProvider::Remote => {
             crate::types::ModelCapabilities::gguf()
         }
     }

@@ -181,6 +181,55 @@ impl ModelRegistry {
         Ok(())
     }
 
+    pub fn upsert_entry(&mut self, entry: ModelEntry) {
+        self.entries.insert(entry.id.clone(), entry);
+    }
+
+    /// Register or update a third-party cloud API model reference (no local GGUF file).
+    pub fn register_remote(
+        &mut self,
+        provider: impl Into<String>,
+        model: impl Into<String>,
+        base_url: Option<String>,
+        region: Option<String>,
+    ) -> ModelEntry {
+        let provider_str = provider.into();
+        let model_str = model.into();
+        let id = format!("remote-{provider_str}");
+        let label = provider_label(&provider_str);
+        let name = format!("{label} — {model_str}");
+        let path = format!("remote://{provider_str}/{model_str}");
+        let source = ModelSource::Remote {
+            provider: provider_str.clone(),
+            model: model_str.clone(),
+            base_url,
+            region,
+        };
+        let now = OffsetDateTime::now_utc();
+        let entry = ModelEntry {
+            id: id.clone(),
+            name,
+            format: ModelFormat::Api,
+            provider: ModelProvider::Remote,
+            version: model_str,
+            capabilities: infer_capabilities(ModelProvider::Remote),
+            source,
+            file_path: PathBuf::from(path),
+            size_bytes: None,
+            checksum_sha256: None,
+            verified: true,
+            created_at: self
+                .entries
+                .get(&id)
+                .map(|existing| existing.created_at)
+                .unwrap_or(now),
+            updated_at: now,
+            metadata: serde_json::json!({ "remoteProvider": provider_str }),
+        };
+        self.upsert_entry(entry.clone());
+        entry
+    }
+
     pub fn update_verification(
         &mut self,
         id: &str,
@@ -210,6 +259,18 @@ impl ModelRegistry {
     pub fn model_file(vault: &Path, model_id: &str, filename: &str) -> PathBuf {
         Self::model_dir(vault, model_id).join(filename)
     }
+}
+
+fn provider_label(provider: &str) -> String {
+    match provider {
+        "openai" => "OpenAI",
+        "anthropic" => "Anthropic",
+        "gemini" | "google" => "Google",
+        "azure" => "Azure",
+        "bedrock" => "AWS Bedrock",
+        other => other,
+    }
+    .into()
 }
 
 #[cfg(test)]

@@ -110,6 +110,15 @@ pub struct ModelDownloadRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ThirdPartyModelSaveRequest {
+    pub provider: String,
+    pub model: String,
+    pub base_url: Option<String>,
+    pub region: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelDownloadProgressDto {
     pub catalog_id: String,
     pub status: String,
@@ -347,6 +356,29 @@ pub async fn models_install(
     let entry = manager
         .install_catalog(&request.catalog_id, None)
         .await
+        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+    Ok(entry_to_dto(&entry))
+}
+
+#[tauri::command]
+pub async fn models_save_third_party(
+    state: State<'_, AppState>,
+    request: ThirdPartyModelSaveRequest,
+) -> CommandResult<ModelEntryDto> {
+    if request.model.trim().is_empty() {
+        return Err(CommandError::invalid_input("model name is required"));
+    }
+    if request.provider.trim().is_empty() {
+        return Err(CommandError::invalid_input("provider is required"));
+    }
+    let mut manager = state.model_manager().lock().await;
+    let entry = manager
+        .register_third_party(
+            request.provider.trim(),
+            request.model.trim(),
+            request.base_url.filter(|value| !value.trim().is_empty()),
+            request.region.filter(|value| !value.trim().is_empty()),
+        )
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
     Ok(entry_to_dto(&entry))
 }

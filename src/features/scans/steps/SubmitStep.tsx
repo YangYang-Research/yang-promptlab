@@ -75,7 +75,10 @@ export function SubmitStep({
   if (submittedScanId && status) {
     const isRunning = ["running", "paused", "pending"].includes(status.status);
     const isSuccess = status.status === "completed";
-    const isFailed = status.status === "failed" || status.status === "stopped";
+    const isFailed =
+      status.status === "failed" ||
+      status.status === "stopped" ||
+      status.status === "cancelled";
 
     return (
       <div className="wizard-submitted">

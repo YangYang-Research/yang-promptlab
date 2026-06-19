@@ -429,6 +429,7 @@ async fn run_agent_scan_job(
             progress: progress.clone(),
             completed_units: completed_units.clone(),
             findings_total: findings_arc.clone(),
+            progress_emitter: Some(progress_emitter.clone()),
         };
 
         match run_agent_endpoint(&mut host, &config).await {

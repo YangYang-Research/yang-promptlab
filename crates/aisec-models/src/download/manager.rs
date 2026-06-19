@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use reqwest::header::{CONTENT_LENGTH, RANGE};
+use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE, RANGE};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
@@ -25,7 +25,8 @@ impl Default for DownloadOptions {
     fn default() -> Self {
         Self {
             chunk_size: 1024 * 1024,
-            timeout_ms: 300_000,
+            // Large GGUF files (4GB+) need hours on typical links.
+            timeout_ms: 7_200_000,
         }
     }
 }
@@ -110,6 +111,9 @@ impl DownloadManager {
         if let Some(state) = &existing {
             if state.url == url {
                 downloaded = downloaded.max(state.downloaded_bytes);
+            } else {
+                downloaded = 0;
+                Self::clear_state(destination).await?;
             }
         }
 
@@ -133,24 +137,14 @@ impl DownloadManager {
             file.seek(std::io::SeekFrom::Start(downloaded)).await?;
         }
 
-        let timeout = std::time::Duration::from_millis(self.options.timeout_ms);
-        let mut request = self.hf.client().get(url).timeout(timeout);
-        if downloaded > 0 {
-            request = request.header(RANGE, format!("bytes={downloaded}-"));
-        }
-
+        let request = build_download_request(self.hf.client(), url, downloaded, self.options.timeout_ms);
         let response = request
             .send()
             .await
-            .map_err(|e| ModelError::download(e.to_string()))?;
+            .map_err(|e| map_download_http_error(url, e))?;
 
-        if !response.status().is_success() && response.status().as_u16() != 206 {
-            return Err(ModelError::download(format!(
-                "HTTP {} for {}",
-                response.status(),
-                url
-            )));
-        }
+        downloaded = normalize_resume_start(&response, downloaded, &mut file, url).await?;
+        validate_binary_response(&response, url).await?;
 
         let total_bytes = parse_content_length(&response, downloaded);
         let mut stream = response.bytes_stream();
@@ -160,7 +154,7 @@ impl DownloadManager {
             .next()
             .await
             .transpose()
-            .map_err(|e| ModelError::download(e.to_string()))?
+            .map_err(|e| map_download_stream_error(url, e))?
         {
             file.write_all(&chunk).await?;
             downloaded += chunk.len() as u64;
@@ -241,6 +235,9 @@ impl DownloadManager {
         if let Some(state) = &existing {
             if state.url == url {
                 downloaded = downloaded.max(state.downloaded_bytes);
+            } else {
+                downloaded = 0;
+                Self::clear_state(destination).await?;
             }
         }
 
@@ -264,11 +261,7 @@ impl DownloadManager {
             file.seek(std::io::SeekFrom::Start(downloaded)).await?;
         }
 
-        let timeout = std::time::Duration::from_millis(self.options.timeout_ms);
-        let mut request = self.hf.client().get(url).timeout(timeout);
-        if downloaded > 0 {
-            request = request.header(RANGE, format!("bytes={downloaded}-"));
-        }
+        let request = build_download_request(self.hf.client(), url, downloaded, self.options.timeout_ms);
 
         {
             let mut slot = progress_slot.lock().await;
@@ -283,20 +276,16 @@ impl DownloadManager {
         let response = request
             .send()
             .await
-            .map_err(|e| ModelError::download(e.to_string()))?;
+            .map_err(|e| map_download_http_error(url, e))?;
 
-        if !response.status().is_success() && response.status().as_u16() != 206 {
-            return Err(ModelError::download(format!(
-                "HTTP {} for {}",
-                response.status(),
-                url
-            )));
-        }
+        downloaded = normalize_resume_start(&response, downloaded, &mut file, url).await?;
+        validate_binary_response(&response, url).await?;
 
         let total_bytes = parse_content_length(&response, downloaded);
         {
             let mut slot = progress_slot.lock().await;
             slot.total_bytes = total_bytes;
+            slot.downloaded_bytes = downloaded;
         }
 
         let mut stream = response.bytes_stream();
@@ -309,7 +298,7 @@ impl DownloadManager {
             .next()
             .await
             .transpose()
-            .map_err(|e| ModelError::download(e.to_string()))?
+            .map_err(|e| map_download_stream_error(url, e))?
         {
             control.wait_if_paused().await?;
             control.check_cancelled()?;
@@ -371,6 +360,88 @@ impl DownloadManager {
         };
         *progress_slot.lock().await = done.clone();
         Ok(done)
+    }
+}
+
+fn build_download_request(
+    client: &reqwest::Client,
+    url: &str,
+    downloaded: u64,
+    timeout_ms: u64,
+) -> reqwest::RequestBuilder {
+    let mut request = client
+        .get(url)
+        .header(reqwest::header::ACCEPT_ENCODING, "identity");
+    if timeout_ms > 0 {
+        request = request.timeout(std::time::Duration::from_millis(timeout_ms));
+    }
+    if downloaded > 0 {
+        request = request.header(RANGE, format!("bytes={downloaded}-"));
+    }
+    request
+}
+
+async fn normalize_resume_start(
+    response: &reqwest::Response,
+    downloaded: u64,
+    file: &mut tokio::fs::File,
+    url: &str,
+) -> ModelResult<u64> {
+    let status = response.status().as_u16();
+    if status == 416 {
+        file.set_len(0).await.map_err(ModelError::Io)?;
+        file.seek(std::io::SeekFrom::Start(0)).await.map_err(ModelError::Io)?;
+        return Err(ModelError::download(format!(
+            "stale resume offset for {url}; cleared partial file — retry download"
+        )));
+    }
+
+    if downloaded > 0 && status == 200 {
+        info!(url, "server ignored Range request; restarting download from byte 0");
+        file.set_len(0).await.map_err(ModelError::Io)?;
+        file.seek(std::io::SeekFrom::Start(0)).await.map_err(ModelError::Io)?;
+        return Ok(0);
+    }
+
+    if !(response.status().is_success() || status == 206) {
+        return Err(ModelError::download(format!("HTTP {status} for {url}")));
+    }
+
+    Ok(downloaded)
+}
+
+async fn validate_binary_response(response: &reqwest::Response, url: &str) -> ModelResult<()> {
+    if let Some(content_type) = response.headers().get(CONTENT_TYPE) {
+        let Ok(value) = content_type.to_str() else {
+            return Ok(());
+        };
+        let lower = value.to_ascii_lowercase();
+        if lower.contains("json") || lower.contains("html") || lower.starts_with("text/") {
+            return Err(ModelError::download(format!(
+                "unexpected content-type '{value}' from {url}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn map_download_http_error(url: &str, err: reqwest::Error) -> ModelError {
+    if err.is_decode() {
+        ModelError::download(format!(
+            "compressed or invalid response from {url}; retry download ({err})"
+        ))
+    } else {
+        ModelError::download(format!("{url}: {err}"))
+    }
+}
+
+fn map_download_stream_error(url: &str, err: reqwest::Error) -> ModelError {
+    if err.is_decode() {
+        ModelError::download(format!(
+            "stream decode failed for {url}; cancel, delete partial file, and retry ({err})"
+        ))
+    } else {
+        ModelError::download(format!("{url}: {err}"))
     }
 }
 
@@ -470,5 +541,30 @@ mod tests {
         assert!(progress.resumed);
         assert_eq!(progress.downloaded_bytes, body.len() as u64);
         assert_eq!(fs::read(&dest).await.unwrap(), body);
+    }
+
+    #[tokio::test]
+    #[ignore = "network: HuggingFace GGUF download smoke test"]
+    async fn downloads_mistral_catalog_url_smoke() {
+        use reqwest::header::RANGE;
+
+        use crate::download::HuggingFaceClient;
+
+        let url = "https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf";
+        let client = HuggingFaceClient::new();
+        let response = client
+            .client()
+            .get(url)
+            .header(RANGE, "bytes=0-4095")
+            .send()
+            .await
+            .expect("request");
+        assert!(
+            response.status().is_success() || response.status().as_u16() == 206,
+            "status {}",
+            response.status()
+        );
+        let bytes = response.bytes().await.expect("read body");
+        assert!(bytes.starts_with(b"GGUF"), "expected GGUF magic");
     }
 }

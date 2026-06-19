@@ -84,10 +84,16 @@ fn method_for_discovered_endpoint(url: &str, reported: Option<&str>) -> String {
 }
 
 fn normalize_http_method(method: Option<String>) -> CommandResult<String> {
+    const ALLOWED: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"];
     let method = method.unwrap_or_else(|| "GET".into());
     let upper = method.trim().to_ascii_uppercase();
     if upper.is_empty() {
         return Err(CommandError::invalid_input("HTTP method must not be empty"));
+    }
+    if !ALLOWED.contains(&upper.as_str()) {
+        return Err(CommandError::invalid_input(format!(
+            "unsupported HTTP method: {upper}"
+        )));
     }
     Ok(upper)
 }
@@ -430,9 +436,10 @@ pub async fn endpoint_list_op(
     Ok(endpoints.into_iter().map(EndpointDto::from).collect())
 }
 
-#[instrument(skip(state))]
+#[instrument(skip(state, app))]
 pub async fn endpoint_update_op(
     state: &AppState,
+    app: &AppHandle,
     endpoint_id: String,
     method: String,
 ) -> CommandResult<EndpointDto> {
@@ -449,6 +456,7 @@ pub async fn endpoint_update_op(
         .await
         .map_err(CommandError::from)?;
     info!(id = %updated.id, method = ?updated.method, "endpoint method updated");
+    emit_app_data_changed(app, "endpoint_updated");
     Ok(updated.into())
 }
 
@@ -487,9 +495,10 @@ pub async fn endpoint_list(
 
 #[tauri::command]
 pub async fn endpoint_update(
+    app: AppHandle,
     state: State<'_, AppState>,
     endpoint_id: String,
     method: String,
 ) -> CommandResult<EndpointDto> {
-    endpoint_update_op(state.inner(), endpoint_id, method).await
+    endpoint_update_op(state.inner(), &app, endpoint_id, method).await
 }

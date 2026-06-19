@@ -8,8 +8,11 @@ import type {
   Target,
 } from "@/shared/types";
 
-const FINISHED_SCAN_STATUSES = new Set(["completed", "failed", "cancelled", "stopped"]);
 const SCANNING_STATUSES = new Set(["running", "paused", "pending"]);
+
+function isDiscoveryScan(scan: ScanRun): boolean {
+  return scan.name.toLowerCase().startsWith("discovery:");
+}
 
 function latestScanPerTarget(scans: ScanRun[]): Map<string, ScanRun> {
   const byTarget = new Map<string, ScanRun>();
@@ -29,16 +32,12 @@ function latestScanPerTarget(scans: ScanRun[]): Map<string, ScanRun> {
   return byTarget;
 }
 
-function projectHasUnfinishedScan(projectId: string, scans: ScanRun[]): boolean {
-  return scans.some(
-    (scan) => scan.projectId === projectId && !FINISHED_SCAN_STATUSES.has(scan.status),
-  );
-}
 
 function countScanningTargets(scans: ScanRun[]): number {
   const latest = latestScanPerTarget(scans);
   let count = 0;
   for (const scan of latest.values()) {
+    if (isDiscoveryScan(scan)) continue;
     if (SCANNING_STATUSES.has(scan.status)) {
       count += 1;
     }
@@ -55,9 +54,7 @@ export function computeDashboardStats(
 ): DashboardStats {
   return {
     projects: projects.length,
-    activeProjects: projects.filter((project) =>
-      projectHasUnfinishedScan(project.id, scans),
-    ).length,
+    activeProjects: projects.filter((project) => project.status === "active").length,
     targets: targets.length,
     scanningTargets: countScanningTargets(scans),
     openFindings: findings.filter((f) => f.status === "open" || f.status === "confirmed").length,

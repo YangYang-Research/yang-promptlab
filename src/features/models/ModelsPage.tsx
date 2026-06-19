@@ -1,30 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   Button,
   Card,
   PageHeader,
-  Select,
   StatusBadge,
 } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
 import {
-  DEFAULT_JUDGE_CONFIG,
-  getJudgeConfig,
-  JUDGE_MODES,
-  LOCAL_PROVIDERS,
-  REMOTE_PROVIDERS,
-  saveJudgeConfig,
-  testJudgeConnectivity,
-  testJudgeModel,
-  type JudgeConfigDto,
-  type JudgeConnectivityResult,
-} from "@/shared/ipc/judge";
-import {
   browseModels,
   cancelModelDownload,
   getModelDownloadStatus,
-  getModelsRegistryDiagnostics,
   getModelsRegistryInfo,
   getModelsVaultPath,
   getModelsVaultStats,
@@ -40,23 +26,23 @@ import {
   type ModelCatalogEntryDto,
   type ModelDownloadProgressDto,
   type ModelEntryDto,
-  type ModelRegistryDiagnosticsDto,
   type ModelRegistryInfoDto,
   type ModelVaultStatsDto,
 } from "@/shared/ipc/models";
 import { pickAnyModelImportFile } from "@/shared/ipc/dialog";
 import { getRuntimeStatus, type RuntimeStatusDto } from "@/shared/ipc/runtime";
+import { useToast } from "@/shared/notifications";
 import { formatBytes } from "@/shared/utils/format";
 import { DownloadManagerCard } from "./DownloadManagerCard";
+import { HuggingFaceModelCatalog } from "./HuggingFaceModelCatalog";
+import { ThirdPartyModelsPanel } from "./ThirdPartyModelsPanel";
 
 export function ModelsPage() {
+  const { notify } = useToast();
   const [backendConnected, setBackendConnected] = useState(false);
-  const [config, setConfig] = useState<JudgeConfigDto>(DEFAULT_JUDGE_CONFIG);
   const [installed, setInstalled] = useState<ModelEntryDto[]>([]);
   const [catalog, setCatalog] = useState<ModelCatalogEntryDto[]>([]);
   const [registryInfo, setRegistryInfo] = useState<ModelRegistryInfoDto | null>(null);
-  const [registryDiagnostics, setRegistryDiagnostics] =
-    useState<ModelRegistryDiagnosticsDto | null>(null);
   const [vaultPath, setVaultPath] = useState<string>("");
   const [vaultStats, setVaultStats] = useState<ModelVaultStatsDto | null>(null);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatusDto | null>(null);
@@ -66,29 +52,24 @@ export function ModelsPage() {
   const [downloadProgress, setDownloadProgress] =
     useState<ModelDownloadProgressDto | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState<"connectivity" | "model" | null>(null);
   const [busyModelId, setBusyModelId] = useState<string | null>(null);
   const [installingId, setInstallingId] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<JudgeConnectivityResult | null>(null);
   const [modelTestMessage, setModelTestMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+
+  const installedNames = useMemo(() => new Set(installed.map((m) => m.name)), [installed]);
 
   const refreshModels = useCallback(async () => {
-    const [models, entries, info, diagnostics, stats, runtime] = await Promise.all([
+    const [models, entries, info, stats, runtime] = await Promise.all([
       listModels(),
       browseModels(),
       getModelsRegistryInfo(),
-      getModelsRegistryDiagnostics(),
       getModelsVaultStats(),
       getRuntimeStatus(),
     ]);
     setInstalled(models);
     setCatalog(entries);
     setRegistryInfo(info);
-    setRegistryDiagnostics(diagnostics);
     setVaultStats(stats);
     setRuntimeStatus(runtime);
   }, []);
@@ -125,21 +106,13 @@ export function ModelsPage() {
 
   useEffect(() => {
     if (!backendConnected) {
-      setLoading(false);
       return;
     }
-    void Promise.all([
-      getJudgeConfig(),
-      refreshModels(),
-      getModelsVaultPath(),
-      pollDownloadStatus(),
-    ])
-      .then(([loaded, , path]) => {
-        setConfig(loaded);
+    void Promise.all([refreshModels(), getModelsVaultPath(), pollDownloadStatus()])
+      .then(([, path]) => {
         setVaultPath(path);
       })
-      .catch((err) => setError(toAppError(err).message))
-      .finally(() => setLoading(false));
+      .catch((err) => setError(toAppError(err).message));
   }, [backendConnected, refreshModels, pollDownloadStatus]);
 
   useEffect(() => {
@@ -175,6 +148,7 @@ export function ModelsPage() {
     try {
       const path = await pickAnyModelImportFile();
       if (!path) {
+        notify("No file selected", "error");
         return;
       }
       setImportPath(path);
@@ -192,52 +166,6 @@ export function ModelsPage() {
     }
   }
 
-  function patch(patchValue: Partial<JudgeConfigDto>) {
-    setSaved(false);
-    setConfig((current) => ({ ...current, ...patchValue }));
-  }
-
-  async function handleSave() {
-    setError(null);
-    setSaving(true);
-    try {
-      const savedConfig = await saveJudgeConfig(config);
-      setConfig(savedConfig);
-      setSaved(true);
-    } catch (err) {
-      setError(toAppError(err).message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleTestConnectivity() {
-    setError(null);
-    setTesting("connectivity");
-    setTestResult(null);
-    try {
-      const result = await testJudgeConnectivity(config);
-      setTestResult(result);
-    } catch (err) {
-      setError(toAppError(err).message);
-    } finally {
-      setTesting(null);
-    }
-  }
-
-  async function handleTestModel() {
-    setError(null);
-    setTesting("model");
-    setTestResult(null);
-    try {
-      const result = await testJudgeModel(config);
-      setTestResult(result);
-    } catch (err) {
-      setError(toAppError(err).message);
-    } finally {
-      setTesting(null);
-    }
-  }
 
   async function handleInstall(entry: ModelCatalogEntryDto) {
     // Only one download can run at a time. Ignore clicks while one is active
@@ -262,8 +190,12 @@ export function ModelsPage() {
   }
 
   async function handleImport() {
-    if (!importName.trim() || !importPath.trim()) {
-      setError("Import name and file path are required");
+    if (!importName.trim()) {
+      notify("Display name is required", "error");
+      return;
+    }
+    if (!importPath.trim()) {
+      notify("Select a .gguf or .zip file to import", "error");
       return;
     }
     const kind: "gguf" | "zip" = importPath.trim().toLowerCase().endsWith(".zip")
@@ -293,9 +225,6 @@ export function ModelsPage() {
     setBusyModelId(modelId);
     try {
       await removeModel(modelId);
-      if (config.localVaultModelId === modelId) {
-        patch({ localVaultModelId: null, localModelPath: null });
-      }
       await refreshModels();
     } catch (err) {
       setError(toAppError(err).message);
@@ -333,39 +262,15 @@ export function ModelsPage() {
     }
   }
 
-  function selectVaultModel(modelId: string) {
-    const entry = installed.find((m) => m.id === modelId);
-    if (!entry) return;
-    patch({
-      localVaultModelId: modelId,
-      localProvider: "llama_cpp",
-      localModelPath: entry.path,
-      localModel: entry.name,
-    });
-  }
-
-  const showLocal = config.mode === "local_llm" || config.mode === "consensus";
-  const showRemote = config.mode === "remote_llm";
-  const ggufModels = installed.filter(
-    (m) => m.provider === "gguf" || m.provider === "huggingface" || m.format === "gguf",
-  );
-
   return (
     <div className="page">
       <PageHeader
-        title="AI Models"
-        description="Install GGUF models via the built-in registry and configure the hybrid judge engine"
-        actions={
-          <Button variant="primary" disabled={saving || loading} onClick={() => void handleSave()}>
-            {saving ? "Saving…" : saved ? "Saved" : "Save Judge Config"}
-          </Button>
-        }
+        title="Models"
+        description="Manage local GGUF models, public catalog, and third-party cloud providers"
       />
 
       {!backendConnected && (
-        <p className="text-muted">
-          Connect to the Tauri backend to manage models and judge configuration.
-        </p>
+        <p className="text-muted">Connect to the Tauri backend to manage local models.</p>
       )}
 
       {vaultPath && (
@@ -433,43 +338,6 @@ export function ModelsPage() {
         </p>
       )}
 
-      {registryDiagnostics && (
-        <Card className="model-card model-card--wide">
-          <h3 className="card__title">Registry Diagnostics</h3>
-          <p className="text-muted text-sm">
-            Startup validation for <code>resources/models.json</code> (GGUF-first schema).
-          </p>
-          <div className="model-catalog__row">
-            <div>
-              <p className="text-sm">
-                <strong>Total:</strong> {registryDiagnostics.totalModels}
-              </p>
-              <p className="text-sm">
-                <strong>Valid:</strong> {registryDiagnostics.validModels}
-              </p>
-              <p className="text-sm">
-                <strong>Invalid:</strong> {registryDiagnostics.invalidModels}
-              </p>
-            </div>
-            <StatusBadge status={registryDiagnostics.healthy ? "completed" : "failed"} />
-          </div>
-          {registryDiagnostics.issues.length > 0 && (
-            <div className="model-catalog">
-              {registryDiagnostics.issues.map((issue, index) => (
-                <div key={`${issue.id}-${issue.field}-${index}`} className="model-catalog__row">
-                  <div>
-                    <strong className="mono">{issue.id || "(missing id)"}</strong>
-                    <p className="text-muted text-sm">
-                      {issue.field}: {issue.message}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      )}
-
       <div className="models-grid">
         {downloadProgress && (
           <DownloadManagerCard
@@ -497,51 +365,91 @@ export function ModelsPage() {
         )}
 
         <Card className="model-card model-card--wide">
-          <h3 className="card__title">Huggingface Models</h3>
-          <p className="text-muted text-sm">
-            Built-in GGUF catalog from <code>resources/models.json</code>. Entries download
-            directly from <code>download_url</code> into the vault.
-          </p>
-          <div className="model-catalog">
-            {catalog.map((entry) => {
-              const alreadyAdded = installed.some((model) => model.name === entry.name);
-              return (
-                <div key={entry.id} className="model-catalog__row">
-                  <div>
-                    <strong>
-                      {entry.name}
-                      {entry.recommended ? " · recommended" : ""}
-                    </strong>
-                    <p className="text-muted text-sm">{entry.description}</p>
-                    <p className="text-muted text-sm">
-                      {entry.engine} · {entry.format} · {entry.purpose}
-                      {entry.quant ? ` · ${entry.quant}` : ""}
-                      {entry.sizeLabel ? ` · ${entry.sizeLabel}` : ""}
-                      {entry.sizeGb != null ? ` · ${entry.sizeGb.toFixed(1)} GB` : ""}
-                    </p>
+          <h3 className="card__title">Manage Models</h3>
+          {installed.length === 0 ? (
+            <p className="text-muted">No local models installed yet.</p>
+          ) : (
+            installed.map((model) => (
+              <div key={model.id} className="model-catalog__row">
+                <div>
+                  <div className="model-card__header">
+                    <div>
+                      <h4 className="model-card__name">{model.name}</h4>
+                      <p className="text-muted text-sm">
+                        {model.provider} · v{model.version}
+                        {model.sizeBytes != null
+                          ? ` · ${formatBytes(model.sizeBytes)}`
+                          : model.sizeGb > 0
+                            ? ` · ${model.sizeGb.toFixed(2)} GB`
+                            : ""}
+                      </p>
+                    </div>
+                    <StatusBadge status={model.verified ? "installed" : "available"} />
                   </div>
+                  <p className="text-muted text-sm">
+                    {[
+                      model.capabilities.chat && "chat",
+                      model.capabilities.completion && "completion",
+                      model.capabilities.embeddings && "embeddings",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                  <p className="model-card__path mono text-sm">{model.path}</p>
+                </div>
+                <div className="model-card__actions">
                   <Button
-                    variant="secondary"
-                    disabled={
-                      !backendConnected ||
-                      installingId !== null ||
-                      downloadingId !== null ||
-                      alreadyAdded
-                    }
-                    onClick={() => void handleInstall(entry)}
+                    variant="ghost"
+                    disabled={busyModelId !== null}
+                    onClick={() => void handleVerify(model.id)}
                   >
-                    {alreadyAdded
-                      ? "Added"
-                      : downloadingId === entry.id
-                        ? "Downloading…"
-                        : installingId === entry.id
-                          ? "Starting…"
-                          : "Add"}
+                    Verify
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={busyModelId !== null || model.provider === "remote"}
+                    onClick={() => void handleRunInference(model.id)}
+                  >
+                    Test
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={busyModelId !== null}
+                    onClick={() => void handleRemove(model.id)}
+                  >
+                    Remove
                   </Button>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            ))
+          )}
+          {modelTestMessage && (
+            <p className="text-muted text-sm judge-test-result">{modelTestMessage}</p>
+          )}
+        </Card>
+
+        <Card className="model-card model-card--wide">
+          <h3 className="card__title">Public Models</h3>
+          <p className="text-muted text-sm">
+            Built-in GGUF catalog from <code>resources/models.json</code>. Click a card for
+            details; use <strong>+</strong> to add to your vault.
+          </p>
+          <HuggingFaceModelCatalog
+            catalog={catalog}
+            installedNames={installedNames}
+            downloadingId={downloadingId}
+            installingId={installingId}
+            backendConnected={backendConnected}
+            onInstall={(entry) => void handleInstall(entry)}
+          />
+        </Card>
+
+        <Card className="model-card model-card--wide">
+          <h3 className="card__title">Third-party Models</h3>
+          <ThirdPartyModelsPanel
+            backendConnected={backendConnected}
+            onSaved={() => void refreshModels()}
+          />
         </Card>
 
         <Card className="model-card model-card--wide">
@@ -591,260 +499,6 @@ export function ModelsPage() {
               {importBusy === "import" ? "Importing…" : "Import"}
             </Button>
           </div>
-        </Card>
-
-        <Card className="model-card model-card--wide">
-          <h3 className="card__title">Installed Models</h3>
-          {installed.length === 0 ? (
-            <p className="text-muted">No local models installed yet.</p>
-          ) : (
-            installed.map((model) => (
-              <div key={model.id} className="model-catalog__row">
-                <div>
-                  <div className="model-card__header">
-                    <div>
-                      <h4 className="model-card__name">{model.name}</h4>
-                      <p className="text-muted text-sm">
-                        {model.provider} · v{model.version}
-                        {model.sizeBytes != null
-                          ? ` · ${formatBytes(model.sizeBytes)}`
-                          : model.sizeGb > 0
-                            ? ` · ${model.sizeGb.toFixed(2)} GB`
-                            : ""}
-                      </p>
-                    </div>
-                    <StatusBadge status={model.verified ? "installed" : "available"} />
-                  </div>
-                  <p className="text-muted text-sm">
-                    {[
-                      model.capabilities.chat && "chat",
-                      model.capabilities.completion && "completion",
-                      model.capabilities.embeddings && "embeddings",
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                  <p className="model-card__path mono text-sm">{model.path}</p>
-                </div>
-                <div className="model-card__actions">
-                  <Button
-                    variant="ghost"
-                    disabled={busyModelId !== null}
-                    onClick={() => void handleVerify(model.id)}
-                  >
-                    Verify
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={busyModelId !== null}
-                    onClick={() => void handleRunInference(model.id)}
-                  >
-                    Test
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={busyModelId !== null}
-                    onClick={() => selectVaultModel(model.id)}
-                  >
-                    Use for Judge
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={busyModelId !== null}
-                    onClick={() => void handleRemove(model.id)}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              </div>
-            ))
-          )}
-          {modelTestMessage && (
-            <p className="text-muted text-sm judge-test-result">{modelTestMessage}</p>
-          )}
-        </Card>
-
-        <Card className="model-card model-card--wide">
-          <h3 className="card__title">Judge Provider</h3>
-
-          <div className="settings-field">
-            <label htmlFor="judgeMode">Judge Mode</label>
-            <Select
-              id="judgeMode"
-              value={config.mode}
-              onChange={(e) => patch({ mode: e.target.value as JudgeConfigDto["mode"] })}
-              disabled={loading}
-            >
-              {JUDGE_MODES.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-            <p className="text-muted text-sm">
-              {JUDGE_MODES.find((option) => option.value === config.mode)?.hint}
-            </p>
-          </div>
-
-          {showLocal && (
-            <div className="wizard-auth-fields">
-              <div className="settings-field">
-                <label htmlFor="vaultModel">Vault Model (optional)</label>
-                <Select
-                  id="vaultModel"
-                  value={config.localVaultModelId ?? ""}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    if (!id) {
-                      patch({ localVaultModelId: null });
-                      return;
-                    }
-                    selectVaultModel(id);
-                  }}
-                >
-                  <option value="">Manual configuration</option>
-                  {ggufModels.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              <div className="settings-field">
-                <label htmlFor="localProvider">Local Provider</label>
-                <Select
-                  id="localProvider"
-                  value={config.localProvider}
-                  onChange={(e) =>
-                    patch({ localProvider: e.target.value as JudgeConfigDto["localProvider"] })
-                  }
-                >
-                  {LOCAL_PROVIDERS.filter((option) => option.value === "llama_cpp").map(
-                    (option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ),
-                  )}
-                </Select>
-              </div>
-
-              <div className="settings-field">
-                <label htmlFor="localModelPath">GGUF Model Path</label>
-                <input
-                  id="localModelPath"
-                  className="input mono"
-                  value={config.localModelPath ?? ""}
-                  onChange={(e) =>
-                    patch({ localModelPath: e.target.value.trim() || null })
-                  }
-                />
-              </div>
-              <div className="settings-field">
-                <label htmlFor="localLlamaBinary">llama-server Binary</label>
-                <input
-                  id="localLlamaBinary"
-                  className="input mono"
-                  value={config.localLlamaBinary}
-                  onChange={(e) => patch({ localLlamaBinary: e.target.value })}
-                />
-              </div>
-            </div>
-          )}
-
-          {showRemote && (
-            <div className="wizard-auth-fields">
-              <div className="settings-field">
-                <label htmlFor="remoteProvider">Remote Provider</label>
-                <Select
-                  id="remoteProvider"
-                  value={config.remoteProvider}
-                  onChange={(e) =>
-                    patch({ remoteProvider: e.target.value as JudgeConfigDto["remoteProvider"] })
-                  }
-                >
-                  {REMOTE_PROVIDERS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div className="settings-field">
-                <label htmlFor="remoteModel">Model</label>
-                <input
-                  id="remoteModel"
-                  className="input"
-                  value={config.remoteModel}
-                  onChange={(e) => patch({ remoteModel: e.target.value })}
-                />
-              </div>
-              <div className="settings-field">
-                <label htmlFor="remoteBaseUrl">Custom Base URL (optional)</label>
-                <input
-                  id="remoteBaseUrl"
-                  className="input mono"
-                  value={config.remoteBaseUrl ?? ""}
-                  onChange={(e) =>
-                    patch({ remoteBaseUrl: e.target.value.trim() || null })
-                  }
-                />
-              </div>
-              <div className="settings-field">
-                <label htmlFor="remoteApiKey">API Key</label>
-                <input
-                  id="remoteApiKey"
-                  className="input mono"
-                  type="password"
-                  value={config.remoteApiKey}
-                  onChange={(e) => patch({ remoteApiKey: e.target.value })}
-                />
-              </div>
-              <div className="settings-field">
-                <label htmlFor="remoteApiKeyEnv">API Key Env Var (fallback)</label>
-                <input
-                  id="remoteApiKeyEnv"
-                  className="input mono"
-                  placeholder="OPENAI_API_KEY"
-                  value={config.remoteApiKeyEnv ?? ""}
-                  onChange={(e) =>
-                    patch({ remoteApiKeyEnv: e.target.value.trim() || null })
-                  }
-                />
-              </div>
-            </div>
-          )}
-
-          <div className="model-card__actions">
-            <Button
-              variant="secondary"
-              disabled={!backendConnected || testing !== null}
-              onClick={() => void handleTestConnectivity()}
-            >
-              {testing === "connectivity" ? "Testing…" : "Validate Connectivity"}
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={!backendConnected || testing !== null || config.mode === "deterministic"}
-              onClick={() => void handleTestModel()}
-            >
-              {testing === "model" ? "Running…" : "Test Model"}
-            </Button>
-          </div>
-
-          {testResult && (
-            <div className="judge-test-result">
-              <StatusBadge status={testResult.ok ? "completed" : "failed"} />
-              <p className="text-sm">
-                {testResult.provider} / {testResult.model} — {testResult.message}
-                {testResult.latencyMs > 0 ? ` (${testResult.latencyMs} ms)` : ""}
-              </p>
-              {testResult.sampleResponse && (
-                <p className="text-muted text-sm">{testResult.sampleResponse}</p>
-              )}
-            </div>
-          )}
         </Card>
       </div>
 

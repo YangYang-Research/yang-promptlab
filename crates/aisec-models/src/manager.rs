@@ -417,6 +417,19 @@ impl LocalModelManager {
         Ok(entry)
     }
 
+    /// Register or update a third-party cloud model in the vault registry.
+    pub fn register_third_party(
+        &mut self,
+        provider: impl Into<String>,
+        model: impl Into<String>,
+        base_url: Option<String>,
+        region: Option<String>,
+    ) -> ModelResult<ModelEntry> {
+        let entry = self.registry.register_remote(provider, model, base_url, region);
+        self.persist()?;
+        Ok(entry)
+    }
+
     /// Remove a model from the registry and delete vault files.
     pub async fn remove_model(&mut self, model_id: &str) -> ModelResult<ModelEntry> {
         let entry = self.registry.remove(model_id)?;
@@ -438,6 +451,16 @@ impl LocalModelManager {
             .get(model_id)
             .ok_or_else(|| ModelError::not_found(model_id))?
             .clone();
+
+        if entry.provider == ModelProvider::Remote {
+            return Ok(VerificationResult {
+                file_path: entry.file_path,
+                expected_sha256: None,
+                actual_sha256: "remote-api".into(),
+                size_bytes: 0,
+                valid: true,
+            });
+        }
 
         if entry.provider == ModelProvider::Ollama {
             let engine = LocalInferenceEngine::from_entry(entry.clone(), self.llama_config()).await?;

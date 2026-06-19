@@ -26,6 +26,7 @@ import {
   listTargets,
   runDiscovery as runDiscoveryCmd,
   runPromptInjection as runPromptInjectionCmd,
+  getScanStatus,
   listModels,
   type EndpointDto,
   type FindingDto,
@@ -35,6 +36,11 @@ import {
 import { toAppError } from "@/shared/errors";
 import { createLogger } from "@/shared/logging";
 import { computeDashboardStats } from "@/shared/stats";
+import {
+  deriveActivity,
+  deriveAttackRuns,
+  deriveDiscoveryJobs,
+} from "@/shared/dashboardDerived";
 
 import {
   mapEndpoints,
@@ -174,14 +180,34 @@ async function loadAll(): Promise<LoadedData> {
   const findingDtos: FindingDto[] = findingGroups;
   const endpointDtos: EndpointDto[] = endpointGroups.flat();
 
+  const projects = mapProjects(projectDtos, targetDtos, findingDtos);
+  const targets = mapTargets(targetDtos);
+  const scans = mapScans(scanDtos);
+  const findings = mapFindings(findingDtos, targetDtos);
+
+  const runningIds = scans
+    .filter((s) => s.status === "running" || s.status === "paused" || s.status === "pending")
+    .map((s) => s.id);
+  const liveStatuses = await Promise.all(
+    runningIds.map((id) => getScanStatus(id).catch(() => null)),
+  );
+  const liveStatusMap = new Map(
+    liveStatuses
+      .filter((status): status is NonNullable<typeof status> => status !== null)
+      .map((status) => [status.scan_id, status]),
+  );
+
   return {
-    projects: mapProjects(projectDtos, targetDtos, findingDtos),
-    targets: mapTargets(targetDtos),
-    scans: mapScans(scanDtos),
+    projects,
+    targets,
+    scans,
     endpoints: mapEndpoints(endpointDtos),
-    findings: mapFindings(findingDtos, targetDtos),
+    findings,
     reports: mapReports(reportDtos, projectDtos, scanDtos),
     models: mapLocalModels(modelEntries),
+    discoveryJobs: deriveDiscoveryJobs(scans, targets, liveStatusMap),
+    attackRuns: deriveAttackRuns(scans, targets, liveStatusMap),
+    activity: deriveActivity(findings, scans, targets, projects),
   };
 }
 

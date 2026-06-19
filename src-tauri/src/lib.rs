@@ -199,6 +199,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::models::models_browse,
             commands::models::models_install,
             commands::models::models_import_gguf,
+            commands::models::models_save_third_party,
             commands::models::models_import_zip,
             commands::models::models_download_start,
             commands::models::models_download_status,

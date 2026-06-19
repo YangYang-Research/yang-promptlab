@@ -13,6 +13,7 @@ pub trait LlmBackend: Send + Sync {
     }
 }
 
+pub mod bedrock_sigv4;
 pub mod local;
 pub mod remote;
 

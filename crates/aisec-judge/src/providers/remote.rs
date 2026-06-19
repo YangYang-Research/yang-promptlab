@@ -3,6 +3,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use serde_json::json;
 
+use super::bedrock_sigv4;
 use super::LlmBackend;
 use crate::config::{RemoteProvider, RemoteProviderSettings};
 use crate::error::{JudgeError, JudgeResult};
@@ -10,14 +11,20 @@ use crate::error::{JudgeError, JudgeResult};
 pub struct RemoteLlmBackend {
     settings: RemoteProviderSettings,
     api_key: String,
+    aws_secret_access_key: Option<String>,
     client: reqwest::Client,
 }
 
 impl RemoteLlmBackend {
-    pub fn new(settings: RemoteProviderSettings, api_key: String) -> Self {
+    pub fn new(
+        settings: RemoteProviderSettings,
+        api_key: String,
+        aws_secret_access_key: Option<String>,
+    ) -> Self {
         Self {
             settings,
             api_key,
+            aws_secret_access_key,
             client: reqwest::Client::new(),
         }
     }
@@ -35,6 +42,16 @@ impl RemoteLlmBackend {
                 "https://generativelanguage.googleapis.com/v1beta".into()
             }
             RemoteProvider::OpenRouter => "https://openrouter.ai/api/v1".into(),
+            RemoteProvider::Azure => String::new(),
+            RemoteProvider::Bedrock => {
+                let region = self
+                    .settings
+                    .aws_region
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or("us-east-1");
+                format!("https://bedrock-runtime.{region}.amazonaws.com")
+            }
         }
     }
 }
@@ -47,6 +64,8 @@ impl LlmBackend for RemoteLlmBackend {
             RemoteProvider::Anthropic => "anthropic",
             RemoteProvider::Gemini => "gemini",
             RemoteProvider::OpenRouter => "openrouter",
+            RemoteProvider::Azure => "azure",
+            RemoteProvider::Bedrock => "bedrock",
         }
     }
 
@@ -61,7 +80,11 @@ impl LlmBackend for RemoteLlmBackend {
                     .await
             }
             RemoteProvider::Gemini => self.complete_gemini(prompt, max_tokens, temperature).await,
-            RemoteProvider::OpenAi | RemoteProvider::OpenRouter => {
+            RemoteProvider::Bedrock => {
+                self.complete_bedrock(prompt, max_tokens, temperature)
+                    .await
+            }
+            RemoteProvider::OpenAi | RemoteProvider::OpenRouter | RemoteProvider::Azure => {
                 self.complete_openai_compatible(prompt, max_tokens, temperature)
                     .await
             }
@@ -226,5 +249,122 @@ impl RemoteLlmBackend {
             .and_then(|v| v.as_str())
             .map(str::to_string)
             .ok_or_else(|| JudgeError::evaluation("gemini returned empty content"))
+    }
+
+    async fn complete_bedrock(
+        &self,
+        prompt: &str,
+        max_tokens: u32,
+        temperature: f32,
+    ) -> JudgeResult<String> {
+        let secret = self.aws_secret_access_key.as_deref().ok_or_else(|| {
+            JudgeError::config("bedrock requires a secret access key")
+        })?;
+        let access_key_id = self.api_key.trim();
+        let secret_access_key = secret.trim();
+        let region = self
+            .settings
+            .aws_region
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("us-east-1")
+            .trim();
+        let model_id = self.settings.model.trim();
+        let path = bedrock_sigv4::bedrock_converse_path(model_id);
+        let host = format!("bedrock-runtime.{region}.amazonaws.com");
+        // Use the raw model id in the request URL so reqwest encodes `:` once on the wire.
+        // Pre-encoded `%3A` in the URL string is double-encoded to `%253A` and breaks SigV4.
+        let url = format!("https://{host}/model/{model_id}/converse");
+        let body = json!({
+            "messages": [{
+                "role": "user",
+                "content": [{"text": prompt}]
+            }],
+            "inferenceConfig": {
+                "maxTokens": max_tokens,
+                "temperature": temperature,
+            }
+        });
+        let body_str = serde_json::to_string(&body)
+            .map_err(|e| JudgeError::evaluation(format!("bedrock body encode failed: {e}")))?;
+        let session_token = self.settings.aws_session_token.trim();
+        let session_token = if session_token.is_empty() {
+            None
+        } else {
+            Some(session_token)
+        };
+        let signed = bedrock_sigv4::sign_bedrock_post(
+            &host,
+            &path,
+            &body_str,
+            access_key_id,
+            secret_access_key,
+            region,
+            session_token,
+        )
+        .map_err(|e| JudgeError::evaluation(format!("bedrock signing failed: {e}")))?;
+
+        let mut request = self
+            .client
+            .post(&url)
+            .header("content-type", "application/json")
+            .header("authorization", signed.authorization)
+            .header("x-amz-date", signed.amz_date)
+            .header("x-amz-content-sha256", signed.payload_hash);
+        if let Some(token) = signed.session_token {
+            request = request.header("x-amz-security-token", token);
+        }
+
+        let response = request
+            .body(body_str)
+            .timeout(std::time::Duration::from_secs(120))
+            .send()
+            .await
+            .map_err(|e| JudgeError::evaluation(format!("bedrock request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(JudgeError::evaluation(format!(
+                "bedrock returned {status}: {}",
+                summarize_bedrock_error(&text)
+            )));
+        }
+
+        let value: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| JudgeError::evaluation(format!("bedrock parse failed: {e}")))?;
+
+        value
+            .pointer("/output/message/content/0/text")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| JudgeError::evaluation("bedrock returned empty content"))
+    }
+}
+
+fn summarize_bedrock_error(body: &str) -> String {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(message) = value.get("message").and_then(|v| v.as_str()) {
+            if message.contains("The request signature we calculated does not match") {
+                return "Signature mismatch — verify access key, secret, session token, and region"
+                    .into();
+            }
+            if message.contains("The security token included in the request is invalid") {
+                return "Invalid or expired AWS credentials — refresh access key, secret, and session token"
+                    .into();
+            }
+            if message.len() <= 400 {
+                return message.to_string();
+            }
+            return format!("{}…", &message[..400]);
+        }
+    }
+
+    if body.len() <= 400 {
+        body.to_string()
+    } else {
+        format!("{}…", &body[..400])
     }
 }

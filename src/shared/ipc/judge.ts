@@ -4,7 +4,13 @@ export type JudgeMode = "deterministic" | "local_llm" | "remote_llm" | "consensu
 
 export type LocalProvider = "ollama" | "llama_cpp";
 
-export type RemoteProvider = "openai" | "anthropic" | "gemini" | "openrouter";
+export type RemoteProvider =
+  | "openai"
+  | "anthropic"
+  | "gemini"
+  | "openrouter"
+  | "azure"
+  | "bedrock";
 
 export type JudgeConfigDto = {
   mode: JudgeMode;
@@ -20,6 +26,12 @@ export type JudgeConfigDto = {
   remoteModel: string;
   remoteApiKey: string;
   remoteApiKeyEnv: string | null;
+  remoteApiKeyConfigured?: boolean;
+  remoteAwsSecretAccessKey: string;
+  remoteAwsSecretAccessKeyConfigured?: boolean;
+  remoteAwsRegion: string | null;
+  remoteAwsSessionToken: string;
+  remoteAwsSessionTokenConfigured?: boolean;
   consensusThreshold: number;
   minConfidence: number;
   llmMaxTokens: number;
@@ -72,7 +84,7 @@ export const JUDGE_MODES: Array<{ value: JudgeMode; label: string; hint: string 
   {
     value: "remote_llm",
     label: "Remote LLM",
-    hint: "OpenAI, Anthropic, Gemini, OpenRouter",
+    hint: "Uses third-party models configured on the Models page",
   },
   {
     value: "consensus",
@@ -89,9 +101,104 @@ export const LOCAL_PROVIDERS: Array<{ value: LocalProvider; label: string }> = [
 export const REMOTE_PROVIDERS: Array<{ value: RemoteProvider; label: string }> = [
   { value: "openai", label: "OpenAI" },
   { value: "anthropic", label: "Anthropic" },
-  { value: "gemini", label: "Gemini" },
+  { value: "gemini", label: "Google" },
+  { value: "azure", label: "Azure" },
+  { value: "bedrock", label: "AWS Bedrock" },
   { value: "openrouter", label: "OpenRouter" },
 ];
+
+export type ThirdPartyProvider = Extract<
+  RemoteProvider,
+  "openai" | "anthropic" | "gemini" | "azure" | "bedrock"
+>;
+
+export const THIRD_PARTY_PROVIDERS: Array<{
+  value: ThirdPartyProvider;
+  label: string;
+  modelPlaceholder: string;
+  apiKeyEnv: string;
+  requiresBaseUrl?: boolean;
+  baseUrlPlaceholder?: string;
+  regionPlaceholder?: string;
+}> = [
+  {
+    value: "openai",
+    label: "OpenAI",
+    modelPlaceholder: "gpt-4o-mini",
+    apiKeyEnv: "OPENAI_API_KEY",
+    baseUrlPlaceholder: "https://api.openai.com/v1",
+  },
+  {
+    value: "anthropic",
+    label: "Anthropic",
+    modelPlaceholder: "claude-sonnet-4-20250514",
+    apiKeyEnv: "ANTHROPIC_API_KEY",
+    baseUrlPlaceholder: "https://api.anthropic.com/v1",
+  },
+  {
+    value: "gemini",
+    label: "Google",
+    modelPlaceholder: "gemini-2.0-flash",
+    apiKeyEnv: "GOOGLE_API_KEY",
+    baseUrlPlaceholder: "https://generativelanguage.googleapis.com/v1beta",
+  },
+  {
+    value: "azure",
+    label: "Azure",
+    modelPlaceholder: "gpt-4o",
+    apiKeyEnv: "AZURE_OPENAI_API_KEY",
+    requiresBaseUrl: true,
+    baseUrlPlaceholder: "https://{resource}.openai.azure.com/openai/deployments/{deployment}",
+  },
+  {
+    value: "bedrock",
+    label: "AWS Bedrock",
+    modelPlaceholder: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+    apiKeyEnv: "AWS_ACCESS_KEY_ID",
+    regionPlaceholder: "us-east-1",
+  },
+];
+
+export function validateThirdPartyConfig(config: JudgeConfigDto): string | null {
+  if (!config.remoteModel.trim()) {
+    return "Model name is required";
+  }
+
+  if (config.remoteProvider === "bedrock") {
+    if (!config.remoteApiKey.trim() && !config.remoteApiKeyConfigured) {
+      return "Access Key ID is required";
+    }
+    if (!config.remoteAwsSecretAccessKey.trim() && !config.remoteAwsSecretAccessKeyConfigured) {
+      return "Secret Access Key is required";
+    }
+    if (!config.remoteAwsRegion?.trim()) {
+      return "Region is required";
+    }
+    const accessKey = config.remoteApiKey.trim();
+    if (
+      accessKey.startsWith("ASIA") &&
+      !config.remoteAwsSessionToken.trim() &&
+      !config.remoteAwsSessionTokenConfigured
+    ) {
+      return "Session Token is required for temporary AWS credentials (ASIA access keys)";
+    }
+    return null;
+  }
+
+  if (config.remoteProvider === "azure" && !config.remoteBaseUrl?.trim()) {
+    return "Endpoint URL is required";
+  }
+
+  if (!config.remoteApiKey.trim() && !config.remoteApiKeyConfigured) {
+    return "API Key is required";
+  }
+
+  return null;
+}
+
+export function thirdPartyTestConfig(config: JudgeConfigDto): JudgeConfigDto {
+  return { ...config, mode: "remote_llm" };
+}
 
 export const DEFAULT_JUDGE_CONFIG: JudgeConfigDto = {
   mode: "deterministic",
@@ -104,9 +211,12 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfigDto = {
   localLlamaPort: 8081,
   remoteProvider: "openai",
   remoteBaseUrl: null,
-  remoteModel: "gpt-4o-mini",
+  remoteModel: "",
   remoteApiKey: "",
   remoteApiKeyEnv: "OPENAI_API_KEY",
+  remoteAwsSecretAccessKey: "",
+  remoteAwsRegion: null,
+  remoteAwsSessionToken: "",
   consensusThreshold: 0.55,
   minConfidence: 0.45,
   llmMaxTokens: 512,

@@ -161,7 +161,9 @@ export function ScanWizardPage() {
   const showRetryScan =
     session.currentStep === 5 &&
     submittedStatus !== null &&
-    (submittedStatus.status === "failed" || submittedStatus.status === "stopped");
+    (submittedStatus.status === "failed" ||
+      submittedStatus.status === "stopped" ||
+      submittedStatus.status === "cancelled");
   const hideBack =
     session.currentStep === 6 ||
     (session.currentStep === 5 && session.submittedScanId !== null);

@@ -20,6 +20,8 @@ pub fn models_vault_path(data_dir: &Path) -> PathBuf {
 /// True when the judge config still stores a plaintext remote API key on disk.
 pub fn judge_config_has_legacy_secrets(config: &JudgeProviderConfig) -> bool {
     !config.remote.api_key.trim().is_empty()
+        || !config.remote.aws_secret_access_key.trim().is_empty()
+        || !config.remote.aws_session_token.trim().is_empty()
 }
 
 pub async fn audit_judge_config_legacy(data_dir: &Path) -> CommandResult<bool> {
@@ -32,15 +34,38 @@ pub fn sanitize_judge_config_secrets(
     config: &mut JudgeProviderConfig,
     secrets: &SecretStore,
 ) -> CommandResult<bool> {
-    if config.remote.api_key.trim().is_empty() {
-        return Ok(false);
+    let mut migrated = false;
+    if !config.remote.api_key.trim().is_empty() {
+        let id = secrets
+            .store(SecretScope::Judge, config.remote.api_key.trim())
+            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        config.remote.api_key_credential_id = Some(id.to_string());
+        config.remote.api_key.clear();
+        migrated = true;
     }
-    let id = secrets
-        .store(SecretScope::Judge, config.remote.api_key.trim())
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-    config.remote.api_key_credential_id = Some(id.to_string());
-    config.remote.api_key.clear();
-    Ok(true)
+    if !config.remote.aws_secret_access_key.trim().is_empty() {
+        let id = secrets
+            .store(
+                SecretScope::Judge,
+                config.remote.aws_secret_access_key.trim(),
+            )
+            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        config.remote.aws_secret_access_key_credential_id = Some(id.to_string());
+        config.remote.aws_secret_access_key.clear();
+        migrated = true;
+    }
+    if !config.remote.aws_session_token.trim().is_empty() {
+        let id = secrets
+            .store(
+                SecretScope::Judge,
+                config.remote.aws_session_token.trim(),
+            )
+            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        config.remote.aws_session_token_credential_id = Some(id.to_string());
+        config.remote.aws_session_token.clear();
+        migrated = true;
+    }
+    Ok(migrated)
 }
 
 /// Load a keychain-backed API key into memory for runtime use (not persisted).
@@ -48,16 +73,30 @@ pub fn resolve_judge_config_secrets(
     config: &mut JudgeProviderConfig,
     secrets: &SecretStore,
 ) -> CommandResult<()> {
-    if !config.remote.api_key.trim().is_empty() {
-        return Ok(());
+    if config.remote.api_key.trim().is_empty() {
+        if let Some(id) = config.remote.api_key_credential_id.clone() {
+            let key = secrets
+                .load(SecretScope::Judge, &CredentialReferenceId::parse(id))
+                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+            config.remote.api_key = key.trim().to_string();
+        }
     }
-    let Some(id) = config.remote.api_key_credential_id.clone() else {
-        return Ok(());
-    };
-    let key = secrets
-        .load(SecretScope::Judge, &CredentialReferenceId::parse(id))
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-    config.remote.api_key = key;
+    if config.remote.aws_secret_access_key.trim().is_empty() {
+        if let Some(id) = config.remote.aws_secret_access_key_credential_id.clone() {
+            let key = secrets
+                .load(SecretScope::Judge, &CredentialReferenceId::parse(id))
+                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+            config.remote.aws_secret_access_key = key.trim().to_string();
+        }
+    }
+    if config.remote.aws_session_token.trim().is_empty() {
+        if let Some(id) = config.remote.aws_session_token_credential_id.clone() {
+            let key = secrets
+                .load(SecretScope::Judge, &CredentialReferenceId::parse(id))
+                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+            config.remote.aws_session_token = key.trim().to_string();
+        }
+    }
     Ok(())
 }
 

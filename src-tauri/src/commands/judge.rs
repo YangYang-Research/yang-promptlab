@@ -31,6 +31,16 @@ pub struct JudgeConfigDto {
     pub remote_api_key_env: Option<String>,
     #[serde(default)]
     pub remote_api_key_configured: bool,
+    #[serde(default)]
+    pub remote_aws_secret_access_key: String,
+    #[serde(default)]
+    pub remote_aws_secret_access_key_configured: bool,
+    #[serde(default)]
+    pub remote_aws_region: Option<String>,
+    #[serde(default)]
+    pub remote_aws_session_token: String,
+    #[serde(default)]
+    pub remote_aws_session_token_configured: bool,
     pub consensus_threshold: f32,
     pub min_confidence: f32,
     pub llm_max_tokens: u32,
@@ -61,6 +71,8 @@ impl From<JudgeProviderConfig> for JudgeConfigDto {
                 RemoteProvider::Anthropic => "anthropic",
                 RemoteProvider::Gemini => "gemini",
                 RemoteProvider::OpenRouter => "openrouter",
+                RemoteProvider::Azure => "azure",
+                RemoteProvider::Bedrock => "bedrock",
             }
             .into(),
             remote_base_url: config.remote.base_url,
@@ -69,6 +81,19 @@ impl From<JudgeProviderConfig> for JudgeConfigDto {
             remote_api_key_env: config.remote.api_key_env.clone(),
             remote_api_key_configured: config.remote.api_key_credential_id.is_some()
                 || !config.remote.api_key.trim().is_empty(),
+            remote_aws_secret_access_key: config.remote.aws_secret_access_key.clone(),
+            remote_aws_secret_access_key_configured: config
+                .remote
+                .aws_secret_access_key_credential_id
+                .is_some()
+                || !config.remote.aws_secret_access_key.trim().is_empty(),
+            remote_aws_region: config.remote.aws_region.clone(),
+            remote_aws_session_token: config.remote.aws_session_token.clone(),
+            remote_aws_session_token_configured: config
+                .remote
+                .aws_session_token_credential_id
+                .is_some()
+                || !config.remote.aws_session_token.trim().is_empty(),
             consensus_threshold: config.consensus_threshold,
             min_confidence: config.min_confidence,
             llm_max_tokens: config.llm_max_tokens,
@@ -101,8 +126,10 @@ fn parse_remote_provider(value: &str) -> Result<RemoteProvider, CommandError> {
     match value {
         "openai" => Ok(RemoteProvider::OpenAi),
         "anthropic" => Ok(RemoteProvider::Anthropic),
-        "gemini" => Ok(RemoteProvider::Gemini),
+        "gemini" | "google" => Ok(RemoteProvider::Gemini),
         "openrouter" => Ok(RemoteProvider::OpenRouter),
+        "azure" => Ok(RemoteProvider::Azure),
+        "bedrock" | "aws_bedrock" => Ok(RemoteProvider::Bedrock),
         other => Err(CommandError::invalid_input(format!(
             "unsupported remote provider: {other}"
         ))),
@@ -128,6 +155,11 @@ fn dto_to_config(dto: JudgeConfigDto) -> Result<JudgeProviderConfig, CommandErro
             api_key: dto.remote_api_key,
             api_key_credential_id: None,
             api_key_env: dto.remote_api_key_env,
+            aws_secret_access_key: dto.remote_aws_secret_access_key,
+            aws_secret_access_key_credential_id: None,
+            aws_region: dto.remote_aws_region,
+            aws_session_token: dto.remote_aws_session_token,
+            aws_session_token_credential_id: None,
         },
         consensus_threshold: dto.consensus_threshold,
         min_confidence: dto.min_confidence,

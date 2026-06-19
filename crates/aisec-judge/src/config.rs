@@ -5,8 +5,6 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::types::JudgeMode;
-
-/// Local inference backend selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalProvider {
@@ -28,6 +26,8 @@ pub enum RemoteProvider {
     Anthropic,
     Gemini,
     OpenRouter,
+    Azure,
+    Bedrock,
 }
 
 impl Default for RemoteProvider {
@@ -99,10 +99,20 @@ pub struct RemoteProviderSettings {
     pub api_key_credential_id: Option<String>,
     #[serde(default)]
     pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub aws_secret_access_key: String,
+    #[serde(default)]
+    pub aws_secret_access_key_credential_id: Option<String>,
+    #[serde(default)]
+    pub aws_region: Option<String>,
+    #[serde(default)]
+    pub aws_session_token: String,
+    #[serde(default)]
+    pub aws_session_token_credential_id: Option<String>,
 }
 
 fn default_remote_model() -> String {
-    "gpt-4o-mini".into()
+    String::new()
 }
 
 impl Default for RemoteProviderSettings {
@@ -114,6 +124,11 @@ impl Default for RemoteProviderSettings {
             api_key: String::new(),
             api_key_credential_id: None,
             api_key_env: Some("OPENAI_API_KEY".into()),
+            aws_secret_access_key: String::new(),
+            aws_secret_access_key_credential_id: None,
+            aws_region: None,
+            aws_session_token: String::new(),
+            aws_session_token_credential_id: None,
         }
     }
 }
@@ -192,6 +207,112 @@ impl JudgeProviderConfig {
             .as_deref()
             .and_then(|name| std::env::var(name).ok())
             .filter(|v| !v.trim().is_empty())
+    }
+
+    pub fn resolved_aws_secret_access_key(&self) -> Option<String> {
+        if !self.remote.aws_secret_access_key.trim().is_empty() {
+            return Some(self.remote.aws_secret_access_key.trim().to_string());
+        }
+        if self.remote.aws_secret_access_key_credential_id.is_some() {
+            return None;
+        }
+        std::env::var("AWS_SECRET_ACCESS_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+    }
+
+    pub fn resolved_aws_session_token(&self) -> Option<String> {
+        if !self.remote.aws_session_token.trim().is_empty() {
+            return Some(self.remote.aws_session_token.trim().to_string());
+        }
+        std::env::var("AWS_SESSION_TOKEN")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+    }
+
+    pub fn has_stored_aws_session_token(&self) -> bool {
+        !self.remote.aws_session_token.trim().is_empty()
+            || self.remote.aws_session_token_credential_id.is_some()
+    }
+
+    fn access_key_requires_session_token(&self) -> bool {
+        if self.remote.api_key.trim().starts_with("ASIA") {
+            return true;
+        }
+        self.resolved_api_key()
+            .is_some_and(|key| key.starts_with("ASIA"))
+    }
+
+    pub fn has_stored_api_key(&self) -> bool {
+        !self.remote.api_key.trim().is_empty() || self.remote.api_key_credential_id.is_some()
+    }
+
+    pub fn has_stored_aws_secret(&self) -> bool {
+        !self.remote.aws_secret_access_key.trim().is_empty()
+            || self.remote.aws_secret_access_key_credential_id.is_some()
+    }
+
+    /// Validate remote credentials for connectivity tests (no env fallback unless explicitly allowed).
+    pub fn validate_remote_for_test(&self, allow_env_fallback: bool) -> Result<(), String> {
+        if self.remote.model.trim().is_empty() {
+            return Err("model name is required".into());
+        }
+
+        match self.remote.provider {
+            RemoteProvider::Bedrock => {
+                if !self.has_stored_api_key() {
+                    return Err("access key id is required".into());
+                }
+                if !self.has_stored_aws_secret()
+                    && !(allow_env_fallback && self.resolved_aws_secret_access_key().is_some())
+                {
+                    return Err("secret access key is required".into());
+                }
+                if self
+                    .remote
+                    .aws_region
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                    .is_none()
+                {
+                    return Err("region is required".into());
+                }
+                if self.access_key_requires_session_token()
+                    && !self.has_stored_aws_session_token()
+                    && !(allow_env_fallback && self.resolved_aws_session_token().is_some())
+                {
+                    return Err(
+                        "session token is required for temporary AWS credentials (ASIA access keys)"
+                            .into(),
+                    );
+                }
+            }
+            RemoteProvider::Azure => {
+                if self
+                    .remote
+                    .base_url
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                    .is_none()
+                {
+                    return Err("endpoint url is required".into());
+                }
+                if !self.has_stored_api_key()
+                    && !(allow_env_fallback && self.resolved_api_key().is_some())
+                {
+                    return Err("api key is required".into());
+                }
+            }
+            _ => {
+                if !self.has_stored_api_key()
+                    && !(allow_env_fallback && self.resolved_api_key().is_some())
+                {
+                    return Err("api key is required".into());
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
