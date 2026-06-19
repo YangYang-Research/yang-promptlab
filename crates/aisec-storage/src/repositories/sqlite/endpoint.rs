@@ -4,7 +4,7 @@ use sqlx::SqlitePool;
 use aisec_core::AisecResult;
 
 use crate::error::StorageResultExt;
-use crate::models::{CreateEndpoint, Endpoint};
+use crate::models::{CreateEndpoint, Endpoint, UpdateEndpoint};
 use crate::repositories::EndpointRepository;
 use crate::util::{new_id, now};
 
@@ -77,6 +77,18 @@ impl EndpointRepository for SqliteEndpointRepository {
         .fetch_all(&self.pool)
         .await
         .map_storage()
+    }
+
+    async fn update(&self, id: &str, input: UpdateEndpoint) -> AisecResult<Endpoint> {
+        if let Some(method) = &input.method {
+            sqlx::query("UPDATE endpoints SET method = ? WHERE id = ?")
+                .bind(method)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_storage()?;
+        }
+        self.get(id).await
     }
 
     async fn delete_by_scan(&self, scan_id: &str) -> AisecResult<u64> {

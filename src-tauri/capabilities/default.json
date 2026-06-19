@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "identifier": "com.aisec.desktop",
+  "identifier": "yangyang.aisec.app",
   "description": "Default capabilities for the AISec main window",
   "windows": ["main"],
   "permissions": [

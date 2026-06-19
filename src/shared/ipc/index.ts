@@ -25,6 +25,7 @@ export {
   runDiscovery,
   listEndpoints,
   createEndpoint,
+  updateEndpoint,
   runPromptInjection,
   startScan,
   getScanStatus,
@@ -46,6 +47,7 @@ export {
   type ScanStartDto,
   type ScanStartRequest,
   type ScanStatusDto,
+  type ScanProgressEvent,
 } from "./client";
 export {
   getJudgeConfig,

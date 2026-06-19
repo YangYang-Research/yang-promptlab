@@ -198,9 +198,12 @@ export type ActivityItem = {
 
 export type DashboardStats = {
   projects: number;
+  activeProjects: number;
   targets: number;
+  scanningTargets: number;
   openFindings: number;
   criticalFindings: number;
   runningScans: number;
   installedModels: number;
+  downloadingModels: number;
 };

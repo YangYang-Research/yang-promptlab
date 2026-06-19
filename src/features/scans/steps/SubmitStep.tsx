@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { Link } from "react-router-dom";
 
 import { Badge, Button } from "@/shared/components";
 import {
@@ -12,12 +11,15 @@ import {
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
 import type { Target } from "@/shared/types";
 
+import { ScanConsole } from "./ScanConsole";
+
 type SubmitStepProps = {
   target: Target;
   endpointIds: string[];
   attackPlan: AttackPlanConfig;
   submittedScanId: string | null;
-  onCreateAnother: () => void;
+  onViewResult: () => void;
+  onRetryScan: () => void;
 };
 
 export function SubmitStep({
@@ -25,7 +27,8 @@ export function SubmitStep({
   endpointIds,
   attackPlan,
   submittedScanId,
-  onCreateAnother,
+  onViewResult,
+  onRetryScan,
 }: SubmitStepProps) {
   const statuses = useScanStatuses(submittedScanId ? [submittedScanId] : [], submittedScanId !== null);
   const liveStatus = submittedScanId ? statuses.get(submittedScanId) : undefined;
@@ -70,12 +73,16 @@ export function SubmitStep({
   }, [attackPlan, endpointIds.length, estimateInput, target.url]);
 
   if (submittedScanId && status) {
+    const isRunning = ["running", "paused", "pending"].includes(status.status);
+    const isSuccess = status.status === "completed";
+    const isFailed = status.status === "failed" || status.status === "stopped";
+
     return (
       <div className="wizard-submitted">
         <div className="wizard-submitted__hero">
-          <h3 className="wizard-submitted__title">Scan execution summary</h3>
+          <h3 className="wizard-submitted__title">Scan progress</h3>
           <p className="text-muted">
-            The scan is running in the background. Monitor progress here or jump to related views.
+            Live output from the attack engine. Monitor progress here or open the scan monitor.
           </p>
         </div>
 
@@ -123,19 +130,24 @@ export function SubmitStep({
           />
         </div>
 
+        <hr className="wizard-submitted__divider" />
+
+        <ScanConsole scanId={submittedScanId} />
+
         <div className="wizard-submitted__actions">
-          <Link to="/scans">
-            <Button variant="primary">Open Scan Monitor</Button>
-          </Link>
-          <Button variant="secondary" onClick={onCreateAnother}>
-            Create Another Scan
-          </Button>
-          <Link to={`/findings?scanId=${encodeURIComponent(submittedScanId)}`}>
-            <Button variant="secondary">Go To Findings</Button>
-          </Link>
-          <Link to="/targets">
-            <Button variant="ghost">Go To Targets</Button>
-          </Link>
+          {isSuccess && (
+            <Button variant="primary" onClick={onViewResult}>
+              View Result
+            </Button>
+          )}
+          {isFailed && (
+            <Button variant="primary" onClick={onRetryScan}>
+              Retry Scan
+            </Button>
+          )}
+          {isRunning && (
+            <span className="text-muted text-sm">Scan running…</span>
+          )}
         </div>
       </div>
     );

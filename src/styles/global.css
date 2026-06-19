@@ -1898,6 +1898,43 @@ a:hover {
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+.wizard-submitted__divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1rem 0;
+}
+.scan-console {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.scan-console__title {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.scan-console__body {
+  margin: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  background: #0d1117;
+  color: #c9d1d9;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.scan-console__line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.scan-console__placeholder {
+  display: block;
+}
+.scan-endpoint-method {
+  min-width: 6.5rem;
+  font-size: 0.8125rem;
+}
 
 .wizard-results {
   display: flex;

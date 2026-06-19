@@ -8,18 +8,22 @@
 use aisec_discovery::{DiscoveryConfig, DiscoveryEngine};
 use aisec_plugin_host::collect_discovery_endpoints;
 use aisec_storage::{
-    CreateEndpoint, CreateScan, EndpointRepository, ScanRepository, TargetRepository, UpdateScan,
+    CreateEndpoint, CreateScan, EndpointRepository, ScanRepository, TargetRepository, UpdateEndpoint,
+    UpdateScan,
 };
-use tauri::State;
+use std::collections::HashSet;
+use tauri::{AppHandle, State};
 use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
 use url::Url;
 
 use crate::dto::{DiscoveryRunDto, DiscoveryStatsDto, EndpointDto, ScanDto};
 use crate::error::{CommandError, CommandResult};
+use crate::events::emit_app_data_changed;
 use crate::fingerprint_service::{
     fingerprint_endpoint_url, fingerprint_json, should_fingerprint_kind,
 };
+use crate::method_heuristic::default_http_method_for_path;
 use crate::session_auth::resolve_discovery_auth;
 use crate::state::AppState;
 
@@ -68,6 +72,17 @@ fn absolute_endpoint_url(origin: &str, path: &str) -> CommandResult<String> {
         })
 }
 
+fn inferred_method(path_or_url: &str) -> String {
+    default_http_method_for_path(path_or_url).to_string()
+}
+
+fn method_for_discovered_endpoint(url: &str, reported: Option<&str>) -> String {
+    reported
+        .map(|m| m.trim().to_ascii_uppercase())
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| inferred_method(url))
+}
+
 fn normalize_http_method(method: Option<String>) -> CommandResult<String> {
     let method = method.unwrap_or_else(|| "GET".into());
     let upper = method.trim().to_ascii_uppercase();
@@ -95,7 +110,10 @@ pub async fn endpoint_create_op(
 
     let origin = target_origin(&target.descriptor_json)?;
     let url = absolute_endpoint_url(&origin, &path)?;
-    let method = normalize_http_method(method)?;
+    let method = match method {
+        Some(m) if !m.trim().is_empty() => normalize_http_method(Some(m))?,
+        _ => inferred_method(&path),
+    };
 
     let fingerprint_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -131,10 +149,12 @@ pub async fn endpoint_create_op(
     Ok(endpoint.into())
 }
 
-#[instrument(skip(state))]
+#[instrument(skip(state, app))]
 pub async fn discovery_run_op(
     state: &AppState,
+    app: &AppHandle,
     target_id: String,
+    merge_scan_id: Option<String>,
 ) -> CommandResult<DiscoveryRunDto> {
     let repos = state.repositories();
 
@@ -143,29 +163,51 @@ pub async fn discovery_run_op(
         CommandError::invalid_input("Target has no URL in its descriptor; add a URL first.")
     })?;
 
-    // Create the scan up-front in the running state so it is visible immediately.
-    let scan = repos
-        .scans()
-        .create(CreateScan {
-            project_id: target.project_id.clone(),
-            target_id: Some(target.id.clone()),
-            name: format!("Discovery: {}", target.name),
-            status: Some("running".into()),
-            playbook_json: None,
-        })
-        .await
-        .map_err(CommandError::from)?;
+    let scan = if let Some(existing_id) = merge_scan_id.as_deref() {
+        let existing = repos.scans().get(existing_id).await.map_err(CommandError::from)?;
+        if existing.target_id.as_deref() != Some(target.id.as_str()) {
+            return Err(CommandError::invalid_input(
+                "Discovery scan does not belong to this target",
+            ));
+        }
+        let _ = repos
+            .scans()
+            .update(
+                existing_id,
+                UpdateScan {
+                    status: Some("running".into()),
+                    started_at: Some(Some(OffsetDateTime::now_utc())),
+                    completed_at: Some(None),
+                    ..Default::default()
+                },
+            )
+            .await;
+        existing
+    } else {
+        let created = repos
+            .scans()
+            .create(CreateScan {
+                project_id: target.project_id.clone(),
+                target_id: Some(target.id.clone()),
+                name: format!("Discovery: {}", target.name),
+                status: Some("running".into()),
+                playbook_json: None,
+            })
+            .await
+            .map_err(CommandError::from)?;
 
-    let _ = repos
-        .scans()
-        .update(
-            &scan.id,
-            UpdateScan {
-                started_at: Some(Some(OffsetDateTime::now_utc())),
-                ..Default::default()
-            },
-        )
-        .await;
+        let _ = repos
+            .scans()
+            .update(
+                &created.id,
+                UpdateScan {
+                    started_at: Some(Some(OffsetDateTime::now_utc())),
+                    ..Default::default()
+                },
+            )
+            .await;
+        created
+    };
 
     // Run the real discovery engine. allow_private_network is enabled so the
     // desktop tool can scan localhost / internal targets the operator owns.
@@ -219,13 +261,24 @@ pub async fn discovery_run_op(
         .build()
         .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
 
+    let existing_endpoints = repos
+        .endpoints()
+        .list_by_scan(&scan.id)
+        .await
+        .map_err(CommandError::from)?;
+    let existing_urls: HashSet<String> = existing_endpoints.iter().map(|e| e.url.clone()).collect();
+
     let mut inputs: Vec<CreateEndpoint> = Vec::with_capacity(report.endpoints.len());
     for e in &report.endpoints {
+        if existing_urls.contains(&e.url) {
+            continue;
+        }
+        let method = method_for_discovered_endpoint(&e.url, e.method.as_deref());
         let fingerprint_json = if should_fingerprint_kind(e.kind.as_str()) {
             fingerprint_endpoint_url(
                 &fingerprint_client,
                 &e.url,
-                e.method.as_deref(),
+                Some(method.as_str()),
                 e.kind.as_str(),
             )
             .await
@@ -239,7 +292,7 @@ pub async fn discovery_run_op(
             target_id: Some(target.id.clone()),
             url: e.url.clone(),
             kind: e.kind.as_str().to_string(),
-            method: e.method.clone(),
+            method: Some(method),
             confidence: e.confidence as f64,
             evidence: Some(e.evidence.clone()),
             source_url: e.source_url.clone(),
@@ -252,17 +305,23 @@ pub async fn discovery_run_op(
         let mut plugin_manager = state.plugin_manager().lock().await;
         if let Ok(plugin_endpoints) = collect_discovery_endpoints(&mut plugin_manager, &seed_url).await
         {
-            let existing: std::collections::HashSet<String> =
-                inputs.iter().map(|e| e.url.clone()).collect();
+            let mut known: HashSet<String> = existing_urls
+                .iter()
+                .chain(inputs.iter().map(|e| &e.url))
+                .cloned()
+                .collect();
             for endpoint in plugin_endpoints {
-                if existing.contains(&endpoint.url) {
+                if known.contains(&endpoint.url) {
                     continue;
                 }
-                let method = endpoint.method.clone();
+                let method = method_for_discovered_endpoint(
+                    &endpoint.url,
+                    endpoint.method.as_deref(),
+                );
                 let fingerprint_json = fingerprint_endpoint_url(
                     &fingerprint_client,
                     &endpoint.url,
-                    method.as_deref(),
+                    Some(method.as_str()),
                     if endpoint.kind.is_empty() {
                         "rest_api"
                     } else {
@@ -271,6 +330,7 @@ pub async fn discovery_run_op(
                 )
                 .await
                 .map(|report| fingerprint_json(&report));
+                known.insert(endpoint.url.clone());
                 inputs.push(CreateEndpoint {
                     scan_id: scan.id.clone(),
                     target_id: Some(target.id.clone()),
@@ -280,7 +340,7 @@ pub async fn discovery_run_op(
                     } else {
                         endpoint.kind
                     },
-                    method,
+                    method: Some(method),
                     confidence: 0.6,
                     evidence: Some("Discovered by plugin".into()),
                     source_url: Some(seed_url.clone()),
@@ -291,9 +351,19 @@ pub async fn discovery_run_op(
         }
     }
 
-    let saved = repos
+    let newly_saved = if inputs.is_empty() {
+        Vec::new()
+    } else {
+        repos
+            .endpoints()
+            .create_many(inputs)
+            .await
+            .map_err(CommandError::from)?
+    };
+
+    let all_endpoints = repos
         .endpoints()
-        .create_many(inputs)
+        .list_by_scan(&scan.id)
         .await
         .map_err(CommandError::from)?;
 
@@ -303,7 +373,7 @@ pub async fn discovery_run_op(
         links_extracted: report.stats.links_extracted as u64,
         probes_sent: report.stats.probes_sent as u64,
         duration_ms: report.stats.duration_ms,
-        endpoint_count: saved.len() as u64,
+        endpoint_count: all_endpoints.len() as u64,
         errors: report.errors.clone(),
     };
 
@@ -332,14 +402,17 @@ pub async fn discovery_run_op(
 
     info!(
         scan_id = %scan.id,
-        endpoints = saved.len(),
+        new_endpoints = newly_saved.len(),
+        total_endpoints = all_endpoints.len(),
         pages = stats.pages_fetched,
         "discovery run completed"
     );
 
+    emit_app_data_changed(app, "discovery_complete");
+
     Ok(DiscoveryRunDto {
         scan: ScanDto::from(updated),
-        endpoints: saved.into_iter().map(EndpointDto::from).collect(),
+        endpoints: all_endpoints.into_iter().map(EndpointDto::from).collect(),
         stats,
     })
 }
@@ -355,6 +428,28 @@ pub async fn endpoint_list_op(
         .await
         .map_err(CommandError::from)?;
     Ok(endpoints.into_iter().map(EndpointDto::from).collect())
+}
+
+#[instrument(skip(state))]
+pub async fn endpoint_update_op(
+    state: &AppState,
+    endpoint_id: String,
+    method: String,
+) -> CommandResult<EndpointDto> {
+    let method = normalize_http_method(Some(method))?;
+    let updated = state
+        .repositories()
+        .endpoints()
+        .update(
+            &endpoint_id,
+            UpdateEndpoint {
+                method: Some(method),
+            },
+        )
+        .await
+        .map_err(CommandError::from)?;
+    info!(id = %updated.id, method = ?updated.method, "endpoint method updated");
+    Ok(updated.into())
 }
 
 // ---------------------------------------------------------------------------
@@ -374,10 +469,12 @@ pub async fn endpoint_create(
 
 #[tauri::command]
 pub async fn discovery_run(
+    app: AppHandle,
     state: State<'_, AppState>,
     target_id: String,
+    merge_scan_id: Option<String>,
 ) -> CommandResult<DiscoveryRunDto> {
-    discovery_run_op(state.inner(), target_id).await
+    discovery_run_op(state.inner(), &app, target_id, merge_scan_id).await
 }
 
 #[tauri::command]
@@ -386,4 +483,13 @@ pub async fn endpoint_list(
     scan_id: String,
 ) -> CommandResult<Vec<EndpointDto>> {
     endpoint_list_op(state.inner(), scan_id).await
+}
+
+#[tauri::command]
+pub async fn endpoint_update(
+    state: State<'_, AppState>,
+    endpoint_id: String,
+    method: String,
+) -> CommandResult<EndpointDto> {
+    endpoint_update_op(state.inner(), endpoint_id, method).await
 }

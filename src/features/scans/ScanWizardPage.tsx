@@ -14,6 +14,7 @@ import { ProjectStep } from "./steps/ProjectStep";
 import { ResultsStep } from "./steps/ResultsStep";
 import { SubmitStep } from "./steps/SubmitStep";
 import { TargetStep } from "./steps/TargetStep";
+import { mergeScanStatus, useScanStatuses } from "./useScanStatuses";
 import {
   buildTargetDescriptor,
   deriveTargetName,
@@ -26,7 +27,6 @@ import {
   buildWizardStore,
   clearWizardSession,
   loadWizardSession,
-  resetSessionForNewScan,
   saveWizardSession,
   shouldPersistTarget,
   type ScanWizardSession,
@@ -141,11 +141,27 @@ export function ScanWizardPage() {
     return () => window.clearInterval(timer);
   }, [session.submittedScanId, session.currentStep, actions]);
 
+  const submittedStatuses = useScanStatuses(
+    session.submittedScanId ? [session.submittedScanId] : [],
+    session.currentStep === 5 && session.submittedScanId !== null,
+  );
+  const submittedLiveStatus = session.submittedScanId
+    ? submittedStatuses.get(session.submittedScanId)
+    : undefined;
+  const submittedStatus = session.submittedScanId
+    ? mergeScanStatus(session.submittedScanId, "running", submittedLiveStatus, 0)
+    : null;
+
   const stepDef = getWizardStep(session.currentStep);
-  const showFooterNext =
-    session.currentStep < 5 || (session.currentStep === 5 && session.submittedScanId !== null);
+  const showFooterNext = session.currentStep < 5;
   const showStartScan = session.currentStep === 5 && session.submittedScanId === null;
   const showFooterDone = session.currentStep === 6;
+  const showViewResult =
+    session.currentStep === 5 && submittedStatus?.status === "completed";
+  const showRetryScan =
+    session.currentStep === 5 &&
+    submittedStatus !== null &&
+    (submittedStatus.status === "failed" || submittedStatus.status === "stopped");
   const hideBack =
     session.currentStep === 6 ||
     (session.currentStep === 5 && session.submittedScanId !== null);
@@ -231,6 +247,11 @@ export function ScanWizardPage() {
 
   async function handleStartScan() {
     if (!canStartScan(draft) || !store.savedTarget || !session.attackPlan) return;
+    await submitScanJob();
+  }
+
+  async function submitScanJob() {
+    if (!store.savedTarget || !session.attackPlan) return;
 
     setStartingScan(true);
     setScanSubmitError(null);
@@ -258,16 +279,9 @@ export function ScanWizardPage() {
     }
   }
 
-  function resetWizard() {
-    const fresh = resetSessionForNewScan(lockedProjectId, session.selectedProjectId);
-    clearWizardSession();
-    saveWizardSession(fresh);
-    setSession(fresh);
-    setTargetStepError(null);
-    setScanSubmitError(null);
-    if (!lockedProjectId) {
-      dispatch({ type: "SET_SELECTED_PROJECT", projectId: null });
-    }
+  async function handleRetryScan() {
+    if (!store.savedTarget || !session.attackPlan) return;
+    await submitScanJob();
   }
 
   function renderStepBody() {
@@ -344,7 +358,8 @@ export function ScanWizardPage() {
               endpointIds={session.discovery.selectedEndpointIds}
               attackPlan={session.attackPlan}
               submittedScanId={session.submittedScanId}
-              onCreateAnother={resetWizard}
+              onViewResult={() => updateSession({ currentStep: 6 })}
+              onRetryScan={() => void handleRetryScan()}
             />
             {scanSubmitError && <p className="text-danger">{scanSubmitError}</p>}
           </>
@@ -420,6 +435,20 @@ export function ScanWizardPage() {
                 onClick={() => void handleStartScan()}
               >
                 {startingScan ? "Starting scan…" : "Start Scan"}
+              </Button>
+            )}
+            {showViewResult && (
+              <Button variant="primary" onClick={() => updateSession({ currentStep: 6 })}>
+                View Result
+              </Button>
+            )}
+            {showRetryScan && (
+              <Button
+                variant="primary"
+                disabled={startingScan}
+                onClick={() => void handleRetryScan()}
+              >
+                {startingScan ? "Retrying…" : "Retry Scan"}
               </Button>
             )}
             {showFooterNext && (

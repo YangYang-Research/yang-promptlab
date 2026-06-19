@@ -8,9 +8,11 @@ pub mod commands;
 pub mod db;
 pub mod dto;
 pub mod error;
+pub mod events;
 pub mod fingerprint_service;
 pub mod jobs;
 pub mod logging;
+pub mod method_heuristic;
 pub mod harness_runtime;
 pub mod judge_config;
 pub mod model_registry;
@@ -175,6 +177,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::discovery::discovery_run,
             commands::discovery::endpoint_list,
             commands::discovery::endpoint_create,
+            commands::discovery::endpoint_update,
             commands::attack::attack_run_prompt_injection,
             commands::scan::scan_start,
             commands::scan::scan_status,

@@ -132,6 +132,7 @@ impl AgentHost for ScanAgentHost<'_> {
             self.runtime_supervisor,
             self.plugin_manager.clone(),
             Some(&map),
+            None,
         )
         .await
         .map_err(|err| AgentError::Attack(err.to_string()))?;

@@ -50,7 +50,7 @@ export type AppDataState = {
 
 export type LoadedData = Pick<
   AppDataState,
-  "projects" | "targets" | "scans" | "endpoints" | "findings" | "reports"
+  "projects" | "targets" | "scans" | "endpoints" | "findings" | "reports" | "models"
 >;
 
 export type AppAction =
@@ -88,7 +88,7 @@ export type AppActions = {
     format?: string,
     kind?: string,
   ) => Promise<void>;
-  runDiscovery: (targetId: string) => Promise<DiscoveryRunDto>;
+  runDiscovery: (targetId: string, mergeScanId?: string | null) => Promise<DiscoveryRunDto>;
   runPromptInjection: (endpointId: string) => Promise<AttackRunDto>;
 };
 

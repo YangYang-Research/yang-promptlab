@@ -30,6 +30,7 @@ use tauri::async_runtime::Mutex as AsyncMutex;
 
 use crate::dto::{AttackRunDto, FindingDto, ScanDto};
 use crate::error::{CommandError, CommandResult};
+use crate::events::{ScanProgressEmitter, ScanProgressLevel};
 use crate::judge_config::build_configured_judge_engine;
 use crate::session_auth::{attack_executor, build_attack_runtime, AttackRuntime};
 use crate::state::AppState;
@@ -88,8 +89,12 @@ pub async fn run_category_on_endpoint(
     runtime_supervisor: &mut RuntimeSupervisor,
     plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
     generated_payloads: Option<&HashMap<AttackCategory, Vec<AttackPayload>>>,
+    progress: Option<&ScanProgressEmitter>,
 ) -> CommandResult<CategoryRunResult> {
     let mut target = AttackTarget::llm_api(endpoint.url.clone());
+    if let Some(method) = &endpoint.method {
+        target.method = Some(method.clone());
+    }
     if let Some(tid) = &target_id {
         if let Ok(stored_target) = repos.targets().get(tid).await {
             let secrets = SecretStore::new().map_err(CommandError::from)?;
@@ -122,8 +127,21 @@ pub async fn run_category_on_endpoint(
         endpoint_id = %endpoint.id,
         category = %category.as_str(),
         url = %endpoint.url,
+        method = ?endpoint.method,
         "attack unit started"
     );
+
+    let method_label = endpoint
+        .method
+        .as_deref()
+        .unwrap_or("POST");
+    if let Some(emitter) = progress {
+        let path = url::Url::parse(&endpoint.url)
+            .ok()
+            .map(|u| u.path().to_string())
+            .unwrap_or_else(|| endpoint.url.clone());
+        emitter.info(format!("Testing {method_label} {path}"));
+    }
 
     let result = executor
         .execute_category(category, &ctx)
@@ -142,9 +160,33 @@ pub async fn run_category_on_endpoint(
     let mut created_findings: Vec<FindingDto> = Vec::new();
     let mut judged: Vec<JudgedAttemptSummary> = Vec::new();
 
-    for attempt in &result.attempts {
+    for (index, attempt) in result.attempts.iter().enumerate() {
         let eval = &attempt.evaluation;
         let normalized = &attempt.response.normalized;
+
+        if let Some(emitter) = progress {
+            emitter.detailed(
+                ScanProgressLevel::Info,
+                emitter
+                    .event(ScanProgressLevel::Info, format!("Payload #{} {}", index + 1, attempt.payload_name))
+                    .payload(&attempt.payload_name)
+                    .endpoint(&endpoint.url),
+            );
+            emitter.detailed(
+                ScanProgressLevel::Info,
+                emitter
+                    .event(
+                        ScanProgressLevel::Info,
+                        format!(
+                            "Response {} ({}ms)",
+                            attempt.response.status, attempt.response.duration_ms
+                        ),
+                    )
+                    .endpoint(&endpoint.url)
+                    .status_code(attempt.response.status)
+                    .latency(attempt.response.duration_ms),
+            );
+        }
 
         let mut verdict: JudgeVerdict = judge
             .judge_normalized(
@@ -241,7 +283,17 @@ pub async fn run_category_on_endpoint(
                 })
                 .await
                 .map_err(CommandError::from)?;
-            created_findings.push(FindingDto::from(finding));
+            let finding_dto = FindingDto::from(finding);
+            created_findings.push(finding_dto.clone());
+            if let Some(emitter) = progress {
+                emitter.detailed(
+                    ScanProgressLevel::Info,
+                    emitter
+                        .event(ScanProgressLevel::Info, "Saved finding")
+                        .endpoint(&endpoint.url)
+                        .finding_id(&finding_dto.id),
+                );
+            }
         }
 
         judged.push(JudgedAttemptSummary {
@@ -251,6 +303,23 @@ pub async fn run_category_on_endpoint(
             confidence: verdict.confidence,
             summary: verdict.summary.clone(),
         });
+
+        if let Some(emitter) = progress {
+            let confidence_label = if verdict.confidence >= 0.8 {
+                "High Confidence"
+            } else if verdict.confidence >= 0.5 {
+                "Medium Confidence"
+            } else {
+                "Low Confidence"
+            };
+            emitter.detailed(
+                ScanProgressLevel::Info,
+                emitter
+                    .event(ScanProgressLevel::Info, format!("Judge: {confidence_label}"))
+                    .endpoint(&endpoint.url)
+                    .payload(&attempt.payload_name),
+            );
+        }
     }
 
     Ok(CategoryRunResult {
@@ -336,6 +405,7 @@ pub async fn attack_run_prompt_injection_op(
         state.model_provider().clone(),
         &mut supervisor,
         state.plugin_manager().clone(),
+        None,
         None,
     )
     .await

@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { listen } from "@tauri-apps/api/event";
+
 import {
   createProject as createProjectCmd,
   createScan as createScanCmd,
@@ -24,8 +26,10 @@ import {
   listTargets,
   runDiscovery as runDiscoveryCmd,
   runPromptInjection as runPromptInjectionCmd,
+  listModels,
   type EndpointDto,
   type FindingDto,
+  type ModelEntryDto,
   type ScanDto,
 } from "@/shared/ipc";
 import { toAppError } from "@/shared/errors";
@@ -47,6 +51,21 @@ import type {
   AppStoreValue,
   LoadedData,
 } from "./types";
+import type { LocalModel, ModelStatus } from "@/shared/types";
+
+function mapLocalModels(entries: ModelEntryDto[]): LocalModel[] {
+  return entries.map((entry) => ({
+    id: entry.id,
+    name: entry.name,
+    provider: entry.provider,
+    sizeGb: entry.sizeGb,
+    status: (entry.status as ModelStatus) || "available",
+    downloadProgress: entry.status === "downloading" ? 50 : entry.status === "installed" ? 100 : 0,
+    quant: entry.format,
+    path: entry.path || null,
+    sha256: entry.sha256,
+  }));
+}
 
 const log = createLogger("AppStore");
 
@@ -147,9 +166,10 @@ async function loadAll(): Promise<LoadedData> {
   const targetDtos = targetGroups.flat();
   const scanDtos: ScanDto[] = scanGroups.flat();
 
-  const [findingGroups, endpointGroups] = await Promise.all([
+  const [findingGroups, endpointGroups, modelEntries] = await Promise.all([
     listFindingsAll(),
     Promise.all(scanDtos.map((s) => listEndpoints(s.id))),
+    listModels().catch(() => [] as ModelEntryDto[]),
   ]);
   const findingDtos: FindingDto[] = findingGroups;
   const endpointDtos: EndpointDto[] = endpointGroups.flat();
@@ -161,6 +181,7 @@ async function loadAll(): Promise<LoadedData> {
     endpoints: mapEndpoints(endpointDtos),
     findings: mapFindings(findingDtos, targetDtos),
     reports: mapReports(reportDtos, projectDtos, scanDtos),
+    models: mapLocalModels(modelEntries),
   };
 }
 
@@ -253,9 +274,9 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
         runMutation("generateReport", () =>
           generateReportCmd(projectId, scanId, format, kind),
         ),
-      runDiscovery: async (targetId) => {
+      runDiscovery: async (targetId, mergeScanId) => {
         try {
-          const result = await runDiscoveryCmd(targetId);
+          const result = await runDiscoveryCmd(targetId, mergeScanId);
           await refresh();
           return result;
         } catch (error) {
@@ -283,6 +304,15 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
 
   useEffect(() => {
     void refresh();
+    let unlisten: (() => void) | undefined;
+    void listen("app-data-changed", () => {
+      void refresh();
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      void unlisten?.();
+    };
   }, [refresh]);
 
   const value = useMemo<AppStoreValue>(() => {

@@ -9,7 +9,7 @@ import {
   Select,
 } from "@/shared/components";
 import type { EndpointDto } from "@/shared/ipc";
-import { createEndpoint, listEndpoints } from "@/shared/ipc";
+import { createEndpoint, listEndpoints, updateEndpoint } from "@/shared/ipc";
 import { useToast } from "@/shared/notifications";
 import type { Target } from "@/shared/types";
 
@@ -20,9 +20,14 @@ import {
 } from "../discoveryPhases";
 import {
   aggregatePlatformSummary,
-  endpointPlatformLabel,
   platformLabel,
 } from "../fingerprintPlan";
+import {
+  confidenceLabel,
+  endpointPath,
+  HTTP_METHODS,
+  inferEndpointMethod,
+} from "../endpointMethod";
 import type { DiscoveryWizardState } from "../wizardState";
 
 export type DiscoverySelection = {
@@ -39,14 +44,16 @@ type DiscoveryStepProps = {
 
 type EndpointRow = EndpointDto & { selected: boolean };
 
-const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
-
 function toRows(endpoints: EndpointDto[], selectedIds: string[]): EndpointRow[] {
   const selected = new Set(selectedIds);
   return endpoints.map((endpoint) => ({
     ...endpoint,
     selected: selected.has(endpoint.id),
   }));
+}
+
+function displayMethod(endpoint: EndpointDto): string {
+  return endpoint.method ?? inferEndpointMethod(endpoint.url);
 }
 
 export function DiscoveryStep({ target, discovery, onDiscoveryChange }: DiscoveryStepProps) {
@@ -59,6 +66,7 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
   const [formError, setFormError] = useState<string | null>(null);
   const [addingManual, setAddingManual] = useState(false);
   const [loadingEndpoints, setLoadingEndpoints] = useState(false);
+  const [updatingMethodId, setUpdatingMethodId] = useState<string | null>(null);
 
   const { scanId, selectedEndpointIds, completed, stats, manualMethod, manualPath, endpoints: cachedEndpoints } =
     discovery;
@@ -90,6 +98,7 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
       .then((rows) => {
         if (cancelled) return;
         setEndpoints(rows);
+        onDiscoveryChange({ endpoints: rows });
       })
       .catch(() => {
         if (!cancelled) setEndpoints([]);
@@ -109,22 +118,28 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
     if (running) return;
     setRunning(true);
     setFormError(null);
+    const previousSelection = new Set(selectedEndpointIds);
     onDiscoveryChange({
       completed: false,
       stats: null,
-      selectedEndpointIds: [],
     });
 
     try {
-      const result = await actions.runDiscovery(target.id);
-      const ids = result.endpoints.map((endpoint) => endpoint.id);
+      const result = await actions.runDiscovery(target.id, scanId);
+      const resultIds = new Set(result.endpoints.map((endpoint) => endpoint.id));
+      const preserved = [...previousSelection].filter((id) => resultIds.has(id));
+      const newlyDiscovered = result.endpoints
+        .map((endpoint) => endpoint.id)
+        .filter((id) => !previousSelection.has(id));
+      const nextSelected = [...preserved, ...newlyDiscovered];
+
       setEndpoints(result.endpoints);
       onDiscoveryChange({
         scanId: result.scan.id,
         completed: true,
         stats: result.stats,
         endpoints: result.endpoints,
-        selectedEndpointIds: ids,
+        selectedEndpointIds: nextSelected.length > 0 ? nextSelected : result.endpoints.map((e) => e.id),
       });
       notify(
         `Discovery complete — ${result.stats.endpoint_count} endpoint(s) found`,
@@ -140,6 +155,21 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
     }
   }
 
+  async function handleMethodChange(endpointId: string, method: string) {
+    setUpdatingMethodId(endpointId);
+    try {
+      const updated = await updateEndpoint(endpointId, method);
+      const rows = endpoints.map((row) => (row.id === endpointId ? updated : row));
+      setEndpoints(rows);
+      onDiscoveryChange({ endpoints: rows });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to update method";
+      notify(message, "error");
+    } finally {
+      setUpdatingMethodId(null);
+    }
+  }
+
   async function handleAddManual(e: React.FormEvent) {
     e.preventDefault();
     if (!scanId) {
@@ -149,6 +179,10 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
     const path = manualPath.trim();
     if (!path.startsWith("/")) {
       setFormError("Path must start with / (e.g. /v1/chat).");
+      return;
+    }
+    if (!manualMethod.trim()) {
+      setFormError("HTTP method is required.");
       return;
     }
 
@@ -194,7 +228,7 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
   const columns = [
     {
       key: "selected",
-      header: " ",
+      header: "✓",
       width: "44px",
       render: (row: EndpointRow) => (
         <input
@@ -206,50 +240,48 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
       ),
     },
     {
-      key: "method",
-      header: "Method",
-      width: "90px",
-      render: (row: EndpointRow) => row.method ?? "—",
-    },
-    {
       key: "url",
       header: "Endpoint",
       render: (row: EndpointRow) => (
-        <div>
-          <span className="mono text-sm">{row.url}</span>
-          {row.evidence && <div className="text-muted text-sm">{row.evidence}</div>}
-        </div>
+        <span className="mono text-sm">{endpointPath(row.url)}</span>
       ),
     },
     {
-      key: "platform",
-      header: "Platform",
-      width: "130px",
-      render: (row: EndpointRow) => {
-        const label = endpointPlatformLabel(row);
-        return label === "—" ? (
-          <span className="text-muted">—</span>
-        ) : (
-          <Badge variant="info">{label}</Badge>
-        );
-      },
-    },
-    {
-      key: "confidence",
-      header: "Confidence",
-      width: "100px",
-      render: (row: EndpointRow) => `${Math.round(row.confidence * 100)}%`,
+      key: "method",
+      header: "Method",
+      width: "110px",
+      render: (row: EndpointRow) => (
+        <Select
+          className="scan-endpoint-method"
+          value={displayMethod(row)}
+          disabled={updatingMethodId === row.id}
+          onChange={(e) => void handleMethodChange(row.id, e.target.value)}
+          aria-label={`HTTP method for ${row.url}`}
+        >
+          {HTTP_METHODS.map((method) => (
+            <option key={method} value={method}>
+              {method}
+            </option>
+          ))}
+        </Select>
+      ),
     },
     {
       key: "source",
       header: "Source",
-      width: "110px",
+      width: "120px",
       render: (row: EndpointRow) => {
         const label = endpointSourceLabel(row.kind, row.source_url);
         return (
           <Badge variant={label === "Manual" ? "info" : "muted"}>{label}</Badge>
         );
       },
+    },
+    {
+      key: "confidence",
+      header: "Confidence",
+      width: "110px",
+      render: (row: EndpointRow) => confidenceLabel(row.confidence),
     },
   ];
 
@@ -345,11 +377,30 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
             <h4 className="wizard-endpoints__title">Manual endpoints</h4>
             <form className="wizard-manual-form" onSubmit={handleAddManual}>
               <label className="field">
+                <span className="field__label">Endpoint</span>
+                <input
+                  className="input"
+                  placeholder="/v1/chat/completions"
+                  value={manualPath}
+                  onChange={(e) => {
+                    const path = e.target.value;
+                    onDiscoveryChange({
+                      manualPath: path,
+                      manualMethod:
+                        manualMethod || inferEndpointMethod(path),
+                    });
+                  }}
+                  disabled={!scanId || addingManual}
+                  required
+                />
+              </label>
+              <label className="field">
                 <span className="field__label">Method</span>
                 <Select
                   value={manualMethod}
                   onChange={(e) => onDiscoveryChange({ manualMethod: e.target.value })}
                   disabled={!scanId || addingManual}
+                  required
                 >
                   {HTTP_METHODS.map((method) => (
                     <option key={method} value={method}>
@@ -358,20 +409,10 @@ export function DiscoveryStep({ target, discovery, onDiscoveryChange }: Discover
                   ))}
                 </Select>
               </label>
-              <label className="field wizard-manual-form__path">
-                <span className="field__label">Path</span>
-                <input
-                  className="input"
-                  placeholder="/v1/chat/completions"
-                  value={manualPath}
-                  onChange={(e) => onDiscoveryChange({ manualPath: e.target.value })}
-                  disabled={!scanId || addingManual}
-                />
-              </label>
               <Button
                 variant="secondary"
                 type="submit"
-                disabled={!scanId || addingManual || !manualPath.trim()}
+                disabled={!scanId || addingManual || !manualPath.trim() || !manualMethod.trim()}
               >
                 {addingManual ? "Adding…" : "Add Endpoint"}
               </Button>

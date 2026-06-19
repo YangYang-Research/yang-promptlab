@@ -14,7 +14,7 @@ use aisec_storage::{
     ScanRepository, TargetRepository, UpdateScan,
 };
 use tauri::async_runtime::Mutex as AsyncMutex;
-use tauri::State;
+use tauri::{AppHandle, State};
 use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
 
@@ -24,6 +24,7 @@ use crate::commands::generator::{
     attack_plan_from_scan, generate_payloads_for_scan_job, parse_generator_mode_optional,
     prompt_payloads_map,
 };
+use crate::events::{emit_app_data_changed, ScanProgressEmitter};
 use crate::session_auth::{build_attack_runtime_parts, fallback_attack_runtime, seed_url_from_descriptor, AttackRuntime};
 use crate::dto::{ScanStartDto, ScanStatusDto};
 use crate::error::{CommandError, CommandResult};
@@ -103,6 +104,7 @@ async fn wait_if_paused(paused: &AtomicBool, cancel: &AtomicBool) {
 }
 
 async fn run_scan_job(
+    app: AppHandle,
     db: aisec_storage::Database,
     jobs: ScanJobManager,
     scan_id: String,
@@ -125,6 +127,8 @@ async fn run_scan_job(
     runtime_supervisor: Arc<AsyncMutex<RuntimeSupervisor>>,
 ) {
     let repos = db.repositories();
+    let progress_emitter = ScanProgressEmitter::new(app.clone(), scan_id.clone());
+    progress_emitter.info("Loading attack plan...");
     let default_runtime = fallback_attack_runtime();
     let attack_runtime: AttackRuntime = if let Some(tid) = &target_id {
         if let Ok(target) = repos.targets().get(tid).await {
@@ -242,6 +246,7 @@ async fn run_scan_job(
                 &mut supervisor,
                 plugin_manager.clone(),
                 generated_payloads.as_ref(),
+                Some(&progress_emitter),
             )
             .await
             {
@@ -308,10 +313,12 @@ async fn run_scan_job(
     }
 
     jobs.remove(&scan_id);
+    emit_app_data_changed(&app, "scan_completed");
     info!(scan_id = %scan_id, status = final_status, findings = findings_total, "scan job finished");
 }
 
 async fn run_agent_scan_job(
+    app: AppHandle,
     db: aisec_storage::Database,
     jobs: ScanJobManager,
     scan_id: String,
@@ -335,6 +342,8 @@ async fn run_agent_scan_job(
     runtime_supervisor: Arc<AsyncMutex<RuntimeSupervisor>>,
 ) {
     let repos = db.repositories();
+    let progress_emitter = ScanProgressEmitter::new(app.clone(), scan_id.clone());
+    progress_emitter.info("Loading attack plan...");
     let config = agent_config_from_scan(generator_mode.as_deref(), max_agent_attempts);
     let default_runtime = fallback_attack_runtime();
     let attack_runtime: AttackRuntime = if let Some(tid) = &target_id {
@@ -487,6 +496,7 @@ async fn run_agent_scan_job(
     }
 
     jobs.remove(&scan_id);
+    emit_app_data_changed(&app, "scan_completed");
     info!(
         scan_id = %scan_id,
         status = final_status,
@@ -495,9 +505,10 @@ async fn run_agent_scan_job(
     );
 }
 
-#[instrument(skip(state))]
+#[instrument(skip(state, app))]
 pub async fn scan_start_op(
     state: &AppState,
+    app: &AppHandle,
     project_id: String,
     target_id: String,
     endpoint_ids: Vec<String>,
@@ -621,10 +632,14 @@ pub async fn scan_start_op(
     let profile_for_job = profile.clone();
     let generator_mode_for_job = generator_mode.clone();
     let max_attempts_for_job = max_agent_attempts;
+    let app_for_job = app.clone();
+
+    emit_app_data_changed(app, "scan_created");
 
     if agentic {
         tauri::async_runtime::spawn(async move {
             run_agent_scan_job(
+                app_for_job,
                 db,
                 jobs,
                 scan_id,
@@ -652,6 +667,7 @@ pub async fn scan_start_op(
     } else {
         tauri::async_runtime::spawn(async move {
             run_scan_job(
+                app_for_job,
                 db,
                 jobs,
                 scan_id,
@@ -825,6 +841,7 @@ pub async fn scan_stop_op(state: &AppState, scan_id: String) -> CommandResult<Sc
 
 #[tauri::command]
 pub async fn scan_start(
+    app: AppHandle,
     state: State<'_, AppState>,
     project_id: String,
     target_id: String,
@@ -838,6 +855,7 @@ pub async fn scan_start(
 ) -> CommandResult<ScanStartDto> {
     scan_start_op(
         state.inner(),
+        &app,
         project_id,
         target_id,
         endpoint_ids,

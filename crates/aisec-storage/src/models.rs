@@ -225,6 +225,11 @@ pub struct CreateEndpoint {
     pub fingerprint_json: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UpdateEndpoint {
+    pub method: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreatePayload {
     pub project_id: Option<String>,

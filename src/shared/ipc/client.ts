@@ -192,6 +192,18 @@ export type ScanStatusDto = {
   current_retry: number | null;
 };
 
+export type ScanProgressEvent = {
+  scanId: string;
+  timestamp: string;
+  level: "INFO" | "WARN" | "ERROR";
+  message: string;
+  endpoint?: string;
+  payload?: string;
+  statusCode?: number;
+  latency?: number;
+  findingId?: string;
+};
+
 export type ReportDto = {
   id: string;
   project_id: string;
@@ -272,8 +284,11 @@ export const readReport = (id: string) =>
 export const exportReport = (id: string) =>
   invokeCommand<string>("report_export", { id });
 
-export const runDiscovery = (targetId: string) =>
-  invokeCommand<DiscoveryRunDto>("discovery_run", { targetId });
+export const runDiscovery = (targetId: string, mergeScanId?: string | null) =>
+  invokeCommand<DiscoveryRunDto>("discovery_run", {
+    targetId,
+    mergeScanId: mergeScanId ?? null,
+  });
 
 export const listEndpoints = (scanId: string) =>
   invokeCommand<EndpointDto[]>("endpoint_list", { scanId });
@@ -285,6 +300,9 @@ export const createEndpoint = (
   path: string,
 ) =>
   invokeCommand<EndpointDto>("endpoint_create", { scanId, targetId, method, path });
+
+export const updateEndpoint = (endpointId: string, method: string) =>
+  invokeCommand<EndpointDto>("endpoint_update", { endpointId, method });
 
 export const runPromptInjection = (endpointId: string) =>
   invokeCommand<AttackRunDto>("attack_run_prompt_injection", { endpointId });

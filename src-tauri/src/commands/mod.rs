@@ -48,7 +48,7 @@ pub fn app_info() -> CommandResult<AppInfoResponse> {
     Ok(AppInfoResponse {
         name: env!("CARGO_PKG_NAME"),
         version: env!("CARGO_PKG_VERSION"),
-        identifier: "com.aisec.desktop",
+        identifier: "yangyang.aisec.app",
     })
 }
 
