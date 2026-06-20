@@ -1019,12 +1019,109 @@ a:hover {
   min-width: 12rem;
 }
 
+.download-manager {
+  margin-bottom: 1rem;
+}
+
 .download-manager__header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 1rem;
   margin-bottom: 1rem;
+}
+
+.download-manager__header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.download-manager__error {
+  margin-top: 0.75rem;
+}
+
+.download-manager__footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.model-card__section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.add-model-modal {
+  min-height: min(68vh, 42rem);
+}
+
+.add-model-modal__layout {
+  display: grid;
+  grid-template-columns: minmax(11rem, 13.5rem) minmax(0, 1fr);
+  gap: 1.5rem;
+  min-height: min(62vh, 38rem);
+}
+
+.add-model-modal__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.add-model-modal__nav-item {
+  text-align: left;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+}
+
+.add-model-modal__nav-item:hover {
+  background: var(--surface-elevated);
+  color: var(--text);
+}
+
+.add-model-modal__nav-item--active {
+  background: var(--surface-elevated);
+  border-color: var(--border-subtle);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.add-model-modal__panel {
+  min-width: 0;
+  overflow-y: auto;
+  max-height: min(62vh, 38rem);
+  padding-right: 0.25rem;
+}
+
+.add-model-modal__panel-header {
+  margin-bottom: 1rem;
+}
+
+.add-model-modal__panel-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.05rem;
+}
+
+@media (max-width: 720px) {
+  .add-model-modal__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .add-model-modal__nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
 }
 
 .download-manager__status {
@@ -1040,6 +1137,18 @@ a:hover {
 
 .download-manager__status--downloading {
   color: var(--accent);
+}
+
+.download-manager__status--verifying {
+  color: var(--warning, #d4a017);
+}
+
+.download-manager__status--downloaded {
+  color: var(--success, #3ecf8e);
+}
+
+.download-manager__status--verify_failed {
+  color: var(--danger);
 }
 
 .download-manager__status--paused {
@@ -3006,6 +3115,17 @@ a:hover {
   flex-direction: column;
   max-height: 90vh;
   overflow: hidden;
+}
+
+.modal--wide {
+  max-width: min(96vw, 72rem);
+  min-height: min(88vh, 48rem);
+}
+
+.modal--wide .modal__body {
+  flex: 1;
+  min-height: 0;
+  padding: 1.25rem 1.5rem 1.5rem;
 }
 .modal__header {
   display: flex;

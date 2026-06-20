@@ -8,6 +8,10 @@ type DownloadManagerCardProps = {
   onPause: () => void;
   onResume: () => void;
   onCancel: () => void;
+  onRetryVerify?: () => void;
+  onCancelVerify?: () => void;
+  onStartVerify?: () => void;
+  onDismiss?: () => void;
 };
 
 function statusLabel(status: string): string {
@@ -18,6 +22,12 @@ function statusLabel(status: string): string {
       return "Paused";
     case "pending":
       return "Pending";
+    case "verifying":
+      return "Verifying";
+    case "downloaded":
+      return "Downloaded";
+    case "verify_failed":
+      return "Verify failed";
     case "completed":
       return "Completed";
     case "failed":
@@ -33,6 +43,10 @@ export function DownloadManagerCard({
   onPause,
   onResume,
   onCancel,
+  onRetryVerify,
+  onCancelVerify,
+  onStartVerify,
+  onDismiss,
 }: DownloadManagerCardProps) {
   const percent = progress.percent ?? 0;
   const remaining =
@@ -41,8 +55,13 @@ export function DownloadManagerCard({
       ? Math.max(0, progress.totalBytes - progress.downloadedBytes)
       : null);
   const isPaused = progress.status === "paused";
+  const isVerifying = progress.status === "verifying";
+  const isDownloaded = progress.status === "downloaded";
+  const isVerifyFailed = progress.status === "verify_failed";
   const isActive =
-    progress.status === "downloading" || progress.status === "paused" || progress.status === "pending";
+    progress.status === "downloading" ||
+    progress.status === "paused" ||
+    progress.status === "pending";
 
   return (
     <Card className="model-card model-card--wide download-manager">
@@ -52,11 +71,48 @@ export function DownloadManagerCard({
           <p className="text-muted text-sm">
             {progress.catalogId}
             {progress.resumed ? " · resumed" : ""}
+            {isVerifying ? " · checking SHA256 integrity" : ""}
+            {isDownloaded ? " · ready to verify" : ""}
+            {isVerifyFailed ? " · file kept on disk" : ""}
           </p>
         </div>
-        <span className={`download-manager__status download-manager__status--${progress.status}`}>
-          {statusLabel(progress.status)}
-        </span>
+        <div className="download-manager__header-actions">
+          {isActive && !isVerifying && (
+            <>
+              {!isPaused ? (
+                <Button variant="ghost" disabled={!backendConnected} onClick={onPause}>
+                  Pause
+                </Button>
+              ) : (
+                <Button variant="ghost" disabled={!backendConnected} onClick={onResume}>
+                  Resume
+                </Button>
+              )}
+            </>
+          )}
+          {isVerifyFailed && (
+            <>
+              <Button
+                variant="secondary"
+                disabled={!backendConnected}
+                onClick={onRetryVerify}
+              >
+                Retry verify
+              </Button>
+              <Button variant="ghost" disabled={!backendConnected} onClick={onDismiss ?? onCancel}>
+                Dismiss
+              </Button>
+            </>
+          )}
+          {progress.status === "failed" && (
+            <Button variant="ghost" disabled={!backendConnected} onClick={onDismiss ?? onCancel}>
+              Dismiss
+            </Button>
+          )}
+          <span className={`download-manager__status download-manager__status--${progress.status}`}>
+            {statusLabel(progress.status)}
+          </span>
+        </div>
       </div>
 
       <div
@@ -74,9 +130,15 @@ export function DownloadManagerCard({
         <div>
           <span className="download-manager__stat-label">Progress</span>
           <strong>
-            {progress.percent != null
-              ? `${progress.percent.toFixed(1)}%`
-              : formatBytes(progress.downloadedBytes)}
+            {isVerifying
+              ? "Verifying…"
+              : isDownloaded
+                ? "Ready"
+                : isVerifyFailed
+                  ? "Download complete"
+                  : progress.percent != null
+                    ? `${progress.percent.toFixed(1)}%`
+                    : formatBytes(progress.downloadedBytes)}
           </strong>
         </div>
         <div>
@@ -88,48 +150,57 @@ export function DownloadManagerCard({
         </div>
         <div>
           <span className="download-manager__stat-label">Remaining</span>
-          <strong>{remaining != null ? formatBytes(remaining) : "—"}</strong>
+          <strong>
+            {isVerifying || isVerifyFailed || isDownloaded
+              ? "—"
+              : remaining != null
+                ? formatBytes(remaining)
+                : "—"}
+          </strong>
         </div>
         <div>
           <span className="download-manager__stat-label">Speed</span>
-          <strong>{formatSpeed(progress.speedBytesPerSec)}</strong>
+          <strong>
+            {isVerifying || isVerifyFailed || isDownloaded
+              ? "—"
+              : formatSpeed(progress.speedBytesPerSec)}
+          </strong>
         </div>
         <div>
           <span className="download-manager__stat-label">ETA</span>
-          <strong>{formatEta(progress.etaSeconds)}</strong>
+          <strong>
+            {isVerifying || isVerifyFailed || isDownloaded
+              ? "—"
+              : formatEta(progress.etaSeconds)}
+          </strong>
         </div>
       </div>
 
-      {progress.status === "failed" && (
-        <div className="download-manager__error">
-          <p className="text-danger">{progress.error ?? "Download failed."}</p>
-          <div className="model-card__actions">
-            <Button variant="ghost" disabled={!backendConnected} onClick={onCancel}>
-              Dismiss
-            </Button>
-          </div>
+      {(progress.status === "failed" || isVerifyFailed) && (
+        <p className="text-danger download-manager__error">
+          {progress.error ?? (isVerifyFailed ? "Verification failed." : "Download failed.")}
+        </p>
+      )}
+
+      {isActive && !isVerifying && (
+        <div className="download-manager__footer">
+          <Button variant="danger" disabled={!backendConnected} onClick={onCancel}>
+            Cancel
+          </Button>
         </div>
       )}
 
-      {isActive && (
-        <div className="model-card__actions">
-          <Button
-            variant="ghost"
-            disabled={!backendConnected || isPaused}
-            onClick={onPause}
-          >
-            Pause
-          </Button>
-          <Button
-            variant="ghost"
-            disabled={!backendConnected || !isPaused}
-            onClick={onResume}
-          >
-            Resume
-          </Button>
-          <Button variant="ghost" disabled={!backendConnected} onClick={onCancel}>
-            Cancel
-          </Button>
+      {(isDownloaded || isVerifying) && (
+        <div className="download-manager__footer">
+          {isVerifying ? (
+            <Button variant="danger" disabled={!backendConnected} onClick={onCancelVerify}>
+              Cancel
+            </Button>
+          ) : (
+            <Button variant="primary" disabled={!backendConnected} onClick={onStartVerify}>
+              Verify
+            </Button>
+          )}
         </div>
       )}
     </Card>

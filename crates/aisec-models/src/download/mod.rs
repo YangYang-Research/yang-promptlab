@@ -4,4 +4,5 @@ mod manager;
 
 pub use coordinator::{DownloadControl, DownloadCoordinator};
 pub use huggingface::{huggingface_url, HuggingFaceClient};
-pub use manager::{DownloadManager, DownloadOptions};
+pub(crate) use manager::ResumeState;
+pub use manager::{DownloadManager, DownloadOptions, PipelinePhase};

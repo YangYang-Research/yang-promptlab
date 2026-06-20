@@ -1,20 +1,17 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
 import {
-  DEFAULT_JUDGE_CONFIG,
-  getJudgeConfig,
-  saveJudgeConfig,
-  testJudgeConnectivity,
+  saveThirdPartyModelForm,
+  testThirdPartyModelConnectivity,
   THIRD_PARTY_PROVIDERS,
-  thirdPartyTestConfig,
-  validateThirdPartyConfig,
-  type JudgeConfigDto,
-  type JudgeConnectivityResult,
+  thirdPartyModelTemplate,
+  validateThirdPartyModelForm,
+  type ThirdPartyModelConnectivityResult,
+  type ThirdPartyModelForm,
   type ThirdPartyProvider,
-} from "@/shared/ipc/judge";
-import { saveThirdPartyModel } from "@/shared/ipc/models";
+} from "@/shared/ipc/thirdPartyModels";
 import { useToast } from "@/shared/notifications";
 
 type ThirdPartyModelsPanelProps = {
@@ -26,12 +23,8 @@ function providerIcon(label: string): string {
   return label.trim().charAt(0).toUpperCase();
 }
 
-function isThirdPartyProvider(value: string): value is ThirdPartyProvider {
-  return THIRD_PARTY_PROVIDERS.some((provider) => provider.value === value);
-}
-
 function connectivityToast(
-  result: JudgeConnectivityResult,
+  result: ThirdPartyModelConnectivityResult,
 ): { message: string; type: "success" | "error" } {
   const latency = result.latencyMs > 0 ? ` (${result.latencyMs} ms)` : "";
   const label = `${result.provider} / ${result.model}`;
@@ -52,65 +45,32 @@ export function ThirdPartyModelsPanel({
   onSaved,
 }: ThirdPartyModelsPanelProps) {
   const { notify } = useToast();
-  const [config, setConfig] = useState<JudgeConfigDto>(DEFAULT_JUDGE_CONFIG);
-  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState<ThirdPartyModelForm>(() =>
+    thirdPartyModelTemplate("openai"),
+  );
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
   const selectedProvider =
-    THIRD_PARTY_PROVIDERS.find((provider) => provider.value === config.remoteProvider) ??
+    THIRD_PARTY_PROVIDERS.find((provider) => provider.value === form.provider) ??
     THIRD_PARTY_PROVIDERS[0];
-  const isBedrock = config.remoteProvider === "bedrock";
-  const accessKeyRequiresSessionToken = config.remoteApiKey.trim().startsWith("ASIA");
+  const isBedrock = form.provider === "bedrock";
+  const accessKeyRequiresSessionToken = form.apiKey.trim().startsWith("ASIA");
 
-  useEffect(() => {
-    if (!backendConnected) {
-      setLoading(false);
-      return;
-    }
-    void getJudgeConfig()
-      .then((loaded) => {
-        const provider = isThirdPartyProvider(loaded.remoteProvider)
-          ? loaded.remoteProvider
-          : "openai";
-        const next = { ...loaded, remoteProvider: provider };
-        // Clear stale OpenAI default model when viewing Bedrock without a saved model.
-        if (provider === "bedrock" && next.remoteModel.trim() === "gpt-4o-mini") {
-          next.remoteModel = "";
-        }
-        setConfig(next);
-      })
-      .catch((err) => setError(toAppError(err).message))
-      .finally(() => setLoading(false));
-  }, [backendConnected]);
-
-  function patchRemote(patchValue: Partial<JudgeConfigDto>) {
+  function patchForm(patchValue: Partial<ThirdPartyModelForm>) {
     setSaved(false);
-    setConfig((current) => ({ ...current, ...patchValue }));
+    setForm((current) => ({ ...current, ...patchValue }));
   }
 
   function selectProvider(provider: ThirdPartyProvider) {
-    const meta = THIRD_PARTY_PROVIDERS.find((entry) => entry.value === provider);
-    if (!meta) return;
-    patchRemote({
-      remoteProvider: provider,
-      remoteModel: "",
-      remoteApiKey: "",
-      remoteAwsSecretAccessKey: "",
-      remoteApiKeyEnv: meta.apiKeyEnv,
-      remoteAwsRegion: provider === "bedrock" ? "" : null,
-      remoteAwsSessionToken: "",
-      remoteBaseUrl: null,
-      remoteApiKeyConfigured: false,
-      remoteAwsSecretAccessKeyConfigured: false,
-      remoteAwsSessionTokenConfigured: false,
-    });
+    setForm(thirdPartyModelTemplate(provider));
+    setSaved(false);
   }
 
   async function handleSave() {
-    const validationError = validateThirdPartyConfig(config);
+    const validationError = validateThirdPartyModelForm(form);
     if (validationError) {
       notify(validationError, "error");
       return;
@@ -119,14 +79,8 @@ export function ThirdPartyModelsPanel({
     setError(null);
     setSaving(true);
     try {
-      const savedConfig = await saveJudgeConfig(config);
-      await saveThirdPartyModel({
-        provider: config.remoteProvider,
-        model: config.remoteModel.trim(),
-        baseUrl: config.remoteBaseUrl,
-        region: config.remoteAwsRegion,
-      });
-      setConfig(savedConfig);
+      const savedForm = await saveThirdPartyModelForm(form);
+      setForm(savedForm);
       setSaved(true);
       notify("Third-party model saved", "success");
       onSaved?.();
@@ -140,7 +94,7 @@ export function ThirdPartyModelsPanel({
   }
 
   async function handleTest() {
-    const validationError = validateThirdPartyConfig(config);
+    const validationError = validateThirdPartyModelForm(form);
     if (validationError) {
       notify(validationError, "error");
       return;
@@ -149,7 +103,7 @@ export function ThirdPartyModelsPanel({
     setError(null);
     setTesting(true);
     try {
-      const result = await testJudgeConnectivity(thirdPartyTestConfig(config));
+      const result = await testThirdPartyModelConnectivity(form);
       const toast = connectivityToast(result);
       notify(toast.message, toast.type);
     } catch (err) {
@@ -162,19 +116,19 @@ export function ThirdPartyModelsPanel({
   return (
     <div className="third-party-models">
       <p className="text-muted text-sm">
-        Configure cloud LLM providers for remote inference and judge mode. Credentials are stored
-        securely in the OS keychain when available.
+        Register cloud LLM providers for remote inference. Credentials are stored securely in the
+        OS keychain when available.
       </p>
 
       <div className="third-party-models__grid">
         {THIRD_PARTY_PROVIDERS.map((provider) => {
-          const isSelected = config.remoteProvider === provider.value;
+          const isSelected = form.provider === provider.value;
           return (
             <button
               key={provider.value}
               type="button"
               className={`third-party-models__card ${isSelected ? "third-party-models__card--selected" : ""}`}
-              disabled={!backendConnected || loading}
+              disabled={!backendConnected}
               onClick={() => selectProvider(provider.value)}
             >
               <span className="third-party-models__icon" aria-hidden="true">
@@ -195,9 +149,9 @@ export function ThirdPartyModelsPanel({
                 id="bedrockAccessKeyId"
                 className="input mono"
                 placeholder="AKIA... or ASIA..."
-                value={config.remoteApiKey}
-                disabled={!backendConnected || loading}
-                onChange={(e) => patchRemote({ remoteApiKey: e.target.value })}
+                value={form.apiKey}
+                disabled={!backendConnected}
+                onChange={(e) => patchForm({ apiKey: e.target.value })}
                 autoComplete="off"
               />
             </div>
@@ -209,16 +163,16 @@ export function ThirdPartyModelsPanel({
                 className="input mono"
                 type="password"
                 placeholder={
-                  config.remoteAwsSecretAccessKeyConfigured ? "Configured in keychain" : "••••••••"
+                  form.awsSecretAccessKeyConfigured ? "Configured in keychain" : "••••••••"
                 }
-                value={config.remoteAwsSecretAccessKey}
-                disabled={!backendConnected || loading}
-                onChange={(e) => patchRemote({ remoteAwsSecretAccessKey: e.target.value })}
+                value={form.awsSecretAccessKey}
+                disabled={!backendConnected}
+                onChange={(e) => patchForm({ awsSecretAccessKey: e.target.value })}
                 autoComplete="off"
               />
             </div>
 
-            {(accessKeyRequiresSessionToken || config.remoteAwsSessionTokenConfigured) && (
+            {(accessKeyRequiresSessionToken || form.awsSessionTokenConfigured) && (
               <div className="settings-field">
                 <label htmlFor="bedrockSessionToken">Session Token</label>
                 <input
@@ -226,13 +180,13 @@ export function ThirdPartyModelsPanel({
                   className="input mono"
                   type="password"
                   placeholder={
-                    config.remoteAwsSessionTokenConfigured
+                    form.awsSessionTokenConfigured
                       ? "Configured in keychain"
                       : "Required for ASIA (temporary) credentials"
                   }
-                  value={config.remoteAwsSessionToken}
-                  disabled={!backendConnected || loading}
-                  onChange={(e) => patchRemote({ remoteAwsSessionToken: e.target.value })}
+                  value={form.awsSessionToken}
+                  disabled={!backendConnected}
+                  onChange={(e) => patchForm({ awsSessionToken: e.target.value })}
                   autoComplete="off"
                 />
               </div>
@@ -244,10 +198,10 @@ export function ThirdPartyModelsPanel({
                 id="bedrockRegion"
                 className="input mono"
                 placeholder={selectedProvider.regionPlaceholder ?? "AWS region"}
-                value={config.remoteAwsRegion ?? ""}
-                disabled={!backendConnected || loading}
+                value={form.awsRegion ?? ""}
+                disabled={!backendConnected}
                 onChange={(e) =>
-                  patchRemote({ remoteAwsRegion: e.target.value.trim() || null })
+                  patchForm({ awsRegion: e.target.value.trim() || null })
                 }
               />
             </div>
@@ -258,9 +212,9 @@ export function ThirdPartyModelsPanel({
                 id="bedrockModel"
                 className="input mono"
                 placeholder={selectedProvider.modelPlaceholder}
-                value={config.remoteModel}
-                disabled={!backendConnected || loading}
-                onChange={(e) => patchRemote({ remoteModel: e.target.value })}
+                value={form.model}
+                disabled={!backendConnected}
+                onChange={(e) => patchForm({ model: e.target.value })}
               />
             </div>
           </>
@@ -272,9 +226,9 @@ export function ThirdPartyModelsPanel({
                 id="thirdPartyModel"
                 className="input"
                 placeholder={selectedProvider.modelPlaceholder}
-                value={config.remoteModel}
-                disabled={!backendConnected || loading}
-                onChange={(e) => patchRemote({ remoteModel: e.target.value })}
+                value={form.model}
+                disabled={!backendConnected}
+                onChange={(e) => patchForm({ model: e.target.value })}
               />
             </div>
 
@@ -288,9 +242,9 @@ export function ThirdPartyModelsPanel({
                 placeholder={
                   selectedProvider.baseUrlPlaceholder ?? "https://api.openai.com/v1"
                 }
-                value={config.remoteBaseUrl ?? ""}
-                disabled={!backendConnected || loading}
-                onChange={(e) => patchRemote({ remoteBaseUrl: e.target.value.trim() || null })}
+                value={form.baseUrl ?? ""}
+                disabled={!backendConnected}
+                onChange={(e) => patchForm({ baseUrl: e.target.value.trim() || null })}
               />
             </div>
 
@@ -300,10 +254,10 @@ export function ThirdPartyModelsPanel({
                 id="thirdPartyApiKey"
                 className="input mono"
                 type="password"
-                placeholder={config.remoteApiKeyConfigured ? "Configured in keychain" : "sk-..."}
-                value={config.remoteApiKey}
-                disabled={!backendConnected || loading}
-                onChange={(e) => patchRemote({ remoteApiKey: e.target.value })}
+                placeholder={form.apiKeyConfigured ? "Configured in keychain" : "sk-..."}
+                value={form.apiKey}
+                disabled={!backendConnected}
+                onChange={(e) => patchForm({ apiKey: e.target.value })}
               />
             </div>
 
@@ -313,9 +267,9 @@ export function ThirdPartyModelsPanel({
                 id="thirdPartyApiKeyEnv"
                 className="input mono"
                 placeholder={selectedProvider.apiKeyEnv}
-                value={config.remoteApiKeyEnv ?? ""}
-                disabled={!backendConnected || loading}
-                onChange={(e) => patchRemote({ remoteApiKeyEnv: e.target.value.trim() || null })}
+                value={form.apiKeyEnv ?? ""}
+                disabled={!backendConnected}
+                onChange={(e) => patchForm({ apiKeyEnv: e.target.value.trim() || null })}
               />
             </div>
           </>
@@ -325,14 +279,14 @@ export function ThirdPartyModelsPanel({
       <div className="model-card__actions">
         <Button
           variant="secondary"
-          disabled={!backendConnected || testing || loading}
+          disabled={!backendConnected || testing}
           onClick={() => void handleTest()}
         >
           {testing ? "Testing…" : "Test Connection"}
         </Button>
         <Button
           variant="primary"
-          disabled={!backendConnected || saving || loading}
+          disabled={!backendConnected || saving}
           onClick={() => void handleSave()}
         >
           {saving ? "Saving…" : saved ? "Saved" : "Save config"}

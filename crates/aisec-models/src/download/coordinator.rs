@@ -105,7 +105,10 @@ impl DownloadCoordinator {
         let existing_terminal = match guard.as_ref() {
             Some(active) => matches!(
                 active.progress.lock().await.status,
-                DownloadStatus::Completed | DownloadStatus::Failed
+                DownloadStatus::Completed
+                    | DownloadStatus::AwaitingVerify
+                    | DownloadStatus::Failed
+                    | DownloadStatus::VerifyFailed
             ),
             None => false,
         };
@@ -202,7 +205,10 @@ impl DownloadCoordinator {
         let existing_terminal = match guard.as_ref() {
             Some(active) => matches!(
                 active.progress.lock().await.status,
-                DownloadStatus::Completed | DownloadStatus::Failed
+                DownloadStatus::Completed
+                    | DownloadStatus::AwaitingVerify
+                    | DownloadStatus::Failed
+                    | DownloadStatus::VerifyFailed
             ),
             None => false,
         };
@@ -328,21 +334,228 @@ impl DownloadCoordinator {
         Ok(())
     }
 
-    pub async fn take_if_completed(&self) -> Option<(String, PathBuf, DownloadProgress)> {
-        let mut guard = self.active.lock().await;
+    fn promote_if_complete(
+        progress: &mut DownloadProgress,
+        task_finished: bool,
+        destination: &Path,
+    ) {
+        if progress.status == DownloadStatus::Downloading && task_finished {
+            progress.status = DownloadStatus::Completed;
+            progress.speed_bytes_per_sec = None;
+            progress.eta_seconds = Some(0);
+        }
+
+        if progress.status == DownloadStatus::Downloading {
+            if let Ok(meta) = std::fs::metadata(destination) {
+                let on_disk = meta.len();
+                if on_disk > progress.downloaded_bytes {
+                    progress.downloaded_bytes = on_disk;
+                }
+                if progress.total_bytes.is_some_and(|total| pipeline_download_complete(on_disk, total)) {
+                    progress.status = DownloadStatus::Completed;
+                    progress.speed_bytes_per_sec = None;
+                    progress.eta_seconds = Some(0);
+                }
+            } else if progress
+                .total_bytes
+                .is_some_and(|total| pipeline_download_complete(progress.downloaded_bytes, total))
+            {
+                progress.status = DownloadStatus::Completed;
+                progress.speed_bytes_per_sec = None;
+                progress.eta_seconds = Some(0);
+            }
+        }
+    }
+
+    /// Completed download snapshot without removing the active slot (verify before consume).
+    pub async fn snapshot_if_completed(&self) -> Option<(String, PathBuf, DownloadProgress)> {
+        let guard = self.active.lock().await;
+        let Some(active) = guard.as_ref() else {
+            return None;
+        };
+        let current = active.progress.lock().await.clone();
+        if current.status == DownloadStatus::Verifying {
+            return None;
+        }
+
+        let mut progress = current;
+        let task_finished = active.task.is_finished();
+        Self::promote_if_complete(&mut progress, task_finished, &active.destination);
+
+        if progress.status != DownloadStatus::Completed {
+            return None;
+        }
+
+        Some((
+            active.catalog_id.clone(),
+            active.destination.clone(),
+            progress,
+        ))
+    }
+
+    /// Resume finalize when a prior poll already marked the job verifying.
+    pub async fn snapshot_if_verifying(&self) -> Option<(String, PathBuf, DownloadProgress)> {
+        let guard = self.active.lock().await;
         let Some(active) = guard.as_ref() else {
             return None;
         };
         let progress = active.progress.lock().await.clone();
-        if progress.status != DownloadStatus::Completed {
+        if progress.status != DownloadStatus::Verifying {
             return None;
         }
-        let catalog_id = active.catalog_id.clone();
-        let destination = active.destination.clone();
+        Some((
+            active.catalog_id.clone(),
+            active.destination.clone(),
+            progress,
+        ))
+    }
+
+    pub async fn mark_verifying(&self) {
+        let guard = self.active.lock().await;
+        let Some(active) = guard.as_ref() else {
+            return;
+        };
+        let mut slot = active.progress.lock().await;
+        if matches!(
+            slot.status,
+            DownloadStatus::Completed
+                | DownloadStatus::Downloading
+                | DownloadStatus::AwaitingVerify
+        ) {
+            slot.status = DownloadStatus::Verifying;
+            slot.speed_bytes_per_sec = None;
+            slot.eta_seconds = None;
+            slot.updated_at = OffsetDateTime::now_utc();
+        }
+    }
+
+    pub async fn mark_awaiting_verify(&self) {
+        let guard = self.active.lock().await;
+        let Some(active) = guard.as_ref() else {
+            return;
+        };
+        let mut slot = active.progress.lock().await;
+        if matches!(
+            slot.status,
+            DownloadStatus::Verifying | DownloadStatus::Completed
+        ) {
+            slot.status = DownloadStatus::AwaitingVerify;
+            slot.error = None;
+            slot.speed_bytes_per_sec = None;
+            slot.eta_seconds = Some(0);
+            slot.updated_at = OffsetDateTime::now_utc();
+        }
+    }
+
+    /// Remove the active slot after a successful finalize.
+    pub async fn consume_completed(&self) {
+        let mut guard = self.active.lock().await;
+        let Some(active) = guard.as_ref() else {
+            return;
+        };
+        let status = active.progress.lock().await.status;
+        if !matches!(
+            status,
+            DownloadStatus::Completed
+                | DownloadStatus::Verifying
+                | DownloadStatus::AwaitingVerify
+        ) {
+            return;
+        }
         if let Some(active) = guard.take() {
             active.task.abort();
         }
-        Some((catalog_id, destination, progress))
+    }
+
+    pub async fn take_if_completed(&self) -> Option<(String, PathBuf, DownloadProgress)> {
+        let snapshot = self.snapshot_if_completed().await?;
+        self.consume_completed().await;
+        Some(snapshot)
+    }
+
+    pub async fn mark_verify_failed(&self, message: impl Into<String>) {
+        let guard = self.active.lock().await;
+        let Some(active) = guard.as_ref() else {
+            return;
+        };
+        let mut slot = active.progress.lock().await;
+        slot.status = DownloadStatus::VerifyFailed;
+        slot.error = Some(message.into());
+        slot.speed_bytes_per_sec = None;
+        slot.eta_seconds = None;
+        slot.updated_at = OffsetDateTime::now_utc();
+    }
+
+    /// Restore a finished download awaiting verification (no HTTP task).
+    pub async fn restore_post_download(
+        &self,
+        catalog_id: impl Into<String>,
+        destination: PathBuf,
+        progress: DownloadProgress,
+    ) -> ModelResult<DownloadProgress> {
+        let catalog_id = catalog_id.into();
+        let mut guard = self.active.lock().await;
+        if let Some(active) = guard.as_ref() {
+            let status = active.progress.lock().await.status;
+            if matches!(
+                status,
+                DownloadStatus::Downloading | DownloadStatus::Paused
+            ) {
+                return Err(ModelError::invalid("another download is already active"));
+            }
+            if let Some(active) = guard.take() {
+                active.task.abort();
+            }
+        }
+        let progress = Arc::new(Mutex::new(progress));
+        let snapshot = progress.lock().await.clone();
+        let task = tokio::spawn(async {});
+        *guard = Some(ActiveDownload {
+            catalog_id,
+            destination,
+            control: DownloadControl::new(),
+            progress,
+            task,
+        });
+        Ok(snapshot)
+    }
+
+    /// Replace a post-download slot with a live HTTP resume task.
+    pub async fn restart_url_download(
+        &self,
+        catalog_id: impl Into<String>,
+        url: &str,
+        destination: PathBuf,
+        expected_sha256: Option<String>,
+        expected_size_bytes: Option<u64>,
+    ) -> ModelResult<DownloadProgress> {
+        let mut guard = self.active.lock().await;
+        if let Some(active) = guard.take() {
+            active.control.cancel();
+            active.task.abort();
+        }
+        drop(guard);
+        self.start_url_download(
+            catalog_id,
+            url,
+            destination,
+            expected_sha256,
+            expected_size_bytes,
+        )
+        .await
+    }
+
+    pub async fn mark_failed(&self, message: impl Into<String>) {
+        let mut guard = self.active.lock().await;
+        let Some(active) = guard.as_ref() else {
+            return;
+        };
+        let mut slot = active.progress.lock().await;
+        slot.status = DownloadStatus::Failed;
+        slot.error = Some(message.into());
+        slot.speed_bytes_per_sec = None;
+        slot.eta_seconds = None;
+        slot.updated_at = OffsetDateTime::now_utc();
     }
 
     pub async fn clear_if_finished(&self) {
@@ -351,10 +564,28 @@ impl DownloadCoordinator {
             return;
         };
         let status = active.progress.lock().await.status;
-        if matches!(status, DownloadStatus::Completed | DownloadStatus::Failed) {
+        if matches!(
+            status,
+            DownloadStatus::Completed
+                | DownloadStatus::Failed
+                | DownloadStatus::VerifyFailed
+                | DownloadStatus::AwaitingVerify
+        ) {
             if let Some(active) = guard.take() {
                 active.task.abort();
             }
         }
     }
+}
+
+fn download_near_complete(downloaded: u64, total: u64) -> bool {
+    if total == 0 {
+        return false;
+    }
+    let remaining = total.saturating_sub(downloaded);
+    remaining <= 1024 || remaining * 100 <= total
+}
+
+fn pipeline_download_complete(on_disk: u64, total: u64) -> bool {
+    total > 0 && on_disk + 1024 >= total
 }

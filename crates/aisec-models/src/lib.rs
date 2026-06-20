@@ -18,7 +18,7 @@ pub mod verify;
 
 pub use builtin_catalog::{BuiltinCatalog, BuiltinCatalogMeta, BuiltinRegistryEntry, entry_to_catalog};
 pub use catalog::find_catalog_entry;
-pub use download::{DownloadControl, DownloadCoordinator, DownloadManager, DownloadOptions, HuggingFaceClient, huggingface_url};
+pub use download::{DownloadControl, DownloadCoordinator, DownloadManager, DownloadOptions, HuggingFaceClient, huggingface_url, PipelinePhase};
 pub use error::{ModelError, ModelResult};
 pub use hardware::detect_hardware;
 pub use manager::LocalModelManager;

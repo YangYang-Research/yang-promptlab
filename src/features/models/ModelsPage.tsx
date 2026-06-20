@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Button,
@@ -10,6 +10,7 @@ import { toAppError } from "@/shared/errors";
 import {
   browseModels,
   cancelModelDownload,
+  cancelModelDownloadVerify,
   getModelDownloadStatus,
   getModelsRegistryInfo,
   getModelsVaultPath,
@@ -20,6 +21,7 @@ import {
   pauseModelDownload,
   removeModel,
   resumeModelDownload,
+  retryModelDownloadVerify,
   startModelDownload,
   testModelInference,
   verifyModel,
@@ -30,12 +32,10 @@ import {
   type ModelVaultStatsDto,
 } from "@/shared/ipc/models";
 import { pickAnyModelImportFile } from "@/shared/ipc/dialog";
-import { getRuntimeStatus, type RuntimeStatusDto } from "@/shared/ipc/runtime";
 import { useToast } from "@/shared/notifications";
 import { formatBytes } from "@/shared/utils/format";
 import { DownloadManagerCard } from "./DownloadManagerCard";
-import { HuggingFaceModelCatalog } from "./HuggingFaceModelCatalog";
-import { ThirdPartyModelsPanel } from "./ThirdPartyModelsPanel";
+import { AddModelModal } from "./AddModelModal";
 
 export function ModelsPage() {
   const { notify } = useToast();
@@ -45,7 +45,6 @@ export function ModelsPage() {
   const [registryInfo, setRegistryInfo] = useState<ModelRegistryInfoDto | null>(null);
   const [vaultPath, setVaultPath] = useState<string>("");
   const [vaultStats, setVaultStats] = useState<ModelVaultStatsDto | null>(null);
-  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatusDto | null>(null);
   const [importName, setImportName] = useState("");
   const [importPath, setImportPath] = useState("");
   const [importBusy, setImportBusy] = useState<"browse" | "import" | null>(null);
@@ -55,46 +54,86 @@ export function ModelsPage() {
   const [busyModelId, setBusyModelId] = useState<string | null>(null);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [modelTestMessage, setModelTestMessage] = useState<string | null>(null);
+  const [addModelOpen, setAddModelOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const verifyInFlightRef = useRef(false);
 
   const installedNames = useMemo(() => new Set(installed.map((m) => m.name)), [installed]);
 
   const refreshModels = useCallback(async () => {
-    const [models, entries, info, stats, runtime] = await Promise.all([
+    const [models, entries, info, stats] = await Promise.all([
       listModels(),
       browseModels(),
       getModelsRegistryInfo(),
       getModelsVaultStats(),
-      getRuntimeStatus(),
     ]);
     setInstalled(models);
     setCatalog(entries);
     setRegistryInfo(info);
     setVaultStats(stats);
-    setRuntimeStatus(runtime);
   }, []);
+
+  const applyDownloadStatus = useCallback(
+    async (status: Awaited<ReturnType<typeof getModelDownloadStatus>>) => {
+      if (status.installed) {
+        verifyInFlightRef.current = false;
+        setDownloadProgress(null);
+        setDownloadingId(null);
+        await refreshModels();
+        notify(`Installed ${status.installed.name}`, "success");
+        return;
+      }
+      if (status.progress) {
+        const downgradedWhileVerifying =
+          verifyInFlightRef.current &&
+          (status.progress.status === "downloaded" || status.progress.status === "completed");
+        if (downgradedWhileVerifying) {
+          setDownloadProgress((prev) =>
+            prev
+              ? { ...prev, status: "verifying", error: null }
+              : { ...status.progress!, status: "verifying", error: null },
+          );
+        } else {
+          if (
+            status.progress.status === "verifying" ||
+            status.progress.status === "downloaded" ||
+            status.progress.status === "verify_failed" ||
+            status.progress.status === "failed"
+          ) {
+            verifyInFlightRef.current = status.progress.status === "verifying";
+          }
+          setDownloadProgress(status.progress);
+        }
+        if (status.progress.status === "failed" || status.progress.status === "verify_failed") {
+          verifyInFlightRef.current = false;
+          setDownloadingId(null);
+          if (status.progress.status === "failed") {
+            setError(status.progress.error ?? "Model download failed");
+          }
+        } else if (
+          status.progress.status === "downloading" ||
+          status.progress.status === "paused" ||
+          status.progress.status === "verifying" ||
+          status.progress.status === "downloaded" ||
+          status.progress.status === "completed"
+        ) {
+          setDownloadingId(status.progress.catalogId);
+        } else {
+          setDownloadingId(null);
+        }
+      } else {
+        verifyInFlightRef.current = false;
+        setDownloadProgress(null);
+        setDownloadingId(null);
+      }
+    },
+    [refreshModels, notify],
+  );
 
   const pollDownloadStatus = useCallback(async () => {
     const status = await getModelDownloadStatus();
-    if (status.installed) {
-      setDownloadProgress(null);
-      setDownloadingId(null);
-      await refreshModels();
-      return;
-    }
-    if (status.progress) {
-      setDownloadProgress(status.progress);
-      if (status.progress.status === "failed") {
-        setDownloadingId(null);
-        setError(status.progress.error ?? "Model download failed");
-      } else {
-        setDownloadingId(status.progress.catalogId);
-      }
-    } else {
-      setDownloadProgress(null);
-      setDownloadingId(null);
-    }
-  }, [refreshModels]);
+    await applyDownloadStatus(status);
+  }, [applyDownloadStatus]);
 
   useEffect(() => {
     void import("@/shared/ipc/client").then(({ healthCheck }) =>
@@ -108,39 +147,62 @@ export function ModelsPage() {
     if (!backendConnected) {
       return;
     }
-    void Promise.all([refreshModels(), getModelsVaultPath(), pollDownloadStatus()])
-      .then(([, path]) => {
-        setVaultPath(path);
-      })
-      .catch((err) => setError(toAppError(err).message));
-  }, [backendConnected, refreshModels, pollDownloadStatus]);
+    void refreshModels().catch((err) => setError(toAppError(err).message));
+    void getModelsVaultPath()
+      .then(setVaultPath)
+      .catch(() => undefined);
+  }, [backendConnected, refreshModels]);
 
   useEffect(() => {
     if (!backendConnected) {
       return;
     }
-    const timer = window.setInterval(() => {
-      void getRuntimeStatus()
-        .then(setRuntimeStatus)
-        .catch(() => undefined);
-    }, 5000);
-    return () => window.clearInterval(timer);
-  }, [backendConnected]);
 
-  useEffect(() => {
-    if (!backendConnected || !downloadProgress) {
+    void pollDownloadStatus().catch((err) => setError(toAppError(err).message));
+
+    const status = downloadProgress?.status;
+    if (status === "failed" || status === "verify_failed") {
       return;
     }
-    // Stop polling once the download reaches a terminal state so the failed/completed
-    // card (and its error message) stays visible instead of being cleared.
-    if (downloadProgress.status === "failed" || downloadProgress.status === "completed") {
-      return;
-    }
+
+    const intervalMs = status === "verifying" ? 500 : status ? 750 : 2000;
     const timer = window.setInterval(() => {
       void pollDownloadStatus().catch((err) => setError(toAppError(err).message));
-    }, 750);
+    }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [backendConnected, downloadProgress, pollDownloadStatus]);
+  }, [backendConnected, downloadProgress?.status, pollDownloadStatus]);
+
+  async function handleRetryVerify(catalogId: string) {
+    setError(null);
+    verifyInFlightRef.current = true;
+    setDownloadProgress((prev) =>
+      prev ? { ...prev, status: "verifying", error: null } : prev,
+    );
+    try {
+      const status = await retryModelDownloadVerify({ catalogId });
+      await applyDownloadStatus(status);
+    } catch (err) {
+      verifyInFlightRef.current = false;
+      setError(toAppError(err).message);
+      void pollDownloadStatus().catch(() => undefined);
+    }
+  }
+
+  async function handleStartVerify(catalogId: string) {
+    await handleRetryVerify(catalogId);
+  }
+
+  async function handleCancelVerify() {
+    setError(null);
+    verifyInFlightRef.current = false;
+    try {
+      const progress = await cancelModelDownloadVerify();
+      setDownloadProgress(progress);
+      setDownloadingId(progress.catalogId);
+    } catch (err) {
+      setError(toAppError(err).message);
+    }
+  }
 
   async function handleBrowse() {
     setError(null);
@@ -182,6 +244,7 @@ export function ModelsPage() {
       const progress = await startModelDownload({ catalogId: entry.id });
       setDownloadingId(entry.id);
       setDownloadProgress(progress);
+      setAddModelOpen(false);
     } catch (err) {
       setError(toAppError(err).message);
     } finally {
@@ -213,6 +276,8 @@ export function ModelsPage() {
       setImportName("");
       setImportPath("");
       await refreshModels();
+      setAddModelOpen(false);
+      notify("Model imported", "success");
     } catch (err) {
       setError(toAppError(err).message);
     } finally {
@@ -282,11 +347,14 @@ export function ModelsPage() {
       {backendConnected && vaultStats && (
         <div className="models-summary-grid">
           <Card className="models-summary-card">
+            <span className="models-summary-card__label">Registered models</span>
+            <strong className="models-summary-card__value">{vaultStats.registeredCount}</strong>
+            <p className="text-muted text-sm">Public, third-party, and import</p>
+          </Card>
+          <Card className="models-summary-card">
             <span className="models-summary-card__label">Installed models</span>
-            <strong className="models-summary-card__value">{vaultStats.modelCount}</strong>
-            <p className="text-muted text-sm">
-              {formatBytes(vaultStats.installedBytes)} registered
-            </p>
+            <strong className="models-summary-card__value">{vaultStats.installedLocalCount}</strong>
+            <p className="text-muted text-sm">Public catalog and local import</p>
           </Card>
           <Card className="models-summary-card">
             <span className="models-summary-card__label">Installed size</span>
@@ -294,30 +362,6 @@ export function ModelsPage() {
               {vaultStats.installedGb.toFixed(2)} GB
             </strong>
             <p className="text-muted text-sm">{formatBytes(vaultStats.installedBytes)}</p>
-          </Card>
-          <Card className="models-summary-card">
-            <span className="models-summary-card__label">Vault disk usage</span>
-            <strong className="models-summary-card__value">
-              {vaultStats.diskUsageGb.toFixed(2)} GB
-            </strong>
-            <p className="text-muted text-sm">{formatBytes(vaultStats.diskUsageBytes)} on disk</p>
-          </Card>
-          <Card className="models-summary-card">
-            <span className="models-summary-card__label">Runtime status</span>
-            <strong className="models-summary-card__value models-summary-card__value--runtime">
-              {runtimeStatus?.healthy
-                ? "Healthy"
-                : runtimeStatus?.state === "running"
-                  ? "Running"
-                  : runtimeStatus?.state === "starting"
-                    ? "Starting"
-                    : runtimeStatus?.state === "failed"
-                      ? "Failed"
-                      : "Stopped"}
-            </strong>
-            <p className="text-muted text-sm">
-              {runtimeStatus?.message ?? "Checking embedded llama.cpp runtime…"}
-            </p>
           </Card>
         </div>
       )}
@@ -338,34 +382,50 @@ export function ModelsPage() {
         </p>
       )}
 
-      <div className="models-grid">
-        {downloadProgress && (
-          <DownloadManagerCard
-            progress={downloadProgress}
-            backendConnected={backendConnected}
-            onPause={() =>
-              void pauseModelDownload()
-                .then(setDownloadProgress)
-                .catch((err) => setError(toAppError(err).message))
-            }
-            onResume={() =>
-              void resumeModelDownload()
-                .then(setDownloadProgress)
-                .catch((err) => setError(toAppError(err).message))
-            }
-            onCancel={() =>
-              void cancelModelDownload()
-                .then(() => {
-                  setDownloadProgress(null);
-                  setDownloadingId(null);
-                })
-                .catch((err) => setError(toAppError(err).message))
-            }
-          />
-        )}
+      {downloadProgress && (
+        <DownloadManagerCard
+          progress={downloadProgress}
+          backendConnected={backendConnected}
+          onPause={() =>
+            void pauseModelDownload()
+              .then(setDownloadProgress)
+              .catch((err) => setError(toAppError(err).message))
+          }
+          onResume={() =>
+            void resumeModelDownload()
+              .then(setDownloadProgress)
+              .catch((err) => setError(toAppError(err).message))
+          }
+          onCancel={() =>
+            void cancelModelDownload()
+              .then(() => {
+                setDownloadProgress(null);
+                setDownloadingId(null);
+              })
+              .catch((err) => setError(toAppError(err).message))
+          }
+          onRetryVerify={() =>
+            void handleRetryVerify(downloadProgress.catalogId)
+          }
+          onCancelVerify={() => void handleCancelVerify()}
+          onStartVerify={() =>
+            void handleStartVerify(downloadProgress.catalogId)
+          }
+        />
+      )}
 
+      <div className="models-grid">
         <Card className="model-card model-card--wide">
-          <h3 className="card__title">Manage Models</h3>
+          <div className="model-card__section-header">
+            <h3 className="card__title">Model Registry</h3>
+            <Button
+              variant="primary"
+              disabled={!backendConnected}
+              onClick={() => setAddModelOpen(true)}
+            >
+              Add model
+            </Button>
+          </div>
           {installed.length === 0 ? (
             <p className="text-muted">No local models installed yet.</p>
           ) : (
@@ -427,80 +487,26 @@ export function ModelsPage() {
             <p className="text-muted text-sm judge-test-result">{modelTestMessage}</p>
           )}
         </Card>
-
-        <Card className="model-card model-card--wide">
-          <h3 className="card__title">Public Models</h3>
-          <p className="text-muted text-sm">
-            Built-in GGUF catalog from <code>resources/models.json</code>. Click a card for
-            details; use <strong>+</strong> to add to your vault.
-          </p>
-          <HuggingFaceModelCatalog
-            catalog={catalog}
-            installedNames={installedNames}
-            downloadingId={downloadingId}
-            installingId={installingId}
-            backendConnected={backendConnected}
-            onInstall={(entry) => void handleInstall(entry)}
-          />
-        </Card>
-
-        <Card className="model-card model-card--wide">
-          <h3 className="card__title">Third-party Models</h3>
-          <ThirdPartyModelsPanel
-            backendConnected={backendConnected}
-            onSaved={() => void refreshModels()}
-          />
-        </Card>
-
-        <Card className="model-card model-card--wide">
-          <h3 className="card__title">Import Model</h3>
-          <p className="text-muted text-sm">
-            Use the native file picker to register a GGUF file or extract one from a ZIP package
-            into the vault.
-          </p>
-          <div className="wizard-auth-fields">
-            <div className="settings-field">
-              <label htmlFor="importName">Display name</label>
-              <input
-                id="importName"
-                className="input"
-                value={importName}
-                onChange={(e) => setImportName(e.target.value)}
-                disabled={!backendConnected || importBusy !== null}
-              />
-            </div>
-            <div className="settings-field">
-              <label htmlFor="importPath">Selected file</label>
-              <div className="import-path-row">
-                <input
-                  id="importPath"
-                  className="input mono"
-                  value={importPath}
-                  readOnly
-                  placeholder="Browse for a .gguf or .zip file"
-                  disabled={!backendConnected || importBusy !== null}
-                />
-                <Button
-                  variant="secondary"
-                  disabled={!backendConnected || importBusy !== null}
-                  onClick={() => void handleBrowse()}
-                >
-                  {importBusy === "browse" ? "Opening…" : "Browse"}
-                </Button>
-              </div>
-            </div>
-          </div>
-          <div className="model-card__actions">
-            <Button
-              variant="secondary"
-              disabled={!backendConnected || importBusy !== null}
-              onClick={() => void handleImport()}
-            >
-              {importBusy === "import" ? "Importing…" : "Import"}
-            </Button>
-          </div>
-        </Card>
       </div>
+
+      <AddModelModal
+        open={addModelOpen}
+        onClose={() => setAddModelOpen(false)}
+        backendConnected={backendConnected}
+        catalog={catalog}
+        installedNames={installedNames}
+        downloadingId={downloadingId}
+        installingId={installingId}
+        importName={importName}
+        importPath={importPath}
+        importBusy={importBusy}
+        onImportNameChange={setImportName}
+        onImportPathChange={setImportPath}
+        onInstall={(entry) => void handleInstall(entry)}
+        onBrowseImport={() => void handleBrowse()}
+        onImport={() => void handleImport()}
+        onThirdPartySaved={() => void refreshModels()}
+      />
 
       {error && <p className="text-danger">{error}</p>}
     </div>

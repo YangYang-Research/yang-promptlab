@@ -95,11 +95,10 @@ export type ModelDownloadProgressDto = {
 
 export type ModelVaultStatsDto = {
   vaultPath: string;
-  modelCount: number;
+  registeredCount: number;
+  installedLocalCount: number;
   installedBytes: number;
   installedGb: number;
-  diskUsageBytes: number;
-  diskUsageGb: number;
 };
 
 export type ModelDownloadStatusDto = {
@@ -148,6 +147,10 @@ export type ThirdPartyModelSaveRequest = {
   model: string;
   baseUrl?: string | null;
   region?: string | null;
+  apiKey?: string;
+  apiKeyEnv?: string | null;
+  awsSecretAccessKey?: string;
+  awsSessionToken?: string;
 };
 
 export function saveThirdPartyModel(
@@ -174,6 +177,16 @@ export function resumeModelDownload(): Promise<ModelDownloadProgressDto> {
 
 export function cancelModelDownload(): Promise<void> {
   return invokeCommand<void>("models_download_cancel");
+}
+
+export function retryModelDownloadVerify(
+  request: ModelDownloadRequest,
+): Promise<ModelDownloadStatusDto> {
+  return invokeCommand<ModelDownloadStatusDto>("models_download_retry_verify", { request });
+}
+
+export function cancelModelDownloadVerify(): Promise<ModelDownloadProgressDto> {
+  return invokeCommand<ModelDownloadProgressDto>("models_download_cancel_verify");
 }
 
 export function removeModel(modelId: string): Promise<ModelEntryDto> {

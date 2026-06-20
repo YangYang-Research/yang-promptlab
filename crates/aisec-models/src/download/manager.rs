@@ -31,13 +31,33 @@ impl Default for DownloadOptions {
     }
 }
 
+/// Resume / pipeline state persisted alongside partial downloads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelinePhase {
+    #[default]
+    Downloading,
+    Downloaded,
+    Verifying,
+    VerifyFailed,
+}
+
 /// Resume state persisted alongside partial downloads.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ResumeState {
+pub(crate) struct ResumeState {
     pub url: String,
     pub destination: PathBuf,
     pub downloaded_bytes: u64,
     pub total_bytes: Option<u64>,
+    #[serde(default)]
+    pub catalog_id: Option<String>,
+    #[serde(default)]
+    pub phase: PipelinePhase,
+    #[serde(default)]
+    pub error: Option<String>,
+    /// When true, auto-verify on poll is suppressed until the user clicks Verify.
+    #[serde(default)]
+    pub verify_manual: bool,
     pub updated_at: OffsetDateTime,
 }
 
@@ -91,6 +111,52 @@ impl DownloadManager {
             fs::remove_file(path).await?;
         }
         Ok(())
+    }
+
+    pub(crate) fn state_path_for(destination: &Path) -> PathBuf {
+        Self::state_path(destination)
+    }
+
+    pub async fn load_pipeline_state(destination: &Path) -> ModelResult<Option<ResumeState>> {
+        Self::load_state(destination).await
+    }
+
+    pub async fn save_pipeline_state(state: &ResumeState) -> ModelResult<()> {
+        Self::save_state(state).await
+    }
+
+    pub async fn clear_pipeline_state(destination: &Path) -> ModelResult<()> {
+        Self::clear_state(destination).await
+    }
+
+    pub async fn update_pipeline_phase(
+        destination: &Path,
+        phase: PipelinePhase,
+        error: Option<String>,
+    ) -> ModelResult<()> {
+        let Some(mut state) = Self::load_state(destination).await? else {
+            return Ok(());
+        };
+        state.phase = phase;
+        state.error = error;
+        state.updated_at = OffsetDateTime::now_utc();
+        Self::save_state(&state).await
+    }
+
+    pub async fn set_verify_manual(destination: &Path, manual: bool) -> ModelResult<()> {
+        let Some(mut state) = Self::load_state(destination).await? else {
+            return Ok(());
+        };
+        state.verify_manual = manual;
+        state.updated_at = OffsetDateTime::now_utc();
+        Self::save_state(&state).await
+    }
+
+    pub async fn is_post_download_awaiting_verify(destination: &Path) -> bool {
+        matches!(
+            Self::load_pipeline_state(destination).await,
+            Ok(Some(state)) if state.phase == PipelinePhase::Downloaded
+        )
     }
 
     /// Download a file with HTTP Range resume support.
@@ -164,6 +230,10 @@ impl DownloadManager {
                 destination: destination.to_path_buf(),
                 downloaded_bytes: downloaded,
                 total_bytes,
+                catalog_id: None,
+                phase: PipelinePhase::Downloading,
+                error: None,
+                verify_manual: false,
                 updated_at: OffsetDateTime::now_utc(),
             })
             .await?;
@@ -225,6 +295,7 @@ impl DownloadManager {
         progress_slot: Arc<Mutex<DownloadProgress>>,
     ) -> ModelResult<DownloadProgress> {
         let destination = destination.as_ref();
+        let catalog_id = progress_slot.lock().await.model_id.clone();
         let existing = Self::load_state(destination).await?;
         let mut downloaded = if destination.exists() {
             fs::metadata(destination).await.map(|m| m.len()).unwrap_or(0)
@@ -250,103 +321,171 @@ impl DownloadManager {
             fs::create_dir_all(parent).await?;
         }
 
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .read(true)
-            .open(destination)
-            .await?;
+        const MAX_STALL_RETRIES: u32 = 12;
+        const CHUNK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+        let mut stall_retries = 0u32;
+        let mut total_bytes: Option<u64> = existing.and_then(|state| state.total_bytes);
 
-        if downloaded > 0 {
-            file.seek(std::io::SeekFrom::Start(downloaded)).await?;
-        }
+        loop {
+            if downloaded > 0 {
+                info!(downloaded, stall_retries, "continuing download from offset");
+            }
 
-        let request = build_download_request(self.hf.client(), url, downloaded, self.options.timeout_ms);
+            let mut file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .read(true)
+                .open(destination)
+                .await?;
 
-        {
-            let mut slot = progress_slot.lock().await;
-            slot.url = url.to_string();
-            slot.destination = destination.to_path_buf();
-            slot.downloaded_bytes = downloaded;
-            slot.resumed = resumed;
-            slot.status = DownloadStatus::Downloading;
-            slot.updated_at = OffsetDateTime::now_utc();
-        }
+            if downloaded > 0 {
+                file.seek(std::io::SeekFrom::Start(downloaded)).await?;
+            }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|e| map_download_http_error(url, e))?;
-
-        downloaded = normalize_resume_start(&response, downloaded, &mut file, url).await?;
-        validate_binary_response(&response, url).await?;
-
-        let total_bytes = parse_content_length(&response, downloaded);
-        {
-            let mut slot = progress_slot.lock().await;
-            slot.total_bytes = total_bytes;
-            slot.downloaded_bytes = downloaded;
-        }
-
-        let mut stream = response.bytes_stream();
-        use futures_util::StreamExt;
-
-        let mut last_bytes = downloaded;
-        let mut last_tick = std::time::Instant::now();
-
-        while let Some(chunk) = stream
-            .next()
-            .await
-            .transpose()
-            .map_err(|e| map_download_stream_error(url, e))?
-        {
-            control.wait_if_paused().await?;
-            control.check_cancelled()?;
-
-            file.write_all(&chunk).await?;
-            downloaded += chunk.len() as u64;
+            let request =
+                build_download_request(self.hf.client(), url, downloaded, self.options.timeout_ms);
 
             {
                 let mut slot = progress_slot.lock().await;
+                slot.url = url.to_string();
+                slot.destination = destination.to_path_buf();
                 slot.downloaded_bytes = downloaded;
                 slot.total_bytes = total_bytes;
+                slot.resumed = resumed;
                 slot.status = DownloadStatus::Downloading;
                 slot.updated_at = OffsetDateTime::now_utc();
-
-                let now = std::time::Instant::now();
-                let elapsed = now.duration_since(last_tick).as_secs_f64();
-                if elapsed >= 0.5 {
-                    let delta = downloaded.saturating_sub(last_bytes);
-                    let speed = delta as f64 / elapsed;
-                    slot.speed_bytes_per_sec = Some(speed);
-                    slot.eta_seconds = total_bytes.and_then(|total| {
-                        let remaining = total.saturating_sub(downloaded);
-                        if speed > 1.0 && remaining > 0 {
-                            Some((remaining as f64 / speed).ceil() as u64)
-                        } else {
-                            None
-                        }
-                    });
-                    last_bytes = downloaded;
-                    last_tick = now;
-                }
             }
 
-            Self::save_state(&ResumeState {
-                url: url.to_string(),
-                destination: destination.to_path_buf(),
-                downloaded_bytes: downloaded,
-                total_bytes,
-                updated_at: OffsetDateTime::now_utc(),
-            })
-            .await?;
+            let response = match request.send().await {
+                Ok(response) => response,
+                Err(err) => {
+                    stall_retries += 1;
+                    if stall_retries > MAX_STALL_RETRIES {
+                        return Err(map_download_http_error(url, err));
+                    }
+                    downloaded = fs::metadata(destination)
+                        .await
+                        .map(|meta| meta.len())
+                        .unwrap_or(downloaded);
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
+
+            downloaded = normalize_resume_start(&response, downloaded, &mut file, url).await?;
+            validate_binary_response(&response, url).await?;
+
+            total_bytes = parse_content_length(&response, downloaded).or(total_bytes);
+            {
+                let mut slot = progress_slot.lock().await;
+                slot.total_bytes = total_bytes;
+                slot.downloaded_bytes = downloaded;
+            }
+
+            let mut stream = response.bytes_stream();
+            use futures_util::StreamExt;
+
+            let mut last_bytes = downloaded;
+            let mut last_tick = std::time::Instant::now();
+            let mut stalled = false;
+
+            while !stalled {
+                let next_chunk = tokio::time::timeout(CHUNK_TIMEOUT, stream.next()).await;
+                let chunk = match next_chunk {
+                    Ok(Some(Ok(bytes))) => bytes,
+                    Ok(Some(Err(err))) => return Err(map_download_stream_error(url, err)),
+                    Ok(None) => break,
+                    Err(_) => {
+                        downloaded = fs::metadata(destination)
+                            .await
+                            .map(|meta| meta.len())
+                            .unwrap_or(downloaded);
+                        if total_bytes.is_some_and(|total| download_near_complete(downloaded, total))
+                        {
+                            break;
+                        }
+                        stalled = true;
+                        break;
+                    }
+                };
+
+                control.wait_if_paused().await?;
+                control.check_cancelled()?;
+
+                file.write_all(&chunk).await?;
+                downloaded += chunk.len() as u64;
+
+                {
+                    let mut slot = progress_slot.lock().await;
+                    slot.downloaded_bytes = downloaded;
+                    slot.total_bytes = total_bytes;
+                    slot.status = DownloadStatus::Downloading;
+                    slot.updated_at = OffsetDateTime::now_utc();
+
+                    let now = std::time::Instant::now();
+                    let elapsed = now.duration_since(last_tick).as_secs_f64();
+                    if elapsed >= 0.5 {
+                        let delta = downloaded.saturating_sub(last_bytes);
+                        let speed = delta as f64 / elapsed;
+                        slot.speed_bytes_per_sec = Some(speed);
+                        slot.eta_seconds = total_bytes.and_then(|total| {
+                            let remaining = total.saturating_sub(downloaded);
+                            if speed > 1.0 && remaining > 0 {
+                                Some((remaining as f64 / speed).ceil() as u64)
+                            } else {
+                                None
+                            }
+                        });
+                        last_bytes = downloaded;
+                        last_tick = now;
+                    }
+                }
+
+                Self::save_state(&ResumeState {
+                    url: url.to_string(),
+                    destination: destination.to_path_buf(),
+                    downloaded_bytes: downloaded,
+                    total_bytes,
+                    catalog_id: Some(catalog_id.clone()),
+                    phase: PipelinePhase::Downloading,
+                    error: None,
+                    verify_manual: false,
+                    updated_at: OffsetDateTime::now_utc(),
+                })
+                .await?;
+            }
+
+            file.flush().await?;
+
+            if !stalled {
+                break;
+            }
+
+            stall_retries += 1;
+            if stall_retries > MAX_STALL_RETRIES {
+                return Err(ModelError::download(format!(
+                    "download stalled after {MAX_STALL_RETRIES} resume attempts"
+                )));
+            }
+            info!(downloaded, stall_retries, "download stalled; retrying with HTTP Range");
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
 
-        file.flush().await?;
-        Self::clear_state(destination).await?;
+        Self::save_pipeline_state(&ResumeState {
+            url: url.to_string(),
+            destination: destination.to_path_buf(),
+            downloaded_bytes: downloaded,
+            total_bytes,
+            catalog_id: Some(catalog_id.clone()),
+            phase: PipelinePhase::Downloaded,
+            error: None,
+            verify_manual: false,
+            updated_at: OffsetDateTime::now_utc(),
+        })
+        .await?;
 
         let done = DownloadProgress {
-            model_id: progress_slot.lock().await.model_id.clone(),
+            model_id: catalog_id,
             status: DownloadStatus::Completed,
             url: url.to_string(),
             destination: destination.to_path_buf(),
@@ -445,6 +584,14 @@ fn map_download_stream_error(url: &str, err: reqwest::Error) -> ModelError {
     }
 }
 
+fn download_near_complete(downloaded: u64, total: u64) -> bool {
+    if total == 0 {
+        return false;
+    }
+    let remaining = total.saturating_sub(downloaded);
+    remaining <= 1024 || remaining * 100 <= total
+}
+
 fn parse_content_length(response: &reqwest::Response, offset: u64) -> Option<u64> {
     if response.status().as_u16() == 206 {
         if let Some(range) = response.headers().get("content-range") {
@@ -518,6 +665,10 @@ mod tests {
                 destination: dest.clone(),
                 downloaded_bytes: 8,
                 total_bytes: Some(body.len() as u64),
+                catalog_id: None,
+                phase: PipelinePhase::Downloading,
+                error: None,
+                verify_manual: false,
                 updated_at: OffsetDateTime::now_utc(),
             })
             .unwrap(),

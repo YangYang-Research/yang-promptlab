@@ -89,8 +89,21 @@ pub async fn open_model_manager_with_registry(
     data_dir: &Path,
 ) -> AisecResult<(LocalModelManager, BuiltinCatalogMeta)> {
     let (catalog, meta) = load_builtin_catalog(app).await?;
-    let manager = crate::judge_config::open_model_manager(data_dir, catalog)
+    let mut manager = crate::judge_config::open_model_manager(data_dir, catalog)
         .map_err(|err| aisec_core::AisecError::internal(err.to_string()))?;
+    let recovered = manager
+        .recover_orphan_downloads()
+        .await
+        .unwrap_or_else(|err| {
+            tracing::warn!(error = %err, "orphan download recovery skipped");
+            0
+        });
+    if recovered > 0 {
+        info!(recovered, "registered recovered model downloads on startup");
+    }
+    if let Err(err) = manager.restore_persisted_pipelines().await {
+        tracing::warn!(error = %err, "pipeline restore skipped");
+    }
     Ok((manager, meta))
 }
 

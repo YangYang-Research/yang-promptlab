@@ -113,7 +113,11 @@ pub enum DownloadStatus {
     Pending,
     Downloading,
     Paused,
+    Verifying,
+    /// Download complete; waiting for user-triggered SHA256 verify.
+    AwaitingVerify,
     Completed,
+    VerifyFailed,
     Failed,
     Verified,
 }
@@ -196,9 +200,11 @@ pub struct DownloadProgress {
 /// Vault storage summary for desktop UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultStats {
-    pub model_count: usize,
+    /// All registered models (public, import, third-party).
+    pub registered_count: usize,
+    /// Local GGUF models only (public catalog + import).
+    pub installed_local_count: usize,
     pub installed_bytes: u64,
-    pub disk_usage_bytes: u64,
     pub vault_path: PathBuf,
 }
 

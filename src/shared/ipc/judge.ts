@@ -159,6 +159,26 @@ export const THIRD_PARTY_PROVIDERS: Array<{
   },
 ];
 
+export function thirdPartyProviderTemplate(
+  provider: ThirdPartyProvider = "openai",
+): JudgeConfigDto {
+  const meta = THIRD_PARTY_PROVIDERS.find((entry) => entry.value === provider);
+  return {
+    ...DEFAULT_JUDGE_CONFIG,
+    remoteProvider: provider,
+    remoteModel: "",
+    remoteApiKey: "",
+    remoteAwsSecretAccessKey: "",
+    remoteAwsSessionToken: "",
+    remoteAwsRegion: null,
+    remoteBaseUrl: null,
+    remoteApiKeyEnv: meta?.apiKeyEnv ?? DEFAULT_JUDGE_CONFIG.remoteApiKeyEnv,
+    remoteApiKeyConfigured: false,
+    remoteAwsSecretAccessKeyConfigured: false,
+    remoteAwsSessionTokenConfigured: false,
+  };
+}
+
 export function validateThirdPartyConfig(config: JudgeConfigDto): string | null {
   if (!config.remoteModel.trim()) {
     return "Model name is required";
