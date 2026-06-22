@@ -257,6 +257,24 @@ pub fn apply_third_party_health_check(
     settings.third_party_last_health_check = Some(checked_at.to_string());
 }
 
+pub fn is_third_party_connectivity_ok(connectivity: Option<&str>) -> bool {
+    connectivity
+        .is_some_and(|value| value.starts_with("Connected"))
+}
+
+pub fn third_party_status_label(settings: &AiInferenceSettings, has_configured_model: bool) -> String {
+    if !has_configured_model || settings.selected_model_id.is_none() {
+        return "Setup Required".into();
+    }
+    if is_third_party_connectivity_ok(settings.third_party_connectivity.as_deref()) {
+        return "Ready".into();
+    }
+    match settings.third_party_connectivity.as_deref() {
+        Some(_) => "Failed".into(),
+        None => "Setup Required".into(),
+    }
+}
+
 pub fn format_health_check_timestamp(timestamp: time::OffsetDateTime) -> String {
     timestamp
         .format(&time::macros::format_description!(

@@ -13,7 +13,7 @@ use time::OffsetDateTime;
 use crate::ai_inference_settings::{
     apply_third_party_health_check, format_health_check_timestamp, is_local_model,
     is_third_party_model, load_settings, reconcile_settings, save_settings, settings_to_dto,
-    settings_to_dto_with_connectivity_test, AiInferenceRoute,
+    settings_to_dto_with_connectivity_test, third_party_status_label, AiInferenceRoute,
     AiInferenceSettingsDto,
 };
 use crate::commands::models::test_third_party_model_connection;
@@ -306,10 +306,9 @@ async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<Runt
                 None,
             )
         } else if settings.route == AiInferenceRoute::ThirdParty {
-            let ready = inference.third_party_available;
             (
                 "third_party".to_string(),
-                if ready { "Ready".to_string() } else { "Setup Required".to_string() },
+                third_party_status_label(&settings, inference.third_party_available),
                 selected_model.map(|m| m.display_provider()),
                 inference.selected_model_name.clone(),
                 None,

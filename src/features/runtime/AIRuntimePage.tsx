@@ -429,20 +429,10 @@ export function AIRuntimePage() {
               <section className="runtime-section">
                 <div className="models-summary-grid runtime-summary-grid">
                   <Card className="models-summary-card">
-                    <div className="runtime-summary-card__value-row">
-                      <strong className="models-summary-card__value models-summary-card__value--runtime">
-                        {configuration?.statusLabel ?? "—"}
-                      </strong>
-                      <StatusBadge
-                        status={
-                          configuration?.statusLabel === "Ready"
-                            ? "completed"
-                            : configuration?.statusLabel === "Setup Required"
-                              ? "failed"
-                              : "pending"
-                        }
-                      />
-                    </div>
+                    <span className="models-summary-card__label">Status</span>
+                    <strong className="models-summary-card__value models-summary-card__value--runtime">
+                      {configuration?.statusLabel ?? "—"}
+                    </strong>
                   </Card>
                   <Card className="models-summary-card">
                     <span className="models-summary-card__label">Provider</span>
@@ -476,7 +466,7 @@ export function AIRuntimePage() {
               </section>
 
               <section className="runtime-section">
-                <h2 className="runtime-section__title">Default Model</h2>
+                <h2 className="runtime-section__title">Choose Model</h2>
                 <Card className="model-card model-card--wide">
                   {thirdPartyModels.length > 0 && (
                     <ul className="runtime-route-models" aria-label="Third-party models">
@@ -500,7 +490,7 @@ export function AIRuntimePage() {
                         })
                       }
                     >
-                      Configure Providers
+                      Add Model
                     </Button>
                   </div>
                 </Card>
