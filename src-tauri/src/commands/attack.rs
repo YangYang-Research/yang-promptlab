@@ -391,7 +391,7 @@ pub async fn attack_run_prompt_injection_op(
 
     let category = AttackCategory::PromptInjection;
     let manager = state.model_manager().lock().await;
-    let mut supervisor = state.runtime_supervisor().lock().await;
+    let mut runtime_mgr = state.runtime_manager().lock().await;
     let run = match run_category_on_endpoint(
         &repos,
         &scan.id,
@@ -403,7 +403,7 @@ pub async fn attack_run_prompt_injection_op(
         state.data_dir(),
         &manager,
         state.model_provider().clone(),
-        &mut supervisor,
+        runtime_mgr.supervisor_mut(),
         state.plugin_manager().clone(),
         None,
         None,

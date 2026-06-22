@@ -160,19 +160,19 @@ pub async fn generate_payloads_for_scan_job(
     data_dir: &std::path::Path,
     model_manager: &AsyncMutex<aisec_models::LocalModelManager>,
     model_provider: aisec_runtime::SharedModelProvider,
-    runtime_supervisor: &AsyncMutex<aisec_runtime::RuntimeSupervisor>,
+    runtime_manager: &AsyncMutex<aisec_runtime::RuntimeManager>,
     plan: &AttackPlan,
     mode: GeneratorMode,
 ) -> CommandResult<PromptPayloads> {
     if mode == GeneratorMode::LocalLlm {
         let manager = model_manager.lock().await;
-        let mut supervisor = runtime_supervisor.lock().await;
+        let mut runtime_mgr = runtime_manager.lock().await;
         let mut config = load_judge_config(data_dir).await?;
         let runtime = prepare_judge_runtime_context(
             &mut config,
             &manager,
             model_provider,
-            &mut supervisor,
+            runtime_mgr.supervisor_mut(),
         )
         .await?
         .ok_or_else(|| {
@@ -181,7 +181,7 @@ pub async fn generate_payloads_for_scan_job(
             )
         })?;
         drop(manager);
-        drop(supervisor);
+        drop(runtime_mgr);
 
         let backend = build_generator_llm_backend(&config, &runtime).await?;
         let adapter = JudgeGeneratorLlm::new(backend);
@@ -204,7 +204,7 @@ pub async fn generate_payloads_for_plan(
         state.data_dir(),
         state.model_manager(),
         state.model_provider().clone(),
-        state.runtime_supervisor(),
+        state.runtime_manager(),
         plan,
         mode,
     )

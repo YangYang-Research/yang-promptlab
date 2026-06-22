@@ -23,8 +23,8 @@ import {
   resumeModelDownload,
   retryModelDownloadVerify,
   startModelDownload,
+  testModelConnection,
   testModelInference,
-  verifyModel,
   type ModelCatalogEntryDto,
   type ModelDownloadProgressDto,
   type ModelEntryDto,
@@ -36,6 +36,13 @@ import { useToast } from "@/shared/notifications";
 import { formatBytes } from "@/shared/utils/format";
 import { DownloadManagerCard } from "./DownloadManagerCard";
 import { AddModelModal } from "./AddModelModal";
+
+function modelRegistryBadgeStatus(model: ModelEntryDto): string {
+  if (model.provider === "remote") {
+    return model.verified ? "registered" : "available";
+  }
+  return model.verified ? "installed" : "available";
+}
 
 export function ModelsPage() {
   const { notify } = useToast();
@@ -53,7 +60,6 @@ export function ModelsPage() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [busyModelId, setBusyModelId] = useState<string | null>(null);
   const [installingId, setInstallingId] = useState<string | null>(null);
-  const [modelTestMessage, setModelTestMessage] = useState<string | null>(null);
   const [addModelOpen, setAddModelOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const verifyInFlightRef = useRef(false);
@@ -298,30 +304,25 @@ export function ModelsPage() {
     }
   }
 
-  async function handleVerify(modelId: string) {
+  async function handleTest(model: ModelEntryDto) {
     setError(null);
-    setBusyModelId(modelId);
+    setBusyModelId(model.id);
     try {
-      const result = await verifyModel(modelId);
-      setModelTestMessage(
-        result.valid ? "Model verified successfully" : "Verification failed",
-      );
-      await refreshModels();
+      if (model.provider === "remote") {
+        const result = await testModelConnection(model.id);
+        const latency = result.latencyMs > 0 ? ` (${result.latencyMs} ms)` : "";
+        const label = `${result.provider} / ${result.model}`;
+        if (result.ok) {
+          notify(`Connection successful — ${label}${latency}`, "success");
+        } else {
+          notify(`Connection failed — ${label}: ${result.message}`, "error");
+        }
+      } else {
+        const result = await testModelInference(model.id);
+        notify(`${result.mode}: ${result.sample}`, result.ok ? "success" : "error");
+      }
     } catch (err) {
-      setError(toAppError(err).message);
-    } finally {
-      setBusyModelId(null);
-    }
-  }
-
-  async function handleRunInference(modelId: string) {
-    setError(null);
-    setBusyModelId(modelId);
-    try {
-      const result = await testModelInference(modelId);
-      setModelTestMessage(`${result.mode}: ${result.sample}`);
-    } catch (err) {
-      setError(toAppError(err).message);
+      notify(toAppError(err).message, "error");
     } finally {
       setBusyModelId(null);
     }
@@ -444,7 +445,7 @@ export function ModelsPage() {
                             : ""}
                       </p>
                     </div>
-                    <StatusBadge status={model.verified ? "installed" : "available"} />
+                    <StatusBadge status={modelRegistryBadgeStatus(model)} />
                   </div>
                   <p className="text-muted text-sm">
                     {[
@@ -461,14 +462,7 @@ export function ModelsPage() {
                   <Button
                     variant="ghost"
                     disabled={busyModelId !== null}
-                    onClick={() => void handleVerify(model.id)}
-                  >
-                    Verify
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={busyModelId !== null || model.provider === "remote"}
-                    onClick={() => void handleRunInference(model.id)}
+                    onClick={() => void handleTest(model)}
                   >
                     Test
                   </Button>
@@ -482,9 +476,6 @@ export function ModelsPage() {
                 </div>
               </div>
             ))
-          )}
-          {modelTestMessage && (
-            <p className="text-muted text-sm judge-test-result">{modelTestMessage}</p>
           )}
         </Card>
       </div>

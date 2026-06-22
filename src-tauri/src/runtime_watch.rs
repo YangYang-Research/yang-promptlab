@@ -22,27 +22,28 @@ async fn run_runtime_watch(app: AppHandle) {
             continue;
         };
 
-        let mut sup = state.runtime_supervisor().lock().await;
-        if !sup.should_watch() {
+        let should_watch = {
+            let manager = state.runtime_manager().lock().await;
+            manager.supervisor().should_watch()
+        };
+        if !should_watch {
             continue;
         }
 
-        if !sup.is_process_alive() {
-            warn!("embedded runtime process exited; restarting");
-            if let Err(err) = sup.restart().await {
+        let mut manager = state.runtime_manager().lock().await;
+        let alive = manager.supervisor_mut().is_process_alive();
+        let healthy = if alive {
+            manager.supervisor_mut().check_health().await.unwrap_or(false)
+        } else {
+            false
+        };
+
+        if !alive || !healthy {
+            warn!("embedded runtime unhealthy; restarting");
+            if let Err(err) = manager.restart_runtime().await {
                 warn!(error = %err, "embedded runtime auto-restart failed");
             } else {
-                info!("embedded runtime auto-restarted after process exit");
-            }
-            continue;
-        }
-
-        if !sup.check_health().await.unwrap_or(false) {
-            warn!("embedded runtime health check failed; restarting");
-            if let Err(err) = sup.restart().await {
-                warn!(error = %err, "embedded runtime health restart failed");
-            } else {
-                info!("embedded runtime auto-restarted after health failure");
+                info!("embedded runtime auto-restarted");
             }
         }
     }

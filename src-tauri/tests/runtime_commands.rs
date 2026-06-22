@@ -19,7 +19,7 @@ async fn make_state(dir: &Path) -> AppState {
         aisec_auth::AuthEngineConfig::default(),
         harness_factory,
         plugin_manager,
-        aisec_runtime::RuntimeSupervisor::new("", dir),
+        aisec_runtime::RuntimeManager::new(dir, None),
         manager,
         provider,
         meta,
@@ -32,7 +32,7 @@ async fn runtime_status_reports_unavailable_without_binary() {
     let state = make_state(dir.path()).await;
 
     let status = runtime_status_op(&state).await.expect("runtime status");
-    assert_eq!(status.state, "stopped");
-    assert!(!status.binary_available || !status.healthy);
-    assert!(status.message.contains("runtime") || status.message.contains("stopped"));
+    assert_eq!(status.lifecycle_state, "not_installed");
+    assert!(!status.binary_available);
+    assert!(status.message.to_lowercase().contains("runtime"));
 }

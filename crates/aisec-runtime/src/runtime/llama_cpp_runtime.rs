@@ -262,6 +262,14 @@ impl LlamaCppRuntime {
     pub async fn loaded_model_path(&self) -> Option<PathBuf> {
         self.model_path.lock().await.clone()
     }
+
+    pub async fn pid(&self) -> Option<u32> {
+        self.process
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|child| child.id())
+    }
 }
 
 pub fn default_llama_port() -> u16 {

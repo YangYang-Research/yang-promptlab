@@ -35,7 +35,7 @@ export function StatusBadge({ status }: { status: string }) {
       ? "info"
       : status === "paused"
         ? "warning"
-      : status === "completed" || status === "installed"
+      : status === "completed" || status === "installed" || status === "registered"
         ? "success"
         : status === "failed" || status === "error"
           ? "danger"

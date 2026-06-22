@@ -57,6 +57,10 @@ impl LlamaCppRuntime {
         }
     }
 
+    pub fn config(&self) -> &LlamaCppConfig {
+        &self.config
+    }
+
     fn base_url(&self) -> String {
         format!("http://{}:{}", self.config.host, self.config.port)
     }

@@ -2,12 +2,14 @@
 
 mod store;
 mod vault;
+mod model_vault;
 pub mod migrate;
 pub mod audit;
 mod descriptor;
 
 pub use store::{CredentialReferenceId, SecretScope, SecretStore};
 pub use vault::EncryptedVault;
+pub use model_vault::ModelCredentialVault;
 pub use migrate::{
     migrate_legacy_auth_data, migrate_legacy_storage_artifacts, migrate_legacy_target_descriptors,
     profile_config_has_plaintext, resolve_auth_config_secrets, run_database_secret_migration,

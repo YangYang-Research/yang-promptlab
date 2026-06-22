@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use aisec_auth::AuthEngineConfig;
 use aisec_attack::{AttackCategory, AttackPayload};
 use aisec_models::LocalModelManager;
-use aisec_runtime::{RuntimeSupervisor, SharedModelProvider};
+use aisec_runtime::SharedModelProvider;
 use aisec_storage::{
     CreateScan, EndpointRepository, FindingRepository, ProjectRepository, Repositories,
     ScanRepository, TargetRepository, UpdateScan,
@@ -124,7 +124,7 @@ async fn run_scan_job(
     plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
-    runtime_supervisor: Arc<AsyncMutex<RuntimeSupervisor>>,
+    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
 ) {
     let repos = db.repositories();
     let progress_emitter = ScanProgressEmitter::new(app.clone(), scan_id.clone());
@@ -159,7 +159,7 @@ async fn run_scan_job(
                 &data_dir,
                 &model_manager,
                 model_provider.clone(),
-                &runtime_supervisor,
+                &runtime_manager,
                 &plan,
                 mode,
             )
@@ -231,7 +231,7 @@ async fn run_scan_job(
             }
 
             let manager = model_manager.lock().await;
-            let mut supervisor = runtime_supervisor.lock().await;
+            let mut runtime_mgr = runtime_manager.lock().await;
             match run_category_on_endpoint(
                 &repos,
                 &scan_id,
@@ -243,7 +243,7 @@ async fn run_scan_job(
                 &data_dir,
                 &manager,
                 model_provider.clone(),
-                &mut supervisor,
+                runtime_mgr.supervisor_mut(),
                 plugin_manager.clone(),
                 generated_payloads.as_ref(),
                 Some(&progress_emitter),
@@ -339,7 +339,7 @@ async fn run_agent_scan_job(
     plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
-    runtime_supervisor: Arc<AsyncMutex<RuntimeSupervisor>>,
+    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
 ) {
     let repos = db.repositories();
     let progress_emitter = ScanProgressEmitter::new(app.clone(), scan_id.clone());
@@ -409,7 +409,7 @@ async fn run_agent_scan_job(
         }
 
         let manager = model_manager.lock().await;
-        let mut supervisor = runtime_supervisor.lock().await;
+        let mut runtime_mgr = runtime_manager.lock().await;
         let mut host = ScanAgentHost {
             repos: &repos,
             scan_id: scan_id.clone(),
@@ -420,7 +420,7 @@ async fn run_agent_scan_job(
             data_dir: &data_dir,
             model_manager: &manager,
             model_provider: model_provider.clone(),
-            runtime_supervisor: &mut supervisor,
+            runtime_supervisor: runtime_mgr.supervisor_mut(),
             plugin_manager: plugin_manager.clone(),
             profile: profile.clone(),
             disabled_tests: disabled_tests.clone(),
@@ -627,7 +627,7 @@ pub async fn scan_start_op(
     let plugin_manager = Arc::clone(state.plugin_manager());
     let model_manager = Arc::clone(state.model_manager());
     let model_provider = state.model_provider().clone();
-    let runtime_supervisor = Arc::clone(state.runtime_supervisor());
+    let runtime_manager = Arc::clone(state.runtime_manager());
 
     let disabled_for_job = disabled_tests.clone();
     let profile_for_job = profile.clone();
@@ -661,7 +661,7 @@ pub async fn scan_start_op(
                 plugin_manager,
                 model_manager,
                 model_provider,
-                runtime_supervisor,
+                runtime_manager,
             )
             .await;
         });
@@ -688,7 +688,7 @@ pub async fn scan_start_op(
                 plugin_manager,
                 model_manager,
                 model_provider,
-                runtime_supervisor,
+                runtime_manager,
             )
             .await;
         });

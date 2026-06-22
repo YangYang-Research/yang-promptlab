@@ -16,6 +16,7 @@ pub mod method_heuristic;
 pub mod harness_runtime;
 pub mod judge_config;
 pub mod model_registry;
+pub mod third_party_credentials;
 pub mod embedded_runtime;
 pub mod plugin_service;
 pub mod plugin_transport;
@@ -43,8 +44,8 @@ pub fn run() {
         if let RunEvent::Exit = event {
             if let Some(state) = app_handle.try_state::<AppState>() {
                 tauri::async_runtime::block_on(async {
-                    let mut supervisor = state.runtime_supervisor().lock().await;
-                    let _ = supervisor.stop().await;
+                    let mut manager = state.runtime_manager().lock().await;
+                    let _ = manager.stop_runtime().await;
                     tracing::info!("embedded runtime stopped (graceful shutdown)");
                     state.database().close().await;
                 });
@@ -105,20 +106,27 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 Ok::<(), crate::error::CommandError>(())
             })?;
 
-            let runtime_config =
-                embedded_runtime::resolve_runtime_config(app.handle(), &data_dir);
-            let llama_binary = runtime_config.binary.clone();
-            let (runtime_supervisor, started) =
-                tauri::async_runtime::block_on(embedded_runtime::start_embedded_runtime(
-                    runtime_config,
-                ))
-                .map_err(crate::error::CommandError::from)?;
-
             let (mut model_manager, model_catalog_meta) = tauri::async_runtime::block_on(
                 model_registry::open_model_manager_with_registry(app.handle(), &data_dir),
             )
             .map_err(crate::error::CommandError::from)?;
+
+            let (runtime_manager, started) =
+                tauri::async_runtime::block_on(embedded_runtime::bootstrap_runtime_manager(
+                    app.handle(),
+                    &data_dir,
+                ))
+                .map_err(crate::error::CommandError::from)?;
+
+            let llama_binary = runtime_manager
+                .manifest()
+                .map(|m| m.install_path.clone())
+                .filter(|p| p.is_file())
+                .unwrap_or_else(|| aisec_runtime::bundled_llama_server_binary(&data_dir));
+
             model_manager = model_manager.with_llama_binary(llama_binary);
+
+            let spawn_runtime_watch = started || runtime_manager.supervisor().binary_available();
 
             let model_manager_arc = std::sync::Arc::new(AsyncMutex::new(model_manager));
             let model_provider: aisec_runtime::SharedModelProvider = std::sync::Arc::new(
@@ -139,13 +147,13 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 auth_engine_config,
                 harness_factory,
                 plugin_manager,
-                runtime_supervisor,
+                runtime_manager,
                 model_manager_arc,
                 model_provider,
                 model_catalog_meta,
             ));
 
-            if started {
+            if spawn_runtime_watch {
                 runtime_watch::spawn_runtime_watch(app.handle().clone());
             }
 
@@ -201,6 +209,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::models::models_import_gguf,
             commands::models::models_save_third_party,
             commands::models::models_test_third_party,
+            commands::models::models_test_connection,
             commands::models::models_import_zip,
             commands::models::models_download_start,
             commands::models::models_download_status,
@@ -218,8 +227,15 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::planner::planner_generate,
             commands::generator::generator_generate,
             commands::runtime::runtime_status,
-            commands::runtime::runtime_restart,
+            commands::runtime::runtime_install,
+            commands::runtime::runtime_start,
             commands::runtime::runtime_stop,
+            commands::runtime::runtime_restart,
+            commands::runtime::runtime_health,
+            commands::runtime::runtime_benchmark,
+            commands::runtime::runtime_logs,
+            commands::runtime::runtime_hardware,
+            commands::runtime::hardware_refresh,
             commands::security::security_audit,
             commands::security::security_migrate_secrets,
             commands::plugins::plugins_list,

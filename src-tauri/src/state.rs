@@ -7,7 +7,7 @@ use aisec_core::LogGuard;
 use aisec_harness::HarnessFactory;
 use aisec_models::{BuiltinCatalogMeta, LocalModelManager};
 use aisec_plugin_host::PluginManager;
-use aisec_runtime::{RuntimeSupervisor, SharedModelProvider};
+use aisec_runtime::RuntimeManager;
 use aisec_storage::{Database, Repositories};
 use tauri::async_runtime::Mutex as AsyncMutex;
 
@@ -22,9 +22,9 @@ pub struct AppState {
     harness_factory: HarnessFactory,
     plugin_manager: Arc<AsyncMutex<PluginManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
-    model_provider: SharedModelProvider,
+    model_provider: aisec_runtime::SharedModelProvider,
     model_catalog_meta: BuiltinCatalogMeta,
-    runtime_supervisor: Arc<AsyncMutex<RuntimeSupervisor>>,
+    runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
     _log_guard: LogGuard,
 }
 
@@ -36,9 +36,9 @@ impl AppState {
         auth_engine_config: AuthEngineConfig,
         harness_factory: HarnessFactory,
         plugin_manager: Arc<AsyncMutex<PluginManager>>,
-        runtime_supervisor: RuntimeSupervisor,
+        runtime_manager: RuntimeManager,
         model_manager: Arc<AsyncMutex<LocalModelManager>>,
-        model_provider: SharedModelProvider,
+        model_provider: aisec_runtime::SharedModelProvider,
         model_catalog_meta: BuiltinCatalogMeta,
     ) -> Self {
         Self {
@@ -51,37 +51,31 @@ impl AppState {
             model_manager,
             model_provider,
             model_catalog_meta,
-            runtime_supervisor: Arc::new(AsyncMutex::new(runtime_supervisor)),
+            runtime_manager: Arc::new(AsyncMutex::new(runtime_manager)),
             _log_guard: log_guard,
         }
     }
 
-    /// The shared database handle (cheap clone of the connection pool).
     pub fn database(&self) -> &Database {
         &self.db
     }
 
-    /// Background scan job registry.
     pub fn jobs(&self) -> &ScanJobManager {
         &self.jobs
     }
 
-    /// Repository manager bound to the shared connection pool.
     pub fn repositories(&self) -> Repositories {
         self.db.repositories()
     }
 
-    /// Application data directory.
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
     }
 
-    /// Directory where generated reports are written.
     pub fn reports_dir(&self) -> PathBuf {
         self.data_dir.join("reports")
     }
 
-    /// Local model vault path (`data/models/`).
     pub fn models_dir(&self) -> PathBuf {
         self.data_dir.join("models")
     }
@@ -90,41 +84,39 @@ impl AppState {
         &self.model_catalog_meta
     }
 
-    /// Local model manager (vault registry, downloads, inference).
     pub fn model_manager(&self) -> &Arc<AsyncMutex<LocalModelManager>> {
         &self.model_manager
     }
 
-    pub fn model_provider(&self) -> &SharedModelProvider {
+    pub fn model_provider(&self) -> &aisec_runtime::SharedModelProvider {
         &self.model_provider
     }
 
-    /// Embedded llama.cpp runtime supervisor.
-    pub fn runtime_supervisor(&self) -> &Arc<AsyncMutex<RuntimeSupervisor>> {
-        &self.runtime_supervisor
+    pub fn runtime_manager(&self) -> &Arc<AsyncMutex<RuntimeManager>> {
+        &self.runtime_manager
     }
 
-    /// Default llama-server base URL for legacy install IPC fields.
     pub async fn ollama_base_url(&self) -> String {
-        self.runtime_supervisor.lock().await.base_url().to_string()
+        self.runtime_manager
+            .lock()
+            .await
+            .supervisor()
+            .base_url()
+            .to_string()
     }
 
-    /// Auth engine configuration (bundled Playwright paths resolved at startup).
     pub fn auth_engine_config(&self) -> &AuthEngineConfig {
         &self.auth_engine_config
     }
 
-    /// Shared harness factory backed by [`HarnessRegistry`].
     pub fn harness_factory(&self) -> &HarnessFactory {
         &self.harness_factory
     }
 
-    /// Plugin manager (discovery / attack / judge extensions).
     pub fn plugin_manager(&self) -> &Arc<AsyncMutex<PluginManager>> {
         &self.plugin_manager
     }
 
-    /// Installed plugins directory under the app data dir.
     pub fn plugins_dir(&self) -> PathBuf {
         self.data_dir.join("plugins")
     }

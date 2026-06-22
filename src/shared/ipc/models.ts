@@ -203,6 +203,21 @@ export function verifyModel(modelId: string): Promise<{
   return invokeCommand("models_verify", { modelId });
 }
 
+export type ModelConnectionTestResult = {
+  ok: boolean;
+  provider: string;
+  model: string;
+  latencyMs: number;
+  message: string;
+  sampleResponse?: string | null;
+};
+
+export function testModelConnection(
+  modelId: string,
+): Promise<ModelConnectionTestResult> {
+  return invokeCommand<ModelConnectionTestResult>("models_test_connection", { modelId });
+}
+
 export function testModelInference(modelId: string): Promise<ModelInferenceTestResult> {
   return invokeCommand<ModelInferenceTestResult>("models_test_inference", { modelId });
 }

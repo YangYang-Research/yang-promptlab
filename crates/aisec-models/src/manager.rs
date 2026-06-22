@@ -113,7 +113,7 @@ impl LocalModelManager {
     }
 
     pub fn llama_config(&self) -> LlamaCppConfig {
-        let mut config = LlamaCppConfig::default();
+        let mut config = self.runtime.config().clone();
         config.n_gpu_layers = self.hardware.recommended_gpu_layers();
         config
     }

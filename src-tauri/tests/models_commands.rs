@@ -19,7 +19,7 @@ async fn make_state(dir: &Path) -> AppState {
         aisec_auth::AuthEngineConfig::default(),
         harness_factory,
         plugin_manager,
-        aisec_runtime::RuntimeSupervisor::new("", dir),
+        aisec_runtime::RuntimeManager::new(dir, None),
         manager,
         provider,
         meta,

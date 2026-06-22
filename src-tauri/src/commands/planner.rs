@@ -122,12 +122,12 @@ pub async fn planner_generate_op(
     let plan = if mode == PlannerMode::LocalLlm {
         let mut config = load_judge_config(state.data_dir()).await?;
         let manager = state.model_manager().lock().await;
-        let mut supervisor = state.runtime_supervisor().lock().await;
+        let mut runtime_mgr = state.runtime_manager().lock().await;
         let runtime = prepare_judge_runtime_context(
             &mut config,
             &manager,
             state.model_provider().clone(),
-            &mut supervisor,
+            runtime_mgr.supervisor_mut(),
         )
         .await?
         .ok_or_else(|| {
@@ -136,7 +136,7 @@ pub async fn planner_generate_op(
             )
         })?;
         drop(manager);
-        drop(supervisor);
+        drop(runtime_mgr);
 
         let backend = build_planner_llm_backend(&config, &runtime).await?;
         let adapter = JudgePlannerLlm::new(backend);

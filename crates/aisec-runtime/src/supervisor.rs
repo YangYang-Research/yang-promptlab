@@ -78,6 +78,23 @@ impl RuntimeSupervisor {
         self.config.binary_available()
     }
 
+    /// Point the supervisor at a new `llama-server` binary (stops any running process).
+    pub async fn set_binary(&mut self, binary: PathBuf) -> RuntimeResult<()> {
+        self.stop().await?;
+        self.config.binary = binary.clone();
+        let runtime_config = LlamaCppRuntimeConfig {
+            binary_path: binary,
+            host: self.config.host.clone(),
+            port: self.config.port,
+            n_gpu_layers: 0,
+            ctx_size: 4096,
+            startup_timeout_ms: 30_000,
+        };
+        self.runtime = LlamaCppRuntime::new(runtime_config);
+        self.state = RuntimeProcessState::Stopped;
+        Ok(())
+    }
+
     pub fn should_watch(&self) -> bool {
         self.watch_enabled && self.state == RuntimeProcessState::Running && self.runtime.is_loaded()
     }
@@ -96,6 +113,10 @@ impl RuntimeSupervisor {
 
     pub fn llama_runtime(&self) -> &LlamaCppRuntime {
         &self.runtime
+    }
+
+    pub async fn pid(&self) -> Option<u32> {
+        self.runtime.pid().await
     }
 
     /// Queue a GGUF model to load on the next `ensure_running` / `ensure_model_loaded`.
@@ -119,7 +140,16 @@ impl RuntimeSupervisor {
             .map_err(|err| RuntimeError::Process(err.to_string()))?;
 
         if let Some(path) = self.pending_model.take() {
-            return self.ensure_model_loaded(&path).await;
+            match self.ensure_model_loaded(&path).await {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    warn!(
+                        error = %err,
+                        model = %path.display(),
+                        "failed to auto-load queued model; runtime will stay idle"
+                    );
+                }
+            }
         }
 
         if self.runtime.is_loaded() {
@@ -147,7 +177,7 @@ impl RuntimeSupervisor {
             binary = %self.config.binary.display(),
             base_url = %self.config.base_url,
             gguf_count = vault_models.len(),
-            "embedded llama.cpp runtime ready (idle; load model on demand)"
+            "embedded llama.cpp runtime ready (idle; activate models via Models module)"
         );
         Ok(())
     }

@@ -20,8 +20,8 @@ pub use secrets::{
     audit_database_secrets, descriptor_has_plaintext_secrets, merge_judge_config_audit,
     migrate_legacy_auth_data, migrate_legacy_storage_artifacts, migrate_legacy_target_descriptors,
     profile_config_has_plaintext, resolve_descriptor_for_runtime, run_database_secret_migration,
-    sanitize_target_descriptor, CredentialReferenceId, EncryptedVault, SecretAuditItem,
-    SecretMigrationAudit, SecretMigrationResult, SecretScope, SecretStore,
+    sanitize_target_descriptor, CredentialReferenceId, EncryptedVault, ModelCredentialVault,
+    SecretAuditItem, SecretMigrationAudit, SecretMigrationResult, SecretScope, SecretStore,
 };
 pub use session::{AuthSessionManager, SessionAuthContext, SessionStore};
 pub use types::*;

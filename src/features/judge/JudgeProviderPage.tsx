@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 
 import { Button, Card, PageHeader, Select, StatusBadge } from "@/shared/components";
@@ -14,13 +15,11 @@ import {
   type JudgeConnectivityResult,
 } from "@/shared/ipc/judge";
 import { listModels, type ModelEntryDto } from "@/shared/ipc/models";
-import { getRuntimeStatus, type RuntimeStatusDto } from "@/shared/ipc/runtime";
 
 export function JudgeProviderPage() {
   const [backendConnected, setBackendConnected] = useState(false);
   const [config, setConfig] = useState<JudgeConfigDto>(DEFAULT_JUDGE_CONFIG);
   const [installed, setInstalled] = useState<ModelEntryDto[]>([]);
-  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatusDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<"connectivity" | "model" | null>(null);
@@ -41,26 +40,13 @@ export function JudgeProviderPage() {
       setLoading(false);
       return;
     }
-    void Promise.all([getJudgeConfig(), listModels(), getRuntimeStatus()])
-      .then(([loaded, models, runtime]) => {
+    void Promise.all([getJudgeConfig(), listModels()])
+      .then(([loaded, models]) => {
         setConfig(loaded);
         setInstalled(models);
-        setRuntimeStatus(runtime);
       })
       .catch((err) => setError(toAppError(err).message))
       .finally(() => setLoading(false));
-  }, [backendConnected]);
-
-  useEffect(() => {
-    if (!backendConnected) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      void getRuntimeStatus()
-        .then(setRuntimeStatus)
-        .catch(() => undefined);
-    }, 5000);
-    return () => window.clearInterval(timer);
   }, [backendConnected]);
 
   function patch(patchValue: Partial<JudgeConfigDto>) {
@@ -140,28 +126,6 @@ export function JudgeProviderPage() {
         <p className="text-muted">Connect to the Tauri backend to configure the judge provider.</p>
       )}
 
-      {backendConnected && (
-        <div className="models-summary-grid judge-runtime-grid">
-          <Card className="models-summary-card">
-            <span className="models-summary-card__label">Runtime status</span>
-            <strong className="models-summary-card__value models-summary-card__value--runtime">
-              {runtimeStatus?.healthy
-                ? "Healthy"
-                : runtimeStatus?.state === "running"
-                  ? "Running"
-                  : runtimeStatus?.state === "starting"
-                    ? "Starting"
-                    : runtimeStatus?.state === "failed"
-                      ? "Failed"
-                      : "Stopped"}
-            </strong>
-            <p className="text-muted text-sm">
-              {runtimeStatus?.message ?? "Checking embedded llama.cpp runtime…"}
-            </p>
-          </Card>
-        </div>
-      )}
-
       <Card className="model-card model-card--wide">
         <div className="settings-field">
           <label htmlFor="judgeMode">Judge Mode</label>
@@ -181,6 +145,14 @@ export function JudgeProviderPage() {
             {JUDGE_MODES.find((option) => option.value === config.mode)?.hint}
           </p>
         </div>
+
+        {showLocal && (
+          <p className="text-muted text-sm">
+            Manage the embedded llama.cpp process under{" "}
+            <Link to="/runtime">AI Runtime</Link>. Judge uses the supervised runtime when a vault
+            model or GGUF path is configured below.
+          </p>
+        )}
 
         {showLocal && (
           <div className="wizard-auth-fields">

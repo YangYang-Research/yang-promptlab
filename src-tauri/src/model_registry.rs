@@ -104,6 +104,23 @@ pub async fn open_model_manager_with_registry(
     if let Err(err) = manager.restore_persisted_pipelines().await {
         tracing::warn!(error = %err, "pipeline restore skipped");
     }
+    if let Ok(secrets) = aisec_auth::SecretStore::new() {
+        match crate::third_party_credentials::migrate_third_party_model_credentials(
+            data_dir,
+            &mut manager,
+            &secrets,
+        )
+        .await
+        {
+            Ok(count) if count > 0 => {
+                info!(count, "migrated third-party model credentials out of judge scope");
+            }
+            Ok(_) => {}
+            Err(err) => {
+                tracing::warn!(error = %err, "third-party credential migration skipped");
+            }
+        }
+    }
     Ok((manager, meta))
 }
 

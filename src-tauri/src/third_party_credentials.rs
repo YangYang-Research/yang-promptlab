@@ -1,0 +1,295 @@
+//! Third-party model credentials — registry metadata + encrypted local vault.
+
+use std::path::Path;
+
+use aisec_auth::{
+    CredentialReferenceId, ModelCredentialVault, SecretScope, SecretStore,
+};
+use aisec_core::AisecError;
+use aisec_judge::{JudgeProviderConfig, RemoteProvider};
+use aisec_models::{LocalModelManager, ModelEntry, ModelProvider, ModelSource};
+use tracing::info;
+
+use crate::error::{CommandError, CommandResult};
+use crate::judge_config::{load_judge_config, resolve_judge_config_secrets};
+
+pub const API_KEY_CREDENTIAL_ID: &str = "apiKeyCredentialId";
+pub const AWS_SECRET_CREDENTIAL_ID: &str = "awsSecretAccessKeyCredentialId";
+pub const AWS_SESSION_CREDENTIAL_ID: &str = "awsSessionTokenCredentialId";
+pub const API_KEY_ENV: &str = "apiKeyEnv";
+
+#[derive(Debug, Clone, Default)]
+pub struct ThirdPartyCredentialFields {
+    pub api_key: String,
+    pub api_key_env: Option<String>,
+    pub aws_secret_access_key: String,
+    pub aws_session_token: String,
+}
+
+pub fn credential_id_from_metadata(metadata: &serde_json::Value, key: &str) -> Option<String> {
+    metadata
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+pub fn copy_credential_metadata(from: &serde_json::Value, to: &mut serde_json::Value) {
+    for key in [
+        API_KEY_CREDENTIAL_ID,
+        AWS_SECRET_CREDENTIAL_ID,
+        AWS_SESSION_CREDENTIAL_ID,
+        API_KEY_ENV,
+    ] {
+        if let Some(value) = from.get(key) {
+            to[key] = value.clone();
+        }
+    }
+}
+
+pub fn has_new_credential_input(credentials: &ThirdPartyCredentialFields) -> bool {
+    !credentials.api_key.trim().is_empty()
+        || !credentials.aws_secret_access_key.trim().is_empty()
+        || !credentials.aws_session_token.trim().is_empty()
+}
+
+pub fn persist_third_party_credentials(
+    metadata: &mut serde_json::Value,
+    credentials: &ThirdPartyCredentialFields,
+    vault: &ModelCredentialVault,
+) -> Result<(), CommandError> {
+    if !credentials.api_key.trim().is_empty() {
+        let id = vault
+            .store(credentials.api_key.trim())
+            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        metadata[API_KEY_CREDENTIAL_ID] = serde_json::Value::String(id.to_string());
+    }
+    if !credentials.aws_secret_access_key.trim().is_empty() {
+        let id = vault
+            .store(credentials.aws_secret_access_key.trim())
+            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        metadata[AWS_SECRET_CREDENTIAL_ID] = serde_json::Value::String(id.to_string());
+    }
+    if !credentials.aws_session_token.trim().is_empty() {
+        let id = vault
+            .store(credentials.aws_session_token.trim())
+            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        metadata[AWS_SESSION_CREDENTIAL_ID] = serde_json::Value::String(id.to_string());
+    }
+    if let Some(env) = credentials
+        .api_key_env
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        metadata[API_KEY_ENV] = serde_json::Value::String(env.to_string());
+    }
+    Ok(())
+}
+
+pub fn resolve_third_party_credentials(
+    credentials: &mut ThirdPartyCredentialFields,
+    metadata: Option<&serde_json::Value>,
+    vault: &ModelCredentialVault,
+    secrets: &SecretStore,
+) -> Result<(), CommandError> {
+    let Some(metadata) = metadata else {
+        return Ok(());
+    };
+
+    if credentials.api_key.trim().is_empty() {
+        if let Some(id) = credential_id_from_metadata(metadata, API_KEY_CREDENTIAL_ID) {
+            credentials.api_key = load_stored_secret(vault, secrets, &id, "API key")?;
+        }
+    }
+    if credentials.aws_secret_access_key.trim().is_empty() {
+        if let Some(id) = credential_id_from_metadata(metadata, AWS_SECRET_CREDENTIAL_ID) {
+            credentials.aws_secret_access_key =
+                load_stored_secret(vault, secrets, &id, "secret access key")?;
+        }
+    }
+    if credentials.aws_session_token.trim().is_empty() {
+        if let Some(id) = credential_id_from_metadata(metadata, AWS_SESSION_CREDENTIAL_ID) {
+            credentials.aws_session_token =
+                load_stored_secret(vault, secrets, &id, "session token")?;
+        }
+    }
+    if credentials
+        .api_key_env
+        .as_ref()
+        .map(|value| value.trim().is_empty())
+        .unwrap_or(true)
+    {
+        credentials.api_key_env = credential_id_from_metadata(metadata, API_KEY_ENV);
+    }
+    Ok(())
+}
+
+pub fn validate_metadata_credentials(
+    metadata: &serde_json::Value,
+    vault: &ModelCredentialVault,
+    secrets: &SecretStore,
+) -> Result<(), CommandError> {
+    let mut probe = ThirdPartyCredentialFields::default();
+    resolve_third_party_credentials(&mut probe, Some(metadata), vault, secrets)
+}
+
+fn load_stored_secret(
+    vault: &ModelCredentialVault,
+    secrets: &SecretStore,
+    id: &str,
+    label: &str,
+) -> Result<String, CommandError> {
+    let reference = CredentialReferenceId::parse(id);
+    vault
+        .load(&reference)
+        .or_else(|_| secrets.load(SecretScope::Model, &reference))
+        .or_else(|_| secrets.load(SecretScope::Judge, &reference))
+        .map_err(|_| {
+            CommandError::invalid_input(format!(
+                "stored {label} not found — re-enter credentials on the third-party model form and save again"
+            ))
+        })
+}
+
+fn rekey_credential_metadata(
+    metadata: &mut serde_json::Value,
+    vault: &ModelCredentialVault,
+    secrets: &SecretStore,
+    key: &str,
+) -> Result<bool, CommandError> {
+    let Some(old_id) = credential_id_from_metadata(metadata, key) else {
+        return Ok(false);
+    };
+    let reference = CredentialReferenceId::parse(old_id);
+    if vault.load(&reference).is_ok() {
+        return Ok(false);
+    }
+    if secrets.load(SecretScope::Model, &reference).is_ok() {
+        let secret = secrets
+            .load(SecretScope::Model, &reference)
+            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        let new_id = vault
+            .store(secret.trim())
+            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        metadata[key] = serde_json::Value::String(new_id.to_string());
+        return Ok(true);
+    }
+    let secret = secrets
+        .load(SecretScope::Judge, &reference)
+        .map_err(|_| {
+            CommandError::invalid_input(
+                "legacy credential reference is invalid — re-enter API keys and save again",
+            )
+        })?;
+    let new_id = vault
+        .store(secret.trim())
+        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+    metadata[key] = serde_json::Value::String(new_id.to_string());
+    Ok(true)
+}
+
+fn parse_remote_provider(value: &str) -> Option<RemoteProvider> {
+    match value {
+        "openai" => Some(RemoteProvider::OpenAi),
+        "anthropic" => Some(RemoteProvider::Anthropic),
+        "gemini" | "google" => Some(RemoteProvider::Gemini),
+        "openrouter" => Some(RemoteProvider::OpenRouter),
+        "azure" => Some(RemoteProvider::Azure),
+        "bedrock" | "aws_bedrock" => Some(RemoteProvider::Bedrock),
+        _ => None,
+    }
+}
+
+fn remote_entry_matches_judge(entry: &ModelEntry, config: &JudgeProviderConfig) -> bool {
+    let ModelSource::Remote { provider, .. } = &entry.source else {
+        return false;
+    };
+    parse_remote_provider(provider)
+        .is_some_and(|remote| remote == config.remote.provider)
+}
+
+fn credentials_from_judge_remote(
+    remote: &aisec_judge::RemoteProviderSettings,
+) -> ThirdPartyCredentialFields {
+    ThirdPartyCredentialFields {
+        api_key: remote.api_key.clone(),
+        api_key_env: remote.api_key_env.clone(),
+        aws_secret_access_key: remote.aws_secret_access_key.clone(),
+        aws_session_token: remote.aws_session_token.clone(),
+    }
+}
+
+/// One-time migration: move legacy keychain credentials into the encrypted model vault.
+pub async fn migrate_third_party_model_credentials(
+    data_dir: &Path,
+    manager: &mut LocalModelManager,
+    secrets: &SecretStore,
+) -> CommandResult<u32> {
+    let vault = ModelCredentialVault::new(data_dir)
+        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+    let judge_config = load_judge_config(data_dir).await.ok();
+    let remote_ids: Vec<String> = manager
+        .list_models()
+        .into_iter()
+        .filter(|entry| entry.provider == ModelProvider::Remote)
+        .map(|entry| entry.id.clone())
+        .collect();
+
+    let mut migrated = 0u32;
+    for model_id in remote_ids {
+        let Some(entry) = manager.get_model(&model_id).cloned() else {
+            continue;
+        };
+        let mut metadata = entry.metadata.clone();
+        let mut changed = rekey_credential_metadata(
+            &mut metadata,
+            &vault,
+            secrets,
+            API_KEY_CREDENTIAL_ID,
+        )?;
+        changed |= rekey_credential_metadata(
+            &mut metadata,
+            &vault,
+            secrets,
+            AWS_SECRET_CREDENTIAL_ID,
+        )?;
+        changed |= rekey_credential_metadata(
+            &mut metadata,
+            &vault,
+            secrets,
+            AWS_SESSION_CREDENTIAL_ID,
+        )?;
+
+        if credential_id_from_metadata(&metadata, API_KEY_CREDENTIAL_ID).is_none() {
+            if let Some(judge) = judge_config.as_ref() {
+                if remote_entry_matches_judge(&entry, judge) {
+                    let mut judge_mut = judge.clone();
+                    let _ = resolve_judge_config_secrets(&mut judge_mut, secrets);
+                    let creds = credentials_from_judge_remote(&judge_mut.remote);
+                    if !creds.api_key.trim().is_empty()
+                        || !creds.aws_secret_access_key.trim().is_empty()
+                    {
+                        persist_third_party_credentials(&mut metadata, &creds, &vault)?;
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        if changed {
+            manager
+                .update_model_metadata(&model_id, metadata)
+                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+            migrated += 1;
+            info!(model_id = %model_id, "migrated third-party model credentials to encrypted vault");
+        }
+    }
+
+    Ok(migrated)
+}
+
+pub fn open_model_credential_vault(data_dir: &Path) -> CommandResult<ModelCredentialVault> {
+    ModelCredentialVault::new(data_dir).map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
+}

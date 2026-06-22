@@ -35,6 +35,7 @@ pub enum SecretScope {
     Target,
     VaultKey,
     Judge,
+    Model,
 }
 
 impl SecretScope {
@@ -45,6 +46,7 @@ impl SecretScope {
             Self::Target => "target",
             Self::VaultKey => "vault-key",
             Self::Judge => "judge",
+            Self::Model => "model",
         }
     }
 }

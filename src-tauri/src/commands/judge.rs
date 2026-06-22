@@ -199,12 +199,12 @@ pub async fn judge_test_connectivity(
         let _ = resolve_judge_config_secrets(&mut provider_config, &secrets);
     }
     let manager = state.model_manager().lock().await;
-    let mut supervisor = state.runtime_supervisor().lock().await;
+    let mut runtime_mgr = state.runtime_manager().lock().await;
     let runtime = prepare_judge_runtime_context(
         &mut provider_config,
         &manager,
         state.model_provider().clone(),
-        &mut supervisor,
+        runtime_mgr.supervisor_mut(),
     )
     .await?;
     test_connectivity(&provider_config, runtime)
@@ -226,12 +226,12 @@ pub async fn judge_test_model(
         let _ = resolve_judge_config_secrets(&mut provider_config, &secrets);
     }
     let manager = state.model_manager().lock().await;
-    let mut supervisor = state.runtime_supervisor().lock().await;
+    let mut runtime_mgr = state.runtime_manager().lock().await;
     let runtime = prepare_judge_runtime_context(
         &mut provider_config,
         &manager,
         state.model_provider().clone(),
-        &mut supervisor,
+        runtime_mgr.supervisor_mut(),
     )
     .await?;
     test_model(&provider_config, runtime)

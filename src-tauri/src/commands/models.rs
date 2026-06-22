@@ -2,15 +2,16 @@
 
 use std::sync::{Mutex, OnceLock};
 
-use aisec_auth::{CredentialReferenceId, SecretScope, SecretStore};
+use aisec_auth::SecretStore;
 use aisec_core::AisecError;
 use aisec_judge::{
     test_connectivity, JudgeMode, JudgeProviderConfig, RemoteProvider,
 };
 use aisec_models::{
     DownloadManager, DownloadProgress, DownloadStatus, LocalModelManager, ModelCatalogEntry,
-    ModelEntry, VerificationResult,
+    ModelEntry, ModelProvider, ModelSource, VerificationResult,
 };
+use aisec_runtime::{InferRequest, RuntimeError};
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::Mutex as AsyncMutex;
 use tauri::State;
@@ -19,6 +20,11 @@ use std::sync::Arc;
 
 use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
+use crate::third_party_credentials::{
+    copy_credential_metadata, credential_id_from_metadata, has_new_credential_input,
+    open_model_credential_vault, persist_third_party_credentials, resolve_third_party_credentials,
+    validate_metadata_credentials, ThirdPartyCredentialFields, API_KEY_ENV,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -146,6 +152,99 @@ pub struct ThirdPartyModelConnectivityResultDto {
     pub sample_response: Option<String>,
 }
 
+fn api_key_env_from_metadata(metadata: &serde_json::Value) -> Option<String> {
+    metadata
+        .get("apiKeyEnv")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn third_party_request_from_entry(
+    entry: &ModelEntry,
+) -> Result<ThirdPartyModelSaveRequest, CommandError> {
+    match &entry.source {
+        ModelSource::Remote {
+            provider,
+            model,
+            base_url,
+            region,
+        } => Ok(ThirdPartyModelSaveRequest {
+            provider: provider.clone(),
+            model: model.clone(),
+            base_url: base_url.clone(),
+            region: region.clone(),
+            api_key: String::new(),
+            api_key_env: api_key_env_from_metadata(&entry.metadata),
+            aws_secret_access_key: String::new(),
+            aws_session_token: String::new(),
+        }),
+        _ => Err(CommandError::invalid_input(
+            "connection test only applies to third-party models",
+        )),
+    }
+}
+
+fn credential_fields_from_request(request: &ThirdPartyModelSaveRequest) -> ThirdPartyCredentialFields {
+    ThirdPartyCredentialFields {
+        api_key: request.api_key.clone(),
+        api_key_env: request.api_key_env.clone(),
+        aws_secret_access_key: request.aws_secret_access_key.clone(),
+        aws_session_token: request.aws_session_token.clone(),
+    }
+}
+
+fn apply_credential_fields(
+    request: &mut ThirdPartyModelSaveRequest,
+    credentials: &ThirdPartyCredentialFields,
+) {
+    request.api_key = credentials.api_key.clone();
+    request.api_key_env = credentials.api_key_env.clone();
+    request.aws_secret_access_key = credentials.aws_secret_access_key.clone();
+    request.aws_session_token = credentials.aws_session_token.clone();
+}
+
+async fn run_third_party_connectivity_test(
+    data_dir: &std::path::Path,
+    mut request: ThirdPartyModelSaveRequest,
+    metadata: Option<serde_json::Value>,
+) -> CommandResult<ThirdPartyModelConnectivityResultDto> {
+    if request.model.trim().is_empty() {
+        return Err(CommandError::invalid_input("model name is required"));
+    }
+    if request.provider.trim().is_empty() {
+        return Err(CommandError::invalid_input("provider is required"));
+    }
+
+    let mut credentials = credential_fields_from_request(&request);
+    let vault = open_model_credential_vault(data_dir)?;
+    let secrets = SecretStore::new().map_err(|e| {
+        CommandError::invalid_input(format!("secure storage unavailable: {e}"))
+    })?;
+    resolve_third_party_credentials(
+        &mut credentials,
+        metadata.as_ref(),
+        &vault,
+        &secrets,
+    )?;
+    apply_credential_fields(&mut request, &credentials);
+
+    let config = third_party_request_to_judge_config(&request)?;
+    let result = test_connectivity(&config, None)
+        .await
+        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+
+    Ok(ThirdPartyModelConnectivityResultDto {
+        ok: result.ok,
+        provider: result.provider,
+        model: result.model,
+        latency_ms: result.latency_ms,
+        message: result.message,
+        sample_response: result.sample_response,
+    })
+}
+
 fn parse_third_party_remote_provider(value: &str) -> Result<RemoteProvider, CommandError> {
     match value {
         "openai" => Ok(RemoteProvider::OpenAi),
@@ -181,83 +280,6 @@ fn third_party_request_to_judge_config(
         },
         ..JudgeProviderConfig::default()
     })
-}
-
-fn credential_id_from_metadata(metadata: &serde_json::Value, key: &str) -> Option<String> {
-    metadata
-        .get(key)
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-fn resolve_third_party_request_secrets(
-    request: &mut ThirdPartyModelSaveRequest,
-    metadata: Option<&serde_json::Value>,
-    secrets: &SecretStore,
-) -> Result<(), CommandError> {
-    let Some(metadata) = metadata else {
-        return Ok(());
-    };
-
-    if request.api_key.trim().is_empty() {
-        if let Some(id) = credential_id_from_metadata(metadata, "apiKeyCredentialId") {
-            request.api_key = secrets
-                .load(SecretScope::Judge, &CredentialReferenceId::parse(id))
-                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-        }
-    }
-    if request.aws_secret_access_key.trim().is_empty() {
-        if let Some(id) = credential_id_from_metadata(metadata, "awsSecretAccessKeyCredentialId")
-        {
-            request.aws_secret_access_key = secrets
-                .load(SecretScope::Judge, &CredentialReferenceId::parse(id))
-                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-        }
-    }
-    if request.aws_session_token.trim().is_empty() {
-        if let Some(id) = credential_id_from_metadata(metadata, "awsSessionTokenCredentialId") {
-            request.aws_session_token = secrets
-                .load(SecretScope::Judge, &CredentialReferenceId::parse(id))
-                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-        }
-    }
-    Ok(())
-}
-
-fn persist_third_party_credentials(
-    metadata: &mut serde_json::Value,
-    request: &ThirdPartyModelSaveRequest,
-    secrets: &SecretStore,
-) -> Result<(), CommandError> {
-    if !request.api_key.trim().is_empty() {
-        let id = secrets
-            .store(SecretScope::Judge, request.api_key.trim())
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-        metadata["apiKeyCredentialId"] = serde_json::Value::String(id.to_string());
-    }
-    if !request.aws_secret_access_key.trim().is_empty() {
-        let id = secrets
-            .store(SecretScope::Judge, request.aws_secret_access_key.trim())
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-        metadata["awsSecretAccessKeyCredentialId"] = serde_json::Value::String(id.to_string());
-    }
-    if !request.aws_session_token.trim().is_empty() {
-        let id = secrets
-            .store(SecretScope::Judge, request.aws_session_token.trim())
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-        metadata["awsSessionTokenCredentialId"] = serde_json::Value::String(id.to_string());
-    }
-    if let Some(env) = request
-        .api_key_env
-        .as_ref()
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-    {
-        metadata["apiKeyEnv"] = serde_json::Value::String(env.to_string());
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -640,11 +662,31 @@ pub async fn models_save_third_party(
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
 
     if let Ok(secrets) = SecretStore::new() {
-        let mut metadata = entry.metadata.clone();
-        persist_third_party_credentials(&mut metadata, &request, &secrets)?;
+        let vault = open_model_credential_vault(state.data_dir())?;
+        let creds = credential_fields_from_request(&request);
+        let mut metadata = serde_json::json!({ "remoteProvider": request.provider.trim() });
+
+        if has_new_credential_input(&creds) {
+            persist_third_party_credentials(&mut metadata, &creds, &vault)?;
+        } else {
+            copy_credential_metadata(&entry.metadata, &mut metadata);
+            if creds.api_key_env.is_none() {
+                if let Some(env) = credential_id_from_metadata(&entry.metadata, API_KEY_ENV) {
+                    metadata[API_KEY_ENV] = serde_json::Value::String(env);
+                }
+            } else if let Some(env) = creds.api_key_env.as_ref().filter(|v| !v.trim().is_empty()) {
+                metadata[API_KEY_ENV] = serde_json::Value::String(env.trim().to_string());
+            }
+            validate_metadata_credentials(&metadata, &vault, &secrets)?;
+        }
+
         manager
             .update_model_metadata(&entry.id, metadata)
             .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+    } else {
+        return Err(CommandError::invalid_input(
+            "secure storage is unavailable — cannot save third-party credentials",
+        ));
     }
 
     let updated = manager
@@ -658,35 +700,36 @@ pub async fn models_test_third_party(
     state: State<'_, AppState>,
     request: ThirdPartyModelSaveRequest,
 ) -> CommandResult<ThirdPartyModelConnectivityResultDto> {
-    if request.model.trim().is_empty() {
-        return Err(CommandError::invalid_input("model name is required"));
-    }
-    if request.provider.trim().is_empty() {
-        return Err(CommandError::invalid_input("provider is required"));
-    }
-
-    let mut resolved = request;
-    let model_id = format!("remote-{}", resolved.provider.trim());
-    if let Ok(secrets) = SecretStore::new() {
+    let model_id = format!("remote-{}", request.provider.trim());
+    let metadata = {
         let manager = state.model_manager().lock().await;
-        let metadata = manager.get_model(&model_id).map(|entry| entry.metadata.clone());
-        drop(manager);
-        resolve_third_party_request_secrets(&mut resolved, metadata.as_ref(), &secrets)?;
-    }
+        manager
+            .get_model(&model_id)
+            .map(|entry| entry.metadata.clone())
+    };
+    run_third_party_connectivity_test(state.data_dir(), request, metadata).await
+}
 
-    let config = third_party_request_to_judge_config(&resolved)?;
-    let result = test_connectivity(&config, None)
-        .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-
-    Ok(ThirdPartyModelConnectivityResultDto {
-        ok: result.ok,
-        provider: result.provider,
-        model: result.model,
-        latency_ms: result.latency_ms,
-        message: result.message,
-        sample_response: result.sample_response,
-    })
+#[tauri::command]
+pub async fn models_test_connection(
+    state: State<'_, AppState>,
+    model_id: String,
+) -> CommandResult<ThirdPartyModelConnectivityResultDto> {
+    let (request, metadata) = {
+        let manager = state.model_manager().lock().await;
+        let entry = manager
+            .get_model(&model_id)
+            .ok_or_else(|| CommandError::invalid_input(format!("model not found: {model_id}")))?;
+        if entry.provider != ModelProvider::Remote {
+            return Err(CommandError::invalid_input(
+                "connection test only applies to third-party models",
+            ));
+        }
+        let metadata = entry.metadata.clone();
+        let request = third_party_request_from_entry(entry)?;
+        (request, metadata)
+    };
+    run_third_party_connectivity_test(state.data_dir(), request, Some(metadata)).await
 }
 
 #[tauri::command]
@@ -823,6 +866,20 @@ pub async fn models_verify(
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
 }
 
+fn llama_server_missing_error(supervisor: &aisec_runtime::RuntimeSupervisor) -> CommandError {
+    CommandError::invalid_input(format!(
+        "llama-server not found at {} — build or download llama.cpp server to runtime/llama-server (see runtime/README.md) or install llama-server on PATH",
+        supervisor.binary_path().display()
+    ))
+}
+
+fn map_runtime_test_error(err: RuntimeError, supervisor: &aisec_runtime::RuntimeSupervisor) -> CommandError {
+    match err {
+        RuntimeError::Unavailable => llama_server_missing_error(supervisor),
+        other => CommandError::from(AisecError::internal(other.to_string())),
+    }
+}
+
 #[tauri::command]
 pub async fn models_test_inference(
     state: State<'_, AppState>,
@@ -833,28 +890,64 @@ pub async fn models_test_inference(
         .get_model(&model_id)
         .ok_or_else(|| CommandError::invalid_input(format!("model not found: {model_id}")))?;
 
-    if entry.capabilities.chat {
-        let sample = manager
-            .test_chat(&model_id)
-            .await
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-        return Ok(ModelInferenceTestResult {
-            ok: !sample.is_empty(),
-            mode: "chat".into(),
-            sample,
-            message: "Chat inference succeeded".into(),
-        });
+    if entry.provider == ModelProvider::Remote {
+        return Err(CommandError::invalid_input(
+            "use Test Connection for third-party cloud models",
+        ));
     }
 
-    let sample = manager
-        .test_inference(&model_id)
+    if !entry.file_path.exists() {
+        return Err(CommandError::invalid_input(format!(
+            "model file missing: {}",
+            entry.file_path.display()
+        )));
+    }
+
+    let file_path = entry.file_path.clone();
+    let use_chat = entry.capabilities.chat;
+    drop(manager);
+
+    let mut manager = state.runtime_manager().lock().await;
+    if !manager.supervisor().binary_available() {
+        return Err(llama_server_missing_error(manager.supervisor()));
+    }
+
+    manager
+        .supervisor_mut()
+        .ensure_model_loaded(&file_path)
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|err| map_runtime_test_error(err, manager.supervisor()))?;
+
+    let prompt = if use_chat {
+        "User: Reply with exactly: AISec OK\nAssistant: ".into()
+    } else {
+        "Reply with exactly: AISec OK".into()
+    };
+
+    let response = manager
+        .supervisor()
+        .llama_runtime()
+        .infer(InferRequest {
+            prompt,
+            max_tokens: 16,
+            temperature: 0.0,
+        })
+        .await
+        .map_err(|err| map_runtime_test_error(err, manager.supervisor()))?;
+
     Ok(ModelInferenceTestResult {
-        ok: !sample.is_empty(),
-        mode: "completion".into(),
-        sample,
-        message: "Completion inference succeeded".into(),
+        ok: !response.text.is_empty(),
+        mode: if use_chat {
+            "chat".into()
+        } else {
+            "completion".into()
+        },
+        sample: response.text,
+        message: if use_chat {
+            "Chat inference succeeded".into()
+        } else {
+            "Completion inference succeeded".into()
+        },
     })
 }
 

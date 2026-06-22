@@ -53,7 +53,7 @@ async fn database_is_accessible_via_app_state() {
         aisec_auth::AuthEngineConfig::default(),
         harness_factory,
         plugin_manager,
-        aisec_runtime::RuntimeSupervisor::new("", dir.path()),
+        aisec_runtime::RuntimeManager::new(dir.path(), None),
         manager,
         provider,
         meta,

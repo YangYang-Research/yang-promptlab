@@ -43,6 +43,9 @@ const PluginsPage = lazy(() =>
 const JudgeProviderPage = lazy(() =>
   import("@/features/judge/JudgeProviderPage").then((m) => ({ default: m.JudgeProviderPage })),
 );
+const AIRuntimePage = lazy(() =>
+  import("@/features/runtime/AIRuntimePage").then((m) => ({ default: m.AIRuntimePage })),
+);
 const SettingsPage = lazy(() =>
   import("@/features/settings/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 );
@@ -184,6 +187,14 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <JudgeProviderPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="runtime"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <AIRuntimePage />
               </Suspense>
             }
           />
