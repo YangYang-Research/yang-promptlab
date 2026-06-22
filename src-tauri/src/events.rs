@@ -6,6 +6,7 @@ use time::OffsetDateTime;
 
 pub const SCAN_PROGRESS_EVENT: &str = "scan-progress";
 pub const APP_DATA_CHANGED_EVENT: &str = "app-data-changed";
+pub const RUNTIME_INSTALL_PROGRESS_EVENT: &str = "runtime-install-progress";
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
@@ -83,6 +84,30 @@ pub fn emit_scan_progress(app: &AppHandle, event: ScanProgressEvent) {
 
 pub fn emit_app_data_changed(app: &AppHandle, reason: &str) {
     let _ = app.emit(APP_DATA_CHANGED_EVENT, serde_json::json!({ "reason": reason }));
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeInstallProgressEvent {
+    pub step: String,
+    pub message: String,
+    pub phase: u8,
+}
+
+pub fn emit_runtime_install_progress(
+    app: &AppHandle,
+    step: impl Into<String>,
+    message: impl Into<String>,
+    phase: u8,
+) {
+    let _ = app.emit(
+        RUNTIME_INSTALL_PROGRESS_EVENT,
+        RuntimeInstallProgressEvent {
+            step: step.into(),
+            message: message.into(),
+            phase,
+        },
+    );
 }
 
 /// Helper for emitting scan progress from background jobs.

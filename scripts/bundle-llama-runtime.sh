@@ -54,8 +54,10 @@ if [ -z "$found" ]; then
   exit 1
 fi
 
-cp "$found" "$DEST/$BINARY_NAME"
+bundle_dir="$(dirname "$found")"
+rm -f "$DEST/$BINARY_NAME" "$DEST"/*.dylib "$DEST"/*.dll "$DEST"/*.so 2>/dev/null || true
+cp -a "$bundle_dir"/. "$DEST/"
 chmod +x "$DEST/$BINARY_NAME" 2>/dev/null || true
 rm -rf "$STAGING"
 
-echo "==> Bundled $DEST/$BINARY_NAME (release ${RELEASE})"
+echo "==> Bundled runtime from $bundle_dir into $DEST (release ${RELEASE})"

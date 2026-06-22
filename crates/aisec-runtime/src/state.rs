@@ -61,6 +61,7 @@ pub fn transition(from: RuntimeLifecycleState, to: RuntimeLifecycleState) -> Run
         (S::Installing, S::Installed) => to,
         (S::Installed, S::Starting) => to,
         (S::Starting, S::Running) => to,
+        (S::Starting, S::Installed) => to,
         (S::Running, S::Busy) => to,
         (S::Busy, S::Running) => to,
         (S::Running, S::Stopping) => to,
@@ -89,6 +90,13 @@ mod tests {
         let s = RuntimeLifecycleState::NotInstalled;
         let s = transition(s, RuntimeLifecycleState::Downloading);
         let s = transition(s, RuntimeLifecycleState::Installing);
+        let s = transition(s, RuntimeLifecycleState::Installed);
+        assert_eq!(s, RuntimeLifecycleState::Installed);
+    }
+
+    #[test]
+    fn idle_start_returns_installed() {
+        let s = transition(RuntimeLifecycleState::Installed, RuntimeLifecycleState::Starting);
         let s = transition(s, RuntimeLifecycleState::Installed);
         assert_eq!(s, RuntimeLifecycleState::Installed);
     }

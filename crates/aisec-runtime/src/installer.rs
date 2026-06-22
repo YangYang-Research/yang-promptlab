@@ -10,7 +10,7 @@ use tracing::info;
 use crate::error::{RuntimeError, RuntimeResult};
 use crate::hardware::RuntimeHardwareProfile;
 use crate::manifest::{RuntimeBackend, RuntimeManifest};
-use crate::paths::bundled_llama_server_binary;
+use crate::paths::{bundled_llama_server_binary, bundled_runtime_dir};
 
 const DEFAULT_RELEASE: &str = "b9551";
 
@@ -36,12 +36,59 @@ impl RuntimeInstaller {
         }
     }
 
+    pub fn install_dir(&self) -> PathBuf {
+        bundled_runtime_dir(&self.data_dir)
+    }
+
     pub fn install_path(&self) -> PathBuf {
         bundled_llama_server_binary(&self.data_dir)
     }
 
     pub fn is_installed(&self) -> bool {
         self.install_path().is_file()
+    }
+
+    /// Smoke-test the installed binary (catches missing dylibs / truncated downloads).
+    pub async fn validate_binary(path: &Path) -> RuntimeResult<()> {
+        if let Some(dir) = path.parent().filter(|p| p.is_dir()) {
+            let dir = dir.to_path_buf();
+            tokio::task::spawn_blocking(move || ensure_dylib_symlinks(&dir))
+                .await
+                .map_err(|err| RuntimeError::Process(err.to_string()))?
+                .map_err(|err| RuntimeError::Process(err.to_string()))?;
+        }
+
+        let path = path.to_path_buf();
+        let output = tokio::task::spawn_blocking(move || {
+            std::process::Command::new(&path)
+                .arg("--version")
+                .current_dir(
+                    path.parent()
+                        .filter(|p| p.is_dir())
+                        .unwrap_or_else(|| Path::new(".")),
+                )
+                .output()
+        })
+        .await
+        .map_err(|err| RuntimeError::Process(err.to_string()))?
+        .map_err(|err| RuntimeError::Process(format!("failed to run llama-server: {err}")))?;
+
+        if output.status.success() {
+            return Ok(());
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Err(RuntimeError::Process(format!(
+            "llama-server validation failed (exit {}): {}{}",
+            output.status,
+            stderr.trim(),
+            if stdout.trim().is_empty() {
+                String::new()
+            } else {
+                format!(" | {}", stdout.trim())
+            }
+        )))
     }
 
     pub fn select_package(profile: &RuntimeHardwareProfile) -> RuntimeResult<RuntimePackage> {
@@ -66,26 +113,30 @@ impl RuntimeInstaller {
     pub async fn install(
         &self,
         profile: &RuntimeHardwareProfile,
-        progress: impl Fn(&str),
+        mut progress: impl FnMut(&str),
     ) -> RuntimeResult<RuntimeManifest> {
         progress("selecting runtime package");
         let package = Self::select_package(profile)?;
         let target = self.install_path();
+        let valid = target.is_file() && Self::validate_binary(&target).await.is_ok();
 
-        if let Some(source) = self.bundled_binary.as_ref().filter(|p| p.is_file()) {
-            progress("installing bundled runtime");
-            self.copy_binary(source, &target).await?;
-        } else if let Some(dev) = dev_repo_binary().filter(|p| p.is_file()) {
-            progress("installing development runtime");
-            self.copy_binary(&dev, &target).await?;
-        } else if target.is_file() {
+        if valid {
             progress("runtime already installed");
+        } else if let Some(bundle_dir) = self.bundled_runtime_dir() {
+            progress("installing bundled runtime");
+            self.install_bundle_dir(&bundle_dir).await?;
+        } else if let Some(dev_dir) = dev_repo_runtime_dir() {
+            progress("installing development runtime");
+            self.install_bundle_dir(&dev_dir).await?;
         } else {
             progress("downloading runtime");
-            self.download_and_extract(&package, &target).await?;
+            self.download_and_extract(&package).await?;
         }
 
         progress("verifying runtime");
+        ensure_dylib_symlinks(&self.install_dir())
+            .map_err(|err| RuntimeError::Process(err.to_string()))?;
+        Self::validate_binary(&target).await?;
         let sha256 = sha256_file(&target).await?;
         let mut manifest = RuntimeManifest::new(
             package.release.clone(),
@@ -105,23 +156,35 @@ impl RuntimeInstaller {
         if !manifest.install_path.is_file() {
             return Ok(false);
         }
+        if Self::validate_binary(&manifest.install_path).await.is_err() {
+            return Ok(false);
+        }
         let actual = sha256_file(&manifest.install_path).await?;
         Ok(manifest.sha256.as_deref() == Some(actual.as_str()))
     }
 
-    async fn copy_binary(&self, source: &Path, target: &Path) -> RuntimeResult<()> {
-        if let Some(parent) = target.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|err| RuntimeError::Process(err.to_string()))?;
-        }
-        tokio::fs::copy(source, target)
-            .await
-            .map_err(|err| RuntimeError::Process(err.to_string()))?;
-        set_executable(target).await
+    fn bundled_runtime_dir(&self) -> Option<PathBuf> {
+        self.bundled_binary
+            .as_ref()
+            .and_then(|binary| binary.parent().map(Path::to_path_buf))
+            .filter(|dir| bundled_llama_server_binary(dir).is_file())
     }
 
-    async fn download_and_extract(&self, package: &RuntimePackage, target: &Path) -> RuntimeResult<()> {
+    async fn install_bundle_dir(&self, source_dir: &Path) -> RuntimeResult<()> {
+        let install_dir = self.install_dir();
+        tokio::fs::create_dir_all(&install_dir)
+            .await
+            .map_err(|err| RuntimeError::Process(err.to_string()))?;
+
+        let source_dir = source_dir.to_path_buf();
+        let install_dir = install_dir.clone();
+        tokio::task::spawn_blocking(move || copy_runtime_tree(&source_dir, &install_dir))
+            .await
+            .map_err(|err| RuntimeError::Process(err.to_string()))?
+            .map_err(|err| RuntimeError::Process(err.to_string()))
+    }
+
+    async fn download_and_extract(&self, package: &RuntimePackage) -> RuntimeResult<()> {
         info!(url = %package.download_url, "downloading llama-server runtime");
         let client = reqwest::Client::builder()
             .user_agent("AISec/0.1")
@@ -171,7 +234,10 @@ impl RuntimeInstaller {
             RuntimeError::Process(format!("{binary_name} missing from release archive"))
         })?;
 
-        self.copy_binary(&discovered, target).await?;
+        let bundle_dir = discovered.parent().ok_or_else(|| {
+            RuntimeError::Process("llama-server has no parent directory in archive".into())
+        })?;
+        self.install_bundle_dir(bundle_dir).await?;
         let _ = tokio::fs::remove_dir_all(&staging).await;
         Ok(())
     }
@@ -240,14 +306,108 @@ fn binary_file_name() -> &'static str {
     }
 }
 
-fn dev_repo_binary() -> Option<PathBuf> {
+fn dev_repo_runtime_dir() -> Option<PathBuf> {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let binary = bundled_llama_server_binary(&repo_root);
-    if binary.is_file() {
-        Some(binary)
+    let dir = bundled_runtime_dir(&repo_root);
+    if bundled_llama_server_binary(&repo_root).is_file() {
+        Some(dir)
     } else {
         None
     }
+}
+
+fn copy_runtime_tree(source_dir: &Path, install_dir: &Path) -> Result<(), std::io::Error> {
+    let entries: Vec<_> = std::fs::read_dir(source_dir)?.collect::<Result<Vec<_>, _>>()?;
+
+    for entry in &entries {
+        let file_type = entry.file_type()?;
+        if !file_type.is_file() {
+            continue;
+        }
+        let dest = install_dir.join(entry.file_name());
+        std::fs::copy(entry.path(), &dest)?;
+        if entry.file_name() == binary_file_name() {
+            set_executable_sync(&dest)?;
+        }
+    }
+
+    for entry in &entries {
+        if !entry.file_type()?.is_symlink() {
+            continue;
+        }
+        let link_target = std::fs::read_link(entry.path())?;
+        let dest = install_dir.join(entry.file_name());
+        if dest.exists() {
+            std::fs::remove_file(&dest)?;
+        }
+        symlink_file(&link_target, &dest)?;
+    }
+
+    ensure_dylib_symlinks(install_dir)?;
+    Ok(())
+}
+
+/// Recreate versioned dylib symlinks when only real files were copied (e.g. partial bundles).
+fn ensure_dylib_symlinks(install_dir: &Path) -> Result<(), std::io::Error> {
+    let versioned_files: Vec<String> = std::fs::read_dir(install_dir)?
+        .flatten()
+        .filter(|entry| entry.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("lib") && name.ends_with(".dylib"))
+        .collect();
+
+    for file in versioned_files {
+        let Some(link0) = dylib_major_link_name(&file) else {
+            continue;
+        };
+        let link0_path = install_dir.join(&link0);
+        if !link0_path.exists() {
+            symlink_file(&file, &link0_path)?;
+        }
+
+        let base = link0.strip_suffix(".0.dylib").unwrap_or(link0.as_str());
+        let link_path = install_dir.join(format!("{base}.dylib"));
+        if !link_path.exists() {
+            symlink_file(&link0, &link_path)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn dylib_major_link_name(versioned: &str) -> Option<String> {
+    let name = versioned.strip_suffix(".dylib")?;
+    let rest = name.strip_prefix("lib")?;
+    let parts: Vec<&str> = rest.split('.').collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let base = parts[0];
+    Some(format!("lib{base}.0.dylib"))
+}
+
+fn symlink_file(target: impl AsRef<Path>, link: impl AsRef<Path>) -> Result<(), std::io::Error> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link)
+    }
+    #[cfg(windows)]
+    {
+        let _ = (target, link);
+        Ok(())
+    }
+}
+
+fn set_executable_sync(path: &Path) -> Result<(), std::io::Error> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(path)?.permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(path, perms)?;
+    }
+    let _ = path;
+    Ok(())
 }
 
 async fn sha256_file(path: &Path) -> RuntimeResult<String> {
@@ -260,22 +420,6 @@ async fn sha256_file(path: &Path) -> RuntimeResult<String> {
     .await
     .map_err(|err| RuntimeError::Process(err.to_string()))?
     .map_err(|err| RuntimeError::Process(err.to_string()))
-}
-
-async fn set_executable(path: &Path) -> RuntimeResult<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = tokio::fs::metadata(path)
-            .await
-            .map_err(|err| RuntimeError::Process(err.to_string()))?
-            .permissions();
-        perms.set_mode(0o755);
-        tokio::fs::set_permissions(path, perms)
-            .await
-            .map_err(|err| RuntimeError::Process(err.to_string()))?;
-    }
-    Ok(())
 }
 
 fn find_named_file(root: &Path, file_name: &str) -> Option<PathBuf> {
@@ -331,5 +475,22 @@ mod hex {
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dylib_major_link_names() {
+        assert_eq!(
+            dylib_major_link_name("libllama-common.0.0.9551.dylib").as_deref(),
+            Some("libllama-common.0.dylib")
+        );
+        assert_eq!(
+            dylib_major_link_name("libggml-base.0.13.1.dylib").as_deref(),
+            Some("libggml-base.0.dylib")
+        );
     }
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 
 import {
   Button,
@@ -35,10 +36,19 @@ import { pickAnyModelImportFile } from "@/shared/ipc/dialog";
 import { useToast } from "@/shared/notifications";
 import { formatBytes } from "@/shared/utils/format";
 import { DownloadManagerCard } from "./DownloadManagerCard";
-import { AddModelModal } from "./AddModelModal";
+import { AddModelModal, type AddModelTab } from "./AddModelModal";
+
+type ModelsPageLocationState = {
+  openAddModel?: boolean;
+  openAddModelTab?: AddModelTab;
+};
+
+function isThirdPartyModel(model: ModelEntryDto): boolean {
+  return model.format === "api" || model.id.startsWith("remote-");
+}
 
 function modelRegistryBadgeStatus(model: ModelEntryDto): string {
-  if (model.provider === "remote") {
+  if (isThirdPartyModel(model)) {
     return model.verified ? "registered" : "available";
   }
   return model.verified ? "installed" : "available";
@@ -46,6 +56,7 @@ function modelRegistryBadgeStatus(model: ModelEntryDto): string {
 
 export function ModelsPage() {
   const { notify } = useToast();
+  const location = useLocation();
   const [backendConnected, setBackendConnected] = useState(false);
   const [installed, setInstalled] = useState<ModelEntryDto[]>([]);
   const [catalog, setCatalog] = useState<ModelCatalogEntryDto[]>([]);
@@ -61,10 +72,20 @@ export function ModelsPage() {
   const [busyModelId, setBusyModelId] = useState<string | null>(null);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [addModelOpen, setAddModelOpen] = useState(false);
+  const [addModelInitialTab, setAddModelInitialTab] = useState<AddModelTab>("public");
   const [error, setError] = useState<string | null>(null);
   const verifyInFlightRef = useRef(false);
 
   const installedNames = useMemo(() => new Set(installed.map((m) => m.name)), [installed]);
+
+  useEffect(() => {
+    const state = location.state as ModelsPageLocationState | null;
+    if (!state?.openAddModel) return;
+    if (state.openAddModelTab) {
+      setAddModelInitialTab(state.openAddModelTab);
+    }
+    setAddModelOpen(true);
+  }, [location.state]);
 
   const refreshModels = useCallback(async () => {
     const [models, entries, info, stats] = await Promise.all([
@@ -308,7 +329,7 @@ export function ModelsPage() {
     setError(null);
     setBusyModelId(model.id);
     try {
-      if (model.provider === "remote") {
+      if (isThirdPartyModel(model)) {
         const result = await testModelConnection(model.id);
         const latency = result.latencyMs > 0 ? ` (${result.latencyMs} ms)` : "";
         const label = `${result.provider} / ${result.model}`;
@@ -482,6 +503,7 @@ export function ModelsPage() {
 
       <AddModelModal
         open={addModelOpen}
+        initialTab={addModelInitialTab}
         onClose={() => setAddModelOpen(false)}
         backendConnected={backendConnected}
         catalog={catalog}

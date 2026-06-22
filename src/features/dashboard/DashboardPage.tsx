@@ -1,7 +1,10 @@
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
+import { AiRuntimeDashboardCard } from "@/features/dashboard/AiRuntimeDashboardCard";
 import { severityCounts } from "@/shared/stats";
+import { getRuntimeConfiguration, type RuntimeConfigurationDto } from "@/shared/ipc/runtime";
 import {
   Badge,
   Button,
@@ -21,10 +24,34 @@ function formatRelativeTime(iso: string) {
 }
 
 export function DashboardPage() {
-  const { stats, findings, activity, discoveryJobs, attackRuns, projects } = useAppStore();
+  const { stats, findings, activity, discoveryJobs, attackRuns, projects, backendConnected } =
+    useAppStore();
   const navigate = useNavigate();
   const counts = severityCounts(findings);
   const maxCount = Math.max(...Object.values(counts), 1);
+  const [runtimeConfiguration, setRuntimeConfiguration] = useState<RuntimeConfigurationDto | null>(
+    null,
+  );
+  const [runtimeLoading, setRuntimeLoading] = useState(false);
+
+  const loadRuntimeConfiguration = useCallback(async () => {
+    if (!backendConnected) {
+      setRuntimeConfiguration(null);
+      return;
+    }
+    setRuntimeLoading(true);
+    try {
+      setRuntimeConfiguration(await getRuntimeConfiguration());
+    } catch {
+      setRuntimeConfiguration(null);
+    } finally {
+      setRuntimeLoading(false);
+    }
+  }, [backendConnected]);
+
+  useEffect(() => {
+    void loadRuntimeConfiguration();
+  }, [loadRuntimeConfiguration]);
 
   return (
     <div className="page dashboard-page">
@@ -59,15 +86,7 @@ export function DashboardPage() {
           hint={`${stats.criticalFindings} critical`}
           accent="critical"
         />
-        <StatCard
-          label="Local Models"
-          value={stats.installedModels}
-          hint={
-            stats.downloadingModels > 0
-              ? `${stats.downloadingModels} downloading`
-              : "Ready"
-          }
-        />
+        <AiRuntimeDashboardCard configuration={runtimeConfiguration} loading={runtimeLoading} />
       </div>
 
       <div className="dashboard-grid">

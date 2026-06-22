@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use tauri::{AppHandle, Manager};
 use tokio::time::sleep;
 use tracing::{info, warn};
@@ -8,7 +10,12 @@ use crate::state::AppState;
 
 const WATCH_INTERVAL: Duration = Duration::from_secs(5);
 
+static WATCH_STARTED: AtomicBool = AtomicBool::new(false);
+
 pub fn spawn_runtime_watch(app: AppHandle) {
+    if WATCH_STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
     tauri::async_runtime::spawn(async move {
         run_runtime_watch(app).await;
     });

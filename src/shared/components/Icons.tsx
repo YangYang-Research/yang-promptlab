@@ -74,3 +74,34 @@ export function IconRefresh({ className }: IconProps) {
     </svg>
   );
 }
+
+export function IconWarning({ className }: IconProps) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path
+        d="M9 3.5 15.5 14.5H2.5L9 3.5Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <path d="M9 7.5v3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="9" cy="13" r="0.75" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function IconArrowRight({ className }: IconProps) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path
+        d="M7 4.5 11.5 9 7 13.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

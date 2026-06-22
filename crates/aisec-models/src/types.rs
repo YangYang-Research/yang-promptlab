@@ -142,6 +142,53 @@ pub struct ModelEntry {
     pub metadata: serde_json::Value,
 }
 
+impl ModelEntry {
+    /// Human-readable provider label (e.g. OpenAI instead of `remote`).
+    pub fn display_provider(&self) -> String {
+        if self.provider != ModelProvider::Remote {
+            return self.provider.as_str().to_string();
+        }
+
+        let raw = self
+            .metadata
+            .get("remoteProvider")
+            .and_then(|value| value.as_str())
+            .or_else(|| match &self.source {
+                ModelSource::Remote { provider, .. } => Some(provider.as_str()),
+                _ => None,
+            })
+            .unwrap_or("remote");
+
+        remote_provider_display_name(raw)
+    }
+
+    /// Model identifier for display (remote API model id, or local display name).
+    pub fn display_model_name(&self) -> String {
+        match &self.source {
+            ModelSource::Remote { model, .. } => model.clone(),
+            _ => self.name.clone(),
+        }
+    }
+}
+
+fn remote_provider_display_name(provider: &str) -> String {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "openai" => "OpenAI".to_string(),
+        "anthropic" => "Anthropic".to_string(),
+        "gemini" | "google" => "Google".to_string(),
+        "azure" => "Azure OpenAI".to_string(),
+        "bedrock" | "aws_bedrock" => "Amazon Bedrock".to_string(),
+        "openrouter" => "OpenRouter".to_string(),
+        other => {
+            let mut label = other.to_string();
+            if let Some(first) = label.get_mut(0..1) {
+                first.make_ascii_uppercase();
+            }
+            label
+        }
+    }
+}
+
 /// Curated or discovered model available for installation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelCatalogEntry {

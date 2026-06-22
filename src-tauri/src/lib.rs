@@ -22,6 +22,7 @@ pub mod plugin_service;
 pub mod plugin_transport;
 pub mod playwright_runtime;
 pub mod agent_service;
+pub mod ai_inference_settings;
 pub mod planner_service;
 pub mod generator_service;
 pub mod runtime_watch;
@@ -111,7 +112,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             )
             .map_err(crate::error::CommandError::from)?;
 
-            let (runtime_manager, started) =
+            let (runtime_manager, _started) =
                 tauri::async_runtime::block_on(embedded_runtime::bootstrap_runtime_manager(
                     app.handle(),
                     &data_dir,
@@ -125,8 +126,6 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 .unwrap_or_else(|| aisec_runtime::bundled_llama_server_binary(&data_dir));
 
             model_manager = model_manager.with_llama_binary(llama_binary);
-
-            let spawn_runtime_watch = started || runtime_manager.supervisor().binary_available();
 
             let model_manager_arc = std::sync::Arc::new(AsyncMutex::new(model_manager));
             let model_provider: aisec_runtime::SharedModelProvider = std::sync::Arc::new(
@@ -152,10 +151,6 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 model_provider,
                 model_catalog_meta,
             ));
-
-            if spawn_runtime_watch {
-                runtime_watch::spawn_runtime_watch(app.handle().clone());
-            }
 
             tracing::info!("AISec backend integration ready (database + repositories + runtime)");
             Ok(())
@@ -228,6 +223,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::generator::generator_generate,
             commands::runtime::runtime_status,
             commands::runtime::runtime_install,
+            commands::runtime::runtime_repair,
             commands::runtime::runtime_start,
             commands::runtime::runtime_stop,
             commands::runtime::runtime_restart,
@@ -236,6 +232,9 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::runtime::runtime_logs,
             commands::runtime::runtime_hardware,
             commands::runtime::hardware_refresh,
+            commands::runtime::runtime_configuration,
+            commands::runtime::runtime_inference_settings,
+            commands::runtime::runtime_set_inference_route,
             commands::security::security_audit,
             commands::security::security_migrate_secrets,
             commands::plugins::plugins_list,

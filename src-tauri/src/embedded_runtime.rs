@@ -1,4 +1,4 @@
-//! Bootstrap embedded AI runtime via RuntimeManager.
+//! Load persisted runtime configuration at app startup (no install/start).
 
 use std::path::{Path, PathBuf};
 
@@ -15,7 +15,7 @@ fn bundled_resource_binary(app: &AppHandle) -> Option<PathBuf> {
         .filter(|path| path.is_file())
 }
 
-/// Provision, install, start, and health-check the embedded runtime at app startup.
+/// Load runtime configuration from disk at app startup. Does not install or start.
 pub async fn bootstrap_runtime_manager(
     app: &AppHandle,
     data_dir: &Path,
@@ -27,10 +27,9 @@ pub async fn bootstrap_runtime_manager(
         Ok(()) => {
             info!(
                 state = manager.lifecycle_state().as_str(),
-                "AI runtime bootstrap complete"
+                "AI runtime configuration loaded"
             );
-            let operational = manager.lifecycle_state().is_operational();
-            Ok((manager, operational))
+            Ok((manager, false))
         }
         Err(err) => {
             tracing::warn!(error = %err, "AI runtime bootstrap failed");

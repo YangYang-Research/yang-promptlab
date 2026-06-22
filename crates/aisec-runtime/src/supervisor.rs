@@ -6,7 +6,7 @@ use tracing::{info, warn};
 use crate::config::RuntimeConfig;
 use crate::discovery::{check_health, discover_models_in_dir, DiscoveredModel};
 use crate::error::{RuntimeError, RuntimeResult};
-use crate::runtime::{LlamaCppRuntime, LlamaCppRuntimeConfig};
+use crate::runtime::{LlamaCppRuntime, LlamaCppRuntimeConfig, default_n_gpu_layers, default_startup_timeout_ms};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeProcessState {
@@ -41,14 +41,7 @@ impl RuntimeSupervisor {
     }
 
     pub fn with_config(config: RuntimeConfig) -> Self {
-        let runtime_config = LlamaCppRuntimeConfig {
-            binary_path: config.binary.clone(),
-            host: config.host.clone(),
-            port: config.port,
-            n_gpu_layers: 0,
-            ctx_size: 4096,
-            startup_timeout_ms: 30_000,
-        };
+        let runtime_config = build_runtime_config(&config);
         Self {
             config,
             runtime: LlamaCppRuntime::new(runtime_config),
@@ -82,17 +75,15 @@ impl RuntimeSupervisor {
     pub async fn set_binary(&mut self, binary: PathBuf) -> RuntimeResult<()> {
         self.stop().await?;
         self.config.binary = binary.clone();
-        let runtime_config = LlamaCppRuntimeConfig {
-            binary_path: binary,
-            host: self.config.host.clone(),
-            port: self.config.port,
-            n_gpu_layers: 0,
-            ctx_size: 4096,
-            startup_timeout_ms: 30_000,
-        };
-        self.runtime = LlamaCppRuntime::new(runtime_config);
+        self.runtime = LlamaCppRuntime::new(build_runtime_config(&self.config));
         self.state = RuntimeProcessState::Stopped;
         Ok(())
+    }
+
+    pub fn set_n_gpu_layers(&mut self, n_gpu_layers: u32) {
+        let mut cfg = build_runtime_config(&self.config);
+        cfg.n_gpu_layers = n_gpu_layers;
+        self.runtime = LlamaCppRuntime::new(cfg);
     }
 
     pub fn should_watch(&self) -> bool {
@@ -271,6 +262,15 @@ impl Drop for RuntimeSupervisor {
             });
         }
     }
+}
+
+fn build_runtime_config(config: &RuntimeConfig) -> LlamaCppRuntimeConfig {
+    let mut rt = LlamaCppRuntimeConfig::from_binary(config.binary.clone());
+    rt.host = config.host.clone();
+    rt.port = config.port;
+    rt.startup_timeout_ms = default_startup_timeout_ms();
+    rt.n_gpu_layers = default_n_gpu_layers();
+    rt
 }
 
 #[cfg(test)]

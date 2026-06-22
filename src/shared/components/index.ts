@@ -5,7 +5,7 @@ export { Card, StatCard } from "./Card";
 export { ContentToolbar, PageSizeSelect, Pagination } from "./Pagination";
 export { DataTable } from "./DataTable";
 export { EmptyState } from "./EmptyState";
-export { IconBack, IconDiscovery, IconList, IconMore, IconRefresh, IconTable } from "./Icons";
+export { IconArrowRight, IconBack, IconDiscovery, IconList, IconMore, IconRefresh, IconTable, IconWarning } from "./Icons";
 export { IconButton } from "./IconButton";
 export { RefreshButton } from "./RefreshButton";
 export { ListCard } from "./ListCard";

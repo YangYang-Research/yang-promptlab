@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button, Modal } from "@/shared/components";
 import type { ModelCatalogEntryDto } from "@/shared/ipc/models";
@@ -11,6 +11,7 @@ export type AddModelTab = "public" | "third-party" | "import";
 type AddModelModalProps = {
   open: boolean;
   onClose: () => void;
+  initialTab?: AddModelTab;
   backendConnected: boolean;
   catalog: ModelCatalogEntryDto[];
   installedNames: Set<string>;
@@ -50,8 +51,16 @@ export function AddModelModal({
   onBrowseImport,
   onImport,
   onThirdPartySaved,
+  initialTab,
 }: AddModelModalProps) {
-  const [tab, setTab] = useState<AddModelTab>("public");
+  const [tab, setTab] = useState<AddModelTab>(initialTab ?? "public");
+
+  useEffect(() => {
+    if (open && initialTab) {
+      setTab(initialTab);
+    }
+  }, [open, initialTab]);
+
   const selectedTab = TABS.find((entry) => entry.id === tab) ?? TABS[0];
 
   return (

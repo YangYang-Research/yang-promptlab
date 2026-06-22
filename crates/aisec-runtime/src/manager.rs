@@ -3,7 +3,6 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tracing::info;
 
 use crate::benchmark::{RuntimeBenchmark, RuntimeBenchmarkResult};
 use crate::config::RuntimeConfig;
@@ -14,6 +13,7 @@ use crate::launcher::RuntimeLauncher;
 use crate::logs::{RuntimeLogEntry, RuntimeLogs};
 use crate::manifest::RuntimeManifest;
 use crate::monitor::{RuntimeHealthReport, RuntimeMonitor};
+use crate::paths::bundled_llama_server_binary;
 use crate::state::{transition, RuntimeLifecycleState};
 use crate::supervisor::RuntimeSupervisor;
 
@@ -32,6 +32,8 @@ pub struct RuntimeStatusSnapshot {
     pub model_loaded: bool,
     pub loaded_model_path: Option<String>,
     pub message: String,
+    pub requires_attention: bool,
+    pub last_error: Option<String>,
 }
 
 pub struct RuntimeManager {
@@ -44,6 +46,7 @@ pub struct RuntimeManager {
     last_health: Option<RuntimeHealthReport>,
     last_benchmark: Option<RuntimeBenchmarkResult>,
     bundled_binary: Option<PathBuf>,
+    last_error: Option<String>,
 }
 
 impl RuntimeManager {
@@ -60,7 +63,30 @@ impl RuntimeManager {
             last_health: None,
             last_benchmark: None,
             bundled_binary,
+            last_error: None,
         }
+    }
+
+    pub fn requires_attention(&self) -> bool {
+        if matches!(
+            self.lifecycle,
+            RuntimeLifecycleState::NotInstalled
+                | RuntimeLifecycleState::Failed
+                | RuntimeLifecycleState::Downloading
+                | RuntimeLifecycleState::Installing
+        ) {
+            return true;
+        }
+
+        let manifest_ok = self
+            .manifest
+            .as_ref()
+            .is_some_and(|m| m.installed && m.install_path.is_file());
+        !manifest_ok || !self.supervisor.binary_available()
+    }
+
+    pub fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
     }
 
     pub fn lifecycle_state(&self) -> RuntimeLifecycleState {
@@ -92,57 +118,107 @@ impl RuntimeManager {
     }
 
     pub async fn bootstrap(&mut self) -> RuntimeResult<()> {
-        self.log("info", "bootstrapping AI runtime").await;
+        self.log("info", "loading runtime configuration").await;
+        self.last_error = None;
         self.manifest = RuntimeManifest::load(&self.data_dir).await?;
 
-        if self.manifest.as_ref().is_some_and(|m| m.installed && m.install_path.is_file()) {
-            self.lifecycle = RuntimeLifecycleState::Installed;
-            self.log("info", "runtime manifest loaded — skipping hardware detection").await;
-            self.hardware = HardwareDetector::new(&self.data_dir).load().await?;
-        } else {
-            self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Downloading);
-            self.log("info", "first launch — detecting hardware").await;
-            let detector = HardwareDetector::new(&self.data_dir);
-            self.hardware = Some(detector.detect_and_persist().await?);
+        // Load persisted hardware profile only — never detect on startup.
+        self.hardware = HardwareDetector::new(&self.data_dir).load().await?;
 
-            self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Installing);
-            let installer = RuntimeInstaller::new(&self.data_dir, self.bundled_binary.clone());
-            let manifest = installer
-                .install(
-                    self.hardware.as_ref().expect("hardware profile"),
-                    |msg| info!(step = msg, "runtime install"),
-                )
-                .await?;
-            self.manifest = Some(manifest);
+        let binary_path = self.install_path_from_manifest();
+        let binary_valid = binary_path.is_file()
+            && RuntimeInstaller::validate_binary(&binary_path).await.is_ok();
+
+        if binary_valid {
             self.lifecycle = RuntimeLifecycleState::Installed;
-            self.log("info", "runtime installed and verified").await;
+            if let Err(err) = self.apply_manifest_to_supervisor().await {
+                self.record_failure(err).await;
+                return Ok(());
+            }
+            self.log("info", "runtime configuration loaded (idle)").await;
+            return Ok(());
         }
 
-        self.apply_manifest_to_supervisor().await?;
-        self.start_runtime().await?;
-        self.run_health_check().await?;
+        let was_marked_installed = self
+            .manifest
+            .as_ref()
+            .is_some_and(|m| m.installed && m.install_path.is_file());
+        self.lifecycle = if was_marked_installed {
+            RuntimeLifecycleState::Failed
+        } else {
+            RuntimeLifecycleState::NotInstalled
+        };
+        let message = if was_marked_installed {
+            "AI runtime install is corrupt or incomplete — repair required"
+        } else {
+            "AI runtime not installed"
+        };
+        self.last_error = Some(message.into());
+        self.log("warn", message).await;
         Ok(())
     }
 
-    pub async fn install(&mut self) -> RuntimeResult<()> {
-        self.log("info", "runtime install requested").await;
+    /// Full install/reinstall + start pipeline for UI-driven setup.
+    pub async fn repair(&mut self, mut progress: impl FnMut(&str, &str, u8)) -> RuntimeResult<()> {
+        self.last_error = None;
+        if let Err(err) = self.repair_steps(&mut progress).await {
+            self.record_failure(err).await;
+            return Err(RuntimeError::Process(
+                self.last_error.clone().unwrap_or_else(|| "repair failed".into()),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn repair_steps(
+        &mut self,
+        progress: &mut impl FnMut(&str, &str, u8),
+    ) -> RuntimeResult<()> {
+        progress("hardware", "Detecting hardware profile…", 10);
+        self.log("info", "repair: detecting hardware").await;
         let detector = HardwareDetector::new(&self.data_dir);
         self.hardware = Some(detector.detect_and_persist().await?);
+
         self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Downloading);
         self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Installing);
 
         let installer = RuntimeInstaller::new(&self.data_dir, self.bundled_binary.clone());
+        let mut emit_install = |msg: &str| {
+            let (step, phase) = progress_from_install_msg(msg);
+            progress(step, msg, phase);
+        };
         let manifest = installer
             .install(
                 self.hardware.as_ref().expect("hardware"),
-                |msg| info!(step = msg, "runtime install"),
+                &mut emit_install,
             )
             .await?;
         self.manifest = Some(manifest);
         self.lifecycle = RuntimeLifecycleState::Installed;
-        self.apply_manifest_to_supervisor().await?;
-        self.log("info", "runtime install complete").await;
+        self.log("info", "repair: runtime installed").await;
+
+        progress("complete", "Runtime installed — press Start Runtime when ready", 100);
+        self.log("info", "repair: install complete (runtime not started)").await;
         Ok(())
+    }
+
+    pub fn recommended_runtime_label(&self) -> Option<String> {
+        let profile = self.hardware.as_ref()?;
+        let package = RuntimeInstaller::select_package(profile).ok()?;
+        Some(format!("llama.cpp ({})", package.backend.as_str()))
+    }
+
+    pub fn is_runtime_active(&self) -> bool {
+        matches!(
+            self.lifecycle,
+            RuntimeLifecycleState::Running
+                | RuntimeLifecycleState::Starting
+                | RuntimeLifecycleState::Busy
+        )
+    }
+
+    pub async fn install(&mut self) -> RuntimeResult<()> {
+        self.repair(|_, _, _| {}).await
     }
 
     pub async fn start_runtime(&mut self) -> RuntimeResult<()> {
@@ -155,9 +231,30 @@ impl RuntimeManager {
             .as_mut()
             .ok_or_else(|| RuntimeError::Config("runtime manifest missing".into()))?;
         self.lifecycle = RuntimeLauncher::start(&mut self.supervisor, manifest, self.lifecycle).await?;
+        self.sync_lifecycle_from_supervisor();
         self.log("info", format!("runtime started ({})", self.lifecycle.as_str()))
             .await;
         Ok(())
+    }
+
+    pub fn sync_lifecycle_from_supervisor(&mut self) {
+        if self.supervisor.llama_runtime().is_loaded() {
+            self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Running);
+        } else if self.supervisor.binary_available() {
+            self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Installed);
+        }
+    }
+
+    pub fn on_model_load_started(&mut self) {
+        self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Starting);
+    }
+
+    pub fn on_model_load_finished(&mut self, ok: bool) {
+        self.lifecycle = if ok {
+            transition(self.lifecycle, RuntimeLifecycleState::Running)
+        } else {
+            transition(self.lifecycle, RuntimeLifecycleState::Failed)
+        };
     }
 
     pub async fn stop_runtime(&mut self) -> RuntimeResult<()> {
@@ -233,6 +330,8 @@ impl RuntimeManager {
             model_loaded: self.supervisor.llama_runtime().is_loaded(),
             loaded_model_path: None,
             message: self.status_message(),
+            requires_attention: self.requires_attention(),
+            last_error: self.last_error.clone(),
         }
     }
 
@@ -261,12 +360,15 @@ impl RuntimeManager {
         match self.lifecycle {
             RuntimeLifecycleState::Running => "AI runtime is running".into(),
             RuntimeLifecycleState::Installed => {
-                "AI runtime installed — llama-server idle until model activation".into()
+                "AI runtime installed — idle until a model is loaded".into()
             }
             RuntimeLifecycleState::NotInstalled => "AI runtime not installed".into(),
             RuntimeLifecycleState::Downloading => "Downloading AI runtime…".into(),
             RuntimeLifecycleState::Installing => "Installing AI runtime…".into(),
-            RuntimeLifecycleState::Starting => "Starting AI runtime…".into(),
+            RuntimeLifecycleState::Starting => {
+                "Loading model into llama-server — large models may take several minutes on CPU"
+                    .into()
+            }
             RuntimeLifecycleState::Stopping => "Stopping AI runtime…".into(),
             RuntimeLifecycleState::Stopped => "AI runtime stopped".into(),
             RuntimeLifecycleState::Busy => "AI runtime busy (benchmark)".into(),
@@ -275,7 +377,33 @@ impl RuntimeManager {
         }
     }
 
+    fn install_path_from_manifest(&self) -> PathBuf {
+        self.manifest
+            .as_ref()
+            .map(|m| m.install_path.clone())
+            .filter(|p| p.is_file())
+            .unwrap_or_else(|| bundled_llama_server_binary(&self.data_dir))
+    }
+
     async fn log(&self, level: &str, message: impl Into<String>) {
         self.logs.push(level, message).await;
+    }
+
+    async fn record_failure(&mut self, err: RuntimeError) {
+        self.lifecycle = RuntimeLifecycleState::Failed;
+        self.last_error = Some(err.to_string());
+        self.log("error", self.last_error.as_ref().expect("last_error"))
+            .await;
+    }
+}
+
+fn progress_from_install_msg(msg: &str) -> (&'static str, u8) {
+    match msg {
+        "selecting runtime package" => ("package", 20),
+        "installing bundled runtime" | "installing development runtime" => ("install", 60),
+        "downloading runtime" => ("download", 40),
+        "runtime already installed" => ("verify", 70),
+        "verifying runtime" => ("verify", 80),
+        _ => ("install", 50),
     }
 }

@@ -27,11 +27,11 @@ impl LlamaCppRuntimeConfig {
     pub fn from_binary(binary: impl Into<PathBuf>) -> Self {
         Self {
             binary_path: binary.into(),
-            host: "127.0.0.1".into(),
+            host: default_llama_host(),
             port: default_llama_port(),
-            n_gpu_layers: 0,
+            n_gpu_layers: default_n_gpu_layers(),
             ctx_size: 4096,
-            startup_timeout_ms: 30_000,
+            startup_timeout_ms: default_startup_timeout_ms(),
         }
     }
 
@@ -123,6 +123,13 @@ impl LlamaCppRuntime {
         self.set_state(RuntimeState::Loading);
 
         let mut child = Command::new(&self.config.binary_path)
+            .current_dir(
+                self.config
+                    .binary_path
+                    .parent()
+                    .filter(|p| p.is_dir())
+                    .unwrap_or_else(|| Path::new(".")),
+            )
             .arg("-m")
             .arg(model_path)
             .arg("--host")
@@ -134,7 +141,7 @@ impl LlamaCppRuntime {
             .arg("-c")
             .arg(self.config.ctx_size.to_string())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()
             .map_err(|err| {
@@ -147,9 +154,39 @@ impl LlamaCppRuntime {
 
         *self.process.lock().await = Some(child);
 
-        let deadline =
-            Instant::now() + Duration::from_millis(self.config.startup_timeout_ms);
+        let startup_timeout_ms = startup_timeout_for_model(model_path, self.config.startup_timeout_ms).await;
+        info!(
+            model = %model_path.display(),
+            timeout_ms = startup_timeout_ms,
+            "loading GGUF into llama-server"
+        );
+
+        let deadline = Instant::now() + Duration::from_millis(startup_timeout_ms);
         while Instant::now() < deadline {
+            {
+                let mut guard = self.process.lock().await;
+                if let Some(proc) = guard.as_mut() {
+                    if let Ok(Some(status)) = proc.try_wait() {
+                        let stderr = proc.stderr.take();
+                        drop(guard);
+                        let mut detail = format!("llama-server exited during startup: {status}");
+                        if let Some(mut stderr) = stderr {
+                            use tokio::io::AsyncReadExt;
+                            let mut buf = Vec::new();
+                            if stderr.read_to_end(&mut buf).await.unwrap_or(0) > 0 {
+                                let text = String::from_utf8_lossy(&buf);
+                                if !text.trim().is_empty() {
+                                    detail.push_str(" — ");
+                                    detail.push_str(text.trim());
+                                }
+                            }
+                        }
+                        self.shutdown().await.ok();
+                        self.set_state(RuntimeState::Error);
+                        return Err(RuntimeError::Process(detail));
+                    }
+                }
+            }
             if self.health().await? {
                 *self.model_path.lock().await = Some(model_path.to_path_buf());
                 *self.quantization.lock().await = Some(quant);
@@ -167,9 +204,10 @@ impl LlamaCppRuntime {
 
         self.shutdown().await.ok();
         self.set_state(RuntimeState::Error);
-        Err(RuntimeError::Process(
-            "llama.cpp server startup timeout".into(),
-        ))
+        Err(RuntimeError::Process(format!(
+            "llama.cpp server startup timeout after {}s — large CPU models may need AISEC_LLAMA_STARTUP_TIMEOUT_MS",
+            startup_timeout_ms / 1000
+        )))
     }
 
     /// Unload the active model and stop the server process.
@@ -284,6 +322,43 @@ pub fn default_llama_host() -> String {
         .ok()
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| "127.0.0.1".into())
+}
+
+pub fn default_startup_timeout_ms() -> u64 {
+    std::env::var("AISEC_LLAMA_STARTUP_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(120_000)
+}
+
+pub fn default_n_gpu_layers() -> u32 {
+    std::env::var("AISEC_LLAMA_N_GPU_LAYERS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| {
+            if cfg!(target_os = "macos") {
+                99
+            } else {
+                0
+            }
+        })
+}
+
+async fn startup_timeout_for_model(model_path: &Path, config_default_ms: u64) -> u64 {
+    if let Ok(raw) = std::env::var("AISEC_LLAMA_STARTUP_TIMEOUT_MS") {
+        if let Ok(ms) = raw.parse::<u64>() {
+            return ms;
+        }
+    }
+
+    let size_bytes = tokio::fs::metadata(model_path)
+        .await
+        .map(|meta| meta.len())
+        .unwrap_or(0);
+    let size_gb = size_bytes.saturating_div(1_000_000_000);
+    // 90s base + 90s per GB for mmap/load on CPU; cap at 10 minutes.
+    let computed = 90_000u64.saturating_add(size_gb.saturating_mul(90_000));
+    computed.max(config_default_ms).min(600_000)
 }
 
 #[cfg(test)]

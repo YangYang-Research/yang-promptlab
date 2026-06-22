@@ -325,7 +325,7 @@ pub struct ModelInferenceTestResult {
     pub message: String,
 }
 
-fn entry_to_dto(entry: &ModelEntry) -> ModelEntryDto {
+pub(crate) fn entry_to_dto(entry: &ModelEntry) -> ModelEntryDto {
     let size_gb = entry
         .size_bytes
         .map(|b| (b as f64) / (1024.0 * 1024.0 * 1024.0))
@@ -333,7 +333,7 @@ fn entry_to_dto(entry: &ModelEntry) -> ModelEntryDto {
     ModelEntryDto {
         id: entry.id.clone(),
         name: entry.name.clone(),
-        provider: entry.provider.as_str().into(),
+        provider: entry.display_provider(),
         version: entry.version.clone(),
         format: entry.format.as_str().into(),
         size_bytes: entry.size_bytes,
@@ -715,10 +715,17 @@ pub async fn models_test_connection(
     state: State<'_, AppState>,
     model_id: String,
 ) -> CommandResult<ThirdPartyModelConnectivityResultDto> {
+    test_third_party_model_connection(state.inner(), &model_id).await
+}
+
+pub(crate) async fn test_third_party_model_connection(
+    state: &AppState,
+    model_id: &str,
+) -> CommandResult<ThirdPartyModelConnectivityResultDto> {
     let (request, metadata) = {
         let manager = state.model_manager().lock().await;
         let entry = manager
-            .get_model(&model_id)
+            .get_model(model_id)
             .ok_or_else(|| CommandError::invalid_input(format!("model not found: {model_id}")))?;
         if entry.provider != ModelProvider::Remote {
             return Err(CommandError::invalid_input(
@@ -912,11 +919,14 @@ pub async fn models_test_inference(
         return Err(llama_server_missing_error(manager.supervisor()));
     }
 
-    manager
+    manager.on_model_load_started();
+    let load_result = manager
         .supervisor_mut()
         .ensure_model_loaded(&file_path)
         .await
-        .map_err(|err| map_runtime_test_error(err, manager.supervisor()))?;
+        .map_err(|err| map_runtime_test_error(err, manager.supervisor()));
+    manager.on_model_load_finished(load_result.is_ok());
+    load_result?;
 
     let prompt = if use_chat {
         "User: Reply with exactly: AISec OK\nAssistant: ".into()
