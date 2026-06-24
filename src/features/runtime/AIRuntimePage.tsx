@@ -2,20 +2,23 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 
-import { Button, Card, PageHeader, StatusBadge } from "@/shared/components";
+import { Button, Card, ConnectivityStatus, PageHeader, RefreshButton } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
 import { useAiInferenceRoute } from "@/shared/hooks/useAiInferenceRoute";
 import {
+  deleteRuntime,
   getRuntimeHardware,
   getRuntimeHealth,
   getRuntimeLogs,
   installRuntime,
+  loadRuntimeModel,
   refreshRuntimeHardware,
   repairRuntime,
   restartRuntime,
   runRuntimeBenchmark,
   startRuntime,
   stopRuntime,
+  unloadRuntimeModel,
   RUNTIME_INSTALL_PROGRESS_EVENT,
   type AiInferenceModelOptionDto,
   type AiInferenceRoute,
@@ -37,17 +40,6 @@ const INSTALL_STEPS = [
   { id: "verify", label: "Verify install" },
   { id: "complete", label: "Ready to start" },
 ] as const;
-
-function lifecycleBadge(state: string): string {
-  if (state === "running" || state === "busy") return "running";
-  if (state === "installed") return "completed";
-  if (state === "starting" || state === "downloading" || state === "installing" || state === "updating") {
-    return "running";
-  }
-  if (state === "failed" || state === "not_installed") return "failed";
-  if (state === "stopped" || state === "stopping") return "cancelled";
-  return "pending";
-}
 
 function stepIndex(stepId: string): number {
   const idx = INSTALL_STEPS.findIndex((s) => s.id === stepId);
@@ -103,45 +95,62 @@ function RuntimeInstallProgress({
   );
 }
 
+type RuntimeModeNote = {
+  label: "Data privacy" | "Hardware";
+  body: string;
+};
+
 type RuntimeModeOption = {
   route: AiInferenceRoute;
-  badge: string;
   title: string;
+  badge: string;
   summary: string;
   highlights: string[];
-  note: { label: string; body: string };
+  notes: RuntimeModeNote[];
 };
 
 const RUNTIME_MODE_OPTIONS: RuntimeModeOption[] = [
   {
     route: "third_party",
-    badge: "Cloud",
-    title: "Third-party",
-    summary: "Send AI requests to a cloud provider you configure.",
+    title: "Third-party Providers",
+    badge: "Remote",
+    summary: "Route AI requests to a cloud provider you register in Models.",
     highlights: [
-      "OpenAI, Anthropic, AWS Bedrock, Azure, and more",
-      "API keys stored securely on this device",
+      "OpenAI, Anthropic, AWS Bedrock, Google, Azure, and custom endpoints",
+      "API keys stored on this device (OS keychain when available)",
       "Traffic goes directly to the provider — not through AISec servers",
     ],
-    note: {
-      label: "Data privacy",
-      body: "Prompts and responses are handled by your chosen provider. Check their retention and training policies before use.",
-    },
+    notes: [
+      {
+        label: "Data privacy",
+        body: "Prompts and responses are handled by your chosen provider. Review their retention, logging, and training policies before sending sensitive content.",
+      },
+      {
+        label: "Hardware",
+        body: "No local GPU required. A stable internet connection is enough; response time depends on provider region and model size.",
+      },
+    ],
   },
   {
     route: "local",
+    title: "Local Runtime",
     badge: "On-device",
-    title: "Local",
-    summary: "Run GGUF models locally with the embedded llama.cpp runtime.",
+    summary: "Run GGUF models on this machine with the bundled llama.cpp runtime.",
     highlights: [
-      "Inference stays on your machine",
-      "No third-party sharing of prompts or outputs",
-      "You control hardware setup, models, and startup",
+      "Inference runs entirely on your hardware",
+      "Prompts and outputs stay on this device",
+      "You control runtime install, model selection, and startup",
     ],
-    note: {
-      label: "Minimum hardware",
-      body: "8 GB RAM and ~6 GB free disk for the runtime plus a compact Q4 model. For larger models, use 16 GB RAM or Apple Silicon / CUDA.",
-    },
+    notes: [
+      {
+        label: "Data privacy",
+        body: "All inference stays on-device. AISec does not send prompts or model outputs to third-party services in this mode.",
+      },
+      {
+        label: "Hardware",
+        body: "8 GB RAM and ~6 GB free disk for the runtime plus a compact Q4 model. Larger models need 16 GB+ RAM or Apple Silicon / CUDA acceleration.",
+      },
+    ],
   },
 ];
 
@@ -154,6 +163,7 @@ function RuntimeModePicker({
 }) {
   return (
     <div className="runtime-mode-picker">
+      <h2 className="runtime-mode-picker__title">Choose AI Runtime Mode</h2>
       <p className="runtime-mode-picker__lead">
         Pick how AISec runs AI features. You can change this later after configuration.
       </p>
@@ -168,7 +178,9 @@ function RuntimeModePicker({
           >
             <Card className="runtime-mode-picker__card-inner" padding="md">
               <div className="runtime-mode-picker__card-header">
-                <span className="runtime-mode-picker__badge">{option.badge}</span>
+                <div className="runtime-mode-picker__card-header-top">
+                  <span className="runtime-mode-picker__badge">{option.badge}</span>
+                </div>
                 <h3 className="runtime-mode-picker__card-title">{option.title}</h3>
                 <p className="runtime-mode-picker__card-summary">{option.summary}</p>
               </div>
@@ -179,9 +191,13 @@ function RuntimeModePicker({
                 ))}
               </ul>
 
-              <div className="runtime-mode-picker__note">
-                <span className="runtime-mode-picker__note-label">{option.note.label}</span>
-                <p className="runtime-mode-picker__note-body">{option.note.body}</p>
+              <div className="runtime-mode-picker__notes">
+                {option.notes.map((note) => (
+                  <div key={note.label} className="runtime-mode-picker__note">
+                    <span className="runtime-mode-picker__note-label">{note.label}</span>
+                    <p className="runtime-mode-picker__note-body">{note.body}</p>
+                  </div>
+                ))}
               </div>
             </Card>
           </button>
@@ -247,6 +263,11 @@ export function AIRuntimePage() {
   const [installing, setInstalling] = useState(false);
   const [installProgress, setInstallProgress] = useState<RuntimeInstallProgressEvent | null>(null);
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
+  const [modelRuntimeAction, setModelRuntimeAction] = useState<{
+    id: string;
+    action: "load" | "unload";
+  } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const {
     configuration,
@@ -262,17 +283,33 @@ export function AIRuntimePage() {
   const lifecycle = status?.lifecycleState ?? "not_installed";
 
   const refreshLocalData = useCallback(async () => {
-    const [hw, logEntries] = await Promise.all([
-      getRuntimeHardware(),
-      getRuntimeLogs(50),
-    ]);
-    setHardware(hw);
+    const logEntries = await getRuntimeLogs(50);
     setLogs(logEntries);
+    try {
+      setHardware(await refreshRuntimeHardware());
+    } catch {
+      setHardware(await getRuntimeHardware());
+    }
   }, []);
 
   const refreshAll = useCallback(async () => {
     await Promise.all([refreshConfiguration(), refreshLocalData()]);
   }, [refreshConfiguration, refreshLocalData]);
+
+  const handleRefresh = useCallback(async () => {
+    if (!backendConnected || refreshing) return;
+    setError(null);
+    setRefreshing(true);
+    try {
+      await refreshAll();
+    } catch (err) {
+      const message = toAppError(err).message;
+      setError(message);
+      notify(message, "error");
+    } finally {
+      setRefreshing(false);
+    }
+  }, [backendConnected, refreshing, refreshAll, notify]);
 
   useEffect(() => {
     void import("@/shared/ipc/client").then(({ healthCheck }) =>
@@ -352,6 +389,64 @@ export function AIRuntimePage() {
     }
   }
 
+  function isLocalModelLoaded(modelId: string): boolean {
+    return Boolean(status?.modelLoaded && settings?.selectedModelId === modelId);
+  }
+
+  async function handleLoadLocalModel(modelId: string) {
+    if (
+      !backendConnected ||
+      loading ||
+      busy !== null ||
+      installing ||
+      routeBusy ||
+      modelRuntimeAction !== null ||
+      !status?.binaryAvailable
+    ) {
+      return;
+    }
+    setError(null);
+    setModelRuntimeAction({ id: modelId, action: "load" });
+    try {
+      await loadRuntimeModel(modelId);
+      await refreshAll();
+      notify("Model loaded into runtime", "success");
+    } catch (err) {
+      const message = toAppError(err).message;
+      setError(message);
+      notify(message, "error");
+    } finally {
+      setModelRuntimeAction(null);
+    }
+  }
+
+  async function handleUnloadLocalModel(modelId: string) {
+    if (
+      !backendConnected ||
+      loading ||
+      busy !== null ||
+      installing ||
+      routeBusy ||
+      modelRuntimeAction !== null ||
+      !isLocalModelLoaded(modelId)
+    ) {
+      return;
+    }
+    setError(null);
+    setModelRuntimeAction({ id: modelId, action: "unload" });
+    try {
+      await unloadRuntimeModel();
+      await refreshAll();
+      notify("Model unloaded from runtime", "success");
+    } catch (err) {
+      const message = toAppError(err).message;
+      setError(message);
+      notify(message, "error");
+    } finally {
+      setModelRuntimeAction(null);
+    }
+  }
+
   async function runInstall(installFn: () => Promise<RuntimeStatusDto>) {
     if (installing) return;
     setError(null);
@@ -373,6 +468,11 @@ export function AIRuntimePage() {
   }
 
   const disabled = !backendConnected || loading || busy !== null || installing || routeBusy;
+  const runtimeStarted =
+    lifecycle === "running" || lifecycle === "busy" || lifecycle === "starting";
+  const localModelActionsDisabled =
+    disabled || modelRuntimeAction !== null || !status?.binaryAvailable;
+  const runtimeInstalled = lifecycle !== "not_installed";
   const localModels = settings?.localModels ?? [];
   const thirdPartyModels = settings?.thirdPartyModels ?? [];
   const showModePicker = backendConnected && mode === "not_configured" && !configLoading;
@@ -398,13 +498,11 @@ export function AIRuntimePage() {
                   compact
                 />
               )}
-              <Button
-                variant="secondary"
-                disabled={disabled || configLoading}
-                onClick={() => void refreshAll().catch((err) => setError(toAppError(err).message))}
-              >
-                Refresh
-              </Button>
+              <RefreshButton
+                loading={refreshing || configLoading}
+                disabled={!backendConnected}
+                onClick={() => void handleRefresh()}
+              />
             </div>
           ) : undefined
         }
@@ -427,11 +525,16 @@ export function AIRuntimePage() {
           {mode === "third_party" && (
             <>
               <section className="runtime-section">
+                <h2 className="runtime-section__title">Status</h2>
                 <div className="models-summary-grid runtime-summary-grid">
                   <Card className="models-summary-card">
-                    <span className="models-summary-card__label">Status</span>
+                    <span className="models-summary-card__label">Runtime Status</span>
                     <strong className="models-summary-card__value models-summary-card__value--runtime">
-                      {configuration?.statusLabel ?? "—"}
+                      {configuration?.statusLabel ? (
+                        <ConnectivityStatus label={configuration.statusLabel} />
+                      ) : (
+                        "—"
+                      )}
                     </strong>
                   </Card>
                   <Card className="models-summary-card">
@@ -442,16 +545,20 @@ export function AIRuntimePage() {
                   </Card>
                   <Card className="models-summary-card">
                     <span className="models-summary-card__label">Model</span>
-                    <strong className="models-summary-card__value models-summary-card__value--runtime">
+                    <strong className="models-summary-card__value models-summary-card__value--model-name">
                       {configuration?.modelName ?? settings?.selectedModelName ?? "—"}
                     </strong>
                   </Card>
                   <Card className="models-summary-card">
                     <span className="models-summary-card__label">Connectivity</span>
-                    <strong className="models-summary-card__value">
-                      {testingModelId
-                        ? "Testing…"
-                        : configuration?.connectivity ?? "—"}
+                    <strong className="models-summary-card__value models-summary-card__value--wrap">
+                      {testingModelId ? (
+                        "Testing…"
+                      ) : configuration?.connectivity ? (
+                        <ConnectivityStatus label={configuration.connectivity} />
+                      ) : (
+                        "—"
+                      )}
                     </strong>
                   </Card>
                   <Card className="models-summary-card">
@@ -466,33 +573,50 @@ export function AIRuntimePage() {
               </section>
 
               <section className="runtime-section">
-                <h2 className="runtime-section__title">Choose Model</h2>
+                <h2 className="runtime-section__title">Registered Models</h2>
                 <Card className="model-card model-card--wide">
-                  {thirdPartyModels.length > 0 && (
-                    <ul className="runtime-route-models" aria-label="Third-party models">
-                      {thirdPartyModels.map((model) => (
-                        <ThirdPartyModelRow
-                          key={model.id}
-                          model={model}
-                          selected={model.id === settings?.selectedModelId}
-                          disabled={disabled}
-                          testing={testingModelId === model.id}
-                          onSelect={() => void handleSelectThirdPartyModel(model.id)}
-                        />
-                      ))}
-                    </ul>
+                  {thirdPartyModels.length > 0 ? (
+                    <>
+                      <ul className="runtime-route-models" aria-label="Registered third-party models">
+                        {thirdPartyModels.map((model) => (
+                          <ThirdPartyModelRow
+                            key={model.id}
+                            model={model}
+                            selected={model.id === settings?.selectedModelId}
+                            disabled={disabled}
+                            testing={testingModelId === model.id}
+                            onSelect={() => void handleSelectThirdPartyModel(model.id)}
+                            onEdit={() =>
+                              navigate("/models", { state: { editModelId: model.id } })
+                            }
+                          />
+                        ))}
+                      </ul>
+                      <div className="model-card__actions">
+                        <Button
+                          onClick={() =>
+                            navigate("/models", {
+                              state: { openAddModel: true, openAddModelTab: "third-party" },
+                            })
+                          }
+                        >
+                          Add Model
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="runtime-choose-model__empty">
+                      <Button
+                        onClick={() =>
+                          navigate("/models", {
+                            state: { openAddModel: true, openAddModelTab: "third-party" },
+                          })
+                        }
+                      >
+                        Add Model
+                      </Button>
+                    </div>
                   )}
-                  <div className="model-card__actions">
-                    <Button
-                      onClick={() =>
-                        navigate("/models", {
-                          state: { openAddModel: true, openAddModelTab: "third-party" },
-                        })
-                      }
-                    >
-                      Add Model
-                    </Button>
-                  </div>
                 </Card>
               </section>
             </>
@@ -504,14 +628,10 @@ export function AIRuntimePage() {
                 <h2 className="runtime-section__title">Status</h2>
                 <div className="models-summary-grid runtime-summary-grid">
                   <Card className="models-summary-card">
-                    <span className="models-summary-card__label">Current Status</span>
-                    <div className="runtime-summary-card__value-row">
-                      <strong className="models-summary-card__value models-summary-card__value--runtime">
-                        {configuration?.statusLabel ?? lifecycle.replace(/_/g, " ")}
-                      </strong>
-                      <StatusBadge status={lifecycleBadge(lifecycle)} />
-                    </div>
-                    <p className="text-muted text-sm">{status?.message ?? "—"}</p>
+                    <span className="models-summary-card__label">Runtime Status</span>
+                    <strong className="models-summary-card__value models-summary-card__value--runtime">
+                      {configuration?.statusLabel ?? lifecycle.replace(/_/g, " ")}
+                    </strong>
                   </Card>
                   <Card className="models-summary-card">
                     <span className="models-summary-card__label">Current Runtime</span>
@@ -520,9 +640,11 @@ export function AIRuntimePage() {
                     </strong>
                   </Card>
                   <Card className="models-summary-card">
-                    <span className="models-summary-card__label">Installed Version</span>
-                    <strong className="models-summary-card__value">
-                      {configuration?.runtimeVersion ?? status?.runtimeVersion ?? "—"}
+                    <span className="models-summary-card__label">Loaded Model</span>
+                    <strong className="models-summary-card__value models-summary-card__value--model-name">
+                      {status?.modelLoaded
+                        ? (configuration?.modelName ?? status?.loadedModelPath ?? "—")
+                        : "—"}
                     </strong>
                   </Card>
                   <Card className="models-summary-card">
@@ -530,9 +652,9 @@ export function AIRuntimePage() {
                     <strong className="models-summary-card__value">
                       {configuration?.connectivity ?? "Not checked"}
                     </strong>
-                    <p className="text-muted text-sm">
-                      {configuration?.lastHealthCheck ?? "Run Start Runtime to probe health"}
-                    </p>
+                    {configuration?.lastHealthCheck ? (
+                      <p className="text-muted text-sm">{configuration.lastHealthCheck}</p>
+                    ) : null}
                   </Card>
                 </div>
               </section>
@@ -578,8 +700,15 @@ export function AIRuntimePage() {
                       <dt>Recommended Runtime</dt>
                       <dd>{status?.recommendedRuntime ?? "Detect hardware first"}</dd>
                     </div>
-                    <div><dt>Install path</dt><dd className="mono">{status?.installPath ?? "—"}</dd></div>
                     <div><dt>API endpoint</dt><dd className="mono">{status?.baseUrl ?? "—"}</dd></div>
+                    <div>
+                      <dt>API status</dt>
+                      <dd>
+                        {status?.modelLoaded
+                          ? (configuration?.connectivity ?? "Not checked")
+                          : "Offline until a model is loaded"}
+                      </dd>
+                    </div>
                     <div><dt>Binary</dt><dd>{status?.binaryAvailable ? "Available" : "Missing"}</dd></div>
                   </dl>
 
@@ -593,38 +722,49 @@ export function AIRuntimePage() {
 
                   <div className="model-card__actions">
                     <Button
-                      disabled={disabled}
+                      disabled={disabled || runtimeInstalled}
                       onClick={() => void runInstall(() => installRuntime())}
                     >
                       {installing ? "Installing…" : "Install Runtime"}
                     </Button>
                     <Button
                       variant="secondary"
-                      disabled={disabled}
+                      disabled={disabled || !runtimeInstalled}
                       onClick={() => void runInstall(() => repairRuntime())}
                     >
                       Repair Runtime
                     </Button>
                     <Button
                       variant="secondary"
-                      disabled={disabled || !status?.installed}
+                      disabled={disabled || !status?.binaryAvailable || runtimeStarted}
                       onClick={() => void runAction("Start runtime", () => startRuntime())}
                     >
                       {busy === "Start runtime" ? "Starting…" : "Start Runtime"}
                     </Button>
                     <Button
                       variant="ghost"
-                      disabled={disabled || lifecycle === "stopped" || lifecycle === "not_installed"}
+                      disabled={disabled || !runtimeStarted}
                       onClick={() => void runAction("Stop runtime", () => stopRuntime())}
                     >
                       {busy === "Stop runtime" ? "Stopping…" : "Stop Runtime"}
                     </Button>
                     <Button
                       variant="ghost"
-                      disabled={disabled || !status?.installed}
+                      disabled={disabled || !status?.binaryAvailable}
                       onClick={() => void runAction("Restart runtime", () => restartRuntime())}
                     >
                       {busy === "Restart runtime" ? "Restarting…" : "Restart Runtime"}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      disabled={disabled || lifecycle === "not_installed"}
+                      onClick={() =>
+                        void runAction("Delete runtime", async () => {
+                          await deleteRuntime();
+                        })
+                      }
+                    >
+                      {busy === "Delete runtime" ? "Deleting…" : "Delete Runtime"}
                     </Button>
                     <Button variant="ghost" onClick={() => setShowLogs((v) => !v)}>
                       {showLogs ? "Hide Logs" : "Logs"}
@@ -656,46 +796,36 @@ export function AIRuntimePage() {
               <section className="runtime-section">
                 <h2 className="runtime-section__title">Installed Models</h2>
                 <Card className="model-card model-card--wide">
-                  <dl className="runtime-kv-grid">
-                    <div>
-                      <dt>Current Model</dt>
-                      <dd>{configuration?.modelName ?? status?.loadedModelPath ?? "—"}</dd>
-                    </div>
-                  </dl>
                   {localModels.length === 0 ? (
                     <p className="text-muted text-sm">No local models installed yet.</p>
                   ) : (
                     <ul className="runtime-route-models" aria-label="Installed local models">
                       {localModels.map((model) => (
-                        <li
+                        <LocalModelRow
                           key={model.id}
-                          className={`runtime-route-models__item${
-                            model.id === settings?.selectedModelId
-                              ? " runtime-route-models__item--selected"
-                              : ""
-                          }`}
-                        >
-                          <div>
-                            <div className="runtime-route-models__name">{model.name}</div>
-                            <div className="runtime-route-models__meta">
-                              {model.provider}
-                              {model.configured ? " · ready" : " · needs setup"}
-                            </div>
-                          </div>
-                        </li>
+                          model={model}
+                          loaded={isLocalModelLoaded(model.id)}
+                          disabled={localModelActionsDisabled}
+                          loading={
+                            modelRuntimeAction?.id === model.id
+                              ? modelRuntimeAction.action
+                              : null
+                          }
+                          onLoad={() => void handleLoadLocalModel(model.id)}
+                          onUnload={() => void handleUnloadLocalModel(model.id)}
+                        />
                       ))}
                     </ul>
                   )}
                   <div className="model-card__actions">
                     <Button
-                      variant="secondary"
                       onClick={() =>
                         navigate("/models", {
                           state: { openAddModel: true, openAddModelTab: "public" },
                         })
                       }
                     >
-                      Manage Models
+                      Add Model
                     </Button>
                     <Button
                       variant="ghost"
@@ -738,31 +868,92 @@ export function AIRuntimePage() {
   );
 }
 
+function thirdPartyModelNeedsEdit(model: AiInferenceModelOptionDto): boolean {
+  return model.statusLabel === "Connection Failed" || model.statusLabel === "Needs setup";
+}
+
+function LocalModelRow({
+  model,
+  loaded,
+  disabled,
+  loading,
+  onLoad,
+  onUnload,
+}: {
+  model: AiInferenceModelOptionDto;
+  loaded: boolean;
+  disabled: boolean;
+  loading: "load" | "unload" | null;
+  onLoad: () => void;
+  onUnload: () => void;
+}) {
+  return (
+    <li
+      className={`runtime-route-models__item${loaded ? " runtime-route-models__item--selected" : ""}`}
+    >
+      <div className="runtime-route-models__info">
+        <div className="runtime-route-models__name">{model.name}</div>
+        <div className="runtime-route-models__meta">
+          {model.provider}
+          {` · ${model.statusLabel}`}
+          {loaded ? " · Loaded" : ""}
+        </div>
+      </div>
+      {!loaded && (
+        <button
+          type="button"
+          className="runtime-route-models__pick"
+          disabled={disabled || loading !== null || !model.configured}
+          onClick={onLoad}
+        >
+          {loading === "load" ? "Loading…" : "Load"}
+        </button>
+      )}
+      {loaded && (
+        <button
+          type="button"
+          className="runtime-route-models__pick"
+          disabled={disabled || loading !== null}
+          onClick={onUnload}
+        >
+          {loading === "unload" ? "Unloading…" : "Unload"}
+        </button>
+      )}
+    </li>
+  );
+}
+
 function ThirdPartyModelRow({
   model,
   selected,
   disabled,
   testing = false,
   onSelect,
+  onEdit,
 }: {
   model: AiInferenceModelOptionDto;
   selected: boolean;
   disabled: boolean;
   testing?: boolean;
   onSelect: () => void;
+  onEdit: () => void;
 }) {
+  const needsEdit = thirdPartyModelNeedsEdit(model);
+  const showUse = !selected && !needsEdit && model.configured;
+
   return (
     <li
       className={`runtime-route-models__item${selected ? " runtime-route-models__item--selected" : ""}`}
     >
-      <div>
+      <div className="runtime-route-models__info">
         <div className="runtime-route-models__name">{model.name}</div>
         <div className="runtime-route-models__meta">
           {model.provider}
-          {model.configured ? " · ready" : " · needs setup"}
+          {" · "}
+          <ConnectivityStatus label={model.statusLabel} />
         </div>
       </div>
-      {!selected && (
+      {showUse && (
         <button
           type="button"
           className="runtime-route-models__pick"
@@ -770,6 +961,16 @@ function ThirdPartyModelRow({
           onClick={onSelect}
         >
           {testing ? "Testing…" : "Use"}
+        </button>
+      )}
+      {needsEdit && (
+        <button
+          type="button"
+          className="runtime-route-models__pick"
+          disabled={disabled}
+          onClick={onEdit}
+        >
+          Edit
         </button>
       )}
     </li>

@@ -179,6 +179,7 @@ fn remote_provider_display_name(provider: &str) -> String {
         "azure" => "Azure OpenAI".to_string(),
         "bedrock" | "aws_bedrock" => "Amazon Bedrock".to_string(),
         "openrouter" => "OpenRouter".to_string(),
+        "custom" => "Custom".to_string(),
         other => {
             let mut label = other.to_string();
             if let Some(first) = label.get_mut(0..1) {

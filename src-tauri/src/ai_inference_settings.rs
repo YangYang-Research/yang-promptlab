@@ -6,6 +6,10 @@ use aisec_models::{ModelEntry, ModelProvider};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CommandError, CommandResult};
+use crate::third_party_credentials::{
+    connectivity_status_label, format_connectivity_value, has_third_party_credentials_metadata,
+    is_connectivity_success, short_connectivity_list_label, CONNECTIVITY_FAILED, CONNECTIVITY_SUCCESS,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -63,6 +67,7 @@ pub struct AiInferenceModelOptionDto {
     pub provider: String,
     pub verified: bool,
     pub configured: bool,
+    pub status_label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,8 +101,24 @@ pub async fn load_settings(data_dir: &Path) -> CommandResult<AiInferenceSettings
     let raw = tokio::fs::read_to_string(&path)
         .await
         .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
-    serde_json::from_str(&raw)
-        .map_err(|err| CommandError::from(aisec_core::AisecError::config(err.to_string())))
+    if raw.trim().is_empty() {
+        tracing::warn!(
+            path = %path.display(),
+            "inference settings file is empty — using defaults"
+        );
+        return Ok(AiInferenceSettings::default());
+    }
+    match serde_json::from_str(&raw) {
+        Ok(settings) => Ok(settings),
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %err,
+                "invalid inference settings JSON — using defaults"
+            );
+            Ok(AiInferenceSettings::default())
+        }
+    }
 }
 
 pub async fn save_settings(data_dir: &Path, settings: &AiInferenceSettings) -> CommandResult<()> {
@@ -109,7 +130,11 @@ pub async fn save_settings(data_dir: &Path, settings: &AiInferenceSettings) -> C
     }
     let raw = serde_json::to_string_pretty(settings)
         .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
-    tokio::fs::write(&path, raw)
+    let tmp_path = path.with_extension("json.tmp");
+    tokio::fs::write(&tmp_path, raw)
+        .await
+        .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
+    tokio::fs::rename(&tmp_path, &path)
         .await
         .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
     Ok(())
@@ -127,24 +152,56 @@ pub fn is_local_model(entry: &ModelEntry) -> bool {
 }
 
 pub fn is_configured_third_party(entry: &ModelEntry) -> bool {
-    is_third_party_model(entry)
+    is_third_party_model(entry) && has_third_party_credentials_metadata(&entry.metadata)
 }
 
 pub fn is_configured_local(entry: &ModelEntry) -> bool {
     is_local_model(entry) && (entry.verified || entry.file_path.is_file())
 }
 
-fn model_option(entry: &ModelEntry, configured: bool) -> AiInferenceModelOptionDto {
+fn local_model_option(entry: &ModelEntry, configured: bool) -> AiInferenceModelOptionDto {
     AiInferenceModelOptionDto {
         id: entry.id.clone(),
         name: entry.display_model_name(),
         provider: entry.display_provider(),
         verified: entry.verified,
         configured,
+        status_label: if configured {
+            "Ready".into()
+        } else {
+            "Needs setup".into()
+        },
     }
 }
 
-fn sort_models(mut entries: Vec<&ModelEntry>, configured: fn(&ModelEntry) -> bool) -> Vec<AiInferenceModelOptionDto> {
+fn third_party_model_option(
+    entry: &ModelEntry,
+    selected_model_id: Option<&str>,
+    global_connectivity: Option<&str>,
+) -> AiInferenceModelOptionDto {
+    let configured = is_configured_third_party(entry);
+    let status_label = if !configured {
+        "Needs setup".into()
+    } else if Some(entry.id.as_str()) == selected_model_id {
+        global_connectivity
+            .and_then(short_connectivity_list_label)
+            .or_else(|| connectivity_status_label(&entry.metadata))
+            .unwrap_or_else(|| "Not tested".into())
+    } else {
+        connectivity_status_label(&entry.metadata).unwrap_or_else(|| "Not tested".into())
+    };
+
+    AiInferenceModelOptionDto {
+        id: entry.id.clone(),
+        name: entry.display_model_name(),
+        provider: entry.display_provider(),
+        verified: entry.verified,
+        configured,
+        status_label,
+    }
+}
+
+fn sort_local_models(mut entries: Vec<&ModelEntry>) -> Vec<AiInferenceModelOptionDto> {
     entries.sort_by(|a, b| {
         b.verified
             .cmp(&a.verified)
@@ -152,7 +209,23 @@ fn sort_models(mut entries: Vec<&ModelEntry>, configured: fn(&ModelEntry) -> boo
     });
     entries
         .into_iter()
-        .map(|entry| model_option(entry, configured(entry)))
+        .map(|entry| local_model_option(entry, is_configured_local(entry)))
+        .collect()
+}
+
+fn sort_third_party_models(
+    mut entries: Vec<&ModelEntry>,
+    selected_model_id: Option<&str>,
+    global_connectivity: Option<&str>,
+) -> Vec<AiInferenceModelOptionDto> {
+    entries.sort_by(|a, b| {
+        b.verified
+            .cmp(&a.verified)
+            .then_with(|| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()))
+    });
+    entries
+        .into_iter()
+        .map(|entry| third_party_model_option(entry, selected_model_id, global_connectivity))
         .collect()
 }
 
@@ -186,14 +259,12 @@ fn pick_model_for_route(
 }
 
 pub fn resolve_initial_settings(models: &[ModelEntry]) -> AiInferenceSettings {
-    let third_party = sort_models(
+    let third_party = sort_third_party_models(
         models.iter().filter(|e| is_third_party_model(e)).collect(),
-        is_configured_third_party,
+        None,
+        None,
     );
-    let local = sort_models(
-        models.iter().filter(|e| is_local_model(e)).collect(),
-        is_configured_local,
-    );
+    let local = sort_local_models(models.iter().filter(|e| is_local_model(e)).collect());
     let route = pick_default_route(&third_party, &local);
     let selected_model_id = pick_model_for_route(route, &third_party, &local);
     AiInferenceSettings {
@@ -209,14 +280,14 @@ pub fn reconcile_settings(
     mut settings: AiInferenceSettings,
     models: &[ModelEntry],
 ) -> AiInferenceSettings {
-    let third_party = sort_models(
+    let third_party = sort_third_party_models(
         models.iter().filter(|e| is_third_party_model(e)).collect(),
-        is_configured_third_party,
+        settings.selected_model_id.as_deref(),
+        settings.third_party_connectivity.as_deref(),
     );
-    let local = sort_models(
-        models.iter().filter(|e| is_local_model(e)).collect(),
-        is_configured_local,
-    );
+    let local = sort_local_models(models.iter().filter(|e| is_local_model(e)).collect());
+
+    let previous_selected = settings.selected_model_id.clone();
 
     if !settings.initialized {
         return resolve_initial_settings(models);
@@ -236,6 +307,27 @@ pub fn reconcile_settings(
         settings.selected_model_id = pick_model_for_route(settings.route, &third_party, &local);
     }
 
+    if settings.route == AiInferenceRoute::ThirdParty {
+        let previous_third_party = previous_selected.as_deref().and_then(|id| {
+            third_party
+                .iter()
+                .find(|model| model.id == id)
+                .map(|model| model.id.as_str())
+        });
+        let selected_third_party = settings.selected_model_id.as_deref().and_then(|id| {
+            third_party
+                .iter()
+                .find(|model| model.id == id)
+                .map(|model| model.id.as_str())
+        });
+        if let (Some(previous), Some(selected)) = (previous_third_party, selected_third_party) {
+            if previous != selected {
+                settings.third_party_connectivity = None;
+                settings.third_party_last_health_check = None;
+            }
+        }
+    }
+
     settings
 }
 
@@ -245,33 +337,39 @@ pub fn apply_third_party_health_check(
     ok: bool,
     latency_ms: u64,
 ) {
-    settings.third_party_connectivity = Some(if ok {
-        if latency_ms > 0 {
-            format!("Connected ({latency_ms} ms)")
-        } else {
-            "Connected".into()
-        }
-    } else {
-        "Failed".into()
-    });
+    settings.third_party_connectivity = Some(format_connectivity_value(ok, latency_ms));
     settings.third_party_last_health_check = Some(checked_at.to_string());
 }
 
 pub fn is_third_party_connectivity_ok(connectivity: Option<&str>) -> bool {
-    connectivity
-        .is_some_and(|value| value.starts_with("Connected"))
+    connectivity.is_some_and(is_connectivity_success)
 }
 
-pub fn third_party_status_label(settings: &AiInferenceSettings, has_configured_model: bool) -> String {
-    if !has_configured_model || settings.selected_model_id.is_none() {
-        return "Setup Required".into();
+pub fn third_party_status_label(
+    settings: &AiInferenceSettings,
+    has_configured_model: bool,
+    selected_model: Option<&ModelEntry>,
+) -> String {
+    if settings.selected_model_id.is_none() || !has_configured_model {
+        return "N/A".into();
     }
     if is_third_party_connectivity_ok(settings.third_party_connectivity.as_deref()) {
         return "Ready".into();
     }
     match settings.third_party_connectivity.as_deref() {
-        Some(_) => "Failed".into(),
-        None => "Setup Required".into(),
+        Some(value) if is_connectivity_success(value) => "Ready".into(),
+        Some(_) => CONNECTIVITY_FAILED.into(),
+        None => {
+            if let Some(entry) = selected_model {
+                match connectivity_status_label(&entry.metadata).as_deref() {
+                    Some(CONNECTIVITY_SUCCESS) => "Ready".into(),
+                    Some(CONNECTIVITY_FAILED) => CONNECTIVITY_FAILED.into(),
+                    _ => "Setup Required".into(),
+                }
+            } else {
+                "Setup Required".into()
+            }
+        }
     }
 }
 
@@ -295,14 +393,12 @@ pub fn settings_to_dto_with_connectivity_test(
     models: &[ModelEntry],
     connectivity_test: Option<(bool, String)>,
 ) -> AiInferenceSettingsDto {
-    let third_party = sort_models(
+    let third_party = sort_third_party_models(
         models.iter().filter(|e| is_third_party_model(e)).collect(),
-        is_configured_third_party,
+        settings.selected_model_id.as_deref(),
+        settings.third_party_connectivity.as_deref(),
     );
-    let local = sort_models(
-        models.iter().filter(|e| is_local_model(e)).collect(),
-        is_configured_local,
-    );
+    let local = sort_local_models(models.iter().filter(|e| is_local_model(e)).collect());
 
     let selected_model_name = settings
         .selected_model_id

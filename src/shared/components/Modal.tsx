@@ -8,8 +8,14 @@ type ModalProps = {
   children: ReactNode;
   footer?: ReactNode;
   /** Wider dialog for multi-column content (e.g. Add Model). */
-  size?: "default" | "wide";
+  size?: "default" | "medium" | "wide";
 };
+
+function modalSizeClass(size: ModalProps["size"]): string {
+  if (size === "wide") return " modal--wide";
+  if (size === "medium") return " modal--medium";
+  return "";
+}
 
 export function Modal({ open, title, onClose, children, footer, size = "default" }: ModalProps) {
   useEffect(() => {
@@ -26,7 +32,7 @@ export function Modal({ open, title, onClose, children, footer, size = "default"
   return createPortal(
     <div className="modal-overlay" onMouseDown={onClose}>
       <div
-        className={`modal${size === "wide" ? " modal--wide" : ""}`}
+        className={`modal${modalSizeClass(size)}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}

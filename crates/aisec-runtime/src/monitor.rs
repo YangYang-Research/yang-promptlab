@@ -38,9 +38,11 @@ impl RuntimeMonitor {
         let message = if endpoint_reachable && model_loaded {
             "runtime healthy — inference endpoint reachable with model loaded".into()
         } else if endpoint_reachable {
-            "runtime idle — endpoint reachable, awaiting model load from Models module".into()
+            String::new()
+        } else if model_loaded {
+            "model loaded but inference endpoint unreachable".into()
         } else if supervisor.binary_available() {
-            "runtime installed — llama-server process not running".into()
+            String::new()
         } else {
             "runtime not installed".into()
         };

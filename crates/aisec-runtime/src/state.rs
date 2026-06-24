@@ -95,9 +95,9 @@ mod tests {
     }
 
     #[test]
-    fn idle_start_returns_installed() {
+    fn idle_start_returns_running() {
         let s = transition(RuntimeLifecycleState::Installed, RuntimeLifecycleState::Starting);
-        let s = transition(s, RuntimeLifecycleState::Installed);
-        assert_eq!(s, RuntimeLifecycleState::Installed);
+        let s = transition(s, RuntimeLifecycleState::Running);
+        assert_eq!(s, RuntimeLifecycleState::Running);
     }
 }

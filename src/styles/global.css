@@ -328,6 +328,27 @@ a:hover {
   background: var(--success);
 }
 
+.connectivity-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.connectivity-status__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.connectivity-status__dot--success {
+  background: var(--success);
+}
+
+.connectivity-status__dot--failed {
+  background: var(--danger);
+}
+
 /* Search */
 .search-input {
   position: relative;
@@ -436,6 +457,14 @@ a:hover {
   align-items: center;
   justify-content: center;
   padding: 0.5rem 1rem 3rem;
+  text-align: center;
+}
+
+.runtime-mode-picker__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .runtime-mode-picker__lead {
@@ -444,7 +473,6 @@ a:hover {
   color: var(--text-muted);
   font-size: 0.9375rem;
   line-height: 1.55;
-  text-align: center;
 }
 
 .runtime-mode-picker__grid {
@@ -507,18 +535,12 @@ a:hover {
 .runtime-mode-picker__card-header {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.5rem;
 }
 
-.runtime-mode-picker__badge {
-  align-self: flex-start;
-  padding: 0.2rem 0.55rem;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+.runtime-mode-picker__card-header-top {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .runtime-mode-picker__card-title {
@@ -526,6 +548,17 @@ a:hover {
   font-size: 1.125rem;
   font-weight: 600;
   line-height: 1.25;
+}
+
+.runtime-mode-picker__badge {
+  flex-shrink: 0;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .runtime-mode-picker__card-summary {
@@ -565,8 +598,14 @@ a:hover {
   opacity: 0.85;
 }
 
-.runtime-mode-picker__note {
+.runtime-mode-picker__notes {
   margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.runtime-mode-picker__note {
   padding: 0.75rem 0.85rem;
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--bg-elevated) 88%, var(--accent) 12%);
@@ -1184,6 +1223,8 @@ a:hover {
 .model-card__name {
   margin: 0;
   font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .model-card__path {
@@ -1247,6 +1288,10 @@ a:hover {
   margin-bottom: 1.5rem;
 }
 
+.models-summary-grid > .models-summary-card {
+  min-width: 0;
+}
+
 .models-summary-card {
   display: flex;
   flex-direction: column;
@@ -1267,6 +1312,22 @@ a:hover {
 
 .models-summary-card__value--runtime {
   text-transform: capitalize;
+}
+
+.models-summary-card__value--wrap {
+  font-size: 0.9375rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-transform: none;
+}
+
+.models-summary-card__value--model-name {
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-transform: none;
 }
 
 .runtime-section {
@@ -1400,6 +1461,14 @@ a:hover {
   gap: 0.35rem;
 }
 
+.runtime-choose-model__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 7rem;
+  padding: 1.5rem 1rem;
+}
+
 .runtime-route-models__item {
   display: flex;
   align-items: center;
@@ -1412,6 +1481,11 @@ a:hover {
   font-size: 0.875rem;
 }
 
+.runtime-route-models__info {
+  min-width: 0;
+  flex: 1;
+}
+
 .runtime-route-models__item--selected {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 10%, var(--bg-elevated));
@@ -1419,6 +1493,8 @@ a:hover {
 
 .runtime-route-models__name {
   font-weight: 500;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .runtime-route-models__meta {
@@ -1427,6 +1503,7 @@ a:hover {
 }
 
 .runtime-route-models__pick {
+  flex-shrink: 0;
   padding: 0.2rem 0.55rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -1675,14 +1752,14 @@ a:hover {
 }
 
 .add-model-modal {
-  min-height: min(68vh, 42rem);
+  min-height: 0;
 }
 
 .add-model-modal__layout {
   display: grid;
   grid-template-columns: minmax(11rem, 13.5rem) minmax(0, 1fr);
   gap: 1.5rem;
-  min-height: min(62vh, 38rem);
+  align-items: start;
 }
 
 .add-model-modal__nav {
@@ -1692,6 +1769,9 @@ a:hover {
 }
 
 .add-model-modal__nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   text-align: left;
   padding: 0.65rem 0.75rem;
   border-radius: var(--radius-sm);
@@ -1700,6 +1780,17 @@ a:hover {
   color: var(--text-muted);
   cursor: pointer;
   font: inherit;
+}
+
+.add-model-modal__nav-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.add-model-modal__nav-item--active .add-model-modal__nav-icon {
+  opacity: 1;
 }
 
 .add-model-modal__nav-item:hover {
@@ -1716,13 +1807,16 @@ a:hover {
 
 .add-model-modal__panel {
   min-width: 0;
-  overflow-y: auto;
-  max-height: min(62vh, 38rem);
-  padding-right: 0.25rem;
+  overflow: visible;
 }
 
 .add-model-modal__panel-header {
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.add-model-modal__panel-header .text-muted {
+  margin: 0;
+  line-height: 1.5;
 }
 
 .add-model-modal__panel-title {
@@ -2074,6 +2168,19 @@ a:hover {
   overflow: hidden;
 }
 
+.hf-catalog__icon--import {
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.hf-catalog__card--import .hf-catalog__desc {
+  -webkit-line-clamp: 3;
+}
+
+.hf-catalog__detail--import {
+  margin-top: 0.25rem;
+}
+
 .hf-catalog__add {
   position: absolute;
   top: 0.5rem;
@@ -2134,6 +2241,28 @@ a:hover {
   gap: 1rem;
 }
 
+.third-party-models__edit-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-elevated);
+}
+
+.third-party-models__edit-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.third-party-models__edit-value {
+  font-size: 0.9375rem;
+}
+
 .third-party-models__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
@@ -2192,6 +2321,11 @@ a:hover {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 1rem;
+}
+
+.third-party-models__custom-hint {
+  grid-column: 1 / -1;
+  margin: 0 0 0.75rem;
 }
 
 .about-list {
@@ -3734,9 +3868,13 @@ a:hover {
   overflow: hidden;
 }
 
+.modal--medium {
+  max-width: min(96vw, 40rem);
+}
+
 .modal--wide {
   max-width: min(96vw, 72rem);
-  min-height: min(88vh, 48rem);
+  max-height: 90vh;
 }
 
 .modal--wide .modal__body {

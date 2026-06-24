@@ -9,21 +9,27 @@ use aisec_judge::{
 };
 use aisec_models::{
     DownloadManager, DownloadProgress, DownloadStatus, LocalModelManager, ModelCatalogEntry,
-    ModelEntry, ModelProvider, ModelSource, VerificationResult,
+    ModelEntry, ModelProvider, ModelSource, VerificationResult, remote_entry_id,
 };
 use aisec_runtime::{InferRequest, RuntimeError};
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 use tauri::async_runtime::Mutex as AsyncMutex;
 use tauri::State;
 
 use std::sync::Arc;
 
+use crate::ai_inference_settings::{
+    apply_third_party_health_check, format_health_check_timestamp, load_settings, save_settings,
+    AiInferenceRoute,
+};
 use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
 use crate::third_party_credentials::{
-    copy_credential_metadata, credential_id_from_metadata, has_new_credential_input,
-    open_model_credential_vault, persist_third_party_credentials, resolve_third_party_credentials,
-    validate_metadata_credentials, ThirdPartyCredentialFields, API_KEY_ENV,
+    apply_model_connectivity_metadata, copy_credential_metadata, credential_id_from_metadata,
+    has_new_credential_input, open_model_credential_vault, persist_third_party_credentials,
+    resolve_third_party_credentials, validate_metadata_credentials, ThirdPartyCredentialFields,
+    API_KEY_CREDENTIAL_ID, API_KEY_ENV, AWS_SECRET_CREDENTIAL_ID, AWS_SESSION_CREDENTIAL_ID,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,6 +145,21 @@ pub struct ThirdPartyModelSaveRequest {
     pub aws_secret_access_key: String,
     #[serde(default)]
     pub aws_session_token: String,
+    #[serde(default)]
+    pub existing_model_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThirdPartyModelEditDto {
+    pub provider: String,
+    pub model: String,
+    pub base_url: Option<String>,
+    pub region: Option<String>,
+    pub api_key_env: Option<String>,
+    pub api_key_configured: bool,
+    pub aws_secret_access_key_configured: bool,
+    pub aws_session_token_configured: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,6 +182,38 @@ fn api_key_env_from_metadata(metadata: &serde_json::Value) -> Option<String> {
         .map(str::to_string)
 }
 
+fn third_party_edit_dto_from_entry(entry: &ModelEntry) -> Result<ThirdPartyModelEditDto, CommandError> {
+    match &entry.source {
+        ModelSource::Remote {
+            provider,
+            model,
+            base_url,
+            region,
+        } => Ok(ThirdPartyModelEditDto {
+            provider: provider.clone(),
+            model: model.clone(),
+            base_url: base_url.clone(),
+            region: region.clone(),
+            api_key_env: api_key_env_from_metadata(&entry.metadata),
+            api_key_configured: credential_id_from_metadata(&entry.metadata, API_KEY_CREDENTIAL_ID)
+                .is_some(),
+            aws_secret_access_key_configured: credential_id_from_metadata(
+                &entry.metadata,
+                AWS_SECRET_CREDENTIAL_ID,
+            )
+            .is_some(),
+            aws_session_token_configured: credential_id_from_metadata(
+                &entry.metadata,
+                AWS_SESSION_CREDENTIAL_ID,
+            )
+            .is_some(),
+        }),
+        _ => Err(CommandError::invalid_input(
+            "edit form only applies to third-party models",
+        )),
+    }
+}
+
 fn third_party_request_from_entry(
     entry: &ModelEntry,
 ) -> Result<ThirdPartyModelSaveRequest, CommandError> {
@@ -179,6 +232,7 @@ fn third_party_request_from_entry(
             api_key_env: api_key_env_from_metadata(&entry.metadata),
             aws_secret_access_key: String::new(),
             aws_session_token: String::new(),
+            existing_model_id: None,
         }),
         _ => Err(CommandError::invalid_input(
             "connection test only applies to third-party models",
@@ -253,9 +307,7 @@ fn parse_third_party_remote_provider(value: &str) -> Result<RemoteProvider, Comm
         "openrouter" => Ok(RemoteProvider::OpenRouter),
         "azure" => Ok(RemoteProvider::Azure),
         "bedrock" | "aws_bedrock" => Ok(RemoteProvider::Bedrock),
-        other => Err(CommandError::invalid_input(format!(
-            "unsupported remote provider: {other}"
-        ))),
+        _ => Ok(RemoteProvider::OpenAi),
     }
 }
 
@@ -325,7 +377,7 @@ pub struct ModelInferenceTestResult {
     pub message: String,
 }
 
-pub(crate) fn entry_to_dto(entry: &ModelEntry) -> ModelEntryDto {
+pub(crate) fn entry_to_dto(entry: &ModelEntry, vault: &std::path::Path) -> ModelEntryDto {
     let size_gb = entry
         .size_bytes
         .map(|b| (b as f64) / (1024.0 * 1024.0 * 1024.0))
@@ -339,7 +391,7 @@ pub(crate) fn entry_to_dto(entry: &ModelEntry) -> ModelEntryDto {
         size_bytes: entry.size_bytes,
         size_gb,
         verified: entry.verified,
-        path: entry.file_path.to_string_lossy().into_owned(),
+        path: aisec_models::ModelRegistry::display_uri(vault, &entry.file_path),
         sha256: entry.checksum_sha256.clone(),
         capabilities: ModelCapabilitiesDto {
             chat: entry.capabilities.chat,
@@ -496,7 +548,8 @@ async fn run_download_finalize(
         .await
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
 
-    Ok(entry.map(|item| entry_to_dto(&item)))
+    let vault = manager.vault_path().to_path_buf();
+    Ok(entry.map(|item| entry_to_dto(&item, &vault)))
 }
 
 fn spawn_download_finalize(state: &AppState) {
@@ -556,10 +609,11 @@ pub async fn models_list(state: State<'_, AppState>) -> CommandResult<Vec<ModelE
 
 pub async fn models_list_op(state: &AppState) -> CommandResult<Vec<ModelEntryDto>> {
     let manager = state.model_manager().lock().await;
+    let vault = manager.vault_path().to_path_buf();
     Ok(manager
         .list_models()
         .into_iter()
-        .map(entry_to_dto)
+        .map(|entry| entry_to_dto(entry, &vault))
         .collect())
 }
 
@@ -637,7 +691,8 @@ pub async fn models_install(
         .install_catalog(&request.catalog_id, None)
         .await
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-    Ok(entry_to_dto(&entry))
+    let vault = manager.vault_path().to_path_buf();
+    Ok(entry_to_dto(&entry, &vault))
 }
 
 #[tauri::command]
@@ -651,25 +706,48 @@ pub async fn models_save_third_party(
     if request.provider.trim().is_empty() {
         return Err(CommandError::invalid_input("provider is required"));
     }
+    let provider = request.provider.trim();
+    let model = request.model.trim();
+    let new_id = remote_entry_id(provider, model);
+    let existing_id = request
+        .existing_model_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
     let mut manager = state.model_manager().lock().await;
+    let preserved_metadata = existing_id
+        .and_then(|id| manager.get_model(id).map(|entry| entry.metadata.clone()))
+        .or_else(|| manager.get_model(&new_id).map(|entry| entry.metadata.clone()));
+
     let entry = manager
         .register_third_party(
-            request.provider.trim(),
-            request.model.trim(),
+            provider,
+            model,
             request.base_url.clone().filter(|value| !value.trim().is_empty()),
             request.region.clone().filter(|value| !value.trim().is_empty()),
         )
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
 
+    if let Some(old_id) = existing_id {
+        if old_id != entry.id {
+            manager
+                .remove_model(old_id)
+                .await
+                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        }
+    }
+
     if let Ok(secrets) = SecretStore::new() {
         let vault = open_model_credential_vault(state.data_dir())?;
         let creds = credential_fields_from_request(&request);
-        let mut metadata = serde_json::json!({ "remoteProvider": request.provider.trim() });
+        let mut metadata = serde_json::json!({ "remoteProvider": provider });
 
         if has_new_credential_input(&creds) {
             persist_third_party_credentials(&mut metadata, &creds, &vault)?;
         } else {
-            copy_credential_metadata(&entry.metadata, &mut metadata);
+            let source_metadata = preserved_metadata.as_ref().unwrap_or(&entry.metadata);
+            copy_credential_metadata(source_metadata, &mut metadata);
             if creds.api_key_env.is_none() {
                 if let Some(env) = credential_id_from_metadata(&entry.metadata, API_KEY_ENV) {
                     metadata[API_KEY_ENV] = serde_json::Value::String(env);
@@ -689,10 +767,32 @@ pub async fn models_save_third_party(
         ));
     }
 
-    let updated = manager
+    let saved = manager
         .get_model(&entry.id)
-        .ok_or_else(|| CommandError::invalid_input(format!("model not found: {}", entry.id)))?;
-    Ok(entry_to_dto(updated))
+        .ok_or_else(|| CommandError::invalid_input(format!("model not found: {}", entry.id)))?
+        .clone();
+    let vault = manager.vault_path().to_path_buf();
+    drop(manager);
+
+    let model_id = saved.id.clone();
+    let is_edit = existing_id.is_some();
+    if !is_edit {
+        sync_third_party_inference_after_add(state.inner(), &model_id).await?;
+    }
+
+    Ok(entry_to_dto(&saved, &vault))
+}
+
+#[tauri::command]
+pub async fn models_third_party_edit_form(
+    state: State<'_, AppState>,
+    model_id: String,
+) -> CommandResult<ThirdPartyModelEditDto> {
+    let manager = state.model_manager().lock().await;
+    let entry = manager
+        .get_model(&model_id)
+        .ok_or_else(|| CommandError::invalid_input(format!("model not found: {model_id}")))?;
+    third_party_edit_dto_from_entry(entry)
 }
 
 #[tauri::command]
@@ -700,7 +800,7 @@ pub async fn models_test_third_party(
     state: State<'_, AppState>,
     request: ThirdPartyModelSaveRequest,
 ) -> CommandResult<ThirdPartyModelConnectivityResultDto> {
-    let model_id = format!("remote-{}", request.provider.trim());
+    let model_id = remote_entry_id(request.provider.trim(), request.model.trim());
     let metadata = {
         let manager = state.model_manager().lock().await;
         manager
@@ -736,7 +836,72 @@ pub(crate) async fn test_third_party_model_connection(
         let request = third_party_request_from_entry(entry)?;
         (request, metadata)
     };
-    run_third_party_connectivity_test(state.data_dir(), request, Some(metadata)).await
+    let result = run_third_party_connectivity_test(state.data_dir(), request, Some(metadata)).await?;
+    persist_third_party_model_connectivity(state, model_id, result.ok, result.latency_ms).await?;
+    Ok(result)
+}
+
+async fn persist_third_party_model_connectivity(
+    state: &AppState,
+    model_id: &str,
+    ok: bool,
+    latency_ms: u64,
+) -> CommandResult<()> {
+    let checked_at = format_health_check_timestamp(OffsetDateTime::now_utc());
+    let data_dir = state.data_dir().to_path_buf();
+
+    {
+        let mut manager = state.model_manager().lock().await;
+        let entry = manager
+            .get_model(model_id)
+            .ok_or_else(|| CommandError::invalid_input(format!("model not found: {model_id}")))?;
+        let mut metadata = entry.metadata.clone();
+        apply_model_connectivity_metadata(&mut metadata, ok, latency_ms, &checked_at);
+        manager
+            .update_model_metadata(model_id, metadata)
+            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+    }
+
+    let mut settings = load_settings(&data_dir).await?;
+    if settings.initialized
+        && settings.route == AiInferenceRoute::ThirdParty
+        && settings.selected_model_id.as_deref() == Some(model_id)
+    {
+        apply_third_party_health_check(&mut settings, &checked_at, ok, latency_ms);
+        save_settings(&data_dir, &settings).await?;
+    }
+
+    Ok(())
+}
+
+async fn sync_third_party_inference_after_add(
+    state: &AppState,
+    model_id: &str,
+) -> CommandResult<()> {
+    let data_dir = state.data_dir().to_path_buf();
+    let mut settings = load_settings(&data_dir).await?;
+    if !settings.initialized || settings.route != AiInferenceRoute::ThirdParty {
+        return Ok(());
+    }
+
+    let checked_at = format_health_check_timestamp(OffsetDateTime::now_utc());
+    match test_third_party_model_connection(state, model_id).await {
+        Ok(result) if result.ok => {
+            settings.selected_model_id = Some(model_id.to_string());
+            apply_third_party_health_check(
+                &mut settings,
+                &checked_at,
+                true,
+                result.latency_ms,
+            );
+            save_settings(&data_dir, &settings).await?;
+        }
+        Ok(_) | Err(_) => {
+            // Connection test failed or errored — metadata is updated on the model entry,
+            // but AI Runtime selection stays on the previously active model.
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -748,7 +913,8 @@ pub async fn models_import_gguf(
     let entry = manager
         .import_local(&request.name, &request.path)
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-    Ok(entry_to_dto(&entry))
+    let vault = manager.vault_path().to_path_buf();
+    Ok(entry_to_dto(&entry, &vault))
 }
 
 #[tauri::command]
@@ -760,7 +926,8 @@ pub async fn models_import_zip(
     let entry = manager
         .import_zip_package(&request.name, &request.path)
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-    Ok(entry_to_dto(&entry))
+    let vault = manager.vault_path().to_path_buf();
+    Ok(entry_to_dto(&entry, &vault))
 }
 
 #[tauri::command]
@@ -858,7 +1025,8 @@ pub async fn models_remove(
         .remove_model(&model_id)
         .await
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-    Ok(entry_to_dto(&entry))
+    let vault = manager.vault_path().to_path_buf();
+    Ok(entry_to_dto(&entry, &vault))
 }
 
 #[tauri::command]

@@ -37,10 +37,12 @@ import { useToast } from "@/shared/notifications";
 import { formatBytes } from "@/shared/utils/format";
 import { DownloadManagerCard } from "./DownloadManagerCard";
 import { AddModelModal, type AddModelTab } from "./AddModelModal";
+import { loadThirdPartyModelForm, type ThirdPartyModelForm } from "@/shared/ipc/thirdPartyModels";
 
 type ModelsPageLocationState = {
   openAddModel?: boolean;
   openAddModelTab?: AddModelTab;
+  editModelId?: string;
 };
 
 function isThirdPartyModel(model: ModelEntryDto): boolean {
@@ -52,6 +54,13 @@ function modelRegistryBadgeStatus(model: ModelEntryDto): string {
     return model.verified ? "registered" : "available";
   }
   return model.verified ? "installed" : "available";
+}
+
+function registryDisplayName(model: ModelEntryDto): string {
+  if (isThirdPartyModel(model)) {
+    return model.version || model.name;
+  }
+  return model.name;
 }
 
 export function ModelsPage() {
@@ -73,19 +82,47 @@ export function ModelsPage() {
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [addModelOpen, setAddModelOpen] = useState(false);
   const [addModelInitialTab, setAddModelInitialTab] = useState<AddModelTab>("public");
+  const [editThirdPartyForm, setEditThirdPartyForm] = useState<ThirdPartyModelForm | null>(null);
+  const [editingModelId, setEditingModelId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const verifyInFlightRef = useRef(false);
+  const deepLinkEditRef = useRef<string | null>(null);
 
   const installedNames = useMemo(() => new Set(installed.map((m) => m.name)), [installed]);
 
   useEffect(() => {
     const state = location.state as ModelsPageLocationState | null;
-    if (!state?.openAddModel) return;
-    if (state.openAddModelTab) {
-      setAddModelInitialTab(state.openAddModelTab);
+    if (!state) return;
+
+    if (state.openAddModel) {
+      if (state.openAddModelTab) {
+        setAddModelInitialTab(state.openAddModelTab);
+      }
+      setEditThirdPartyForm(null);
+      setEditingModelId(null);
+      setAddModelOpen(true);
     }
-    setAddModelOpen(true);
-  }, [location.state]);
+
+    if (!state.editModelId || !backendConnected) return;
+    if (deepLinkEditRef.current === state.editModelId) return;
+    deepLinkEditRef.current = state.editModelId;
+
+    void (async () => {
+      setError(null);
+      setBusyModelId(state.editModelId!);
+      try {
+        const form = await loadThirdPartyModelForm(state.editModelId!);
+        setEditThirdPartyForm(form);
+        setEditingModelId(state.editModelId!);
+        setAddModelInitialTab("third-party");
+        setAddModelOpen(true);
+      } catch (err) {
+        notify(toAppError(err).message, "error");
+      } finally {
+        setBusyModelId(null);
+      }
+    })();
+  }, [location.state, backendConnected, notify]);
 
   const refreshModels = useCallback(async () => {
     const [models, entries, info, stats] = await Promise.all([
@@ -312,6 +349,32 @@ export function ModelsPage() {
     }
   }
 
+  function openAddModel(tab: AddModelTab = "public") {
+    setEditThirdPartyForm(null);
+    setEditingModelId(null);
+    setAddModelInitialTab(tab);
+    setAddModelOpen(true);
+  }
+
+  async function handleEdit(model: ModelEntryDto) {
+    if (!isThirdPartyModel(model)) {
+      return;
+    }
+    setError(null);
+    setBusyModelId(model.id);
+    try {
+      const form = await loadThirdPartyModelForm(model.id);
+      setEditThirdPartyForm(form);
+      setEditingModelId(model.id);
+      setAddModelInitialTab("third-party");
+      setAddModelOpen(true);
+    } catch (err) {
+      notify(toAppError(err).message, "error");
+    } finally {
+      setBusyModelId(null);
+    }
+  }
+
   async function handleRemove(modelId: string) {
     setError(null);
     setBusyModelId(modelId);
@@ -334,9 +397,9 @@ export function ModelsPage() {
         const latency = result.latencyMs > 0 ? ` (${result.latencyMs} ms)` : "";
         const label = `${result.provider} / ${result.model}`;
         if (result.ok) {
-          notify(`Connection successful — ${label}${latency}`, "success");
+          notify(`Connection Successful — ${label}${latency}`, "success");
         } else {
-          notify(`Connection failed — ${label}: ${result.message}`, "error");
+          notify(`Connection Failed — ${label}: ${result.message}`, "error");
         }
       } else {
         const result = await testModelInference(model.id);
@@ -353,7 +416,7 @@ export function ModelsPage() {
     <div className="page">
       <PageHeader
         title="Models"
-        description="Manage local GGUF models, public catalog, and third-party cloud providers"
+        description="Manage local GGUF models, cloud providers, and imports"
       />
 
       {!backendConnected && (
@@ -371,12 +434,12 @@ export function ModelsPage() {
           <Card className="models-summary-card">
             <span className="models-summary-card__label">Registered models</span>
             <strong className="models-summary-card__value">{vaultStats.registeredCount}</strong>
-            <p className="text-muted text-sm">Public, third-party, and import</p>
+            <p className="text-muted text-sm">Local catalog, cloud, and import</p>
           </Card>
           <Card className="models-summary-card">
             <span className="models-summary-card__label">Installed models</span>
             <strong className="models-summary-card__value">{vaultStats.installedLocalCount}</strong>
-            <p className="text-muted text-sm">Public catalog and local import</p>
+            <p className="text-muted text-sm">Local catalog and file import</p>
           </Card>
           <Card className="models-summary-card">
             <span className="models-summary-card__label">Installed size</span>
@@ -436,27 +499,27 @@ export function ModelsPage() {
         />
       )}
 
-      <div className="models-grid">
+      <section className="runtime-section">
+        <div className="runtime-section__header">
+          <h2 className="runtime-section__title">Model Registry</h2>
+          <Button
+            variant="primary"
+            disabled={!backendConnected}
+            onClick={() => openAddModel()}
+          >
+            Add Model
+          </Button>
+        </div>
         <Card className="model-card model-card--wide">
-          <div className="model-card__section-header">
-            <h3 className="card__title">Model Registry</h3>
-            <Button
-              variant="primary"
-              disabled={!backendConnected}
-              onClick={() => setAddModelOpen(true)}
-            >
-              Add model
-            </Button>
-          </div>
           {installed.length === 0 ? (
-            <p className="text-muted">No local models installed yet.</p>
+            <p className="text-muted">No models registered yet.</p>
           ) : (
             installed.map((model) => (
               <div key={model.id} className="model-catalog__row">
                 <div>
                   <div className="model-card__header">
                     <div>
-                      <h4 className="model-card__name">{model.name}</h4>
+                      <h4 className="model-card__name">{registryDisplayName(model)}</h4>
                       <p className="text-muted text-sm">
                         {model.provider} · v{model.version}
                         {model.sizeBytes != null
@@ -480,6 +543,15 @@ export function ModelsPage() {
                   <p className="model-card__path mono text-sm">{model.path}</p>
                 </div>
                 <div className="model-card__actions">
+                  {isThirdPartyModel(model) && (
+                    <Button
+                      variant="ghost"
+                      disabled={busyModelId !== null}
+                      onClick={() => void handleEdit(model)}
+                    >
+                      Edit
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     disabled={busyModelId !== null}
@@ -499,12 +571,19 @@ export function ModelsPage() {
             ))
           )}
         </Card>
-      </div>
+      </section>
 
       <AddModelModal
         open={addModelOpen}
         initialTab={addModelInitialTab}
-        onClose={() => setAddModelOpen(false)}
+        initialThirdPartyForm={editThirdPartyForm}
+        editingModelId={editingModelId}
+        modalTitle={editThirdPartyForm ? "Edit Model" : "Add Model"}
+        onClose={() => {
+          setAddModelOpen(false);
+          setEditThirdPartyForm(null);
+          setEditingModelId(null);
+        }}
         backendConnected={backendConnected}
         catalog={catalog}
         installedNames={installedNames}
@@ -518,7 +597,11 @@ export function ModelsPage() {
         onInstall={(entry) => void handleInstall(entry)}
         onBrowseImport={() => void handleBrowse()}
         onImport={() => void handleImport()}
-        onThirdPartySaved={() => void refreshModels()}
+        onThirdPartySaved={() => {
+          setEditThirdPartyForm(null);
+          setEditingModelId(null);
+          void refreshModels();
+        }}
       />
 
       {error && <p className="text-danger">{error}</p>}

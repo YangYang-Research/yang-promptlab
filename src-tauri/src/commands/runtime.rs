@@ -1,6 +1,6 @@
 //! Embedded AI runtime IPC — lifecycle, health, benchmark, logs, hardware.
 
-use aisec_models::ModelEntry;
+use aisec_models::{ModelEntry, ModelProvider};
 use aisec_runtime::{
     RuntimeBenchmarkResult, RuntimeHardwareProfile, RuntimeHealthReport, RuntimeLogEntry,
     RuntimeStatusSnapshot,
@@ -14,7 +14,7 @@ use crate::ai_inference_settings::{
     apply_third_party_health_check, format_health_check_timestamp, is_local_model,
     is_third_party_model, load_settings, reconcile_settings, save_settings, settings_to_dto,
     settings_to_dto_with_connectivity_test, third_party_status_label, AiInferenceRoute,
-    AiInferenceSettingsDto,
+    AiInferenceSettings, AiInferenceSettingsDto,
 };
 use crate::commands::models::test_third_party_model_connection;
 use crate::error::{CommandError, CommandResult};
@@ -185,6 +185,89 @@ pub async fn runtime_stop(state: State<'_, AppState>) -> CommandResult<RuntimeSt
 }
 
 #[tauri::command]
+pub async fn runtime_delete(state: State<'_, AppState>) -> CommandResult<RuntimeStatusDto> {
+    let mut manager = state.runtime_manager().lock().await;
+    manager
+        .delete_runtime()
+        .await
+        .map_err(map_runtime_err)?;
+    Ok(status_dto_for_manager(&manager).await)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeLoadModelRequest {
+    pub model_id: String,
+}
+
+#[tauri::command]
+pub async fn runtime_load_model(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: RuntimeLoadModelRequest,
+) -> CommandResult<RuntimeConfigurationDto> {
+    let (file_path, model_id) = {
+        let manager = state.model_manager().lock().await;
+        let entry = manager
+            .get_model(&request.model_id)
+            .ok_or_else(|| {
+                CommandError::invalid_input(format!("model not found: {}", request.model_id))
+            })?;
+        if entry.provider == ModelProvider::Remote {
+            return Err(CommandError::invalid_input(
+                "only local GGUF models can be loaded into the runtime",
+            ));
+        }
+        if !entry.file_path.exists() {
+            return Err(CommandError::invalid_input(format!(
+                "model file missing: {}",
+                entry.file_path.display()
+            )));
+        }
+        (entry.file_path.clone(), entry.id.clone())
+    };
+
+    {
+        let mut manager = state.runtime_manager().lock().await;
+        if !manager.supervisor().binary_available() {
+            return Err(map_runtime_err(aisec_runtime::RuntimeError::Unavailable));
+        }
+        manager
+            .load_model_at_path(&file_path)
+            .await
+            .map_err(map_runtime_err)?;
+        let _ = manager.run_health_check().await;
+    }
+
+    let data_dir = state.data_dir();
+    let models: Vec<ModelEntry> = {
+        let manager = state.model_manager().lock().await;
+        manager.list_models().into_iter().cloned().collect()
+    };
+    let mut settings = load_settings(&data_dir).await?;
+    settings.route = AiInferenceRoute::Local;
+    settings.initialized = true;
+    settings.selected_model_id = Some(model_id);
+    settings = reconcile_settings(settings, &models);
+    save_settings(&data_dir, &settings).await?;
+
+    runtime_watch::spawn_runtime_watch(app);
+    runtime_configuration_for_state(state.inner()).await
+}
+
+#[tauri::command]
+pub async fn runtime_unload_model(
+    state: State<'_, AppState>,
+) -> CommandResult<RuntimeConfigurationDto> {
+    let mut manager = state.runtime_manager().lock().await;
+    manager
+        .unload_loaded_model()
+        .await
+        .map_err(map_runtime_err)?;
+    runtime_configuration_for_state(state.inner()).await
+}
+
+#[tauri::command]
 pub async fn runtime_restart(state: State<'_, AppState>) -> CommandResult<RuntimeStatusDto> {
     let mut manager = state.runtime_manager().lock().await;
     manager
@@ -244,26 +327,91 @@ pub struct RuntimeInferenceRouteRequest {
     pub selected_model_id: Option<String>,
 }
 
-async fn inference_settings_for_state(state: &AppState) -> CommandResult<AiInferenceSettingsDto> {
+async fn run_third_party_connectivity_test_for_settings(
+    state: &AppState,
+    settings: &mut AiInferenceSettings,
+    model_id: &str,
+) -> (bool, String) {
+    let checked_at = format_health_check_timestamp(OffsetDateTime::now_utc());
+    match test_third_party_model_connection(state, model_id).await {
+        Ok(result) => {
+            apply_third_party_health_check(
+                settings,
+                &checked_at,
+                result.ok,
+                result.latency_ms,
+            );
+            (result.ok, result.message)
+        }
+        Err(err) => {
+            apply_third_party_health_check(settings, &checked_at, false, 0);
+            (false, err.to_string())
+        }
+    }
+}
+
+async fn reconcile_inference_settings(
+    state: &AppState,
+    models: &[ModelEntry],
+) -> CommandResult<(AiInferenceSettings, Option<(bool, String)>)> {
     let data_dir = state.data_dir().to_path_buf();
+    let loaded = load_settings(&data_dir).await?;
+    if !loaded.initialized {
+        return Ok((loaded, None));
+    }
+
+    let mut settings = loaded.clone();
+    let previous_selected = settings.selected_model_id.clone();
+    settings = reconcile_settings(settings, models);
+
+    let mut connectivity_test = None;
+    if settings.route == AiInferenceRoute::ThirdParty
+        && settings.selected_model_id != previous_selected
+        && settings.selected_model_id.is_some()
+    {
+        if let Some(id) = settings.selected_model_id.clone() {
+            let result =
+                run_third_party_connectivity_test_for_settings(state, &mut settings, &id).await;
+            connectivity_test = Some(result);
+        }
+    }
+
+    if settings != loaded {
+        save_settings(&data_dir, &settings).await?;
+    }
+    Ok((settings, connectivity_test))
+}
+
+async fn inference_settings_for_state(state: &AppState) -> CommandResult<AiInferenceSettingsDto> {
     let models: Vec<ModelEntry> = {
         let manager = state.model_manager().lock().await;
         manager.list_models().into_iter().cloned().collect()
     };
 
-    let mut settings = load_settings(&data_dir).await?;
-    if settings.initialized {
-        settings = reconcile_settings(settings, &models);
-        save_settings(&data_dir, &settings).await?;
-    }
-    Ok(settings_to_dto(&settings, &models))
+    let (settings, connectivity_test) = reconcile_inference_settings(state, &models).await?;
+    Ok(settings_to_dto_with_connectivity_test(
+        &settings,
+        &models,
+        connectivity_test,
+    ))
 }
 
-fn local_status_label(lifecycle: &str) -> String {
+fn local_status_label(
+    lifecycle: &str,
+    binary_available: bool,
+    manifest_installed: bool,
+    model_loaded: bool,
+) -> String {
+    if manifest_installed && !binary_available {
+        return "Repair Required".into();
+    }
     match lifecycle {
-        "running" | "busy" => "Running".into(),
+        "running" | "busy" if model_loaded => "Running".into(),
+        "running" | "busy" => "Ready".into(),
         "starting" => "Starting".into(),
-        "installed" | "stopped" => "Idle".into(),
+        "stopping" => "Stopping".into(),
+        "stopped" => "Stopped".into(),
+        "installed" => "Idle".into(),
         "not_installed" => "Not Installed".into(),
         "downloading" | "installing" => "Installing".into(),
         "failed" => "Failed".into(),
@@ -272,17 +420,12 @@ fn local_status_label(lifecycle: &str) -> String {
 }
 
 async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<RuntimeConfigurationDto> {
-    let data_dir = state.data_dir().to_path_buf();
     let models: Vec<ModelEntry> = {
         let manager = state.model_manager().lock().await;
         manager.list_models().into_iter().cloned().collect()
     };
 
-    let mut settings = load_settings(&data_dir).await?;
-    if settings.initialized {
-        settings = reconcile_settings(settings, &models);
-        save_settings(&data_dir, &settings).await?;
-    }
+    let (settings, _) = reconcile_inference_settings(state, &models).await?;
     let inference = settings_to_dto(&settings, &models);
 
     let runtime_manager = state.runtime_manager().lock().await;
@@ -308,7 +451,11 @@ async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<Runt
         } else if settings.route == AiInferenceRoute::ThirdParty {
             (
                 "third_party".to_string(),
-                third_party_status_label(&settings, inference.third_party_available),
+                third_party_status_label(
+                    &settings,
+                    inference.third_party_available,
+                    selected_model,
+                ),
                 selected_model.map(|m| m.display_provider()),
                 inference.selected_model_name.clone(),
                 None,
@@ -318,11 +465,19 @@ async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<Runt
             )
         } else {
             let lifecycle = runtime_status.lifecycle_state.as_str();
+            let manifest_installed = runtime_manager
+                .manifest()
+                .is_some_and(|m| m.installed);
             (
                 "local".to_string(),
-                local_status_label(lifecycle),
+                local_status_label(
+                    lifecycle,
+                    runtime_status.binary_available,
+                    manifest_installed,
+                    runtime_status.model_loaded,
+                ),
                 None,
-                inference.selected_model_name.clone().or_else(|| {
+                if runtime_status.model_loaded {
                     runtime_status.loaded_model_path.as_ref().map(|p| {
                         std::path::Path::new(p)
                             .file_stem()
@@ -330,19 +485,29 @@ async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<Runt
                             .unwrap_or(p)
                             .to_string()
                     })
-                }),
+                } else {
+                    None
+                },
                 runtime_status.backend.clone().or(Some("llama.cpp".into())),
                 runtime_status.runtime_version.clone(),
                 last_health.as_ref().map(|h| {
                     if h.endpoint_reachable {
                         format!("Reachable ({} ms)", h.latency_ms)
-                    } else if h.process_alive {
-                        "Process up".into()
-                    } else {
+                    } else if h.model_loaded {
                         "Unreachable".into()
+                    } else if matches!(lifecycle, "running" | "busy" | "starting") {
+                        "Offline — load a model".into()
+                    } else {
+                        "Not checked".into()
                     }
                 }),
-                last_health.as_ref().map(|h| h.message.clone()),
+                last_health.as_ref().and_then(|h| {
+                    if h.message.is_empty() {
+                        None
+                    } else {
+                        Some(h.message.clone())
+                    }
+                }),
             )
         };
 
@@ -423,23 +588,11 @@ pub async fn runtime_set_inference_route(
 
     if run_connectivity_test {
         let mut connectivity_test: Option<(bool, String)> = None;
-        if let Some(id) = settings.selected_model_id.as_deref() {
-            let checked_at = format_health_check_timestamp(OffsetDateTime::now_utc());
-            match test_third_party_model_connection(state.inner(), id).await {
-                Ok(result) => {
-                    apply_third_party_health_check(
-                        &mut settings,
-                        &checked_at,
-                        result.ok,
-                        result.latency_ms,
-                    );
-                    connectivity_test = Some((result.ok, result.message));
-                }
-                Err(err) => {
-                    apply_third_party_health_check(&mut settings, &checked_at, false, 0);
-                    connectivity_test = Some((false, err.to_string()));
-                }
-            }
+        if let Some(id) = settings.selected_model_id.clone() {
+            connectivity_test = Some(
+                run_third_party_connectivity_test_for_settings(state.inner(), &mut settings, &id)
+                    .await,
+            );
         }
         save_settings(&data_dir, &settings).await?;
         return Ok(settings_to_dto_with_connectivity_test(

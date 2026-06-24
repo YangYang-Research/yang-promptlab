@@ -61,6 +61,7 @@ pub fn run() {
 fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // 5. Logging.
             let log_guard = logging::init_app_logging(app)?;
@@ -203,6 +204,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::models::models_install,
             commands::models::models_import_gguf,
             commands::models::models_save_third_party,
+            commands::models::models_third_party_edit_form,
             commands::models::models_test_third_party,
             commands::models::models_test_connection,
             commands::models::models_import_zip,
@@ -226,6 +228,9 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::runtime::runtime_repair,
             commands::runtime::runtime_start,
             commands::runtime::runtime_stop,
+            commands::runtime::runtime_delete,
+            commands::runtime::runtime_load_model,
+            commands::runtime::runtime_unload_model,
             commands::runtime::runtime_restart,
             commands::runtime::runtime_health,
             commands::runtime::runtime_benchmark,

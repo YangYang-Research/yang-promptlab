@@ -22,7 +22,7 @@ pub use download::{DownloadControl, DownloadCoordinator, DownloadManager, Downlo
 pub use error::{ModelError, ModelResult};
 pub use hardware::detect_hardware;
 pub use manager::LocalModelManager;
-pub use registry::ModelRegistry;
+pub use registry::{remote_entry_id, ModelRegistry};
 pub use runtime::{
     InferenceRuntime, LocalInferenceEngine, LlamaCppConfig, LlamaCppRuntime,
     MockInferenceRuntime, OllamaConfig, OllamaRuntime,

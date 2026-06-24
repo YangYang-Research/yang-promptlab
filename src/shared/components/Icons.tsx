@@ -105,3 +105,41 @@ export function IconArrowRight({ className }: IconProps) {
     </svg>
   );
 }
+
+export function IconOnDevice({ className }: IconProps) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <rect
+        x="3.5"
+        y="4.5"
+        width="11"
+        height="8"
+        rx="1.25"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <path
+        d="M2 13.5h14"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+export function IconCloud({ className }: IconProps) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path
+        d="M6.25 13.5h6.75a2.75 2.75 0 0 0 .45-5.46A3.5 3.5 0 0 0 5.2 6.35 2.75 2.75 0 0 0 6.25 13.5Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

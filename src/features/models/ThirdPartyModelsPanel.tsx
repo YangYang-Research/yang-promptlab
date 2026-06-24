@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
@@ -16,6 +16,8 @@ import { useToast } from "@/shared/notifications";
 
 type ThirdPartyModelsPanelProps = {
   backendConnected: boolean;
+  initialForm?: ThirdPartyModelForm | null;
+  editingModelId?: string | null;
   onSaved?: () => void;
 };
 
@@ -31,32 +33,49 @@ function connectivityToast(
   if (result.ok) {
     return {
       type: "success",
-      message: `Connection successful — ${label}${latency}`,
+      message: `Connection Successful — ${label}${latency}`,
     };
   }
   return {
     type: "error",
-    message: `Connection failed — ${label}: ${result.message}`,
+    message: `Connection Failed — ${label}: ${result.message}`,
   };
 }
 
 export function ThirdPartyModelsPanel({
   backendConnected,
+  initialForm = null,
+  editingModelId = null,
   onSaved,
 }: ThirdPartyModelsPanelProps) {
   const { notify } = useToast();
   const [form, setForm] = useState<ThirdPartyModelForm>(() =>
-    thirdPartyModelTemplate("openai"),
+    initialForm ?? thirdPartyModelTemplate("openai"),
   );
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  useEffect(() => {
+    if (initialForm) {
+      setForm(initialForm);
+      setSaved(false);
+      setError(null);
+    }
+  }, [initialForm]);
+
+  const isEditing = Boolean(editingModelId);
+
   const selectedProvider =
     THIRD_PARTY_PROVIDERS.find((provider) => provider.value === form.provider) ??
     THIRD_PARTY_PROVIDERS[0];
+  const providerLabel =
+    form.provider === "custom"
+      ? form.customProviderName || "Custom"
+      : selectedProvider.label;
   const isBedrock = form.provider === "bedrock";
+  const isCustom = form.provider === "custom";
   const accessKeyRequiresSessionToken = form.apiKey.trim().startsWith("ASIA");
 
   function patchForm(patchValue: Partial<ThirdPartyModelForm>) {
@@ -79,7 +98,7 @@ export function ThirdPartyModelsPanel({
     setError(null);
     setSaving(true);
     try {
-      const savedForm = await saveThirdPartyModelForm(form);
+      const savedForm = await saveThirdPartyModelForm(form, editingModelId);
       setForm(savedForm);
       setSaved(true);
       notify("Third-party model saved", "success");
@@ -115,30 +134,32 @@ export function ThirdPartyModelsPanel({
 
   return (
     <div className="third-party-models">
-      <p className="text-muted text-sm">
-        Register cloud LLM providers for remote inference. Credentials are stored securely in the
-        OS keychain when available.
-      </p>
-
-      <div className="third-party-models__grid">
-        {THIRD_PARTY_PROVIDERS.map((provider) => {
-          const isSelected = form.provider === provider.value;
-          return (
-            <button
-              key={provider.value}
-              type="button"
-              className={`third-party-models__card ${isSelected ? "third-party-models__card--selected" : ""}`}
-              disabled={!backendConnected}
-              onClick={() => selectProvider(provider.value)}
-            >
-              <span className="third-party-models__icon" aria-hidden="true">
-                {providerIcon(provider.label)}
-              </span>
-              <span className="third-party-models__name">{provider.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      {isEditing ? (
+        <div className="third-party-models__edit-header">
+          <span className="third-party-models__edit-label">Provider</span>
+          <strong className="third-party-models__edit-value">{providerLabel}</strong>
+        </div>
+      ) : (
+        <div className="third-party-models__grid">
+          {THIRD_PARTY_PROVIDERS.map((provider) => {
+            const isSelected = form.provider === provider.value;
+            return (
+              <button
+                key={provider.value}
+                type="button"
+                className={`third-party-models__card ${isSelected ? "third-party-models__card--selected" : ""}`}
+                disabled={!backendConnected}
+                onClick={() => selectProvider(provider.value)}
+              >
+                <span className="third-party-models__icon" aria-hidden="true">
+                  {providerIcon(provider.label)}
+                </span>
+                <span className="third-party-models__name">{provider.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="third-party-models__form">
         {isBedrock ? (
@@ -220,6 +241,26 @@ export function ThirdPartyModelsPanel({
           </>
         ) : (
           <>
+            {isCustom && !isEditing && (
+              <>
+                <p className="text-muted text-sm third-party-models__custom-hint">
+                  OpenAI-compatible API with <code>/chat/completions</code>. Use the base URL of your
+                  gateway or self-hosted server (for example <code>https://host/v1</code>).
+                </p>
+                <div className="settings-field">
+                  <label htmlFor="thirdPartyCustomProvider">Provider</label>
+                  <input
+                    id="thirdPartyCustomProvider"
+                    className="input"
+                    placeholder="lm-studio"
+                    value={form.customProviderName}
+                    disabled={!backendConnected}
+                    onChange={(e) => patchForm({ customProviderName: e.target.value })}
+                  />
+                </div>
+              </>
+            )}
+
             <div className="settings-field">
               <label htmlFor="thirdPartyModel">Model</label>
               <input
@@ -234,7 +275,11 @@ export function ThirdPartyModelsPanel({
 
             <div className="settings-field">
               <label htmlFor="thirdPartyBaseUrl">
-                {selectedProvider.requiresBaseUrl ? "Endpoint URL" : "Custom Base URL (optional)"}
+                {isCustom
+                  ? "Base URL"
+                  : selectedProvider.requiresBaseUrl
+                    ? "Endpoint URL"
+                    : "Custom Base URL (optional)"}
               </label>
               <input
                 id="thirdPartyBaseUrl"
@@ -289,7 +334,7 @@ export function ThirdPartyModelsPanel({
           disabled={!backendConnected || saving}
           onClick={() => void handleSave()}
         >
-          {saving ? "Saving…" : saved ? "Saved" : "Save config"}
+          {saving ? "Saving…" : saved ? "Saved" : isEditing ? "Save changes" : "Save config"}
         </Button>
       </div>
 

@@ -25,6 +25,7 @@ export function useAiInferenceRoute(options: UseAiInferenceRouteOptions = {}) {
   const refresh = useCallback(async () => {
     const dto = await getRuntimeConfiguration();
     setConfiguration(dto);
+    setError(null);
     return dto;
   }, []);
 

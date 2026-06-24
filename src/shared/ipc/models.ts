@@ -151,6 +151,7 @@ export type ThirdPartyModelSaveRequest = {
   apiKeyEnv?: string | null;
   awsSecretAccessKey?: string;
   awsSessionToken?: string;
+  existingModelId?: string | null;
 };
 
 export function saveThirdPartyModel(

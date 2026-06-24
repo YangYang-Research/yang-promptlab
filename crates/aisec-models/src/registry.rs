@@ -9,6 +9,8 @@ use crate::runtime::{infer_capabilities, infer_provider, infer_version};
 use crate::types::{ModelEntry, ModelFormat, ModelProvider, ModelSource};
 
 const REGISTRY_VERSION: u32 = 1;
+pub const MODEL_REGISTRY_DIR: &str = "model-registry";
+const LEGACY_MODEL_STORAGE_DIR: &str = "models";
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct RegistrySnapshot {
@@ -37,6 +39,10 @@ impl ModelRegistry {
             return Ok(Self::new());
         }
         let raw = std::fs::read_to_string(&path).map_err(ModelError::Io)?;
+        if raw.trim().is_empty() {
+            tracing::warn!(path = %path.display(), "model registry file is empty — starting fresh");
+            return Ok(Self::new());
+        }
         let snapshot: RegistrySnapshot =
             serde_json::from_str(&raw).map_err(|e| ModelError::invalid(e.to_string()))?;
         let mut registry = Self::new();
@@ -195,9 +201,7 @@ impl ModelRegistry {
     ) -> ModelEntry {
         let provider_str = provider.into();
         let model_str = model.into();
-        let id = format!("remote-{provider_str}");
-        let label = provider_label(&provider_str);
-        let name = format!("{label} — {model_str}");
+        let id = remote_entry_id(&provider_str, &model_str);
         let path = format!("remote://{provider_str}/{model_str}");
         let source = ModelSource::Remote {
             provider: provider_str.clone(),
@@ -206,9 +210,20 @@ impl ModelRegistry {
             region,
         };
         let now = OffsetDateTime::now_utc();
+        let previous = self.entries.get(&id);
+        let created_at = previous.map(|existing| existing.created_at).unwrap_or(now);
+        let mut metadata = previous
+            .map(|existing| existing.metadata.clone())
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let serde_json::Value::Object(ref mut map) = metadata {
+            map.insert(
+                "remoteProvider".to_string(),
+                serde_json::Value::String(provider_str.clone()),
+            );
+        }
         let entry = ModelEntry {
             id: id.clone(),
-            name,
+            name: model_str.clone(),
             format: ModelFormat::Api,
             provider: ModelProvider::Remote,
             version: model_str,
@@ -218,13 +233,9 @@ impl ModelRegistry {
             size_bytes: None,
             checksum_sha256: None,
             verified: true,
-            created_at: self
-                .entries
-                .get(&id)
-                .map(|existing| existing.created_at)
-                .unwrap_or(now),
+            created_at,
             updated_at: now,
-            metadata: serde_json::json!({ "remoteProvider": provider_str }),
+            metadata,
         };
         self.upsert_entry(entry.clone());
         entry
@@ -252,31 +263,137 @@ impl ModelRegistry {
             .ok_or_else(|| ModelError::not_found(id))
     }
 
+    pub fn model_storage_root(vault: &Path) -> PathBuf {
+        vault.join(MODEL_REGISTRY_DIR)
+    }
+
     pub fn model_dir(vault: &Path, model_id: &str) -> PathBuf {
-        vault.join("models").join(model_id)
+        Self::model_storage_root(vault).join(model_id)
     }
 
     pub fn model_file(vault: &Path, model_id: &str, filename: &str) -> PathBuf {
         Self::model_dir(vault, model_id).join(filename)
     }
+
+    /// User-facing URI for a model file under the app data vault (`app://models/...`).
+    pub fn display_uri(vault: &Path, file_path: &Path) -> String {
+        let raw = file_path.to_string_lossy();
+        if raw.starts_with("remote://") {
+            return raw.into_owned();
+        }
+        if let Ok(rel) = file_path.strip_prefix(vault) {
+            let rel = rel
+                .to_string_lossy()
+                .replace('\\', "/")
+                .trim_start_matches('/')
+                .to_string();
+            return format!("app://models/{rel}");
+        }
+        raw.into_owned()
+    }
+
+    /// Move `vault/models/{id}` → `vault/model-registry/{id}` and rewrite registry paths.
+    pub fn migrate_storage_layout(vault: &Path, registry: &mut Self) -> ModelResult<bool> {
+        let legacy = vault.join(LEGACY_MODEL_STORAGE_DIR);
+        let current = Self::model_storage_root(vault);
+        let mut changed = false;
+
+        if legacy.is_dir() {
+            std::fs::create_dir_all(&current).map_err(ModelError::Io)?;
+            for entry in std::fs::read_dir(&legacy).map_err(ModelError::Io)? {
+                let entry = entry.map_err(ModelError::Io)?;
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let dest = current.join(entry.file_name());
+                if dest.exists() {
+                    continue;
+                }
+                std::fs::rename(&path, &dest).map_err(ModelError::Io)?;
+                changed = true;
+            }
+            if std::fs::read_dir(&legacy)
+                .map(|mut dir| dir.next().is_none())
+                .unwrap_or(false)
+            {
+                let _ = std::fs::remove_dir(&legacy);
+            }
+        }
+
+        for entry in registry.entries.values_mut() {
+            if let Ok(rel) = entry.file_path.strip_prefix(&legacy) {
+                entry.file_path = current.join(rel);
+                changed = true;
+            }
+        }
+
+        Ok(changed)
+    }
 }
 
-fn provider_label(provider: &str) -> String {
-    match provider {
-        "openai" => "OpenAI",
-        "anthropic" => "Anthropic",
-        "gemini" | "google" => "Google",
-        "azure" => "Azure",
-        "bedrock" => "AWS Bedrock",
-        other => other,
+/// Stable registry id for a third-party provider + model pair.
+pub fn remote_entry_id(provider: &str, model: &str) -> String {
+    let provider_part = slug_identifier(provider);
+    let model_part = slug_identifier(model);
+    if model_part.is_empty() {
+        format!("remote-{provider_part}")
+    } else {
+        format!("remote-{provider_part}-{model_part}")
     }
-    .into()
+}
+
+fn slug_identifier(value: &str) -> String {
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for ch in value.trim().to_ascii_lowercase().chars() {
+        let normalized = if ch.is_ascii_alphanumeric() { ch } else { '-' };
+        if normalized == '-' {
+            if prev_dash || out.is_empty() {
+                continue;
+            }
+            prev_dash = true;
+        } else {
+            prev_dash = false;
+        }
+        out.push(normalized);
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    const MAX_LEN: usize = 96;
+    if out.len() > MAX_LEN {
+        out.truncate(MAX_LEN);
+        while out.ends_with('-') {
+            out.pop();
+        }
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn model_dir_uses_model_registry() {
+        let vault = Path::new("/data/models");
+        assert_eq!(
+            ModelRegistry::model_dir(vault, "abc"),
+            Path::new("/data/models/model-registry/abc")
+        );
+    }
+
+    #[test]
+    fn display_uri_formats_app_scheme() {
+        let vault = Path::new("/data/app/models");
+        let file = vault.join("model-registry/abc/model.gguf");
+        assert_eq!(
+            ModelRegistry::display_uri(vault, &file),
+            "app://models/model-registry/abc/model.gguf"
+        );
+    }
 
     #[test]
     fn register_local_gguf() {
@@ -289,6 +406,43 @@ mod tests {
         assert_eq!(entry.format, ModelFormat::Gguf);
         assert_eq!(entry.provider, ModelProvider::Gguf);
         assert_eq!(registry.len(), 1);
+    }
+
+    #[test]
+    fn migrates_legacy_model_storage() {
+        let dir = tempdir().unwrap();
+        let vault = dir.path().join("vault");
+        std::fs::create_dir_all(vault.join("models/model-a")).unwrap();
+        std::fs::write(vault.join("models/model-a/weights.gguf"), b"gguf").unwrap();
+
+        let mut registry = ModelRegistry::new();
+        registry
+            .upsert_entry(ModelEntry {
+                id: "model-a".into(),
+                name: "model-a".into(),
+                format: ModelFormat::Gguf,
+                provider: ModelProvider::Gguf,
+                version: "1".into(),
+                capabilities: infer_capabilities(ModelProvider::Gguf),
+                source: ModelSource::Local {
+                    path: vault.join("models/model-a/weights.gguf"),
+                },
+                file_path: vault.join("models/model-a/weights.gguf"),
+                size_bytes: Some(4),
+                checksum_sha256: None,
+                verified: true,
+                created_at: OffsetDateTime::now_utc(),
+                updated_at: OffsetDateTime::now_utc(),
+                metadata: serde_json::json!({}),
+            });
+
+        let changed = ModelRegistry::migrate_storage_layout(&vault, &mut registry).unwrap();
+        assert!(changed);
+        assert!(vault.join("model-registry/model-a/weights.gguf").is_file());
+        assert_eq!(
+            registry.get("model-a").unwrap().file_path,
+            vault.join("model-registry/model-a/weights.gguf")
+        );
     }
 
     #[test]
@@ -314,5 +468,31 @@ mod tests {
 
         let loaded = ModelRegistry::load_from_vault(&vault).unwrap();
         assert_eq!(loaded.len(), 1);
+    }
+
+    #[test]
+    fn register_multiple_remote_same_provider() {
+        let mut registry = ModelRegistry::new();
+        let a = registry.register_remote("openai", "gpt-4o", None, None);
+        let b = registry.register_remote("openai", "gpt-4o-mini", None, None);
+        assert_ne!(a.id, b.id);
+        assert_eq!(a.id, "remote-openai-gpt-4o");
+        assert_eq!(b.id, "remote-openai-gpt-4o-mini");
+        assert_eq!(registry.len(), 2);
+    }
+
+    #[test]
+    fn register_remote_preserves_metadata_on_update() {
+        let mut registry = ModelRegistry::new();
+        let mut entry = registry.register_remote("openai", "gpt-4o", None, None);
+        entry.metadata = serde_json::json!({ "apiKeyEnv": "OPENAI_API_KEY" });
+        registry.upsert_entry(entry);
+
+        let updated = registry.register_remote("openai", "gpt-4o", Some("https://api.openai.com/v1".into()), None);
+        assert_eq!(updated.id, "remote-openai-gpt-4o");
+        assert_eq!(
+            updated.metadata.get("apiKeyEnv").and_then(|v| v.as_str()),
+            Some("OPENAI_API_KEY")
+        );
     }
 }

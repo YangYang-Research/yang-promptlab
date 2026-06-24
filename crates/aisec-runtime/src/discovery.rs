@@ -90,8 +90,8 @@ pub async fn discover_models_in_dir(models_dir: &Path) -> RuntimeResult<Vec<Disc
     Ok(discovered)
 }
 
-/// Probe llama-server health via `/health`, or report vault availability when idle.
-pub async fn check_health(base_url: Option<&str>, models_dir: Option<&Path>) -> RuntimeResult<bool> {
+/// Probe llama-server `/health` over HTTP only (no vault fallback).
+pub async fn probe_endpoint_health(base_url: Option<&str>) -> RuntimeResult<bool> {
     let default_url = crate::config::default_llama_base_url();
     let base = base_url
         .filter(|v| !v.trim().is_empty())
@@ -104,14 +104,22 @@ pub async fn check_health(base_url: Option<&str>, models_dir: Option<&Path>) -> 
 
     let url = format!("{}/health", base.trim_end_matches('/'));
     match client.get(&url).send().await {
-        Ok(resp) if resp.status().is_success() => return Ok(true),
-        Ok(_) => return Ok(false),
+        Ok(resp) if resp.status().is_success() => Ok(true),
+        Ok(_) => Ok(false),
         Err(err) => {
             debug!(%err, "llama.cpp health probe failed");
+            Ok(false)
         }
     }
+}
 
-    // Idle supervisor: healthy when vault contains at least one GGUF file.
+/// Probe llama-server health via `/health`, or report vault availability when idle.
+pub async fn check_health(base_url: Option<&str>, models_dir: Option<&Path>) -> RuntimeResult<bool> {
+    if probe_endpoint_health(base_url).await? {
+        return Ok(true);
+    }
+
+    // Idle supervisor: vault has GGUF files (API may still be offline until a model loads).
     if let Some(dir) = models_dir {
         let models = discover_models_in_dir(dir).await?;
         return Ok(!models.is_empty());

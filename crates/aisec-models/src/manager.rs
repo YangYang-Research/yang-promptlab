@@ -50,7 +50,10 @@ impl LocalModelManager {
         let hardware = detect_hardware()?;
         let mut llama_config = LlamaCppConfig::default();
         llama_config.n_gpu_layers = hardware.recommended_gpu_layers();
-        let registry = ModelRegistry::load_from_vault(&vault_path)?;
+        let mut registry = ModelRegistry::load_from_vault(&vault_path)?;
+        if ModelRegistry::migrate_storage_layout(&vault_path, &mut registry)? {
+            registry.save_to_vault(&vault_path)?;
+        }
 
         Ok(Self {
             vault_path,

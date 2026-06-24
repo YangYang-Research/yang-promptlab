@@ -91,6 +91,7 @@ export type AiInferenceModelOptionDto = {
   provider: string;
   verified: boolean;
   configured: boolean;
+  statusLabel: string;
 };
 
 export type AiInferenceSettingsDto = {
@@ -157,6 +158,20 @@ export function startRuntime(): Promise<RuntimeStatusDto> {
 
 export function stopRuntime(): Promise<RuntimeStatusDto> {
   return invokeCommand<RuntimeStatusDto>("runtime_stop");
+}
+
+export function deleteRuntime(): Promise<RuntimeStatusDto> {
+  return invokeCommand<RuntimeStatusDto>("runtime_delete");
+}
+
+export function loadRuntimeModel(modelId: string): Promise<RuntimeConfigurationDto> {
+  return invokeCommand<RuntimeConfigurationDto>("runtime_load_model", {
+    request: { modelId },
+  });
+}
+
+export function unloadRuntimeModel(): Promise<RuntimeConfigurationDto> {
+  return invokeCommand<RuntimeConfigurationDto>("runtime_unload_model");
 }
 
 export function restartRuntime(): Promise<RuntimeStatusDto> {

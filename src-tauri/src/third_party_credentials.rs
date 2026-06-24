@@ -17,6 +17,27 @@ pub const API_KEY_CREDENTIAL_ID: &str = "apiKeyCredentialId";
 pub const AWS_SECRET_CREDENTIAL_ID: &str = "awsSecretAccessKeyCredentialId";
 pub const AWS_SESSION_CREDENTIAL_ID: &str = "awsSessionTokenCredentialId";
 pub const API_KEY_ENV: &str = "apiKeyEnv";
+pub const LAST_CONNECTIVITY_OK: &str = "lastConnectivityOk";
+pub const LAST_CONNECTIVITY: &str = "lastConnectivity";
+pub const LAST_CONNECTIVITY_AT: &str = "lastConnectivityAt";
+pub const CONNECTIVITY_SUCCESS: &str = "Connection Successful";
+pub const CONNECTIVITY_FAILED: &str = "Connection Failed";
+
+pub fn is_connectivity_success(value: &str) -> bool {
+    value.starts_with(CONNECTIVITY_SUCCESS) || value.starts_with("Connected")
+}
+
+pub fn format_connectivity_value(ok: bool, latency_ms: u64) -> String {
+    if ok {
+        if latency_ms > 0 {
+            format!("{CONNECTIVITY_SUCCESS} ({latency_ms} ms)")
+        } else {
+            CONNECTIVITY_SUCCESS.into()
+        }
+    } else {
+        CONNECTIVITY_FAILED.into()
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct ThirdPartyCredentialFields {
@@ -135,6 +156,47 @@ pub fn validate_metadata_credentials(
     resolve_third_party_credentials(&mut probe, Some(metadata), vault, secrets)
 }
 
+pub fn has_third_party_credentials_metadata(metadata: &serde_json::Value) -> bool {
+    let has_api_key = credential_id_from_metadata(metadata, API_KEY_CREDENTIAL_ID).is_some()
+        || metadata
+            .get(API_KEY_ENV)
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| !value.trim().is_empty());
+    let has_secret = credential_id_from_metadata(metadata, AWS_SECRET_CREDENTIAL_ID).is_some();
+    if has_secret {
+        has_api_key
+    } else {
+        has_api_key
+    }
+}
+
+pub fn apply_model_connectivity_metadata(
+    metadata: &mut serde_json::Value,
+    ok: bool,
+    latency_ms: u64,
+    checked_at: &str,
+) {
+    let connectivity = format_connectivity_value(ok, latency_ms);
+    metadata[LAST_CONNECTIVITY_OK] = serde_json::Value::Bool(ok);
+    metadata[LAST_CONNECTIVITY] = serde_json::Value::String(connectivity);
+    metadata[LAST_CONNECTIVITY_AT] = serde_json::Value::String(checked_at.to_string());
+}
+
+pub fn connectivity_status_label(metadata: &serde_json::Value) -> Option<String> {
+    let value = metadata.get(LAST_CONNECTIVITY)?.as_str()?;
+    if is_connectivity_success(value) {
+        Some(CONNECTIVITY_SUCCESS.into())
+    } else if value == CONNECTIVITY_FAILED || value == "Failed" {
+        Some(CONNECTIVITY_FAILED.into())
+    } else {
+        Some(value.to_string())
+    }
+}
+
+pub fn short_connectivity_list_label(value: &str) -> Option<String> {
+    connectivity_status_label(&serde_json::json!({ LAST_CONNECTIVITY: value }))
+}
+
 fn load_stored_secret(
     vault: &ModelCredentialVault,
     secrets: &SecretStore,
@@ -198,7 +260,8 @@ fn parse_remote_provider(value: &str) -> Option<RemoteProvider> {
         "openrouter" => Some(RemoteProvider::OpenRouter),
         "azure" => Some(RemoteProvider::Azure),
         "bedrock" | "aws_bedrock" => Some(RemoteProvider::Bedrock),
-        _ => None,
+        "custom" => Some(RemoteProvider::OpenAi),
+        _ => Some(RemoteProvider::OpenAi),
     }
 }
 

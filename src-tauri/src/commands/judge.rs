@@ -130,9 +130,7 @@ fn parse_remote_provider(value: &str) -> Result<RemoteProvider, CommandError> {
         "openrouter" => Ok(RemoteProvider::OpenRouter),
         "azure" => Ok(RemoteProvider::Azure),
         "bedrock" | "aws_bedrock" => Ok(RemoteProvider::Bedrock),
-        other => Err(CommandError::invalid_input(format!(
-            "unsupported remote provider: {other}"
-        ))),
+        _ => Ok(RemoteProvider::OpenAi),
     }
 }
 

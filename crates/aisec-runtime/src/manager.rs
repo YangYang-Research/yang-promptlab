@@ -52,7 +52,7 @@ pub struct RuntimeManager {
 impl RuntimeManager {
     pub fn new(data_dir: impl Into<PathBuf>, bundled_binary: Option<PathBuf>) -> Self {
         let data_dir = data_dir.into();
-        let config = RuntimeConfig::new("", &data_dir);
+        let config = RuntimeConfig::new(&data_dir, &data_dir);
         Self {
             data_dir,
             lifecycle: RuntimeLifecycleState::NotInstalled,
@@ -194,7 +194,9 @@ impl RuntimeManager {
             )
             .await?;
         self.manifest = Some(manifest);
+        self.apply_manifest_to_supervisor().await?;
         self.lifecycle = RuntimeLifecycleState::Installed;
+        self.last_error = None;
         self.log("info", "repair: runtime installed").await;
 
         progress("complete", "Runtime installed — press Start Runtime when ready", 100);
@@ -222,8 +224,16 @@ impl RuntimeManager {
     }
 
     pub async fn start_runtime(&mut self) -> RuntimeResult<()> {
+        if let Some(manifest) = self.manifest.as_ref() {
+            if manifest.install_path.is_file() && !self.supervisor.binary_available() {
+                self.apply_manifest_to_supervisor().await?;
+            }
+        }
         if !self.supervisor.binary_available() {
             self.lifecycle = RuntimeLifecycleState::Failed;
+            self.last_error = Some(
+                "AI runtime binary not available — run Install Runtime or Repair Runtime".into(),
+            );
             return Err(RuntimeError::Unavailable);
         }
         let manifest = self
@@ -238,8 +248,14 @@ impl RuntimeManager {
     }
 
     pub fn sync_lifecycle_from_supervisor(&mut self) {
-        if self.supervisor.llama_runtime().is_loaded() {
+        use crate::supervisor::RuntimeProcessState;
+
+        if self.supervisor.llama_runtime().is_loaded()
+            || self.supervisor.state() == RuntimeProcessState::Running
+        {
             self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Running);
+        } else if matches!(self.lifecycle, RuntimeLifecycleState::Stopped) {
+            // Preserve an explicit user stop until Start is pressed again.
         } else if self.supervisor.binary_available() {
             self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Installed);
         }
@@ -257,6 +273,31 @@ impl RuntimeManager {
         };
     }
 
+    pub async fn load_model_at_path(
+        &mut self,
+        model_path: &std::path::Path,
+    ) -> RuntimeResult<()> {
+        self.on_model_load_started();
+        let result = self.supervisor.ensure_model_loaded(model_path).await;
+        self.on_model_load_finished(result.is_ok());
+        if result.is_ok() {
+            self.sync_lifecycle_from_supervisor();
+        }
+        result
+    }
+
+    pub async fn unload_loaded_model(&mut self) -> RuntimeResult<()> {
+        if self.supervisor.llama_runtime().is_loaded() {
+            self.supervisor.stop().await?;
+        }
+        self.lifecycle = if self.supervisor.binary_available() {
+            RuntimeLifecycleState::Installed
+        } else {
+            RuntimeLifecycleState::NotInstalled
+        };
+        Ok(())
+    }
+
     pub async fn stop_runtime(&mut self) -> RuntimeResult<()> {
         self.lifecycle = RuntimeLauncher::stop(&mut self.supervisor, self.lifecycle).await?;
         self.log("info", "runtime stopped").await;
@@ -272,6 +313,37 @@ impl RuntimeManager {
             RuntimeLauncher::restart(&mut self.supervisor, manifest, self.lifecycle).await?;
         self.log("info", "runtime restarted").await;
         self.run_health_check().await?;
+        Ok(())
+    }
+
+    pub async fn delete_runtime(&mut self) -> RuntimeResult<()> {
+        if self.is_runtime_active() {
+            self.stop_runtime().await?;
+        }
+
+        let manifest_path = RuntimeManifest::path(&self.data_dir);
+        if manifest_path.is_file() {
+            tokio::fs::remove_file(&manifest_path)
+                .await
+                .map_err(|err| RuntimeError::Process(err.to_string()))?;
+        }
+
+        let runtime_dir = crate::paths::bundled_runtime_dir(&self.data_dir);
+        if runtime_dir.is_dir() {
+            tokio::fs::remove_dir_all(&runtime_dir)
+                .await
+                .map_err(|err| RuntimeError::Process(err.to_string()))?;
+        }
+
+        self.manifest = None;
+        self.last_health = None;
+        self.last_benchmark = None;
+        self.last_error = None;
+        self.lifecycle = RuntimeLifecycleState::NotInstalled;
+
+        let default_binary = bundled_llama_server_binary(&self.data_dir);
+        self.supervisor.set_binary(default_binary).await?;
+        self.log("info", "runtime deleted").await;
         Ok(())
     }
 
@@ -323,7 +395,7 @@ impl RuntimeManager {
             backend: manifest.map(|m| m.backend.as_str().to_string()),
             platform: manifest.map(|m| m.platform.clone()),
             install_path: manifest.map(|m| m.install_path.display().to_string()),
-            installed: manifest.is_some_and(|m| m.installed),
+            installed: manifest.is_some_and(|m| m.installed) && self.supervisor.binary_available(),
             verified: manifest.is_some_and(|m| m.verified),
             binary_available: self.supervisor.binary_available(),
             base_url: self.supervisor.base_url().to_string(),
@@ -358,7 +430,13 @@ impl RuntimeManager {
 
     fn status_message(&self) -> String {
         match self.lifecycle {
-            RuntimeLifecycleState::Running => "AI runtime is running".into(),
+            RuntimeLifecycleState::Running => {
+                if self.supervisor.llama_runtime().is_loaded() {
+                    "AI runtime is running".into()
+                } else {
+                    "AI runtime ready — load a model to start the API on port 8081".into()
+                }
+            }
             RuntimeLifecycleState::Installed => {
                 "AI runtime installed — idle until a model is loaded".into()
             }

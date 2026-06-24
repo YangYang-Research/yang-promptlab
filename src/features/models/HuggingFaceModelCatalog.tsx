@@ -1,9 +1,23 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/shared/components";
 import type { ModelCatalogEntryDto } from "@/shared/ipc/models";
+import { openExternalUrl } from "@/shared/utils/openExternalUrl";
 
 import { huggingFaceModelIcon, huggingFaceRepoUrl } from "./huggingFace";
+
+export const HF_CATALOG_IMPORT_ID = "__import__";
+
+export type ImportModelFormProps = {
+  backendConnected: boolean;
+  importName: string;
+  importPath: string;
+  importBusy: "browse" | "import" | null;
+  onImportNameChange: (value: string) => void;
+  onImportPathChange: (value: string) => void;
+  onBrowseImport: () => void;
+  onImport: () => void;
+};
 
 type HuggingFaceModelCatalogProps = {
   catalog: ModelCatalogEntryDto[];
@@ -12,6 +26,8 @@ type HuggingFaceModelCatalogProps = {
   installingId: string | null;
   backendConnected: boolean;
   onInstall: (entry: ModelCatalogEntryDto) => void;
+  importForm?: ImportModelFormProps;
+  initialSelectImport?: boolean;
 };
 
 export function HuggingFaceModelCatalog({
@@ -21,9 +37,27 @@ export function HuggingFaceModelCatalog({
   installingId,
   backendConnected,
   onInstall,
+  importForm,
+  initialSelectImport = false,
 }: HuggingFaceModelCatalogProps) {
-  const [selectedId, setSelectedId] = useState<string | null>(catalog[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialSelectImport ? HF_CATALOG_IMPORT_ID : (catalog[0]?.id ?? null),
+  );
+
+  useEffect(() => {
+    if (initialSelectImport) {
+      setSelectedId(HF_CATALOG_IMPORT_ID);
+      return;
+    }
+    setSelectedId((current) => {
+      if (current === HF_CATALOG_IMPORT_ID) return current;
+      if (current && catalog.some((entry) => entry.id === current)) return current;
+      return catalog[0]?.id ?? null;
+    });
+  }, [catalog, initialSelectImport]);
+
   const selected = catalog.find((entry) => entry.id === selectedId) ?? null;
+  const importSelected = selectedId === HF_CATALOG_IMPORT_ID;
   const repoUrl = selected ? huggingFaceRepoUrl(selected.downloadUrl) : null;
 
   return (
@@ -66,9 +100,27 @@ export function HuggingFaceModelCatalog({
             </button>
           );
         })}
+
+        {importForm && (
+          <button
+            type="button"
+            className={`hf-catalog__card hf-catalog__card--import ${importSelected ? "hf-catalog__card--selected" : ""}`}
+            onClick={() => setSelectedId(HF_CATALOG_IMPORT_ID)}
+          >
+            <span className="hf-catalog__icon hf-catalog__icon--import" aria-hidden="true">
+              ↑
+            </span>
+            <span className="hf-catalog__name">Import Model</span>
+            <span className="hf-catalog__desc">Local .gguf or .zip package</span>
+          </button>
+        )}
       </div>
 
-      {selected && (
+      {importSelected && importForm && (
+        <ImportModelDetail {...importForm} />
+      )}
+
+      {selected && !importSelected && (
         <div className="hf-catalog__detail">
           <h4 className="hf-catalog__detail-title">{selected.name}</h4>
           <p className="text-muted text-sm">{selected.description}</p>
@@ -96,16 +148,17 @@ export function HuggingFaceModelCatalog({
               </dd>
             </div>
           </dl>
-          {repoUrl && (
-            <p className="text-sm">
-              <a href={repoUrl} target="_blank" rel="noreferrer" className="link">
-                View on Hugging Face →
-              </a>
-            </p>
-          )}
           <div className="hf-catalog__detail-actions">
+            {repoUrl && (
+              <Button
+                variant="secondary"
+                onClick={() => void openExternalUrl(repoUrl)}
+              >
+                View on Hugging Face
+              </Button>
+            )}
             <Button
-              variant="secondary"
+              variant="primary"
               disabled={
                 !backendConnected ||
                 installingId !== null ||
@@ -125,6 +178,68 @@ export function HuggingFaceModelCatalog({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function ImportModelDetail({
+  backendConnected,
+  importName,
+  importPath,
+  importBusy,
+  onImportNameChange,
+  onImportPathChange,
+  onBrowseImport,
+  onImport,
+}: ImportModelFormProps) {
+  return (
+    <div className="hf-catalog__detail hf-catalog__detail--import">
+      <h4 className="hf-catalog__detail-title">Import Model</h4>
+      <p className="text-muted text-sm">
+        Register a GGUF file or extract one from a ZIP package into the vault.
+      </p>
+      <div className="wizard-auth-fields">
+        <div className="settings-field">
+          <label htmlFor="addModelImportName">Display name</label>
+          <input
+            id="addModelImportName"
+            className="input"
+            value={importName}
+            onChange={(e) => onImportNameChange(e.target.value)}
+            disabled={!backendConnected || importBusy !== null}
+          />
+        </div>
+        <div className="settings-field">
+          <label htmlFor="addModelImportPath">Selected file</label>
+          <div className="import-path-row">
+            <input
+              id="addModelImportPath"
+              className="input mono"
+              value={importPath}
+              readOnly
+              placeholder="Browse for a .gguf or .zip file"
+              disabled={!backendConnected || importBusy !== null}
+              onChange={(e) => onImportPathChange(e.target.value)}
+            />
+            <Button
+              variant="secondary"
+              disabled={!backendConnected || importBusy !== null}
+              onClick={onBrowseImport}
+            >
+              {importBusy === "browse" ? "Opening…" : "Browse"}
+            </Button>
+          </div>
+        </div>
+      </div>
+      <div className="hf-catalog__detail-actions">
+        <Button
+          variant="primary"
+          disabled={!backendConnected || importBusy !== null}
+          onClick={onImport}
+        >
+          {importBusy === "import" ? "Importing…" : "Import"}
+        </Button>
+      </div>
     </div>
   );
 }

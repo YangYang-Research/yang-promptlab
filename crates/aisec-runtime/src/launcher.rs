@@ -24,12 +24,7 @@ impl RuntimeLauncher {
         let state = transition(lifecycle, RuntimeLifecycleState::Starting);
         supervisor.ensure_running().await?;
         manifest.last_started = Some(OffsetDateTime::now_utc());
-
-        if supervisor.llama_runtime().is_loaded() {
-            Ok(transition(state, RuntimeLifecycleState::Running))
-        } else {
-            Ok(transition(state, RuntimeLifecycleState::Installed))
-        }
+        Ok(transition(state, RuntimeLifecycleState::Running))
     }
 
     pub async fn stop(

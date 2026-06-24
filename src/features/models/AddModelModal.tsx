@@ -1,17 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 
-import { Button, Modal } from "@/shared/components";
+import { IconCloud, IconOnDevice, Modal } from "@/shared/components";
 import type { ModelCatalogEntryDto } from "@/shared/ipc/models";
 
 import { HuggingFaceModelCatalog } from "./HuggingFaceModelCatalog";
 import { ThirdPartyModelsPanel } from "./ThirdPartyModelsPanel";
+import type { ThirdPartyModelForm } from "@/shared/ipc/thirdPartyModels";
 
 export type AddModelTab = "public" | "third-party" | "import";
+
+type NavTab = Exclude<AddModelTab, "import">;
 
 type AddModelModalProps = {
   open: boolean;
   onClose: () => void;
   initialTab?: AddModelTab;
+  initialThirdPartyForm?: ThirdPartyModelForm | null;
+  editingModelId?: string | null;
+  modalTitle?: string;
   backendConnected: boolean;
   catalog: ModelCatalogEntryDto[];
   installedNames: Set<string>;
@@ -28,11 +34,33 @@ type AddModelModalProps = {
   onThirdPartySaved: () => void;
 };
 
-const TABS: Array<{ id: AddModelTab; label: string; hint: string }> = [
-  { id: "public", label: "Public Models", hint: "Built-in Hugging Face GGUF catalog" },
-  { id: "third-party", label: "Third-party Models", hint: "Cloud LLM providers (Bedrock, OpenAI, …)" },
-  { id: "import", label: "Import Model", hint: "Local .gguf or .zip package" },
+const TABS: Array<{
+  id: NavTab;
+  navLabel: string;
+  panelTitle: string;
+  hint: string;
+  icon: ComponentType<{ className?: string }>;
+}> = [
+  {
+    id: "public",
+    navLabel: "On-device",
+    panelTitle: "Public Models",
+    hint: "Built-in Hugging Face GGUF catalog and local import",
+    icon: IconOnDevice,
+  },
+  {
+    id: "third-party",
+    navLabel: "Remote",
+    panelTitle: "Third-party Providers",
+    hint: "Register cloud LLM providers for remote inference. Credentials are stored securely in the OS keychain when available.",
+    icon: IconCloud,
+  },
 ];
+
+function resolveNavTab(initialTab?: AddModelTab): NavTab {
+  if (initialTab === "third-party") return "third-party";
+  return "public";
+}
 
 export function AddModelModal({
   open,
@@ -52,37 +80,66 @@ export function AddModelModal({
   onImport,
   onThirdPartySaved,
   initialTab,
+  initialThirdPartyForm = null,
+  editingModelId = null,
+  modalTitle = "Add Model",
 }: AddModelModalProps) {
-  const [tab, setTab] = useState<AddModelTab>(initialTab ?? "public");
+  const [tab, setTab] = useState<NavTab>(resolveNavTab(initialTab));
+  const [selectImport, setSelectImport] = useState(initialTab === "import");
 
   useEffect(() => {
-    if (open && initialTab) {
-      setTab(initialTab);
-    }
+    if (!open) return;
+    setTab(resolveNavTab(initialTab));
+    setSelectImport(initialTab === "import");
   }, [open, initialTab]);
 
+  const isEditing = Boolean(editingModelId);
   const selectedTab = TABS.find((entry) => entry.id === tab) ?? TABS[0];
 
+  if (isEditing) {
+    return (
+      <Modal open={open} title={modalTitle} onClose={onClose} size="medium">
+        <ThirdPartyModelsPanel
+          key={open ? `edit-${editingModelId}` : "edit-closed"}
+          backendConnected={backendConnected}
+          initialForm={initialThirdPartyForm}
+          editingModelId={editingModelId}
+          onSaved={() => {
+            onThirdPartySaved();
+            onClose();
+          }}
+        />
+      </Modal>
+    );
+  }
+
   return (
-    <Modal open={open} title="Add Model" onClose={onClose} size="wide">
+    <Modal open={open} title={modalTitle} onClose={onClose} size="wide">
       <div className="add-model-modal">
         <div className="add-model-modal__layout">
           <nav className="add-model-modal__nav" aria-label="Add model sources">
-            {TABS.map((entry) => (
+            {TABS.map((entry) => {
+              const NavIcon = entry.icon;
+              return (
               <button
                 key={entry.id}
                 type="button"
                 className={`add-model-modal__nav-item ${tab === entry.id ? "add-model-modal__nav-item--active" : ""}`}
-                onClick={() => setTab(entry.id)}
+                onClick={() => {
+                  setTab(entry.id);
+                  setSelectImport(false);
+                }}
               >
-                {entry.label}
+                <NavIcon className="add-model-modal__nav-icon" />
+                <span>{entry.navLabel}</span>
               </button>
-            ))}
+              );
+            })}
           </nav>
 
           <div className="add-model-modal__panel">
             <div className="add-model-modal__panel-header">
-              <h3 className="add-model-modal__panel-title">{selectedTab.label}</h3>
+              <h3 className="add-model-modal__panel-title">{selectedTab.panelTitle}</h3>
               <p className="text-muted text-sm">{selectedTab.hint}</p>
             </div>
 
@@ -99,69 +156,36 @@ export function AddModelModal({
                   installingId={installingId}
                   backendConnected={backendConnected}
                   onInstall={onInstall}
+                  initialSelectImport={selectImport}
+                  importForm={{
+                    backendConnected,
+                    importName,
+                    importPath,
+                    importBusy,
+                    onImportNameChange,
+                    onImportPathChange,
+                    onBrowseImport,
+                    onImport,
+                  }}
                 />
               </>
             )}
 
             {tab === "third-party" && (
               <ThirdPartyModelsPanel
-                key={open ? "third-party-panel" : "third-party-panel-closed"}
+                key={
+                  open
+                    ? `third-party-panel-${initialThirdPartyForm?.provider ?? "new"}-${initialThirdPartyForm?.model ?? ""}`
+                    : "third-party-panel-closed"
+                }
                 backendConnected={backendConnected}
+                initialForm={initialThirdPartyForm}
+                editingModelId={editingModelId}
                 onSaved={() => {
                   onThirdPartySaved();
                   onClose();
                 }}
               />
-            )}
-
-            {tab === "import" && (
-              <>
-                <p className="text-muted text-sm">
-                  Register a GGUF file or extract one from a ZIP package into the vault.
-                </p>
-                <div className="wizard-auth-fields">
-                  <div className="settings-field">
-                    <label htmlFor="addModelImportName">Display name</label>
-                    <input
-                      id="addModelImportName"
-                      className="input"
-                      value={importName}
-                      onChange={(e) => onImportNameChange(e.target.value)}
-                      disabled={!backendConnected || importBusy !== null}
-                    />
-                  </div>
-                  <div className="settings-field">
-                    <label htmlFor="addModelImportPath">Selected file</label>
-                    <div className="import-path-row">
-                      <input
-                        id="addModelImportPath"
-                        className="input mono"
-                        value={importPath}
-                        readOnly
-                        placeholder="Browse for a .gguf or .zip file"
-                        disabled={!backendConnected || importBusy !== null}
-                        onChange={(e) => onImportPathChange(e.target.value)}
-                      />
-                      <Button
-                        variant="secondary"
-                        disabled={!backendConnected || importBusy !== null}
-                        onClick={onBrowseImport}
-                      >
-                        {importBusy === "browse" ? "Opening…" : "Browse"}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-                <div className="model-card__actions">
-                  <Button
-                    variant="primary"
-                    disabled={!backendConnected || importBusy !== null}
-                    onClick={onImport}
-                  >
-                    {importBusy === "import" ? "Importing…" : "Import"}
-                  </Button>
-                </div>
-              </>
             )}
           </div>
         </div>

@@ -219,11 +219,7 @@ impl RuntimeSupervisor {
         if self.runtime.is_loaded() {
             return self.runtime.health().await;
         }
-        check_health(
-            Some(&self.config.base_url),
-            Some(&self.config.models_dir),
-        )
-        .await
+        crate::discovery::probe_endpoint_health(Some(&self.config.base_url)).await
     }
 
     pub async fn list_installed_models(&self) -> RuntimeResult<Vec<DiscoveredModel>> {
