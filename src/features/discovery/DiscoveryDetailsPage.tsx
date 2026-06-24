@@ -20,7 +20,7 @@ import type { DiscoveredEndpoint, EndpointFingerprint } from "@/shared/types";
 
 export function DiscoveryDetailsPage() {
   const { scanId = "" } = useParams();
-  const { scans, projects, targets, endpoints, actions } = useAppStore();
+  const { scans, projects, targets, endpoints, actions, loading: storeLoading, error: storeError } = useAppStore();
   const [detail, setDetail] = useState<ScanDetailDto | null>(null);
   const [selectedEndpointIds, setSelectedEndpointIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -171,7 +171,11 @@ export function DiscoveryDetailsPage() {
         backOnly
         title="Discovery Details"
         actions={
-          <RefreshButton onClick={() => void actions.refresh()} />
+          <RefreshButton
+            loading={storeLoading}
+            error={storeError}
+            onClick={() => void actions.refresh()}
+          />
         }
       />
 

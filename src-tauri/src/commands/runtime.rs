@@ -2,8 +2,8 @@
 
 use aisec_models::{ModelEntry, ModelProvider};
 use aisec_runtime::{
-    RuntimeBenchmarkResult, RuntimeHardwareProfile, RuntimeHealthReport, RuntimeLogEntry,
-    RuntimeStatusSnapshot,
+    hardware::HardwareDetector, RuntimeBenchmarkResult, RuntimeHardwareProfile,
+    RuntimeHealthReport, RuntimeLogEntry, RuntimeLifecycleState, RuntimeStatusSnapshot,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -91,6 +91,7 @@ pub struct RuntimeConfigurationDto {
     pub runtime_version: Option<String>,
     pub connectivity: Option<String>,
     pub last_health_check: Option<String>,
+    pub model_load_in_progress: bool,
     pub settings: AiInferenceSettingsDto,
     pub runtime_status: RuntimeStatusDto,
 }
@@ -227,29 +228,49 @@ pub async fn runtime_load_model(
         (entry.file_path.clone(), entry.id.clone())
     };
 
-    {
-        let mut manager = state.runtime_manager().lock().await;
-        if !manager.supervisor().binary_available() {
-            return Err(map_runtime_err(aisec_runtime::RuntimeError::Unavailable));
-        }
-        manager
-            .load_model_at_path(&file_path)
-            .await
-            .map_err(map_runtime_err)?;
-        let _ = manager.run_health_check().await;
-    }
-
     let data_dir = state.data_dir();
     let models: Vec<ModelEntry> = {
         let manager = state.model_manager().lock().await;
         manager.list_models().into_iter().cloned().collect()
     };
-    let mut settings = load_settings(&data_dir).await?;
-    settings.route = AiInferenceRoute::Local;
-    settings.initialized = true;
-    settings.selected_model_id = Some(model_id);
-    settings = reconcile_settings(settings, &models);
-    save_settings(&data_dir, &settings).await?;
+    {
+        let mut settings = load_settings(&data_dir).await?;
+        settings.route = AiInferenceRoute::Local;
+        settings.initialized = true;
+        settings.selected_model_id = Some(model_id.clone());
+        let settings = reconcile_settings(settings, &models);
+        save_settings(&data_dir, &settings).await?;
+    }
+
+    {
+        let mut manager = state.runtime_manager().lock().await;
+        if !manager.supervisor().binary_available() {
+            return Err(map_runtime_err(aisec_runtime::RuntimeError::Unavailable));
+        }
+        let lifecycle = manager.lifecycle_state();
+        if !matches!(
+            lifecycle,
+            RuntimeLifecycleState::Running
+                | RuntimeLifecycleState::Starting
+                | RuntimeLifecycleState::Busy
+        ) {
+            return Err(CommandError::invalid_input(
+                "Start Runtime before loading a model",
+            ));
+        }
+        if !manager.is_model_loaded_at(&file_path).await {
+            load_model_with_loading_cache(
+                state.inner(),
+                &mut manager,
+                &file_path,
+                &model_id,
+            )
+                .await
+                .map_err(map_runtime_err)?;
+        } else {
+            let _ = manager.run_health_check().await;
+        }
+    }
 
     runtime_watch::spawn_runtime_watch(app);
     runtime_configuration_for_state(state.inner()).await
@@ -300,15 +321,24 @@ pub async fn runtime_logs(
     state: State<'_, AppState>,
     limit: Option<usize>,
 ) -> CommandResult<Vec<RuntimeLogEntry>> {
-    let manager = state.runtime_manager().lock().await;
-    Ok(manager.logs(limit.unwrap_or(100)).await)
+    if let Ok(manager) = state.runtime_manager().try_lock() {
+        return Ok(manager.logs(limit.unwrap_or(100)).await);
+    }
+    Ok(Vec::new())
 }
 
 #[tauri::command]
 pub async fn hardware_refresh(state: State<'_, AppState>) -> CommandResult<RuntimeHardwareDto> {
-    let mut manager = state.runtime_manager().lock().await;
-    let profile = manager
-        .refresh_hardware()
+    if let Ok(mut manager) = state.runtime_manager().try_lock() {
+        let profile = manager
+            .refresh_hardware()
+            .await
+            .map_err(map_runtime_err)?;
+        return Ok(profile.into());
+    }
+
+    let profile = HardwareDetector::new(state.data_dir())
+        .detect_and_persist()
         .await
         .map_err(map_runtime_err)?;
     Ok(profile.into())
@@ -316,8 +346,16 @@ pub async fn hardware_refresh(state: State<'_, AppState>) -> CommandResult<Runti
 
 #[tauri::command]
 pub async fn runtime_hardware(state: State<'_, AppState>) -> CommandResult<Option<RuntimeHardwareDto>> {
-    let manager = state.runtime_manager().lock().await;
-    Ok(manager.hardware().cloned().map(RuntimeHardwareDto::from))
+    if let Ok(manager) = state.runtime_manager().try_lock() {
+        if let Some(profile) = manager.hardware() {
+            return Ok(Some(profile.clone().into()));
+        }
+    }
+    let profile = HardwareDetector::new(state.data_dir())
+        .load()
+        .await
+        .map_err(map_runtime_err)?;
+    Ok(profile.map(RuntimeHardwareDto::from))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -408,6 +446,7 @@ fn local_status_label(
     match lifecycle {
         "running" | "busy" if model_loaded => "Running".into(),
         "running" | "busy" => "Ready".into(),
+        "starting" if !model_loaded => "Loading model".into(),
         "starting" => "Starting".into(),
         "stopping" => "Stopping".into(),
         "stopped" => "Stopped".into(),
@@ -419,17 +458,17 @@ fn local_status_label(
     }
 }
 
-async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<RuntimeConfigurationDto> {
-    let models: Vec<ModelEntry> = {
-        let manager = state.model_manager().lock().await;
-        manager.list_models().into_iter().cloned().collect()
-    };
+async fn store_runtime_configuration_cache(state: &AppState, dto: &RuntimeConfigurationDto) {
+    *state.runtime_config_cache().lock().await = Some(dto.clone());
+}
 
-    let (settings, _) = reconcile_inference_settings(state, &models).await?;
-    let inference = settings_to_dto(&settings, &models);
-
-    let runtime_manager = state.runtime_manager().lock().await;
-    let runtime_status = status_dto_for_manager(&runtime_manager).await;
+async fn assemble_runtime_configuration(
+    models: &[ModelEntry],
+    settings: &AiInferenceSettings,
+    inference: &AiInferenceSettingsDto,
+    runtime_manager: &aisec_runtime::RuntimeManager,
+) -> RuntimeConfigurationDto {
+    let runtime_status = status_dto_for_manager(runtime_manager).await;
     let last_health = runtime_manager.last_health().cloned();
 
     let selected_model = settings.selected_model_id.as_ref().and_then(|id| {
@@ -452,7 +491,7 @@ async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<Runt
             (
                 "third_party".to_string(),
                 third_party_status_label(
-                    &settings,
+                    settings,
                     inference.third_party_available,
                     selected_model,
                 ),
@@ -511,7 +550,7 @@ async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<Runt
             )
         };
 
-    Ok(RuntimeConfigurationDto {
+    RuntimeConfigurationDto {
         mode,
         status_label,
         provider,
@@ -520,9 +559,192 @@ async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<Runt
         runtime_version,
         connectivity,
         last_health_check,
-        settings: inference,
+        model_load_in_progress: false,
+        settings: inference.clone(),
         runtime_status,
-    })
+    }
+}
+
+fn fallback_runtime_status_when_busy() -> RuntimeStatusDto {
+    RuntimeStatusDto {
+        lifecycle_state: "starting".into(),
+        runtime_version: None,
+        backend: Some("llama.cpp".into()),
+        platform: None,
+        install_path: None,
+        installed: true,
+        verified: false,
+        binary_available: true,
+        base_url: aisec_runtime::default_llama_base_url(),
+        model_loaded: false,
+        loaded_model_path: None,
+        message: "Loading model into llama-server — large models may take several minutes on CPU".into(),
+        requires_attention: false,
+        last_error: None,
+        recommended_runtime: None,
+    }
+}
+
+async fn assemble_runtime_configuration_busy_fallback(
+    models: &[ModelEntry],
+    settings: &AiInferenceSettings,
+    inference: &AiInferenceSettingsDto,
+) -> RuntimeConfigurationDto {
+    let selected_model = settings.selected_model_id.as_ref().and_then(|id| {
+        models.iter().find(|m| &m.id == id)
+    });
+    let runtime_status = fallback_runtime_status_when_busy();
+
+    let (mode, status_label, provider, model_name, runtime_name, runtime_version, connectivity, last_health_check) =
+        if !settings.initialized {
+            (
+                "not_configured".to_string(),
+                "Setup Required".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        } else if settings.route == AiInferenceRoute::ThirdParty {
+            (
+                "third_party".to_string(),
+                third_party_status_label(
+                    settings,
+                    inference.third_party_available,
+                    selected_model,
+                ),
+                selected_model.map(|m| m.display_provider()),
+                inference.selected_model_name.clone(),
+                None,
+                None,
+                settings.third_party_connectivity.clone(),
+                settings.third_party_last_health_check.clone(),
+            )
+        } else {
+            (
+                "local".to_string(),
+                "Loading model".into(),
+                None,
+                inference.selected_model_name.clone(),
+                Some("llama.cpp".into()),
+                None,
+                Some("Offline — load a model".into()),
+                None,
+            )
+        };
+
+    RuntimeConfigurationDto {
+        mode,
+        status_label,
+        provider,
+        model_name,
+        runtime_name,
+        runtime_version,
+        connectivity,
+        last_health_check,
+        model_load_in_progress: false,
+        settings: inference.clone(),
+        runtime_status,
+    }
+}
+
+async fn runtime_model_loading_id(state: &AppState) -> Option<String> {
+    state.runtime_model_loading_id().lock().await.clone()
+}
+
+pub(crate) async fn set_runtime_model_loading(state: &AppState, model_id: Option<String>) {
+    *state.runtime_model_loading_id().lock().await = model_id;
+}
+
+fn apply_model_loading_overlay(dto: &mut RuntimeConfigurationDto, loading_model_id: Option<&str>) {
+    let Some(model_id) = loading_model_id else {
+        return;
+    };
+    dto.model_load_in_progress = true;
+    dto.status_label = "Loading model".into();
+    dto.runtime_status.lifecycle_state = "starting".into();
+    dto.runtime_status.model_loaded = false;
+    dto.runtime_status.loaded_model_path = None;
+    dto.runtime_status.message =
+        "Loading model into llama-server — large models may take several minutes on CPU".into();
+    if dto.mode == "not_configured" {
+        dto.mode = "local".into();
+    }
+    dto.settings.selected_model_id = Some(model_id.to_string());
+}
+
+/// Reserved for startup auto-resume; loading UI is driven by `runtime_model_loading_id`.
+pub(crate) async fn prime_loading_configuration_cache(_state: &AppState, _model_id: &str) {}
+
+/// Refresh the configuration cache while the runtime manager lock is already held.
+pub(crate) async fn prime_runtime_configuration_cache(
+    state: &AppState,
+    runtime_manager: &aisec_runtime::RuntimeManager,
+) {
+    let models: Vec<ModelEntry> = {
+        let manager = state.model_manager().lock().await;
+        manager.list_models().into_iter().cloned().collect()
+    };
+    let Ok(settings) = load_settings(state.data_dir()).await else {
+        return;
+    };
+    let inference = settings_to_dto(&settings, &models);
+    let dto = assemble_runtime_configuration(&models, &settings, &inference, runtime_manager).await;
+    store_runtime_configuration_cache(state, &dto).await;
+}
+
+/// Shared model-load path for manual IPC and startup auto-resume.
+pub(crate) async fn load_model_with_loading_cache(
+    state: &AppState,
+    manager: &mut aisec_runtime::RuntimeManager,
+    file_path: &std::path::Path,
+    model_id: &str,
+) -> Result<(), aisec_runtime::RuntimeError> {
+    set_runtime_model_loading(state, Some(model_id.to_string())).await;
+
+    let result = async {
+        if !manager.is_model_loaded_at(file_path).await {
+            manager.on_model_load_started();
+            prime_runtime_configuration_cache(state, manager).await;
+        }
+        manager.load_model_at_path(file_path).await
+    }
+    .await;
+
+    if result.is_ok() {
+        let _ = manager.run_health_check().await;
+    }
+    set_runtime_model_loading(state, None).await;
+    prime_runtime_configuration_cache(state, manager).await;
+    result
+}
+
+async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<RuntimeConfigurationDto> {
+    let models: Vec<ModelEntry> = {
+        let manager = state.model_manager().lock().await;
+        manager.list_models().into_iter().cloned().collect()
+    };
+
+    let (settings, _) = reconcile_inference_settings(state, &models).await?;
+    let inference = settings_to_dto(&settings, &models);
+    let loading_model_id = runtime_model_loading_id(state).await;
+
+    let base = if let Ok(runtime_manager) = state.runtime_manager().try_lock() {
+        let dto =
+            assemble_runtime_configuration(&models, &settings, &inference, &runtime_manager).await;
+        store_runtime_configuration_cache(state, &dto).await;
+        dto
+    } else if let Some(cached) = state.runtime_config_cache().lock().await.clone() {
+        cached
+    } else {
+        assemble_runtime_configuration_busy_fallback(&models, &settings, &inference).await
+    };
+
+    let mut response = base;
+    apply_model_loading_overlay(&mut response, loading_model_id.as_deref());
+    Ok(response)
 }
 
 #[tauri::command]
@@ -548,8 +770,20 @@ pub async fn runtime_set_inference_route(
         CommandError::invalid_input(format!("unknown inference route: {}", request.route))
     })?;
 
+    if state.runtime_model_loading_id().lock().await.is_some() {
+        return Err(CommandError::invalid_input(
+            "cannot change inference route while a local model is loading",
+        ));
+    }
+
     if route == AiInferenceRoute::ThirdParty {
         let mut runtime_mgr = state.runtime_manager().lock().await;
+        let snap = runtime_mgr.status_snapshot();
+        if snap.lifecycle_state == RuntimeLifecycleState::Starting.as_str() && !snap.model_loaded {
+            return Err(CommandError::invalid_input(
+                "cannot switch to third-party while a local model is loading",
+            ));
+        }
         if runtime_mgr.is_runtime_active() {
             let _ = runtime_mgr.stop_runtime().await;
         }
@@ -581,6 +815,23 @@ pub async fn runtime_set_inference_route(
         });
         if valid {
             settings.selected_model_id = Some(id);
+        }
+    } else {
+        let selection_matches_route = settings
+            .selected_model_id
+            .as_ref()
+            .is_some_and(|id| {
+                models.iter().any(|model| match route {
+                    AiInferenceRoute::ThirdParty => is_third_party_model(model) && model.id == *id,
+                    AiInferenceRoute::Local => is_local_model(model) && model.id == *id,
+                })
+            });
+        if !selection_matches_route {
+            settings.selected_model_id = None;
+            if route == AiInferenceRoute::ThirdParty {
+                settings.third_party_connectivity = None;
+                settings.third_party_last_health_check = None;
+            }
         }
     }
 

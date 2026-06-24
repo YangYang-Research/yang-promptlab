@@ -27,3 +27,11 @@ pub fn bundled_ollama_binary(app_root: impl AsRef<Path>) -> PathBuf {
         base.join("ollama")
     }
 }
+
+/// Compare two paths, resolving symlinks when possible.
+pub fn same_paths(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => a == b,
+    }
+}

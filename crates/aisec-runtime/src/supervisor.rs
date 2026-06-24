@@ -95,11 +95,17 @@ impl RuntimeSupervisor {
     }
 
     pub fn is_process_alive(&mut self) -> bool {
-        if !self.runtime.is_loaded() {
-            return self.binary_available();
+        if self.runtime.is_loaded() {
+            return true;
         }
-        // When a model is loaded, rely on health rather than subprocess wait handles.
-        true
+        self.binary_available()
+    }
+
+    pub async fn is_process_alive_async(&self) -> bool {
+        if self.runtime.is_loaded() {
+            return self.runtime.subprocess_running().await;
+        }
+        self.binary_available()
     }
 
     pub fn llama_runtime(&self) -> &LlamaCppRuntime {
@@ -182,7 +188,9 @@ impl RuntimeSupervisor {
 
         if self.runtime.is_loaded() {
             if let Some(loaded) = self.runtime.loaded_model_path().await {
-                if loaded == model_path && self.check_health().await.unwrap_or(false) {
+                if crate::paths::same_paths(&loaded, model_path)
+                    && self.check_health().await.unwrap_or(false)
+                {
                     self.state = RuntimeProcessState::Running;
                     return Ok(());
                 }

@@ -27,7 +27,7 @@ function severityVariant(severity: Severity): "danger" | "warning" | "info" | "m
 }
 
 export function ResultsStep({ projectId, scanId, onDone }: ResultsStepProps) {
-  const { scans, findings, actions } = useAppStore();
+  const { scans, findings, actions, loading, error } = useAppStore();
 
   const [exporting, setExporting] = useState<ReportExportFormat | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -88,6 +88,8 @@ export function ResultsStep({ projectId, scanId, onDone }: ResultsStepProps) {
           <RefreshButton
             size="sm"
             ariaLabel="Refresh data"
+            loading={loading}
+            error={error}
             onClick={() => void actions.refresh()}
           />
         </div>

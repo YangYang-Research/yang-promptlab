@@ -159,7 +159,7 @@ export function ScansPage() {
         description="Monitor background security scans"
         actions={
           <div className="page-actions">
-            <RefreshButton loading={loading} onClick={() => void actions.refresh()} />
+            <RefreshButton loading={loading} error={error} onClick={() => void actions.refresh()} />
             <Link to="/scans/new">
               <Button variant="primary">New Scan</Button>
             </Link>

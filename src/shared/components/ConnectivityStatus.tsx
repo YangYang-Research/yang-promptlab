@@ -5,7 +5,12 @@ export function connectivityStatusVariant(
 ): ConnectivityStatusVariant | null {
   if (!label) return null;
   const value = label.trim();
-  if (value.startsWith("Connection Successful") || value.startsWith("Connected")) {
+  if (
+    value.startsWith("Connection Successful") ||
+    value.startsWith("Connected") ||
+    value === "Running" ||
+    value === "Ready"
+  ) {
     return "success";
   }
   if (value === "Connection Failed" || value === "Failed") {

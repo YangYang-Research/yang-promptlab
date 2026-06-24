@@ -16,6 +16,7 @@ use crate::monitor::{RuntimeHealthReport, RuntimeMonitor};
 use crate::paths::bundled_llama_server_binary;
 use crate::state::{transition, RuntimeLifecycleState};
 use crate::supervisor::RuntimeSupervisor;
+use time::OffsetDateTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -122,7 +123,7 @@ impl RuntimeManager {
         self.last_error = None;
         self.manifest = RuntimeManifest::load(&self.data_dir).await?;
 
-        // Load persisted hardware profile only — never detect on startup.
+        // Load persisted hardware profile; refreshed synchronously during app setup.
         self.hardware = HardwareDetector::new(&self.data_dir).load().await?;
 
         let binary_path = self.install_path_from_manifest();
@@ -277,13 +278,30 @@ impl RuntimeManager {
         &mut self,
         model_path: &std::path::Path,
     ) -> RuntimeResult<()> {
-        self.on_model_load_started();
+        if self.is_model_loaded_at(model_path).await {
+            self.sync_lifecycle_from_supervisor();
+            return Ok(());
+        }
+        if !matches!(self.lifecycle, RuntimeLifecycleState::Starting) {
+            self.on_model_load_started();
+        }
         let result = self.supervisor.ensure_model_loaded(model_path).await;
         self.on_model_load_finished(result.is_ok());
         if result.is_ok() {
             self.sync_lifecycle_from_supervisor();
         }
         result
+    }
+
+    pub async fn is_model_loaded_at(&mut self, model_path: &std::path::Path) -> bool {
+        if !self.supervisor.llama_runtime().is_loaded() {
+            return false;
+        }
+        let Some(loaded) = self.supervisor.llama_runtime().loaded_model_path().await else {
+            return false;
+        };
+        crate::paths::same_paths(&loaded, model_path)
+            && self.supervisor.check_health().await.unwrap_or(false)
     }
 
     pub async fn unload_loaded_model(&mut self) -> RuntimeResult<()> {
@@ -305,12 +323,11 @@ impl RuntimeManager {
     }
 
     pub async fn restart_runtime(&mut self) -> RuntimeResult<()> {
-        let manifest = self
-            .manifest
-            .as_mut()
-            .ok_or_else(|| RuntimeError::Config("runtime manifest missing".into()))?;
-        self.lifecycle =
-            RuntimeLauncher::restart(&mut self.supervisor, manifest, self.lifecycle).await?;
+        self.supervisor_mut().restart().await?;
+        self.sync_lifecycle_from_supervisor();
+        if let Some(manifest) = self.manifest.as_mut() {
+            manifest.last_started = Some(OffsetDateTime::now_utc());
+        }
         self.log("info", "runtime restarted").await;
         self.run_health_check().await?;
         Ok(())

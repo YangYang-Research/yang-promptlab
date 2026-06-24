@@ -187,7 +187,7 @@ export function FindingsPage() {
         title="Findings"
         description="Read-only view of vulnerabilities from SQLite attack and judge results"
         actions={
-          <RefreshButton loading={loading} onClick={() => void actions.refresh()} />
+          <RefreshButton loading={loading} error={error} onClick={() => void actions.refresh()} />
         }
       />
 

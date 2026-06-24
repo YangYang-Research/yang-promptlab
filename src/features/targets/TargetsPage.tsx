@@ -130,7 +130,7 @@ export function TargetsPage() {
         description="Endpoints, applications, and models under test"
         actions={
           <>
-            <RefreshButton loading={loading} onClick={() => void actions.refresh()} />
+            <RefreshButton loading={loading} error={error} onClick={() => void actions.refresh()} />
             <Button variant="primary" onClick={() => setModalOpen(true)}>
               Add Target
             </Button>

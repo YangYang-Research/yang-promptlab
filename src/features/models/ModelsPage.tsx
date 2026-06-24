@@ -4,8 +4,9 @@ import { useLocation } from "react-router-dom";
 import {
   Button,
   Card,
+  Modal,
   PageHeader,
-  StatusBadge,
+  RefreshButton,
 } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
 import {
@@ -32,10 +33,13 @@ import {
   type ModelRegistryInfoDto,
   type ModelVaultStatsDto,
 } from "@/shared/ipc/models";
+import { getRuntimeConfiguration } from "@/shared/ipc/runtime";
 import { pickAnyModelImportFile } from "@/shared/ipc/dialog";
 import { useToast } from "@/shared/notifications";
+import { useRuntimeModelLoading } from "@/shared/hooks/useRuntimeModelLoading";
 import { formatBytes } from "@/shared/utils/format";
 import { DownloadManagerCard } from "./DownloadManagerCard";
+import { ModelRegistrySection } from "./ModelRegistrySection";
 import { AddModelModal, type AddModelTab } from "./AddModelModal";
 import { loadThirdPartyModelForm, type ThirdPartyModelForm } from "@/shared/ipc/thirdPartyModels";
 
@@ -49,18 +53,20 @@ function isThirdPartyModel(model: ModelEntryDto): boolean {
   return model.format === "api" || model.id.startsWith("remote-");
 }
 
-function modelRegistryBadgeStatus(model: ModelEntryDto): string {
-  if (isThirdPartyModel(model)) {
-    return model.verified ? "registered" : "available";
-  }
-  return model.verified ? "installed" : "available";
-}
-
-function registryDisplayName(model: ModelEntryDto): string {
-  if (isThirdPartyModel(model)) {
-    return model.version || model.name;
-  }
-  return model.name;
+function findLoadedLocalModel(
+  models: ModelEntryDto[],
+  loadedModelPath: string | null,
+): ModelEntryDto | undefined {
+  if (!loadedModelPath) return undefined;
+  const fileName = loadedModelPath.split(/[/\\]/).pop() ?? "";
+  const stem = fileName.replace(/\.gguf$/i, "");
+  return models.find(
+    (m) =>
+      !isThirdPartyModel(m) &&
+      (m.name === stem ||
+        loadedModelPath.endsWith(`/${m.name}.gguf`) ||
+        loadedModelPath.endsWith(`\\${m.name}.gguf`)),
+  );
 }
 
 export function ModelsPage() {
@@ -84,11 +90,17 @@ export function ModelsPage() {
   const [addModelInitialTab, setAddModelInitialTab] = useState<AddModelTab>("public");
   const [editThirdPartyForm, setEditThirdPartyForm] = useState<ThirdPartyModelForm | null>(null);
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
+  const [localTestConfirm, setLocalTestConfirm] = useState<{
+    target: ModelEntryDto;
+    loadedName: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const verifyInFlightRef = useRef(false);
   const deepLinkEditRef = useRef<string | null>(null);
 
   const installedNames = useMemo(() => new Set(installed.map((m) => m.name)), [installed]);
+  const { modelLoading: runtimeModelLoading } = useRuntimeModelLoading(backendConnected);
 
   useEffect(() => {
     const state = location.state as ModelsPageLocationState | null;
@@ -216,6 +228,23 @@ export function ModelsPage() {
       .then(setVaultPath)
       .catch(() => undefined);
   }, [backendConnected, refreshModels]);
+
+  const handleRefresh = useCallback(async () => {
+    if (!backendConnected || refreshing) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      await Promise.all([
+        refreshModels(),
+        getModelsVaultPath().then(setVaultPath).catch(() => undefined),
+        pollDownloadStatus(),
+      ]);
+    } catch (err) {
+      setError(toAppError(err).message);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [backendConnected, refreshing, refreshModels, pollDownloadStatus]);
 
   useEffect(() => {
     if (!backendConnected) {
@@ -376,6 +405,10 @@ export function ModelsPage() {
   }
 
   async function handleRemove(modelId: string) {
+    if (runtimeModelLoading) {
+      const model = installed.find((m) => m.id === modelId);
+      if (model && !isThirdPartyModel(model)) return;
+    }
     setError(null);
     setBusyModelId(modelId);
     try {
@@ -388,11 +421,24 @@ export function ModelsPage() {
     }
   }
 
-  async function handleTest(model: ModelEntryDto) {
+  async function runLocalModelTest(model: ModelEntryDto) {
     setError(null);
     setBusyModelId(model.id);
     try {
+      const result = await testModelInference(model.id);
+      notify(`${result.mode}: ${result.sample}`, result.ok ? "success" : "error");
+    } catch (err) {
+      notify(toAppError(err).message, "error");
+    } finally {
+      setBusyModelId(null);
+    }
+  }
+
+  async function handleTest(model: ModelEntryDto) {
+    setError(null);
+    try {
       if (isThirdPartyModel(model)) {
+        setBusyModelId(model.id);
         const result = await testModelConnection(model.id);
         const latency = result.latencyMs > 0 ? ` (${result.latencyMs} ms)` : "";
         const label = `${result.provider} / ${result.model}`;
@@ -401,13 +447,34 @@ export function ModelsPage() {
         } else {
           notify(`Connection Failed — ${label}: ${result.message}`, "error");
         }
+        setBusyModelId(null);
       } else {
-        const result = await testModelInference(model.id);
-        notify(`${result.mode}: ${result.sample}`, result.ok ? "success" : "error");
+        if (runtimeModelLoading) return;
+        const config = await getRuntimeConfiguration();
+        const { modelLoaded, loadedModelPath } = config.runtimeStatus;
+        const selectedId = config.settings.selectedModelId;
+        if (modelLoaded && selectedId && selectedId !== model.id) {
+          const loaded = installed.find((m) => m.id === selectedId);
+          setLocalTestConfirm({
+            target: model,
+            loadedName: loaded?.name ?? config.modelName ?? "the loaded model",
+          });
+          return;
+        }
+        if (modelLoaded && !selectedId) {
+          const loaded = findLoadedLocalModel(installed, loadedModelPath);
+          if (loaded && loaded.id !== model.id) {
+            setLocalTestConfirm({
+              target: model,
+              loadedName: loaded.name,
+            });
+            return;
+          }
+        }
+        await runLocalModelTest(model);
       }
     } catch (err) {
       notify(toAppError(err).message, "error");
-    } finally {
       setBusyModelId(null);
     }
   }
@@ -417,6 +484,19 @@ export function ModelsPage() {
       <PageHeader
         title="Models"
         description="Manage local GGUF models, cloud providers, and imports"
+        actions={
+          <>
+            <RefreshButton
+              loading={refreshing}
+              error={error}
+              disabled={!backendConnected}
+              onClick={() => void handleRefresh()}
+            />
+            <Button variant="primary" disabled={!backendConnected} onClick={() => openAddModel()}>
+              Add Model
+            </Button>
+          </>
+        }
       />
 
       {!backendConnected && (
@@ -499,79 +579,46 @@ export function ModelsPage() {
         />
       )}
 
-      <section className="runtime-section">
-        <div className="runtime-section__header">
-          <h2 className="runtime-section__title">Model Registry</h2>
-          <Button
-            variant="primary"
-            disabled={!backendConnected}
-            onClick={() => openAddModel()}
-          >
-            Add Model
-          </Button>
-        </div>
-        <Card className="model-card model-card--wide">
-          {installed.length === 0 ? (
-            <p className="text-muted">No models registered yet.</p>
-          ) : (
-            installed.map((model) => (
-              <div key={model.id} className="model-catalog__row">
-                <div>
-                  <div className="model-card__header">
-                    <div>
-                      <h4 className="model-card__name">{registryDisplayName(model)}</h4>
-                      <p className="text-muted text-sm">
-                        {model.provider} · v{model.version}
-                        {model.sizeBytes != null
-                          ? ` · ${formatBytes(model.sizeBytes)}`
-                          : model.sizeGb > 0
-                            ? ` · ${model.sizeGb.toFixed(2)} GB`
-                            : ""}
-                      </p>
-                    </div>
-                    <StatusBadge status={modelRegistryBadgeStatus(model)} />
-                  </div>
-                  <p className="text-muted text-sm">
-                    {[
-                      model.capabilities.chat && "chat",
-                      model.capabilities.completion && "completion",
-                      model.capabilities.embeddings && "embeddings",
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                  <p className="model-card__path mono text-sm">{model.path}</p>
-                </div>
-                <div className="model-card__actions">
-                  {isThirdPartyModel(model) && (
-                    <Button
-                      variant="ghost"
-                      disabled={busyModelId !== null}
-                      onClick={() => void handleEdit(model)}
-                    >
-                      Edit
-                    </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    disabled={busyModelId !== null}
-                    onClick={() => void handleTest(model)}
-                  >
-                    Test
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={busyModelId !== null}
-                    onClick={() => void handleRemove(model.id)}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              </div>
-            ))
-          )}
-        </Card>
-      </section>
+      <ModelRegistrySection
+        models={installed}
+        busyModelId={busyModelId}
+        runtimeModelLoading={runtimeModelLoading}
+        onTest={(model) => void handleTest(model)}
+        onEdit={(model) => void handleEdit(model)}
+        onRemove={(modelId) => void handleRemove(modelId)}
+      />
+
+      <Modal
+        open={localTestConfirm !== null}
+        title="Switch model in AI Runtime?"
+        onClose={() => setLocalTestConfirm(null)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setLocalTestConfirm(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={busyModelId !== null}
+              onClick={() => {
+                const target = localTestConfirm?.target;
+                setLocalTestConfirm(null);
+                if (target) void runLocalModelTest(target);
+              }}
+            >
+              Continue
+            </Button>
+          </>
+        }
+      >
+        {localTestConfirm ? (
+          <p>
+            <strong>{localTestConfirm.loadedName}</strong> is active in AI Runtime. To test{" "}
+            <strong>{localTestConfirm.target.name}</strong>, the runtime will unload the current
+            model and load this one first. Continue?
+          </p>
+        ) : null}
+      </Modal>
 
       <AddModelModal
         open={addModelOpen}

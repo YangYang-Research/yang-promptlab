@@ -276,13 +276,26 @@ impl LlamaCppRuntime {
     /// Probe `/health` on the llama-server HTTP API.
     pub async fn health(&self) -> RuntimeResult<bool> {
         let url = format!("{}/health", self.base_url());
-        match self.client.get(&url).send().await {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(3))
+            .build()
+            .map_err(|err| RuntimeError::Process(err.to_string()))?;
+        match client.get(&url).send().await {
             Ok(resp) => Ok(resp.status().is_success()),
             Err(err) => {
                 warn!(%err, "llama.cpp health check failed");
                 Ok(false)
             }
         }
+    }
+
+    /// Returns false when the supervised subprocess has exited.
+    pub async fn subprocess_running(&self) -> bool {
+        let mut guard = self.process.lock().await;
+        let Some(proc) = guard.as_mut() else {
+            return false;
+        };
+        matches!(proc.try_wait(), Ok(None))
     }
 
     /// Stop the server subprocess and reset state.

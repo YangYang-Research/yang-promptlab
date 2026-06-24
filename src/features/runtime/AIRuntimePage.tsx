@@ -2,9 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 
-import { Button, Card, ConnectivityStatus, PageHeader, RefreshButton } from "@/shared/components";
+import { Button, Card, ConnectivityStatus, Modal, PageHeader, RefreshButton } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
 import { useAiInferenceRoute } from "@/shared/hooks/useAiInferenceRoute";
+import { useRuntimeModelLoading } from "@/shared/hooks/useRuntimeModelLoading";
 import {
   deleteRuntime,
   getRuntimeHardware,
@@ -210,11 +211,15 @@ function RuntimeModePicker({
 function ModeToggle({
   mode,
   disabled,
+  disableThirdParty = false,
+  disableLocal = false,
   onChange,
   compact = false,
 }: {
   mode: RuntimeConfigurationDto["mode"];
   disabled: boolean;
+  disableThirdParty?: boolean;
+  disableLocal?: boolean;
   onChange: (route: AiInferenceRoute) => void;
   compact?: boolean;
 }) {
@@ -230,7 +235,7 @@ function ModeToggle({
       <button
         type="button"
         className={`runtime-route-toggle__btn${thirdPartyActive ? " runtime-route-toggle__btn--active" : ""}`}
-        disabled={disabled}
+        disabled={disabled || disableThirdParty}
         aria-pressed={thirdPartyActive}
         onClick={() => onChange("third_party")}
       >
@@ -239,7 +244,7 @@ function ModeToggle({
       <button
         type="button"
         className={`runtime-route-toggle__btn${localActive ? " runtime-route-toggle__btn--active" : ""}`}
-        disabled={disabled}
+        disabled={disabled || disableLocal}
         aria-pressed={localActive}
         onClick={() => onChange("local")}
       >
@@ -267,6 +272,15 @@ export function AIRuntimePage() {
     id: string;
     action: "load" | "unload";
   } | null>(null);
+  const [loadModelConfirm, setLoadModelConfirm] = useState<{
+    targetId: string;
+    targetName: string;
+    loadedName: string;
+  } | null>(null);
+  const [unloadModelConfirm, setUnloadModelConfirm] = useState<{
+    modelId: string;
+    modelName: string;
+  } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const {
@@ -279,18 +293,27 @@ export function AIRuntimePage() {
     setRoute,
   } = useAiInferenceRoute({ enabled: backendConnected });
 
+  const { modelLoading: runtimeModelLoading, loadingModelId, refresh: refreshModelLoading } =
+    useRuntimeModelLoading(backendConnected);
+
   const status: RuntimeStatusDto | null = configuration?.runtimeStatus ?? null;
   const lifecycle = status?.lifecycleState ?? "not_installed";
 
-  const refreshLocalData = useCallback(async () => {
-    const logEntries = await getRuntimeLogs(50);
-    setLogs(logEntries);
+  const refreshHardware = useCallback(async () => {
     try {
       setHardware(await refreshRuntimeHardware());
     } catch {
       setHardware(await getRuntimeHardware());
     }
   }, []);
+
+  const refreshLocalData = useCallback(async () => {
+    const [logEntries] = await Promise.all([
+      getRuntimeLogs(50).catch(() => [] as RuntimeLogEntry[]),
+      refreshHardware(),
+    ]);
+    setLogs(logEntries);
+  }, [refreshHardware]);
 
   const refreshAll = useCallback(async () => {
     await Promise.all([refreshConfiguration(), refreshLocalData()]);
@@ -342,6 +365,25 @@ export function AIRuntimePage() {
     };
   }, [backendConnected]);
 
+  useEffect(() => {
+    if (!backendConnected || (modelRuntimeAction === null && !runtimeModelLoading)) return;
+    const timer = window.setInterval(() => {
+      void Promise.all([refreshConfiguration(), refreshModelLoading()]).catch(() => undefined);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [
+    backendConnected,
+    modelRuntimeAction,
+    runtimeModelLoading,
+    refreshConfiguration,
+    refreshModelLoading,
+  ]);
+
+  useEffect(() => {
+    if (!backendConnected || runtimeModelLoading) return;
+    void refreshConfiguration().catch(() => undefined);
+  }, [backendConnected, runtimeModelLoading, refreshConfiguration]);
+
   async function runAction(label: string, fn: () => Promise<unknown>) {
     setError(null);
     setBusy(label);
@@ -360,6 +402,10 @@ export function AIRuntimePage() {
 
   async function handleModeChange(route: AiInferenceRoute) {
     if (routeBusy || busy !== null || installing) return;
+    if (modelLoadInProgress) return;
+    if (route === "third_party" && (runtimeModelLoading || modelRuntimeAction?.action === "load")) {
+      return;
+    }
     try {
       await setRoute(route);
       await refreshLocalData();
@@ -393,7 +439,7 @@ export function AIRuntimePage() {
     return Boolean(status?.modelLoaded && settings?.selectedModelId === modelId);
   }
 
-  async function handleLoadLocalModel(modelId: string) {
+  async function runLoadLocalModel(modelId: string) {
     if (
       !backendConnected ||
       loading ||
@@ -401,7 +447,8 @@ export function AIRuntimePage() {
       installing ||
       routeBusy ||
       modelRuntimeAction !== null ||
-      !status?.binaryAvailable
+      !status?.binaryAvailable ||
+      !runtimeStarted
     ) {
       return;
     }
@@ -420,7 +467,39 @@ export function AIRuntimePage() {
     }
   }
 
-  async function handleUnloadLocalModel(modelId: string) {
+  function handleLoadLocalModel(modelId: string) {
+    if (
+      !backendConnected ||
+      loading ||
+      busy !== null ||
+      installing ||
+      routeBusy ||
+      modelRuntimeAction !== null ||
+      modelLoadInProgress ||
+      !status?.binaryAvailable ||
+      !runtimeStarted
+    ) {
+      return;
+    }
+    if (isLocalModelLoaded(modelId)) {
+      return;
+    }
+    const models = settings?.localModels ?? [];
+    const selectedId = settings?.selectedModelId;
+    if (status?.modelLoaded && selectedId && selectedId !== modelId) {
+      const loaded = models.find((m) => m.id === selectedId);
+      const target = models.find((m) => m.id === modelId);
+      setLoadModelConfirm({
+        targetId: modelId,
+        targetName: target?.name ?? modelId,
+        loadedName: loaded?.name ?? configuration?.modelName ?? "the loaded model",
+      });
+      return;
+    }
+    void runLoadLocalModel(modelId);
+  }
+
+  async function runUnloadLocalModel(modelId: string) {
     if (
       !backendConnected ||
       loading ||
@@ -447,6 +526,37 @@ export function AIRuntimePage() {
     }
   }
 
+  function handleUnloadLocalModel(modelId: string) {
+    if (
+      !backendConnected ||
+      loading ||
+      busy !== null ||
+      installing ||
+      routeBusy ||
+      modelRuntimeAction !== null ||
+      modelLoadInProgress ||
+      !isLocalModelLoaded(modelId)
+    ) {
+      return;
+    }
+    const models = settings?.localModels ?? [];
+    const model = models.find((m) => m.id === modelId);
+    setUnloadModelConfirm({
+      modelId,
+      modelName: model?.name ?? configuration?.modelName ?? "this model",
+    });
+  }
+
+  function modelRowLoadingAction(modelId: string): "load" | "unload" | null {
+    if (modelRuntimeAction?.id === modelId) {
+      return modelRuntimeAction.action;
+    }
+    if (runtimeModelLoading && (loadingModelId === null || loadingModelId === modelId)) {
+      return "load";
+    }
+    return null;
+  }
+
   async function runInstall(installFn: () => Promise<RuntimeStatusDto>) {
     if (installing) return;
     setError(null);
@@ -468,10 +578,19 @@ export function AIRuntimePage() {
   }
 
   const disabled = !backendConnected || loading || busy !== null || installing || routeBusy;
+  const modelLoadInProgress =
+    runtimeModelLoading || modelRuntimeAction?.action === "load";
+  const localRuntimeStatusLabel = modelLoadInProgress
+    ? "Loading model"
+    : (configuration?.statusLabel ?? lifecycle.replace(/_/g, " "));
   const runtimeStarted =
     lifecycle === "running" || lifecycle === "busy" || lifecycle === "starting";
   const localModelActionsDisabled =
-    disabled || modelRuntimeAction !== null || !status?.binaryAvailable;
+    disabled ||
+    modelLoadInProgress ||
+    modelRuntimeAction !== null ||
+    !status?.binaryAvailable ||
+    !runtimeStarted;
   const runtimeInstalled = lifecycle !== "not_installed";
   const localModels = settings?.localModels ?? [];
   const thirdPartyModels = settings?.thirdPartyModels ?? [];
@@ -490,19 +609,22 @@ export function AIRuntimePage() {
         actions={
           backendConnected ? (
             <div className="page-header__actions-row">
+              <RefreshButton
+                loading={refreshing || configLoading}
+                error={error}
+                disabled={!backendConnected}
+                onClick={() => void handleRefresh()}
+              />
               {modeConfigured && !configLoading && (
                 <ModeToggle
                   mode={mode}
                   disabled={disabled}
+                  disableThirdParty={modelLoadInProgress}
+                  disableLocal={modelLoadInProgress}
                   onChange={handleModeChange}
                   compact
                 />
               )}
-              <RefreshButton
-                loading={refreshing || configLoading}
-                disabled={!backendConnected}
-                onClick={() => void handleRefresh()}
-              />
             </div>
           ) : undefined
         }
@@ -512,15 +634,18 @@ export function AIRuntimePage() {
         <p className="text-muted">Connect to the Tauri backend to manage the AI runtime.</p>
       )}
 
-      {configLoading && backendConnected && (
+      {configLoading && !configuration && backendConnected && (
         <p className="text-muted text-sm">Loading runtime configuration…</p>
       )}
 
       {showModePicker && (
-        <RuntimeModePicker disabled={disabled} onSelect={handleModeChange} />
+        <RuntimeModePicker
+          disabled={disabled || modelLoadInProgress}
+          onSelect={handleModeChange}
+        />
       )}
 
-      {backendConnected && modeConfigured && (
+      {backendConnected && (modeConfigured || configuration) && (
         <>
           {mode === "third_party" && (
             <>
@@ -630,7 +755,7 @@ export function AIRuntimePage() {
                   <Card className="models-summary-card">
                     <span className="models-summary-card__label">Runtime Status</span>
                     <strong className="models-summary-card__value models-summary-card__value--runtime">
-                      {configuration?.statusLabel ?? lifecycle.replace(/_/g, " ")}
+                      {localRuntimeStatusLabel}
                     </strong>
                   </Card>
                   <Card className="models-summary-card">
@@ -652,9 +777,6 @@ export function AIRuntimePage() {
                     <strong className="models-summary-card__value">
                       {configuration?.connectivity ?? "Not checked"}
                     </strong>
-                    {configuration?.lastHealthCheck ? (
-                      <p className="text-muted text-sm">{configuration.lastHealthCheck}</p>
-                    ) : null}
                   </Card>
                 </div>
               </section>
@@ -682,7 +804,7 @@ export function AIRuntimePage() {
                       disabled={disabled}
                       onClick={() =>
                         void runAction("Detect hardware", async () => {
-                          setHardware(await refreshRuntimeHardware());
+                          await refreshHardware();
                         })
                       }
                     >
@@ -693,12 +815,16 @@ export function AIRuntimePage() {
               </section>
 
               <section className="runtime-section">
-                <h2 className="runtime-section__title">Runtime</h2>
+                <h2 className="runtime-section__title">Runtime Manager</h2>
                 <Card className="model-card model-card--wide">
                   <dl className="runtime-kv-grid">
                     <div>
-                      <dt>Recommended Runtime</dt>
+                      <dt>Runtime</dt>
                       <dd>{status?.recommendedRuntime ?? "Detect hardware first"}</dd>
+                    </div>
+                    <div>
+                      <dt>Version</dt>
+                      <dd>{configuration?.runtimeVersion ?? status?.runtimeVersion ?? "—"}</dd>
                     </div>
                     <div><dt>API endpoint</dt><dd className="mono">{status?.baseUrl ?? "—"}</dd></div>
                     <div>
@@ -734,13 +860,15 @@ export function AIRuntimePage() {
                     >
                       Repair Runtime
                     </Button>
-                    <Button
-                      variant="secondary"
-                      disabled={disabled || !status?.binaryAvailable || runtimeStarted}
-                      onClick={() => void runAction("Start runtime", () => startRuntime())}
-                    >
-                      {busy === "Start runtime" ? "Starting…" : "Start Runtime"}
-                    </Button>
+                    {!runtimeStarted && (
+                      <Button
+                        variant="secondary"
+                        disabled={disabled || !status?.binaryAvailable}
+                        onClick={() => void runAction("Start runtime", () => startRuntime())}
+                      >
+                        {busy === "Start runtime" ? "Starting…" : "Start Runtime"}
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       disabled={disabled || !runtimeStarted}
@@ -748,13 +876,15 @@ export function AIRuntimePage() {
                     >
                       {busy === "Stop runtime" ? "Stopping…" : "Stop Runtime"}
                     </Button>
-                    <Button
-                      variant="ghost"
-                      disabled={disabled || !status?.binaryAvailable}
-                      onClick={() => void runAction("Restart runtime", () => restartRuntime())}
-                    >
-                      {busy === "Restart runtime" ? "Restarting…" : "Restart Runtime"}
-                    </Button>
+                    {runtimeStarted && (
+                      <Button
+                        variant="ghost"
+                        disabled={disabled}
+                        onClick={() => void runAction("Restart runtime", () => restartRuntime())}
+                      >
+                        {busy === "Restart runtime" ? "Restarting…" : "Restart Runtime"}
+                      </Button>
+                    )}
                     <Button
                       variant="danger"
                       disabled={disabled || lifecycle === "not_installed"}
@@ -806,11 +936,7 @@ export function AIRuntimePage() {
                           model={model}
                           loaded={isLocalModelLoaded(model.id)}
                           disabled={localModelActionsDisabled}
-                          loading={
-                            modelRuntimeAction?.id === model.id
-                              ? modelRuntimeAction.action
-                              : null
-                          }
+                          loading={modelRowLoadingAction(model.id)}
                           onLoad={() => void handleLoadLocalModel(model.id)}
                           onUnload={() => void handleUnloadLocalModel(model.id)}
                         />
@@ -864,6 +990,69 @@ export function AIRuntimePage() {
           {error && <p className="text-danger">{error}</p>}
         </>
       )}
+
+      <Modal
+        open={loadModelConfirm !== null}
+        title="Switch model in AI Runtime?"
+        onClose={() => setLoadModelConfirm(null)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setLoadModelConfirm(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={modelRuntimeAction !== null}
+              onClick={() => {
+                const targetId = loadModelConfirm?.targetId;
+                setLoadModelConfirm(null);
+                if (targetId) void runLoadLocalModel(targetId);
+              }}
+            >
+              Continue
+            </Button>
+          </>
+        }
+      >
+        {loadModelConfirm ? (
+          <p>
+            <strong>{loadModelConfirm.loadedName}</strong> is active in AI Runtime. To load{" "}
+            <strong>{loadModelConfirm.targetName}</strong>, the runtime will unload the current
+            model and load this one first. Continue?
+          </p>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={unloadModelConfirm !== null}
+        title="Unload model from AI Runtime?"
+        onClose={() => setUnloadModelConfirm(null)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setUnloadModelConfirm(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={modelRuntimeAction !== null}
+              onClick={() => {
+                const modelId = unloadModelConfirm?.modelId;
+                setUnloadModelConfirm(null);
+                if (modelId) void runUnloadLocalModel(modelId);
+              }}
+            >
+              Unload
+            </Button>
+          </>
+        }
+      >
+        {unloadModelConfirm ? (
+          <p>
+            <strong>{unloadModelConfirm.modelName}</strong> is active in AI Runtime. Unloading it
+            will stop the inference API until you load a model again. Continue?
+          </p>
+        ) : null}
+      </Modal>
     </div>
   );
 }

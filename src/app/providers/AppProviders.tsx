@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { AppStoreProvider } from "@/app/store/AppStore";
+import { RuntimeModelLoadingPoller } from "@/app/providers/RuntimeModelLoadingPoller";
 import { ErrorBoundary } from "@/shared/errors";
 import { ToastProvider } from "@/shared/notifications";
 
@@ -12,7 +13,10 @@ export function AppProviders({ children }: AppProvidersProps) {
   return (
     <ErrorBoundary>
       <ToastProvider>
-        <AppStoreProvider>{children}</AppStoreProvider>
+        <AppStoreProvider>
+          <RuntimeModelLoadingPoller />
+          {children}
+        </AppStoreProvider>
       </ToastProvider>
     </ErrorBoundary>
   );

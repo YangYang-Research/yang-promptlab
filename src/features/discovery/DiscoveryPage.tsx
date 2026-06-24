@@ -276,7 +276,7 @@ export function DiscoveryPage() {
         title="Discovery"
         description="Attack surface enumeration — crawl, API, OpenAPI, AI fingerprinting"
         actions={
-          <RefreshButton loading={loading} onClick={() => void actions.refresh()} />
+          <RefreshButton loading={loading} error={error} onClick={() => void actions.refresh()} />
         }
       />
 

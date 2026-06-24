@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { IconMore } from "./Icons";
 import { IconButton } from "./IconButton";
@@ -8,24 +9,74 @@ export type ActionsDropdownItem = {
   label: string;
   onClick: () => void;
   tone?: "default" | "danger";
+  disabled?: boolean;
 };
 
 type ActionsDropdownProps = {
   label?: string;
   items: ActionsDropdownItem[];
+  disabled?: boolean;
 };
 
-export function ActionsDropdown({ label = "Actions", items }: ActionsDropdownProps) {
+type MenuPosition = {
+  top: number;
+  left: number;
+};
+
+const MENU_GAP_PX = 6;
+const VIEWPORT_PADDING_PX = 8;
+
+export function ActionsDropdown({ label = "Actions", items, disabled }: ActionsDropdownProps) {
   const [open, setOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuPosition(null);
+      return;
+    }
+
+    const anchor = rootRef.current;
+    const menu = menuRef.current;
+    if (!anchor || !menu) return;
+
+    const anchorRect = anchor.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const menuWidth = menuRect.width;
+    const menuHeight = menuRect.height;
+
+    const spaceBelow = window.innerHeight - anchorRect.bottom - MENU_GAP_PX;
+    const spaceAbove = anchorRect.top - MENU_GAP_PX;
+    const openUp = menuHeight > spaceBelow && spaceAbove >= menuHeight;
+
+    let top = openUp
+      ? anchorRect.top - MENU_GAP_PX - menuHeight
+      : anchorRect.bottom + MENU_GAP_PX;
+
+    let left = anchorRect.right - menuWidth;
+    left = Math.max(
+      VIEWPORT_PADDING_PX,
+      Math.min(left, window.innerWidth - menuWidth - VIEWPORT_PADDING_PX),
+    );
+    top = Math.max(
+      VIEWPORT_PADDING_PX,
+      Math.min(top, window.innerHeight - menuHeight - VIEWPORT_PADDING_PX),
+    );
+
+    setMenuPosition({ top, left });
+  }, [open, items]);
 
   useEffect(() => {
     if (!open) return;
 
     function handlePointerDown(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) {
+        return;
       }
+      setOpen(false);
     }
 
     function handleEscape(event: KeyboardEvent) {
@@ -45,30 +96,44 @@ export function ActionsDropdown({ label = "Actions", items }: ActionsDropdownPro
       <IconButton
         ariaLabel={label}
         active={open}
+        disabled={disabled}
         onClick={() => setOpen((value) => !value)}
       >
         <IconMore />
       </IconButton>
-      {open && (
-        <div className="actions-dropdown__menu" role="menu">
-          {items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="menuitem"
-              className={`actions-dropdown__item ${
-                item.tone === "danger" ? "actions-dropdown__item--danger" : ""
-              }`}
-              onClick={() => {
-                setOpen(false);
-                item.onClick();
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="actions-dropdown__menu actions-dropdown__menu--portal"
+            role="menu"
+            style={
+              menuPosition
+                ? { top: menuPosition.top, left: menuPosition.left }
+                : { top: 0, left: 0, visibility: "hidden" }
+            }
+          >
+            {items.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="menuitem"
+                disabled={item.disabled}
+                className={`actions-dropdown__item ${
+                  item.tone === "danger" ? "actions-dropdown__item--danger" : ""
+                } ${item.disabled ? "actions-dropdown__item--disabled" : ""}`}
+                onClick={() => {
+                  if (item.disabled) return;
+                  setOpen(false);
+                  item.onClick();
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

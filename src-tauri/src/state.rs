@@ -25,6 +25,9 @@ pub struct AppState {
     model_provider: aisec_runtime::SharedModelProvider,
     model_catalog_meta: BuiltinCatalogMeta,
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+    runtime_config_cache: Arc<AsyncMutex<Option<crate::commands::runtime::RuntimeConfigurationDto>>>,
+    /// Model id currently loading into llama-server (survives stale config cache).
+    runtime_model_loading_id: Arc<AsyncMutex<Option<String>>>,
     _log_guard: LogGuard,
 }
 
@@ -52,6 +55,8 @@ impl AppState {
             model_provider,
             model_catalog_meta,
             runtime_manager: Arc::new(AsyncMutex::new(runtime_manager)),
+            runtime_config_cache: Arc::new(AsyncMutex::new(None)),
+            runtime_model_loading_id: Arc::new(AsyncMutex::new(None)),
             _log_guard: log_guard,
         }
     }
@@ -94,6 +99,16 @@ impl AppState {
 
     pub fn runtime_manager(&self) -> &Arc<AsyncMutex<RuntimeManager>> {
         &self.runtime_manager
+    }
+
+    pub fn runtime_config_cache(
+        &self,
+    ) -> &Arc<AsyncMutex<Option<crate::commands::runtime::RuntimeConfigurationDto>>> {
+        &self.runtime_config_cache
+    }
+
+    pub fn runtime_model_loading_id(&self) -> &Arc<AsyncMutex<Option<String>>> {
+        &self.runtime_model_loading_id
     }
 
     pub async fn ollama_base_url(&self) -> String {

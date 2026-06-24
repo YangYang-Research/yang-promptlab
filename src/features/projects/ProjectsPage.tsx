@@ -138,7 +138,7 @@ export function ProjectsPage() {
         description="Organize security assessments by engagement or product"
         actions={
           <>
-            <RefreshButton loading={loading} onClick={() => void actions.refresh()} />
+            <RefreshButton loading={loading} error={error} onClick={() => void actions.refresh()} />
             <Button variant="primary" onClick={() => setModalOpen(true)}>
               New Project
             </Button>

@@ -23,6 +23,7 @@ use crate::ai_inference_settings::{
     apply_third_party_health_check, format_health_check_timestamp, load_settings, save_settings,
     AiInferenceRoute,
 };
+use crate::commands::runtime::load_model_with_loading_cache;
 use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
 use crate::third_party_credentials::{
@@ -1087,14 +1088,12 @@ pub async fn models_test_inference(
         return Err(llama_server_missing_error(manager.supervisor()));
     }
 
-    manager.on_model_load_started();
-    let load_result = manager
-        .supervisor_mut()
-        .ensure_model_loaded(&file_path)
-        .await
-        .map_err(|err| map_runtime_test_error(err, manager.supervisor()));
-    manager.on_model_load_finished(load_result.is_ok());
-    load_result?;
+    if !manager.is_model_loaded_at(&file_path).await {
+        load_model_with_loading_cache(state.inner(), &mut manager, &file_path, &model_id)
+            .await
+            .map_err(|err| map_runtime_test_error(err, manager.supervisor()))?;
+        manager.sync_lifecycle_from_supervisor();
+    }
 
     let prompt = if use_chat {
         "User: Reply with exactly: AISec OK\nAssistant: ".into()

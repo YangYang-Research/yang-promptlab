@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { toAppError } from "@/shared/errors";
 import {
@@ -16,9 +16,10 @@ type UseAiInferenceRouteOptions = {
 export function useAiInferenceRoute(options: UseAiInferenceRouteOptions = {}) {
   const { enabled = true } = options;
   const [configuration, setConfiguration] = useState<RuntimeConfigurationDto | null>(null);
-  const [loading, setLoading] = useState(enabled);
+  const [initialLoading, setInitialLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const hasLoadedOnceRef = useRef(false);
 
   const settings: AiInferenceSettingsDto | null = configuration?.settings ?? null;
 
@@ -26,18 +27,21 @@ export function useAiInferenceRoute(options: UseAiInferenceRouteOptions = {}) {
     const dto = await getRuntimeConfiguration();
     setConfiguration(dto);
     setError(null);
+    hasLoadedOnceRef.current = true;
     return dto;
   }, []);
 
   useEffect(() => {
     if (!enabled) {
-      setLoading(false);
+      setInitialLoading(false);
       return;
     }
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) {
+      setInitialLoading(true);
+    }
     void refresh()
       .catch((err) => setError(toAppError(err).message))
-      .finally(() => setLoading(false));
+      .finally(() => setInitialLoading(false));
   }, [enabled, refresh]);
 
   const setRoute = useCallback(
@@ -67,7 +71,7 @@ export function useAiInferenceRoute(options: UseAiInferenceRouteOptions = {}) {
     settings,
     mode: configuration?.mode ?? "not_configured",
     route: settings?.initialized ? settings.route : null,
-    loading,
+    loading: initialLoading,
     busy,
     error,
     refresh,

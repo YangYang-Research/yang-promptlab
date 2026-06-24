@@ -113,12 +113,16 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             )
             .map_err(crate::error::CommandError::from)?;
 
-            let (runtime_manager, _started) =
+            let (mut runtime_manager, _started) =
                 tauri::async_runtime::block_on(embedded_runtime::bootstrap_runtime_manager(
                     app.handle(),
                     &data_dir,
                 ))
                 .map_err(crate::error::CommandError::from)?;
+
+            tauri::async_runtime::block_on(
+                embedded_runtime::detect_hardware_on_startup(&mut runtime_manager),
+            );
 
             let llama_binary = runtime_manager
                 .manifest()
@@ -152,6 +156,12 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 model_provider,
                 model_catalog_meta,
             ));
+
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state = app_handle.state::<AppState>();
+                embedded_runtime::resume_local_runtime_on_startup(&app_handle, state.inner()).await;
+            });
 
             tracing::info!("AISec backend integration ready (database + repositories + runtime)");
             Ok(())

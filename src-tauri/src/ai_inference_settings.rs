@@ -304,7 +304,7 @@ pub fn reconcile_settings(
         .and_then(|id| pool.iter().find(|m| &m.id == id));
 
     if selected_valid.is_none() {
-        settings.selected_model_id = pick_model_for_route(settings.route, &third_party, &local);
+        settings.selected_model_id = None;
     }
 
     if settings.route == AiInferenceRoute::ThirdParty {
@@ -350,19 +350,22 @@ pub fn third_party_status_label(
     has_configured_model: bool,
     selected_model: Option<&ModelEntry>,
 ) -> String {
-    if settings.selected_model_id.is_none() || !has_configured_model {
+    if !has_configured_model {
         return "N/A".into();
     }
-    if is_third_party_connectivity_ok(settings.third_party_connectivity.as_deref()) {
+    if settings.selected_model_id.is_none() {
         return "Ready".into();
     }
+    if is_third_party_connectivity_ok(settings.third_party_connectivity.as_deref()) {
+        return "Running".into();
+    }
     match settings.third_party_connectivity.as_deref() {
-        Some(value) if is_connectivity_success(value) => "Ready".into(),
+        Some(value) if is_connectivity_success(value) => "Running".into(),
         Some(_) => CONNECTIVITY_FAILED.into(),
         None => {
             if let Some(entry) = selected_model {
                 match connectivity_status_label(&entry.metadata).as_deref() {
-                    Some(CONNECTIVITY_SUCCESS) => "Ready".into(),
+                    Some(CONNECTIVITY_SUCCESS) => "Running".into(),
                     Some(CONNECTIVITY_FAILED) => CONNECTIVITY_FAILED.into(),
                     _ => "Setup Required".into(),
                 }

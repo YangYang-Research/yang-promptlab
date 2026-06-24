@@ -5,6 +5,7 @@ import {
   Card,
   DataTable,
   PageHeader,
+  RefreshButton,
   StatusBadge,
 } from "@/shared/components";
 import { useAppStore } from "@/app/store/AppStore";
@@ -82,13 +83,12 @@ export function PluginsPage() {
         title="Plugins"
         description="Manage discovery, attack, and judge extensions"
         actions={
-          <Button
-            variant="secondary"
-            disabled={!backendConnected || busy}
+          <RefreshButton
+            loading={busy}
+            error={error}
+            disabled={!backendConnected}
             onClick={() => void handleRefresh()}
-          >
-            Refresh
-          </Button>
+          />
         }
       />
 
