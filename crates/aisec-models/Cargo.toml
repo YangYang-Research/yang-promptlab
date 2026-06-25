@@ -8,9 +8,8 @@ authors.workspace = true
 rust-version.workspace = true
 
 [features]
-default = []
+default = ["llama"]
 storage = ["dep:aisec-storage"]
-# In-process llama.cpp GGUF runtime (builds llama.cpp via bindgen/cmake; needs clang).
 llama = ["dep:llama-cpp-2"]
 
 [dependencies]

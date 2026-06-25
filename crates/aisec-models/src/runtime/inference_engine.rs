@@ -1,21 +1,21 @@
 use std::time::Instant;
 
 use crate::error::{ModelError, ModelResult};
-use crate::runtime::{InferenceRuntime, LlamaCppConfig, LlamaCppRuntime, OllamaRuntime};
+use crate::runtime::{InferenceRuntime, LlamaInProcessRuntime, LlamaModelConfig, OllamaRuntime};
 use crate::types::{
     ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, InferenceRequest,
     InferenceResponse, ModelEntry, ModelProvider, ModelSource,
 };
 
-/// Unified local inference engine routing to Ollama or llama.cpp based on model entry.
+/// Unified local inference engine routing to Ollama or embedded libllama based on model entry.
 pub struct LocalInferenceEngine {
     entry: ModelEntry,
     ollama: Option<OllamaRuntime>,
-    llama: Option<LlamaCppRuntime>,
+    llama: Option<LlamaInProcessRuntime>,
 }
 
 impl LocalInferenceEngine {
-    pub async fn from_entry(entry: ModelEntry, llama_config: LlamaCppConfig) -> ModelResult<Self> {
+    pub async fn from_entry(entry: ModelEntry, llama_config: LlamaModelConfig) -> ModelResult<Self> {
         match entry.provider {
             ModelProvider::Ollama => {
                 let (model, base_url) = match &entry.source {
@@ -45,7 +45,7 @@ impl LocalInferenceEngine {
                         entry.file_path.display()
                     )));
                 }
-                let mut runtime = LlamaCppRuntime::new(llama_config);
+                let mut runtime = LlamaInProcessRuntime::new(llama_config);
                 runtime.load_model(&entry.file_path).await?;
                 Ok(Self {
                     entry,
@@ -101,7 +101,7 @@ impl LocalInferenceEngine {
             return runtime.embeddings(request).await;
         }
         Err(ModelError::invalid(
-            "embeddings are only supported for Ollama models in this release",
+            "embeddings require a dedicated embedding model — capability unavailable for this GGUF",
         ))
     }
 

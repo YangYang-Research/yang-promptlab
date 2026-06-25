@@ -10,12 +10,26 @@ use crate::config::{
 };
 use crate::engine::JudgeEngine;
 use crate::error::{JudgeError, JudgeResult};
+use aisec_inference::ProviderAdapter;
 use crate::providers::local::LocalLlmBackend;
 use crate::providers::remote::RemoteLlmBackend;
 use crate::providers::LlmBackend;
 use crate::roles::ModelRolePool;
 use crate::runtime_context::JudgeRuntimeContext;
 use crate::types::{JudgeMode, JudgeRequest};
+
+/// Build judge engine using a provider adapter from the AI Inference Gateway.
+pub async fn build_judge_engine_with_adapter(
+    adapter: Arc<dyn ProviderAdapter>,
+    config: &JudgeProviderConfig,
+) -> JudgeResult<JudgeEngine> {
+    let engine_config = config.to_engine_config();
+    let mut pool = ModelRolePool::new();
+    let runtime: Arc<Mutex<dyn InferenceRuntime>> =
+        Arc::new(Mutex::new(AdapterRuntime { adapter }));
+    pool.set_all(runtime);
+    Ok(JudgeEngine::new(engine_config, pool))
+}
 
 /// Build a hybrid judge engine from persisted provider configuration.
 pub async fn build_judge_engine(
@@ -46,14 +60,58 @@ async fn build_role_pool(
     Ok(pool)
 }
 
-fn attach_backend_to_pool(pool: &mut ModelRolePool, backend: Arc<dyn LlmBackend>) {
+fn attach_backend_to_pool(pool: &mut ModelRolePool, backend: Arc<dyn crate::providers::LlmBackend>) {
     let runtime: Arc<Mutex<dyn InferenceRuntime>> =
         Arc::new(Mutex::new(BackendRuntime { backend }));
     pool.set_all(runtime);
 }
 
+struct AdapterRuntime {
+    adapter: Arc<dyn ProviderAdapter>,
+}
+
+#[async_trait::async_trait]
+impl InferenceRuntime for AdapterRuntime {
+    fn state(&self) -> aisec_models::types::RuntimeState {
+        aisec_models::types::RuntimeState::Ready
+    }
+
+    async fn load_model(
+        &mut self,
+        _model_path: &std::path::Path,
+    ) -> aisec_models::error::ModelResult<()> {
+        Ok(())
+    }
+
+    async fn unload(&mut self) -> aisec_models::error::ModelResult<()> {
+        Ok(())
+    }
+
+    async fn complete(
+        &self,
+        request: aisec_models::types::InferenceRequest,
+    ) -> aisec_models::error::ModelResult<aisec_models::types::InferenceResponse> {
+        self.adapter
+            .complete(None, &request.prompt, request.max_tokens, request.temperature)
+            .await
+            .map(|text| aisec_models::types::InferenceResponse {
+                text,
+                tokens_predicted: 0,
+                duration_ms: 0,
+            })
+            .map_err(|e| aisec_models::error::ModelError::runtime(e.to_string()))
+    }
+
+    async fn health(&self) -> aisec_models::error::ModelResult<bool> {
+        self.adapter
+            .health()
+            .await
+            .map_err(|e| aisec_models::error::ModelError::runtime(e.to_string()))
+    }
+}
+
 struct BackendRuntime {
-    backend: Arc<dyn LlmBackend>,
+    backend: Arc<dyn crate::providers::LlmBackend>,
 }
 
 #[async_trait::async_trait]

@@ -137,6 +137,7 @@ mod tests {
         BuiltinRegistryEntry {
             id: "test".into(),
             name: "Test".into(),
+            provider: "Meta".into(),
             purpose: "judge".into(),
             recommended: false,
             engine: "llama.cpp".into(),

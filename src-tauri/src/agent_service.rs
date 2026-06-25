@@ -14,9 +14,9 @@ use aisec_fingerprint::StackFingerprintReport;
 use aisec_generator::{
     generate_from_plan, GeneratorMode, PromptPayloads,
 };
-use aisec_models::LocalModelManager;
-use aisec_planner::{generate_attack_plan, AttackPlan, FingerprintResult};
-use aisec_runtime::{RuntimeSupervisor, SharedModelProvider};
+use aisec_planner::{generate_attack_plan, AttackPlan, FingerprintResult, PlannerMode};
+use aisec_inference::InferenceRuntimeManager;
+use aisec_runtime::SharedModelProvider;
 use aisec_storage::{Endpoint, Repositories};
 use async_trait::async_trait;
 use tauri::async_runtime::Mutex as AsyncMutex;
@@ -24,6 +24,7 @@ use crate::commands::attack::run_category_on_endpoint;
 use crate::jobs::ScanProgress;
 use crate::events::ScanProgressEmitter;
 use crate::session_auth::AttackRuntime;
+use crate::inference_host::{build_judge_engine_from_gateway, is_inference_ready, HostGeneratorLlm, HostPlannerLlm};
 
 pub struct ScanAgentHost<'a> {
     pub repos: &'a Repositories,
@@ -33,9 +34,10 @@ pub struct ScanAgentHost<'a> {
     pub endpoint: Endpoint,
     pub runtime: AttackRuntime,
     pub data_dir: &'a Path,
-    pub model_manager: &'a LocalModelManager,
+    pub inference_manager: Arc<AsyncMutex<InferenceRuntimeManager>>,
+    pub model_manager_arc: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
     pub model_provider: SharedModelProvider,
-    pub runtime_supervisor: &'a mut RuntimeSupervisor,
+    pub runtime_manager_arc: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
     pub plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
     pub profile: String,
     pub disabled_tests: Vec<String>,
@@ -45,6 +47,7 @@ pub struct ScanAgentHost<'a> {
     pub completed_units: Arc<Mutex<u64>>,
     pub findings_total: Arc<Mutex<u64>>,
     pub progress_emitter: Option<ScanProgressEmitter>,
+    pub planner_mode: PlannerMode,
 }
 
 #[async_trait]
@@ -94,9 +97,36 @@ impl AgentHost for ScanAgentHost<'_> {
     }
 
     async fn plan(&mut self, fingerprint: &FingerprintResult) -> AgentResult<AttackPlan> {
-        generate_attack_plan(fingerprint, aisec_planner::PlannerMode::Deterministic, None)
-            .await
-            .map_err(Into::into)
+        let mode = if self.planner_mode == PlannerMode::LocalLlm {
+            let inference = self.inference_manager.lock().await;
+            if is_inference_ready(&inference) {
+                PlannerMode::LocalLlm
+            } else {
+                PlannerMode::Deterministic
+            }
+        } else {
+            self.planner_mode
+        };
+
+        let llm = if mode == PlannerMode::LocalLlm {
+            Some(Arc::new(HostPlannerLlm::new(
+                self.data_dir.to_path_buf(),
+                self.inference_manager.clone(),
+                self.model_manager_arc.clone(),
+                self.model_provider.clone(),
+                self.runtime_manager_arc.clone(),
+            )) as Arc<dyn aisec_planner::PlannerLlm>)
+        } else {
+            None
+        };
+
+        generate_attack_plan(
+            fingerprint,
+            mode,
+            llm.as_ref().map(|adapter| adapter.as_ref()),
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn generate_payloads(
@@ -109,9 +139,37 @@ impl AgentHost for ScanAgentHost<'_> {
             categories: vec![category],
             ..plan.clone()
         };
-        generate_from_plan(&category_plan, mode, None)
-            .await
-            .map_err(Into::into)
+
+        let effective_mode = if mode == GeneratorMode::LocalLlm {
+            let inference = self.inference_manager.lock().await;
+            if is_inference_ready(&inference) {
+                GeneratorMode::LocalLlm
+            } else {
+                GeneratorMode::StaticPack
+            }
+        } else {
+            GeneratorMode::StaticPack
+        };
+
+        let llm = if effective_mode == GeneratorMode::LocalLlm {
+            Some(Arc::new(HostGeneratorLlm::new(
+                self.data_dir.to_path_buf(),
+                self.inference_manager.clone(),
+                self.model_manager_arc.clone(),
+                self.model_provider.clone(),
+                self.runtime_manager_arc.clone(),
+            )) as Arc<dyn aisec_generator::GeneratorLlm>)
+        } else {
+            None
+        };
+
+        generate_from_plan(
+            &category_plan,
+            effective_mode,
+            llm.as_ref().map(|adapter| adapter.as_ref()),
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn execute_attack(
@@ -120,6 +178,9 @@ impl AgentHost for ScanAgentHost<'_> {
         payloads: &PromptPayloads,
     ) -> AgentResult<AttackExecutionSummary> {
         let map = payload_map_for_category(payloads, category);
+        let manager = self.model_manager_arc.lock().await;
+        let mut runtime_mgr = self.runtime_manager_arc.lock().await;
+        let inference = self.inference_manager.lock().await;
         let run = run_category_on_endpoint(
             self.repos,
             &self.scan_id,
@@ -129,9 +190,10 @@ impl AgentHost for ScanAgentHost<'_> {
             category,
             self.runtime.clone(),
             self.data_dir,
-            self.model_manager,
+            &inference,
+            &manager,
             self.model_provider.clone(),
-            self.runtime_supervisor,
+            &mut runtime_mgr,
             self.plugin_manager.clone(),
             Some(&map),
             self.progress_emitter.as_ref(),
@@ -202,9 +264,15 @@ pub fn agent_config_from_scan(
         })
         .unwrap_or(GeneratorMode::StaticPack);
 
+    let planner_mode = if initial_generator_mode == GeneratorMode::LocalLlm {
+        PlannerMode::LocalLlm
+    } else {
+        PlannerMode::Deterministic
+    };
+
     AgentConfig {
         max_attempts_per_category: max_attempts.unwrap_or(5),
-        planner_mode: aisec_planner::PlannerMode::Deterministic,
+        planner_mode,
         initial_generator_mode,
     }
 }
@@ -213,6 +281,7 @@ pub async fn run_agent_endpoint(
     host: &mut ScanAgentHost<'_>,
     config: &AgentConfig,
 ) -> AgentResult<AgentScanResult> {
+    host.planner_mode = config.planner_mode;
     let endpoint_id = host.endpoint.id.clone();
     let endpoint_url = host.endpoint.url.clone();
     let allowed = host.allowed_categories.clone();

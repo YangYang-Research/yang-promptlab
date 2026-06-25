@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::error::{RuntimeError, RuntimeResult};
-use crate::runtime::{InferRequest, LlamaCppRuntime};
+use crate::error::RuntimeResult;
+use crate::local_runtime_adapter::InferRequest;
 use crate::supervisor::RuntimeSupervisor;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,7 +25,7 @@ pub struct RuntimeBenchmark;
 
 impl RuntimeBenchmark {
     pub async fn run(supervisor: &RuntimeSupervisor) -> RuntimeResult<RuntimeBenchmarkResult> {
-        let runtime = supervisor.llama_runtime();
+        let runtime = supervisor.local_runtime();
         if !runtime.is_loaded() {
             return Ok(RuntimeBenchmarkResult {
                 ok: false,
@@ -39,7 +39,7 @@ impl RuntimeBenchmark {
             });
         }
 
-        let response = runtime
+        let response = supervisor
             .infer(InferRequest {
                 prompt: "Benchmark prompt. Reply with one word: OK".into(),
                 max_tokens: 8,

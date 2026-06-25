@@ -2,8 +2,8 @@
   "models": [
     {
       "id": "qwen3-8b-judge",
-      "name": "Qwen3 8B Security Judge",
-      "purpose": "judge",
+      "name": "Qwen3 8B",
+      "provider": "Qwen Team",
       "recommended": true,
       "engine": "llama.cpp",
       "format": "gguf",
@@ -13,8 +13,8 @@
     },
     {
       "id": "llama3-8b-q4",
-      "name": "Llama 3 8B Instruct Q4_K_M",
-      "purpose": "general",
+      "name": "Llama 3 8B Instruct",
+      "provider": "Meta",
       "recommended": false,
       "engine": "llama.cpp",
       "format": "gguf",
@@ -24,8 +24,8 @@
     },
     {
       "id": "mistral-7b-q4",
-      "name": "Mistral 7B Instruct Q4_K_M",
-      "purpose": "general",
+      "name": "Mistral 7B Instruct",
+      "provider": "Mistral AI",
       "recommended": false,
       "engine": "llama.cpp",
       "format": "gguf",

@@ -1,0 +1,28 @@
+[package]
+name = "aisec-inference"
+description = "Unified AI inference gateway, runtime orchestration, and provider adapters for AISec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+aisec-core = { workspace = true }
+aisec-models = { workspace = true }
+aisec-runtime = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
+tracing = { workspace = true }
+hmac = "0.12"
+hex = "0.4"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

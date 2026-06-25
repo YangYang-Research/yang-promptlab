@@ -1,6 +1,6 @@
 [package]
 name = "aisec-runtime"
-description = "Embedded local AI runtime supervisor and model provider for AISec"
+description = "Embedded local AI runtime (libllama) and model provider for AISec"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,19 +9,15 @@ rust-version.workspace = true
 
 [dependencies]
 aisec-core = { workspace = true }
-aisec-models = { workspace = true }
+aisec-models = { workspace = true, features = ["llama"] }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
-tokio = { workspace = true, features = ["process", "io-util", "fs", "time", "macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["fs", "time", "macros", "rt-multi-thread", "sync"] }
 reqwest = { workspace = true }
 tracing = { workspace = true }
-sha2 = "0.10"
-flate2 = "1"
-tar = "0.4"
-zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile = "3"

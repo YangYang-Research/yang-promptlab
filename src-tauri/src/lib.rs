@@ -14,7 +14,8 @@ pub mod jobs;
 pub mod logging;
 pub mod method_heuristic;
 pub mod harness_runtime;
-pub mod judge_config;
+pub mod inference_host;
+pub mod inference_settings;
 pub mod model_registry;
 pub mod third_party_credentials;
 pub mod embedded_runtime;
@@ -22,13 +23,11 @@ pub mod plugin_service;
 pub mod plugin_transport;
 pub mod playwright_runtime;
 pub mod agent_service;
-pub mod ai_inference_settings;
-pub mod planner_service;
-pub mod generator_service;
 pub mod runtime_watch;
 pub mod session_auth;
 pub mod state;
 
+use aisec_models::ModelEntry;
 use state::AppState;
 use tauri::{async_runtime::Mutex as AsyncMutex, Manager, RunEvent};
 
@@ -100,11 +99,6 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 )
                 .await
                 .map_err(crate::error::CommandError::from)?;
-                let _ = crate::judge_config::migrate_judge_config_secrets(
-                    &data_dir,
-                    store.secrets(),
-                )
-                .await;
                 Ok::<(), crate::error::CommandError>(())
             })?;
 
@@ -112,6 +106,9 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 model_registry::open_model_manager_with_registry(app.handle(), &data_dir),
             )
             .map_err(crate::error::CommandError::from)?;
+
+            let model_list: Vec<ModelEntry> =
+                model_manager.list_models().into_iter().cloned().collect();
 
             let (mut runtime_manager, _started) =
                 tauri::async_runtime::block_on(embedded_runtime::bootstrap_runtime_manager(
@@ -123,14 +120,6 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             tauri::async_runtime::block_on(
                 embedded_runtime::detect_hardware_on_startup(&mut runtime_manager),
             );
-
-            let llama_binary = runtime_manager
-                .manifest()
-                .map(|m| m.install_path.clone())
-                .filter(|p| p.is_file())
-                .unwrap_or_else(|| aisec_runtime::bundled_llama_server_binary(&data_dir));
-
-            model_manager = model_manager.with_llama_binary(llama_binary);
 
             let model_manager_arc = std::sync::Arc::new(AsyncMutex::new(model_manager));
             let model_provider: aisec_runtime::SharedModelProvider = std::sync::Arc::new(
@@ -144,6 +133,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                     .map_err(crate::error::CommandError::from)?,
             ));
 
+            let data_dir_for_inference = data_dir.clone();
             app.manage(AppState::new(
                 database,
                 data_dir,
@@ -160,6 +150,10 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let state = app_handle.state::<AppState>();
+                {
+                    let mut inference = state.inference_manager().lock().await;
+                    let _ = inference.load().await;
+                }
                 embedded_runtime::resume_local_runtime_on_startup(&app_handle, state.inner()).await;
             });
 
@@ -203,10 +197,6 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::auth::auth_record_session_cancel,
             commands::auth::auth_session_validate,
             commands::auth::auth_session_status,
-            commands::judge::judge_config_get,
-            commands::judge::judge_config_save,
-            commands::judge::judge_test_connectivity,
-            commands::judge::judge_test_model,
             commands::models::models_list,
             commands::models::models_registry_info,
             commands::models::models_registry_diagnostics,
@@ -250,6 +240,8 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::runtime::runtime_configuration,
             commands::runtime::runtime_inference_settings,
             commands::runtime::runtime_set_inference_route,
+            commands::runtime::runtime_test_connectivity,
+            commands::runtime::runtime_test_inference,
             commands::security::security_audit,
             commands::security::security_migrate_secrets,
             commands::plugins::plugins_list,

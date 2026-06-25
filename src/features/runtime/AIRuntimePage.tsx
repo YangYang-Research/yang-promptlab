@@ -7,14 +7,13 @@ import { toAppError } from "@/shared/errors";
 import { useAiInferenceRoute } from "@/shared/hooks/useAiInferenceRoute";
 import { useRuntimeModelLoading } from "@/shared/hooks/useRuntimeModelLoading";
 import {
-  deleteRuntime,
   getRuntimeHardware,
   getRuntimeHealth,
   getRuntimeLogs,
-  installRuntime,
   loadRuntimeModel,
   refreshRuntimeHardware,
-  repairRuntime,
+  reinitializeRuntimeEngine,
+  resetRuntimeConfig,
   restartRuntime,
   runRuntimeBenchmark,
   startRuntime,
@@ -33,30 +32,43 @@ import {
 import { useToast } from "@/shared/notifications";
 import { formatBytes } from "@/shared/utils/format";
 
-const INSTALL_STEPS = [
+const ENGINE_INIT_STEPS = [
   { id: "hardware", label: "Detect hardware" },
-  { id: "package", label: "Select package" },
-  { id: "download", label: "Download runtime" },
-  { id: "install", label: "Install binaries" },
-  { id: "verify", label: "Verify install" },
-  { id: "complete", label: "Ready to start" },
+  { id: "runtime", label: "Initialize engine" },
+  { id: "complete", label: "Ready" },
 ] as const;
 
 function stepIndex(stepId: string): number {
-  const idx = INSTALL_STEPS.findIndex((s) => s.id === stepId);
+  const idx = ENGINE_INIT_STEPS.findIndex((s) => s.id === stepId);
   return idx >= 0 ? idx : 0;
 }
 
-function RuntimeInstallProgress({
+function localInferenceLabel(
+  status: RuntimeStatusDto | null,
+  connectivity: string | null | undefined,
+  statusLabel: string | undefined,
+  modelLoadInProgress: boolean,
+): string {
+  if (modelLoadInProgress) return "Loading model";
+  if (connectivity) return connectivity;
+  if (statusLabel) return statusLabel;
+  if (!status) return "Not checked";
+  if (!status.binaryAvailable) {
+    return status.lifecycleState === "not_installed" ? "Not initialized" : "Unavailable";
+  }
+  return status.lifecycleState.replace(/_/g, " ");
+}
+
+function RuntimeEngineProgress({
   progress,
-  installing,
+  initializing,
   error,
 }: {
   progress: RuntimeInstallProgressEvent | null;
-  installing: boolean;
+  initializing: boolean;
   error: string | null;
 }) {
-  const activeIdx = progress ? stepIndex(progress.step) : installing ? 0 : -1;
+  const activeIdx = progress ? stepIndex(progress.step) : initializing ? 0 : -1;
   const phase = progress?.phase ?? 0;
 
   return (
@@ -67,22 +79,22 @@ function RuntimeInstallProgress({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={phase}
-        aria-label="Runtime install progress"
+        aria-label="Engine initialization progress"
       >
         <div className="runtime-setup-card__bar-fill" style={{ width: `${phase}%` }} />
       </div>
       <p className="runtime-setup-card__status">
-        {installing
-          ? progress?.message ?? "Installing runtime…"
+        {initializing
+          ? progress?.message ?? "Initializing engine…"
           : error ?? "Waiting…"}
       </p>
       <ol className="runtime-setup-steps">
-        {INSTALL_STEPS.map((step, index) => {
+        {ENGINE_INIT_STEPS.map((step, index) => {
           let state: "pending" | "active" | "done" | "error" = "pending";
           if (error && index === activeIdx) state = "error";
           else if (index < activeIdx) state = "done";
-          else if (index === activeIdx && installing) state = "active";
-          else if (!installing && progress?.step === "complete") state = "done";
+          else if (index === activeIdx && initializing) state = "active";
+          else if (!initializing && progress?.step === "complete") state = "done";
 
           return (
             <li key={step.id} className={`runtime-setup-steps__item runtime-setup-steps__item--${state}`}>
@@ -140,7 +152,7 @@ const RUNTIME_MODE_OPTIONS: RuntimeModeOption[] = [
     highlights: [
       "Inference runs entirely on your hardware",
       "Prompts and outputs stay on this device",
-      "You control runtime install, model selection, and startup",
+      "You control model selection and engine startup",
     ],
     notes: [
       {
@@ -265,8 +277,8 @@ export function AIRuntimePage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(false);
-  const [installing, setInstalling] = useState(false);
-  const [installProgress, setInstallProgress] = useState<RuntimeInstallProgressEvent | null>(null);
+  const [engineInitializing, setEngineInitializing] = useState(false);
+  const [engineInitProgress, setEngineInitProgress] = useState<RuntimeInstallProgressEvent | null>(null);
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
   const [modelRuntimeAction, setModelRuntimeAction] = useState<{
     id: string;
@@ -289,6 +301,7 @@ export function AIRuntimePage() {
     mode,
     loading: configLoading,
     busy: routeBusy,
+    error: configError,
     refresh: refreshConfiguration,
     setRoute,
   } = useAiInferenceRoute({ enabled: backendConnected });
@@ -356,7 +369,7 @@ export function AIRuntimePage() {
     if (!backendConnected) return;
     let unlisten: (() => void) | undefined;
     void listen<RuntimeInstallProgressEvent>(RUNTIME_INSTALL_PROGRESS_EVENT, (event) => {
-      setInstallProgress(event.payload);
+      setEngineInitProgress(event.payload);
     }).then((fn) => {
       unlisten = fn;
     });
@@ -401,7 +414,7 @@ export function AIRuntimePage() {
   }
 
   async function handleModeChange(route: AiInferenceRoute) {
-    if (routeBusy || busy !== null || installing) return;
+    if (routeBusy || busy !== null || engineInitializing) return;
     if (modelLoadInProgress) return;
     if (route === "third_party" && (runtimeModelLoading || modelRuntimeAction?.action === "load")) {
       return;
@@ -417,7 +430,7 @@ export function AIRuntimePage() {
   }
 
   async function handleSelectThirdPartyModel(modelId: string) {
-    if (!backendConnected || loading || busy !== null || installing || routeBusy || testingModelId !== null) {
+    if (!backendConnected || loading || busy !== null || engineInitializing || routeBusy || testingModelId !== null) {
       return;
     }
     setError(null);
@@ -444,7 +457,7 @@ export function AIRuntimePage() {
       !backendConnected ||
       loading ||
       busy !== null ||
-      installing ||
+      engineInitializing ||
       routeBusy ||
       modelRuntimeAction !== null ||
       !status?.binaryAvailable ||
@@ -472,7 +485,7 @@ export function AIRuntimePage() {
       !backendConnected ||
       loading ||
       busy !== null ||
-      installing ||
+      engineInitializing ||
       routeBusy ||
       modelRuntimeAction !== null ||
       modelLoadInProgress ||
@@ -504,7 +517,7 @@ export function AIRuntimePage() {
       !backendConnected ||
       loading ||
       busy !== null ||
-      installing ||
+      engineInitializing ||
       routeBusy ||
       modelRuntimeAction !== null ||
       !isLocalModelLoaded(modelId)
@@ -531,7 +544,7 @@ export function AIRuntimePage() {
       !backendConnected ||
       loading ||
       busy !== null ||
-      installing ||
+      engineInitializing ||
       routeBusy ||
       modelRuntimeAction !== null ||
       modelLoadInProgress ||
@@ -557,15 +570,15 @@ export function AIRuntimePage() {
     return null;
   }
 
-  async function runInstall(installFn: () => Promise<RuntimeStatusDto>) {
-    if (installing) return;
+  async function runEngineReinitialize() {
+    if (engineInitializing) return;
     setError(null);
-    setInstalling(true);
-    setInstallProgress({ step: "hardware", message: "Starting install…", phase: 5 });
+    setEngineInitializing(true);
+    setEngineInitProgress({ step: "hardware", message: "Initializing engine…", phase: 5 });
     try {
-      await installFn();
-      setInstallProgress({ step: "complete", message: "Runtime installed", phase: 100 });
-      notify("Runtime installed — press Start Runtime when ready", "success");
+      await reinitializeRuntimeEngine();
+      setEngineInitProgress({ step: "complete", message: "Engine ready", phase: 100 });
+      notify("Inference engine ready — press Start Runtime when ready", "success");
       await refreshAll();
     } catch (err) {
       const message = toAppError(err).message;
@@ -573,16 +586,22 @@ export function AIRuntimePage() {
       notify(message, "error");
       await refreshAll().catch(() => undefined);
     } finally {
-      setInstalling(false);
+      setEngineInitializing(false);
     }
   }
 
-  const disabled = !backendConnected || loading || busy !== null || installing || routeBusy;
+  const disabled = !backendConnected || loading || busy !== null || engineInitializing || routeBusy;
   const modelLoadInProgress =
     runtimeModelLoading || modelRuntimeAction?.action === "load";
   const localRuntimeStatusLabel = modelLoadInProgress
     ? "Loading model"
     : (configuration?.statusLabel ?? lifecycle.replace(/_/g, " "));
+  const inferenceLabel = localInferenceLabel(
+    status,
+    configuration?.connectivity,
+    configuration?.statusLabel,
+    modelLoadInProgress,
+  );
   const runtimeStarted =
     lifecycle === "running" || lifecycle === "busy" || lifecycle === "starting";
   const localModelActionsDisabled =
@@ -591,7 +610,7 @@ export function AIRuntimePage() {
     modelRuntimeAction !== null ||
     !status?.binaryAvailable ||
     !runtimeStarted;
-  const runtimeInstalled = lifecycle !== "not_installed";
+  const runtimeConfigured = lifecycle !== "not_installed";
   const localModels = settings?.localModels ?? [];
   const thirdPartyModels = settings?.thirdPartyModels ?? [];
   const showModePicker = backendConnected && mode === "not_configured" && !configLoading;
@@ -636,6 +655,10 @@ export function AIRuntimePage() {
 
       {configLoading && !configuration && backendConnected && (
         <p className="text-muted text-sm">Loading runtime configuration…</p>
+      )}
+
+      {configError && !configuration && backendConnected && !configLoading && (
+        <p className="text-danger text-sm">{configError}</p>
       )}
 
       {showModePicker && (
@@ -761,7 +784,7 @@ export function AIRuntimePage() {
                   <Card className="models-summary-card">
                     <span className="models-summary-card__label">Current Runtime</span>
                     <strong className="models-summary-card__value">
-                      {configuration?.runtimeName ?? status?.backend ?? "—"}
+                      {configuration?.runtimeName ?? "—"}
                     </strong>
                   </Card>
                   <Card className="models-summary-card">
@@ -795,87 +818,80 @@ export function AIRuntimePage() {
                     </dl>
                   ) : (
                     <p className="text-muted text-sm">
-                      Hardware not detected yet. Press Detect Hardware to profile this machine.
+                      Hardware profile not available yet. Reinitialize the engine to detect this machine.
                     </p>
                   )}
-                  <div className="model-card__actions">
-                    <Button
-                      variant="secondary"
-                      disabled={disabled}
-                      onClick={() =>
-                        void runAction("Detect hardware", async () => {
-                          await refreshHardware();
-                        })
-                      }
-                    >
-                      {busy === "Detect hardware" ? "Detecting…" : "Detect Hardware"}
-                    </Button>
-                  </div>
                 </Card>
               </section>
 
               <section className="runtime-section">
-                <h2 className="runtime-section__title">Runtime Manager</h2>
+                <h2 className="runtime-section__title">Inference Engine</h2>
                 <Card className="model-card model-card--wide">
+                  <p className="text-muted text-sm runtime-engine-intro">
+                    Embedded libllama runs in-process — no separate runtime binary to install.
+                  </p>
                   <dl className="runtime-kv-grid">
                     <div>
-                      <dt>Runtime</dt>
-                      <dd>{status?.recommendedRuntime ?? "Detect hardware first"}</dd>
+                      <dt>Engine</dt>
+                      <dd>{status?.recommendedRuntime ?? "Reinitialize engine to profile hardware"}</dd>
                     </div>
                     <div>
                       <dt>Version</dt>
                       <dd>{configuration?.runtimeVersion ?? status?.runtimeVersion ?? "—"}</dd>
                     </div>
-                    <div><dt>API endpoint</dt><dd className="mono">{status?.baseUrl ?? "—"}</dd></div>
                     <div>
-                      <dt>API status</dt>
+                      <dt>Inference</dt>
+                      <dd>
+                        <ConnectivityStatus label={inferenceLabel} />
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Model status</dt>
                       <dd>
                         {status?.modelLoaded
                           ? (configuration?.connectivity ?? "Not checked")
-                          : "Offline until a model is loaded"}
+                          : "No model loaded"}
                       </dd>
                     </div>
-                    <div><dt>Binary</dt><dd>{status?.binaryAvailable ? "Available" : "Missing"}</dd></div>
+                    <div>
+                      <dt>Status</dt>
+                      <dd>{status?.message ?? "—"}</dd>
+                    </div>
                   </dl>
 
-                  {installing && (
-                    <RuntimeInstallProgress
-                      progress={installProgress}
-                      installing={installing}
+                  {engineInitializing && (
+                    <RuntimeEngineProgress
+                      progress={engineInitProgress}
+                      initializing={engineInitializing}
                       error={error}
                     />
                   )}
 
                   <div className="model-card__actions">
                     <Button
-                      disabled={disabled || runtimeInstalled}
-                      onClick={() => void runInstall(() => installRuntime())}
+                      disabled={disabled}
+                      onClick={() => void runEngineReinitialize()}
                     >
-                      {installing ? "Installing…" : "Install Runtime"}
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      disabled={disabled || !runtimeInstalled}
-                      onClick={() => void runInstall(() => repairRuntime())}
-                    >
-                      Repair Runtime
+                      {engineInitializing ? "Initializing…" : "Reinitialize Engine"}
                     </Button>
                     {!runtimeStarted && (
                       <Button
                         variant="secondary"
-                        disabled={disabled || !status?.binaryAvailable}
+                        disabled={disabled || !runtimeConfigured || !status?.binaryAvailable}
                         onClick={() => void runAction("Start runtime", () => startRuntime())}
                       >
                         {busy === "Start runtime" ? "Starting…" : "Start Runtime"}
                       </Button>
                     )}
-                    <Button
-                      variant="ghost"
-                      disabled={disabled || !runtimeStarted}
-                      onClick={() => void runAction("Stop runtime", () => stopRuntime())}
-                    >
-                      {busy === "Stop runtime" ? "Stopping…" : "Stop Runtime"}
-                    </Button>
+                    {runtimeStarted && (
+                      <Button
+                        variant="ghost"
+                        disabled={disabled}
+                        onClick={() => void runAction("Stop runtime", () => stopRuntime())}
+                      >
+                        {busy === "Stop runtime" ? "Stopping…" : "Stop Runtime"}
+                      </Button>
+                    )}
                     {runtimeStarted && (
                       <Button
                         variant="ghost"
@@ -887,14 +903,14 @@ export function AIRuntimePage() {
                     )}
                     <Button
                       variant="danger"
-                      disabled={disabled || lifecycle === "not_installed"}
+                      disabled={disabled || !runtimeConfigured}
                       onClick={() =>
-                        void runAction("Delete runtime", async () => {
-                          await deleteRuntime();
+                        void runAction("Reset runtime config", async () => {
+                          await resetRuntimeConfig();
                         })
                       }
                     >
-                      {busy === "Delete runtime" ? "Deleting…" : "Delete Runtime"}
+                      {busy === "Reset runtime config" ? "Resetting…" : "Reset Runtime Config"}
                     </Button>
                     <Button variant="ghost" onClick={() => setShowLogs((v) => !v)}>
                       {showLogs ? "Hide Logs" : "Logs"}
@@ -1058,7 +1074,7 @@ export function AIRuntimePage() {
 }
 
 function thirdPartyModelNeedsEdit(model: AiInferenceModelOptionDto): boolean {
-  return model.statusLabel === "Connection Failed" || model.statusLabel === "Needs setup";
+  return model.statusLabel === "Connection Failed" || model.statusLabel === "Not Verified";
 }
 
 function LocalModelRow({

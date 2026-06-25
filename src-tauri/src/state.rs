@@ -7,6 +7,7 @@ use aisec_core::LogGuard;
 use aisec_harness::HarnessFactory;
 use aisec_models::{BuiltinCatalogMeta, LocalModelManager};
 use aisec_plugin_host::PluginManager;
+use aisec_inference::InferenceRuntimeManager;
 use aisec_runtime::RuntimeManager;
 use aisec_storage::{Database, Repositories};
 use tauri::async_runtime::Mutex as AsyncMutex;
@@ -25,8 +26,9 @@ pub struct AppState {
     model_provider: aisec_runtime::SharedModelProvider,
     model_catalog_meta: BuiltinCatalogMeta,
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+    inference_manager: Arc<AsyncMutex<InferenceRuntimeManager>>,
     runtime_config_cache: Arc<AsyncMutex<Option<crate::commands::runtime::RuntimeConfigurationDto>>>,
-    /// Model id currently loading into llama-server (survives stale config cache).
+    /// Model id currently loading into embedded libllama (survives stale config cache).
     runtime_model_loading_id: Arc<AsyncMutex<Option<String>>>,
     _log_guard: LogGuard,
 }
@@ -46,7 +48,7 @@ impl AppState {
     ) -> Self {
         Self {
             db,
-            data_dir,
+            data_dir: data_dir.clone(),
             jobs: ScanJobManager::default(),
             auth_engine_config,
             harness_factory,
@@ -55,6 +57,7 @@ impl AppState {
             model_provider,
             model_catalog_meta,
             runtime_manager: Arc::new(AsyncMutex::new(runtime_manager)),
+            inference_manager: Arc::new(AsyncMutex::new(InferenceRuntimeManager::new(&data_dir))),
             runtime_config_cache: Arc::new(AsyncMutex::new(None)),
             runtime_model_loading_id: Arc::new(AsyncMutex::new(None)),
             _log_guard: log_guard,
@@ -101,6 +104,10 @@ impl AppState {
         &self.runtime_manager
     }
 
+    pub fn inference_manager(&self) -> &Arc<AsyncMutex<InferenceRuntimeManager>> {
+        &self.inference_manager
+    }
+
     pub fn runtime_config_cache(
         &self,
     ) -> &Arc<AsyncMutex<Option<crate::commands::runtime::RuntimeConfigurationDto>>> {
@@ -112,12 +119,8 @@ impl AppState {
     }
 
     pub async fn ollama_base_url(&self) -> String {
-        self.runtime_manager
-            .lock()
-            .await
-            .supervisor()
-            .base_url()
-            .to_string()
+        let _ = self.runtime_manager.lock().await;
+        "embedded".into()
     }
 
     pub fn auth_engine_config(&self) -> &AuthEngineConfig {

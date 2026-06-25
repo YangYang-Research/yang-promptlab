@@ -145,12 +145,27 @@ export function getRuntimeStatus(): Promise<RuntimeStatusDto> {
   return invokeCommand<RuntimeStatusDto>("runtime_status");
 }
 
-export function installRuntime(): Promise<RuntimeStatusDto> {
-  return invokeCommand<RuntimeStatusDto>("runtime_install");
+export function reinitializeRuntimeEngine(): Promise<RuntimeStatusDto> {
+  return invokeCommand<RuntimeStatusDto>("runtime_repair");
 }
 
+/** @deprecated Use {@link reinitializeRuntimeEngine} — embedded libllama has no separate install step. */
+export function installRuntime(): Promise<RuntimeStatusDto> {
+  return reinitializeRuntimeEngine();
+}
+
+/** @deprecated Use {@link reinitializeRuntimeEngine}. */
 export function repairRuntime(): Promise<RuntimeStatusDto> {
-  return invokeCommand<RuntimeStatusDto>("runtime_repair");
+  return reinitializeRuntimeEngine();
+}
+
+export function resetRuntimeConfig(): Promise<RuntimeStatusDto> {
+  return invokeCommand<RuntimeStatusDto>("runtime_delete");
+}
+
+/** @deprecated Use {@link resetRuntimeConfig}. */
+export function deleteRuntime(): Promise<RuntimeStatusDto> {
+  return resetRuntimeConfig();
 }
 
 export function startRuntime(): Promise<RuntimeStatusDto> {
@@ -159,10 +174,6 @@ export function startRuntime(): Promise<RuntimeStatusDto> {
 
 export function stopRuntime(): Promise<RuntimeStatusDto> {
   return invokeCommand<RuntimeStatusDto>("runtime_stop");
-}
-
-export function deleteRuntime(): Promise<RuntimeStatusDto> {
-  return invokeCommand<RuntimeStatusDto>("runtime_delete");
 }
 
 export function loadRuntimeModel(modelId: string): Promise<RuntimeConfigurationDto> {
@@ -197,4 +208,21 @@ export function refreshRuntimeHardware(): Promise<RuntimeHardwareDto> {
 
 export function getRuntimeHardware(): Promise<RuntimeHardwareDto | null> {
   return invokeCommand<RuntimeHardwareDto | null>("runtime_hardware");
+}
+
+export type RuntimeConnectivityResult = {
+  ok: boolean;
+  provider: string;
+  model: string;
+  latencyMs: number;
+  message: string;
+  sampleResponse?: string | null;
+};
+
+export function testRuntimeConnectivity(): Promise<RuntimeConnectivityResult> {
+  return invokeCommand<RuntimeConnectivityResult>("runtime_test_connectivity");
+}
+
+export function testRuntimeInference(): Promise<RuntimeConnectivityResult> {
+  return invokeCommand<RuntimeConnectivityResult>("runtime_test_inference");
 }

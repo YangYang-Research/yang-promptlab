@@ -1,12 +1,21 @@
 import { useEffect, useState } from "react";
 
-import { Button } from "@/shared/components";
+import { Badge, Button } from "@/shared/components";
 import type { ModelCatalogEntryDto } from "@/shared/ipc/models";
 import { openExternalUrl } from "@/shared/utils/openExternalUrl";
 
 import { huggingFaceModelIcon, huggingFaceRepoUrl } from "./huggingFace";
 
 export const HF_CATALOG_IMPORT_ID = "__import__";
+
+function formatCatalogCapabilities(entry: ModelCatalogEntryDto): string {
+  const caps = [
+    entry.capabilities.chat && "Chat",
+    entry.capabilities.completion && "Completion",
+    entry.capabilities.embeddings && "Embeddings",
+  ].filter(Boolean);
+  return caps.length > 0 ? caps.join(", ") : "—";
+}
 
 export type ImportModelFormProps = {
   backendConnected: boolean;
@@ -122,23 +131,32 @@ export function HuggingFaceModelCatalog({
 
       {selected && !importSelected && (
         <div className="hf-catalog__detail">
-          <h4 className="hf-catalog__detail-title">{selected.name}</h4>
-          <p className="text-muted text-sm">{selected.description}</p>
+          <div className="hf-catalog__detail-header">
+            <h4 className="hf-catalog__detail-title">{selected.name}</h4>
+            {selected.recommended ? (
+              <Badge variant="success">Recommended</Badge>
+            ) : null}
+          </div>
           <dl className="hf-catalog__meta">
             <div>
               <dt>Provider</dt>
               <dd>{selected.provider}</dd>
             </div>
             <div>
-              <dt>Purpose</dt>
-              <dd>{selected.purpose}</dd>
+              <dt>Capabilities</dt>
+              <dd>{formatCatalogCapabilities(selected)}</dd>
+            </div>
+            <div>
+              <dt>Format</dt>
+              <dd>{selected.format}</dd>
+            </div>
+            <div>
+              <dt>Quantization</dt>
+              <dd>{selected.quant ?? "—"}</dd>
             </div>
             <div>
               <dt>Engine</dt>
-              <dd>
-                {selected.engine} · {selected.format}
-                {selected.quant ? ` · ${selected.quant}` : ""}
-              </dd>
+              <dd>{selected.engine}</dd>
             </div>
             <div>
               <dt>Size</dt>

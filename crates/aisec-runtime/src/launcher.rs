@@ -1,4 +1,4 @@
-//! Start/stop/restart the supervised llama-server process.
+//! Start/stop/restart the embedded libllama runtime.
 
 use std::path::Path;
 
@@ -17,7 +17,7 @@ impl RuntimeLauncher {
         manifest: &mut RuntimeManifest,
         lifecycle: RuntimeLifecycleState,
     ) -> RuntimeResult<RuntimeLifecycleState> {
-        if !supervisor.binary_available() {
+        if !supervisor.runtime_available() {
             return Err(RuntimeError::Unavailable);
         }
 

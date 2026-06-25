@@ -21,6 +21,7 @@ aisec-core = { workspace = true }
 aisec-harness = { workspace = true }
 aisec-models = { workspace = true }
 aisec-runtime = { workspace = true }
+aisec-inference = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 regex = { workspace = true }

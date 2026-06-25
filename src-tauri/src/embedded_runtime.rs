@@ -1,14 +1,14 @@
-//! Load persisted runtime configuration at app startup (no install/start).
+//! Load persisted runtime configuration at app startup (no model preload).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use aisec_core::AisecResult;
+use aisec_inference::config::InferenceMode;
 use aisec_models::ModelProvider;
 use aisec_runtime::RuntimeManager;
 use tauri::{AppHandle, Manager};
 use tracing::{info, warn};
 
-use crate::ai_inference_settings::{load_settings, AiInferenceRoute};
 use crate::commands::runtime::{
     load_model_with_loading_cache, prime_loading_configuration_cache, prime_runtime_configuration_cache,
     set_runtime_model_loading,
@@ -16,32 +16,23 @@ use crate::commands::runtime::{
 use crate::runtime_watch;
 use crate::state::AppState;
 
-fn bundled_resource_binary(app: &AppHandle) -> Option<PathBuf> {
-    app.path()
-        .resource_dir()
-        .ok()
-        .map(|dir| aisec_runtime::bundled_llama_server_binary(&dir))
-        .filter(|path| path.is_file())
-}
-
 /// Load runtime configuration from disk at app startup. Does not install or start.
 pub async fn bootstrap_runtime_manager(
-    app: &AppHandle,
+    _app: &AppHandle,
     data_dir: &Path,
 ) -> AisecResult<(RuntimeManager, bool)> {
-    let bundled = bundled_resource_binary(app);
-    let mut manager = RuntimeManager::new(data_dir, bundled);
+    let mut manager = RuntimeManager::new(data_dir);
 
     match manager.bootstrap().await {
         Ok(()) => {
             info!(
                 state = manager.lifecycle_state().as_str(),
-                "AI runtime configuration loaded"
+                "embedded libllama runtime configuration loaded"
             );
             Ok((manager, false))
         }
         Err(err) => {
-            warn!(error = %err, "AI runtime bootstrap failed");
+            warn!(error = %err, "embedded libllama runtime bootstrap failed");
             Ok((manager, false))
         }
     }
@@ -63,16 +54,12 @@ pub async fn detect_hardware_on_startup(manager: &mut RuntimeManager) {
 
 /// When AI inference is configured for local mode, start the runtime and reload the last model.
 pub async fn resume_local_runtime_on_startup(app: &AppHandle, state: &AppState) {
-    let data_dir = state.data_dir();
-    let settings = match load_settings(data_dir).await {
-        Ok(settings) => settings,
-        Err(err) => {
-            warn!(error = %err, "local runtime auto-resume skipped: settings unavailable");
-            return;
-        }
+    let settings = {
+        let inference = state.inference_manager().lock().await;
+        inference.config().clone()
     };
 
-    if !settings.initialized || settings.route != AiInferenceRoute::Local {
+    if !settings.initialized || settings.mode != InferenceMode::Local {
         return;
     }
 
@@ -108,9 +95,9 @@ pub async fn resume_local_runtime_on_startup(app: &AppHandle, state: &AppState) 
     prime_loading_configuration_cache(state, &model_id).await;
 
     let mut runtime = state.runtime_manager().lock().await;
-    if !runtime.supervisor().binary_available() {
+    if !runtime.supervisor().runtime_available() {
         set_runtime_model_loading(state, None).await;
-        info!("local runtime auto-resume skipped: llama-server binary missing");
+        info!("local runtime auto-resume skipped: embedded libllama unavailable");
         return;
     }
 
@@ -141,15 +128,5 @@ pub async fn resume_local_runtime_on_startup(app: &AppHandle, state: &AppState) 
                 "local runtime auto-resume: failed to load model"
             );
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bundled_path_helper_compiles() {
-        let _ = bundled_resource_binary as fn(&AppHandle) -> Option<PathBuf>;
     }
 }

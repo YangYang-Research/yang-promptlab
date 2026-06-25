@@ -122,6 +122,7 @@ async fn run_scan_job(
     auth_config: AuthEngineConfig,
     harness_factory: aisec_harness::HarnessFactory,
     plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
+    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
     runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
@@ -157,9 +158,10 @@ async fn run_scan_job(
             let plan = attack_plan_from_scan(profile.clone(), categories.clone(), disabled_tests);
             match generate_payloads_for_scan_job(
                 &data_dir,
-                &model_manager,
+                Arc::clone(&inference_manager),
+                Arc::clone(&model_manager),
                 model_provider.clone(),
-                &runtime_manager,
+                Arc::clone(&runtime_manager),
                 &plan,
                 mode,
             )
@@ -230,6 +232,7 @@ async fn run_scan_job(
                 }
             }
 
+            let inference = inference_manager.lock().await;
             let manager = model_manager.lock().await;
             let mut runtime_mgr = runtime_manager.lock().await;
             match run_category_on_endpoint(
@@ -241,9 +244,10 @@ async fn run_scan_job(
                 *category,
                 attack_runtime.clone(),
                 &data_dir,
+                &inference,
                 &manager,
                 model_provider.clone(),
-                runtime_mgr.supervisor_mut(),
+                &mut runtime_mgr,
                 plugin_manager.clone(),
                 generated_payloads.as_ref(),
                 Some(&progress_emitter),
@@ -337,6 +341,7 @@ async fn run_agent_scan_job(
     auth_config: AuthEngineConfig,
     harness_factory: aisec_harness::HarnessFactory,
     plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
+    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
     runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
@@ -408,8 +413,6 @@ async fn run_agent_scan_job(
             p.current_phase = Some("fingerprint".into());
         }
 
-        let manager = model_manager.lock().await;
-        let mut runtime_mgr = runtime_manager.lock().await;
         let mut host = ScanAgentHost {
             repos: &repos,
             scan_id: scan_id.clone(),
@@ -418,9 +421,10 @@ async fn run_agent_scan_job(
             endpoint: endpoint.clone(),
             runtime: attack_runtime.clone(),
             data_dir: &data_dir,
-            model_manager: &manager,
+            inference_manager: inference_manager.clone(),
+            model_manager_arc: model_manager.clone(),
             model_provider: model_provider.clone(),
-            runtime_supervisor: runtime_mgr.supervisor_mut(),
+            runtime_manager_arc: runtime_manager.clone(),
             plugin_manager: plugin_manager.clone(),
             profile: profile.clone(),
             disabled_tests: disabled_tests.clone(),
@@ -430,6 +434,7 @@ async fn run_agent_scan_job(
             completed_units: completed_units.clone(),
             findings_total: findings_arc.clone(),
             progress_emitter: Some(progress_emitter.clone()),
+            planner_mode: config.planner_mode,
         };
 
         match run_agent_endpoint(&mut host, &config).await {
@@ -625,6 +630,7 @@ pub async fn scan_start_op(
     let auth_config = state.auth_engine_config().clone();
     let harness_factory = state.harness_factory().clone();
     let plugin_manager = Arc::clone(state.plugin_manager());
+    let inference_manager = Arc::clone(state.inference_manager());
     let model_manager = Arc::clone(state.model_manager());
     let model_provider = state.model_provider().clone();
     let runtime_manager = Arc::clone(state.runtime_manager());
@@ -659,6 +665,7 @@ pub async fn scan_start_op(
                 auth_config,
                 harness_factory,
                 plugin_manager,
+                inference_manager,
                 model_manager,
                 model_provider,
                 runtime_manager,
@@ -686,6 +693,7 @@ pub async fn scan_start_op(
                 auth_config,
                 harness_factory,
                 plugin_manager,
+                inference_manager,
                 model_manager,
                 model_provider,
                 runtime_manager,

@@ -8,12 +8,17 @@ export function connectivityStatusVariant(
   if (
     value.startsWith("Connection Successful") ||
     value.startsWith("Connected") ||
+    value.startsWith("Reachable") ||
     value === "Running" ||
     value === "Ready"
   ) {
     return "success";
   }
-  if (value === "Connection Failed" || value === "Failed") {
+  if (
+    value === "Connection Failed" ||
+    value === "Failed" ||
+    value.startsWith("Unreachable")
+  ) {
     return "failed";
   }
   return null;

@@ -3,19 +3,15 @@
 use aisec_attack::AttackCategory;
 use aisec_core::AisecError;
 use aisec_generator::{generate_from_plan, GeneratorMode, PromptPayloads};
-use aisec_judge::{JudgeProviderConfig, JudgeRuntimeContext};
-use aisec_judge::providers::LocalLlmBackend;
 use aisec_planner::{AttackPlan, PlannerMode};
-use aisec_runtime::ModelProviderRuntime;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::State;
 use tokio::sync::Mutex as AsyncMutex;
 
+use crate::inference_host::{is_inference_ready, HostGeneratorLlm};
 use crate::error::{CommandError, CommandResult};
-use crate::generator_service::JudgeGeneratorLlm;
-use crate::judge_config::{load_judge_config, prepare_judge_runtime_context};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -158,34 +154,29 @@ pub fn parse_generator_mode_optional(raw: Option<&str>) -> Option<GeneratorMode>
 
 pub async fn generate_payloads_for_scan_job(
     data_dir: &std::path::Path,
-    model_manager: &AsyncMutex<aisec_models::LocalModelManager>,
+    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
     model_provider: aisec_runtime::SharedModelProvider,
-    runtime_manager: &AsyncMutex<aisec_runtime::RuntimeManager>,
+    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
     plan: &AttackPlan,
     mode: GeneratorMode,
 ) -> CommandResult<PromptPayloads> {
     if mode == GeneratorMode::LocalLlm {
-        let manager = model_manager.lock().await;
-        let mut runtime_mgr = runtime_manager.lock().await;
-        let mut config = load_judge_config(data_dir).await?;
-        let runtime = prepare_judge_runtime_context(
-            &mut config,
-            &manager,
+        let inference = inference_manager.lock().await;
+        if !is_inference_ready(&inference) {
+            return Err(CommandError::invalid_input(
+                "AI runtime is not configured for local LLM generation",
+            ));
+        }
+        drop(inference);
+        let llm = Arc::new(HostGeneratorLlm::new(
+            data_dir.to_path_buf(),
+            Arc::clone(&inference_manager),
+            Arc::clone(&model_manager),
             model_provider,
-            runtime_mgr.supervisor_mut(),
-        )
-        .await?
-        .ok_or_else(|| {
-            CommandError::invalid_input(
-                "local LLM generator requires a vault model — configure Models page first",
-            )
-        })?;
-        drop(manager);
-        drop(runtime_mgr);
-
-        let backend = build_generator_llm_backend(&config, &runtime).await?;
-        let adapter = JudgeGeneratorLlm::new(backend);
-        generate_from_plan(plan, mode, Some(&adapter))
+            Arc::clone(&runtime_manager),
+        ));
+        generate_from_plan(plan, mode, Some(llm.as_ref()))
             .await
             .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
     } else {
@@ -202,9 +193,10 @@ pub async fn generate_payloads_for_plan(
 ) -> CommandResult<PromptPayloads> {
     generate_payloads_for_scan_job(
         state.data_dir(),
-        state.model_manager(),
+        Arc::clone(state.inference_manager()),
+        Arc::clone(state.model_manager()),
         state.model_provider().clone(),
-        state.runtime_manager(),
+        Arc::clone(state.runtime_manager()),
         plan,
         mode,
     )
@@ -219,35 +211,6 @@ pub async fn generator_generate_op(
     let mode = parse_generator_mode(&request.mode);
     let pack = generate_payloads_for_plan(state, &plan, mode).await?;
     Ok(payloads_to_dto(pack))
-}
-
-async fn build_generator_llm_backend(
-    config: &JudgeProviderConfig,
-    runtime: &JudgeRuntimeContext,
-) -> CommandResult<Arc<dyn aisec_judge::providers::LlmBackend>> {
-    let model_id = config
-        .local
-        .vault_model_id
-        .clone()
-        .unwrap_or_else(|| runtime.active_model_id.clone());
-    if model_id.trim().is_empty() {
-        return Err(CommandError::invalid_input(
-            "select an active vault model for local LLM generator mode",
-        ));
-    }
-
-    let provider_runtime =
-        ModelProviderRuntime::new(runtime.model_provider.clone(), model_id.clone());
-    let label = match config.local.provider {
-        aisec_judge::LocalProvider::Ollama => "runtime/ollama",
-        aisec_judge::LocalProvider::LlamaCpp => "runtime/llama_cpp",
-    };
-
-    Ok(Arc::new(LocalLlmBackend::new(
-        label,
-        config.local.model.clone(),
-        Arc::new(AsyncMutex::new(provider_runtime)),
-    )))
 }
 
 #[tauri::command]

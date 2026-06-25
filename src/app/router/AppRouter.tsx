@@ -40,9 +40,6 @@ const ModelsPage = lazy(() =>
 const PluginsPage = lazy(() =>
   import("@/features/plugins/PluginsPage").then((m) => ({ default: m.PluginsPage })),
 );
-const JudgeProviderPage = lazy(() =>
-  import("@/features/judge/JudgeProviderPage").then((m) => ({ default: m.JudgeProviderPage })),
-);
 const AIRuntimePage = lazy(() =>
   import("@/features/runtime/AIRuntimePage").then((m) => ({ default: m.AIRuntimePage })),
 );
@@ -179,14 +176,6 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <ReportsPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="judge"
-            element={
-              <Suspense fallback={<PageLoader />}>
-                <JudgeProviderPage />
               </Suspense>
             }
           />

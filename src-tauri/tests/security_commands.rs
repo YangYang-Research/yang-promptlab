@@ -6,9 +6,7 @@ use aisec_auth::descriptor_has_plaintext_secrets;
 use aisec_core::{init_logging, LogOptions};
 use aisec_desktop_lib::commands::security::{security_audit_op, security_migrate_secrets_op};
 use aisec_desktop_lib::db::open_database;
-use aisec_desktop_lib::judge_config::{judge_config_path, load_judge_config};
 use aisec_desktop_lib::state::AppState;
-use aisec_judge::JudgeProviderConfig;
 use aisec_storage::{
     AuthProfileRepository, AuthSessionRepository, CreateAuthProfile, CreateAuthSessionRecord,
     CreateProject, CreateTarget, ProjectRepository, TargetRepository,
@@ -34,7 +32,7 @@ async fn make_state(dir: &Path) -> AppState {
 }
 
 #[tokio::test]
-async fn audit_detects_legacy_target_session_and_judge_config() {
+async fn audit_detects_legacy_target_session_secrets() {
     let dir = tempfile::tempdir().unwrap();
     let state = make_state(dir.path()).await;
 
@@ -92,19 +90,12 @@ async fn audit_detects_legacy_target_session_and_judge_config() {
         .await
         .unwrap();
 
-    let mut judge = JudgeProviderConfig::default();
-    judge.remote.api_key = "sk-test-key".into();
-    let judge_json = serde_json::to_string_pretty(&judge).unwrap();
-    tokio::fs::write(judge_config_path(state.data_dir()), judge_json)
-        .await
-        .unwrap();
-
     let audit = security_audit_op(&state).await.expect("audit");
     assert!(audit.targets_legacy >= 1);
     assert!(audit.auth_profiles_legacy >= 1);
     assert!(audit.sessions_legacy >= 1);
-    assert_eq!(audit.judge_config_legacy, 1);
-    assert!(audit.legacy_count >= 4);
+    assert_eq!(audit.judge_config_legacy, 0);
+    assert!(audit.legacy_count >= 3);
 }
 
 #[tokio::test]
@@ -138,38 +129,17 @@ async fn migrate_clears_plaintext_secrets() {
         .await
         .unwrap();
 
-    let mut judge = JudgeProviderConfig::default();
-    judge.remote.api_key = "sk-migrate".into();
-    tokio::fs::write(
-        judge_config_path(state.data_dir()),
-        serde_json::to_string_pretty(&judge).unwrap(),
-    )
-    .await
-    .unwrap();
-
     let report = security_migrate_secrets_op(&state)
         .await
         .expect("migrate");
-    assert!(report.audit_before.legacy_count >= 2);
+    assert!(report.audit_before.legacy_count >= 1);
     assert_eq!(report.audit_after.legacy_count, 0);
     assert!(report.targets_migrated >= 1);
-    assert!(report.judge_migrated >= 1);
+    assert_eq!(report.judge_migrated, 0);
 
     let updated = state.repositories().targets().get(&target.id).await.unwrap();
     assert!(
         !descriptor_has_plaintext_secrets(&updated.descriptor_json),
         "target descriptor must not contain plaintext password"
     );
-
-    let judge_raw = tokio::fs::read_to_string(judge_config_path(state.data_dir()))
-        .await
-        .unwrap();
-    assert!(
-        !judge_raw.contains("sk-migrate"),
-        "judge config file must not contain plaintext api key"
-    );
-
-    let loaded = load_judge_config(state.data_dir()).await.unwrap();
-    assert!(loaded.remote.api_key.is_empty());
-    assert!(loaded.remote.api_key_credential_id.is_some());
 }

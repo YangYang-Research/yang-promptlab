@@ -25,7 +25,7 @@ pub use consensus::ConsensusEngine;
 pub use engine::JudgeEngine;
 pub use error::{JudgeError, JudgeResult};
 pub use evaluators::{LlmEvaluator, RegexEvaluator, RuleBasedEvaluator};
-pub use factory::{build_judge_engine, test_connectivity, test_model};
+pub use factory::{build_judge_engine, build_judge_engine_with_adapter, test_connectivity, test_model};
 pub use mock_runtime::JsonMockRuntime;
 pub use roles::ModelRolePool;
 pub use runtime_context::JudgeRuntimeContext;

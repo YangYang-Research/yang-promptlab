@@ -19,6 +19,8 @@ pub struct BuiltinRegistryEntry {
     pub id: String,
     pub name: String,
     #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
     pub purpose: String,
     #[serde(default)]
     pub recommended: bool,
@@ -190,22 +192,32 @@ async fn merge_remote(entries: &mut Vec<BuiltinRegistryEntry>, url: &str) -> Mod
 pub fn entry_to_catalog(entry: &BuiltinRegistryEntry) -> ModelCatalogEntry {
     let quant = infer_quant_from_url(&entry.download_url);
     let filename = filename_from_url(&entry.download_url);
+    let format_label = quant
+        .as_ref()
+        .map(|q| format!("{} · {}", entry.format, q))
+        .unwrap_or_else(|| entry.format.clone());
+    let provider_label = if entry.provider.trim().is_empty() {
+        "Unknown".to_string()
+    } else {
+        entry.provider.trim().to_string()
+    };
     let description = if entry.recommended {
         format!(
             "{} · {} · {} (recommended)",
-            entry.name, entry.engine, entry.purpose
+            provider_label, format_label, entry.engine
         )
     } else {
-        format!("{} · {} · {}", entry.name, entry.engine, entry.purpose)
+        format!("{} · {} · {}", provider_label, format_label, entry.engine)
     };
 
     ModelCatalogEntry {
         id: entry.id.clone(),
         name: entry.name.clone(),
         provider: ModelProvider::Gguf,
+        provider_label,
         version: filename.clone().unwrap_or_else(|| entry.id.clone()),
         description,
-        purpose: entry.purpose.clone(),
+        purpose: String::new(),
         recommended: entry.recommended,
         size_bytes: parse_size_bytes(entry.size.as_deref()),
         quant,
@@ -270,7 +282,8 @@ mod tests {
         let entry = BuiltinRegistryEntry {
             id: "qwen3-8b-judge".into(),
             name: "Qwen3 8B".into(),
-            purpose: "judge".into(),
+            provider: "Qwen Team".into(),
+            purpose: String::new(),
             recommended: true,
             engine: "llama.cpp".into(),
             format: "gguf".into(),
@@ -284,9 +297,11 @@ mod tests {
         };
         let catalog = entry_to_catalog(&entry);
         assert_eq!(catalog.id, "qwen3-8b-judge");
+        assert_eq!(catalog.provider_label, "Qwen Team");
         assert_eq!(catalog.provider, ModelProvider::Gguf);
         assert_eq!(catalog.quant.as_deref(), Some("Q4_K_M"));
         assert!(catalog.download_url.is_some());
+        assert!(catalog.description.contains("Qwen Team"));
     }
 
     #[test]

@@ -13,7 +13,7 @@ use crate::hardware::detect_hardware;
 use crate::registry::ModelRegistry;
 use crate::runtime::{
     infer_capabilities, infer_provider, infer_version, InferenceRuntime, LocalInferenceEngine,
-    LlamaCppConfig, LlamaCppRuntime,
+    LlamaInProcessRuntime, LlamaModelConfig,
 };
 use crate::types::{
     ChatMessage, ChatRequest, DownloadProgress, DownloadStatus, HardwareProfile, HuggingFaceDownloadRequest,
@@ -39,7 +39,7 @@ pub struct LocalModelManager {
     catalog: Vec<ModelCatalogEntry>,
     catalog_meta: BuiltinCatalogMeta,
     hardware: HardwareProfile,
-    runtime: LlamaCppRuntime,
+    runtime: LlamaInProcessRuntime,
 }
 
 impl LocalModelManager {
@@ -48,7 +48,7 @@ impl LocalModelManager {
         std::fs::create_dir_all(&vault_path).map_err(ModelError::Io)?;
 
         let hardware = detect_hardware()?;
-        let mut llama_config = LlamaCppConfig::default();
+        let mut llama_config = LlamaModelConfig::default();
         llama_config.n_gpu_layers = hardware.recommended_gpu_layers();
         let mut registry = ModelRegistry::load_from_vault(&vault_path)?;
         if ModelRegistry::migrate_storage_layout(&vault_path, &mut registry)? {
@@ -63,7 +63,7 @@ impl LocalModelManager {
             catalog: Vec::new(),
             catalog_meta: BuiltinCatalogMeta::default(),
             hardware,
-            runtime: LlamaCppRuntime::new(llama_config),
+            runtime: LlamaInProcessRuntime::new(llama_config),
         })
     }
 
@@ -73,11 +73,9 @@ impl LocalModelManager {
         self
     }
 
-    /// Point the vault inference runtime at a bundled or system `llama-server` binary.
-    pub fn with_llama_binary(mut self, binary: impl AsRef<Path>) -> Self {
-        let mut config = self.llama_config();
-        config.binary_path = binary.as_ref().to_path_buf();
-        self.runtime = LlamaCppRuntime::new(config);
+    /// Override embedded libllama model configuration (GPU layers, context size).
+    pub fn with_model_config(mut self, config: LlamaModelConfig) -> Self {
+        self.runtime = LlamaInProcessRuntime::new(config);
         self
     }
 
@@ -107,15 +105,15 @@ impl LocalModelManager {
         &self.hardware
     }
 
-    pub fn runtime(&self) -> &LlamaCppRuntime {
+    pub fn runtime(&self) -> &LlamaInProcessRuntime {
         &self.runtime
     }
 
-    pub fn runtime_mut(&mut self) -> &mut LlamaCppRuntime {
+    pub fn runtime_mut(&mut self) -> &mut LlamaInProcessRuntime {
         &mut self.runtime
     }
 
-    pub fn llama_config(&self) -> LlamaCppConfig {
+    pub fn local_model_config(&self) -> LlamaModelConfig {
         let mut config = self.runtime.config().clone();
         config.n_gpu_layers = self.hardware.recommended_gpu_layers();
         config
@@ -245,7 +243,11 @@ impl LocalModelManager {
             verified: true,
             created_at: now,
             updated_at: now,
-            metadata: serde_json::json!({ "download": progress, "registry_id": catalog_id }),
+            metadata: serde_json::json!({
+                "download": progress,
+                "registry_id": catalog_id,
+                "providerLabel": catalog.provider_label,
+            }),
         };
 
         self.registry.register_entry(entry.clone())?;
@@ -692,7 +694,11 @@ impl LocalModelManager {
             verified: true,
             created_at: now,
             updated_at: now,
-            metadata: serde_json::json!({ "download": progress }),
+            metadata: serde_json::json!({
+                "download": progress,
+                "registry_id": catalog.id,
+                "providerLabel": catalog.provider_label,
+            }),
         };
 
         self.registry.register_entry(entry.clone())?;
@@ -783,7 +789,11 @@ impl LocalModelManager {
                 verified: true,
                 created_at: now,
                 updated_at: now,
-                metadata: serde_json::json!({ "recovered": true }),
+                metadata: serde_json::json!({
+                    "recovered": true,
+                    "registry_id": catalog.id,
+                    "providerLabel": catalog.provider_label,
+                }),
             };
 
             self.registry.register_entry(entry)?;
@@ -1092,7 +1102,7 @@ impl LocalModelManager {
         }
 
         if entry.provider == ModelProvider::Ollama {
-            let engine = LocalInferenceEngine::from_entry(entry.clone(), self.llama_config()).await?;
+            let engine = LocalInferenceEngine::from_entry(entry.clone(), self.local_model_config()).await?;
             let ok = engine.health().await.unwrap_or(false);
             if ok {
                 self.registry.update_verification(model_id, "ollama-ok".into(), true)?;
@@ -1139,7 +1149,7 @@ impl LocalModelManager {
             .get(model_id)
             .ok_or_else(|| ModelError::not_found(model_id))?
             .clone();
-        LocalInferenceEngine::from_entry(entry, self.llama_config()).await
+        LocalInferenceEngine::from_entry(entry, self.local_model_config()).await
     }
 
     /// Run a completion smoke test on a registered model.
@@ -1236,6 +1246,17 @@ impl LocalModelManager {
             .get_mut(model_id)
             .ok_or_else(|| ModelError::not_found(model_id))?;
         entry.metadata = metadata;
+        entry.updated_at = OffsetDateTime::now_utc();
+        self.persist()?;
+        Ok(self.registry.get(model_id).expect("entry exists"))
+    }
+
+    pub fn set_model_verified(&mut self, model_id: &str, verified: bool) -> ModelResult<&ModelEntry> {
+        let entry = self
+            .registry
+            .get_mut(model_id)
+            .ok_or_else(|| ModelError::not_found(model_id))?;
+        entry.verified = verified;
         entry.updated_at = OffsetDateTime::now_utc();
         self.persist()?;
         Ok(self.registry.get(model_id).expect("entry exists"))

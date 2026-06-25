@@ -6,12 +6,10 @@ use aisec_auth::{
     CredentialReferenceId, ModelCredentialVault, SecretScope, SecretStore,
 };
 use aisec_core::AisecError;
-use aisec_judge::{JudgeProviderConfig, RemoteProvider};
-use aisec_models::{LocalModelManager, ModelEntry, ModelProvider, ModelSource};
+use aisec_models::{LocalModelManager, ModelProvider};
 use tracing::info;
 
 use crate::error::{CommandError, CommandResult};
-use crate::judge_config::{load_judge_config, resolve_judge_config_secrets};
 
 pub const API_KEY_CREDENTIAL_ID: &str = "apiKeyCredentialId";
 pub const AWS_SECRET_CREDENTIAL_ID: &str = "awsSecretAccessKeyCredentialId";
@@ -252,38 +250,6 @@ fn rekey_credential_metadata(
     Ok(true)
 }
 
-fn parse_remote_provider(value: &str) -> Option<RemoteProvider> {
-    match value {
-        "openai" => Some(RemoteProvider::OpenAi),
-        "anthropic" => Some(RemoteProvider::Anthropic),
-        "gemini" | "google" => Some(RemoteProvider::Gemini),
-        "openrouter" => Some(RemoteProvider::OpenRouter),
-        "azure" => Some(RemoteProvider::Azure),
-        "bedrock" | "aws_bedrock" => Some(RemoteProvider::Bedrock),
-        "custom" => Some(RemoteProvider::OpenAi),
-        _ => Some(RemoteProvider::OpenAi),
-    }
-}
-
-fn remote_entry_matches_judge(entry: &ModelEntry, config: &JudgeProviderConfig) -> bool {
-    let ModelSource::Remote { provider, .. } = &entry.source else {
-        return false;
-    };
-    parse_remote_provider(provider)
-        .is_some_and(|remote| remote == config.remote.provider)
-}
-
-fn credentials_from_judge_remote(
-    remote: &aisec_judge::RemoteProviderSettings,
-) -> ThirdPartyCredentialFields {
-    ThirdPartyCredentialFields {
-        api_key: remote.api_key.clone(),
-        api_key_env: remote.api_key_env.clone(),
-        aws_secret_access_key: remote.aws_secret_access_key.clone(),
-        aws_session_token: remote.aws_session_token.clone(),
-    }
-}
-
 /// One-time migration: move legacy keychain credentials into the encrypted model vault.
 pub async fn migrate_third_party_model_credentials(
     data_dir: &Path,
@@ -292,7 +258,6 @@ pub async fn migrate_third_party_model_credentials(
 ) -> CommandResult<u32> {
     let vault = ModelCredentialVault::new(data_dir)
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-    let judge_config = load_judge_config(data_dir).await.ok();
     let remote_ids: Vec<String> = manager
         .list_models()
         .into_iter()
@@ -324,22 +289,6 @@ pub async fn migrate_third_party_model_credentials(
             secrets,
             AWS_SESSION_CREDENTIAL_ID,
         )?;
-
-        if credential_id_from_metadata(&metadata, API_KEY_CREDENTIAL_ID).is_none() {
-            if let Some(judge) = judge_config.as_ref() {
-                if remote_entry_matches_judge(&entry, judge) {
-                    let mut judge_mut = judge.clone();
-                    let _ = resolve_judge_config_secrets(&mut judge_mut, secrets);
-                    let creds = credentials_from_judge_remote(&judge_mut.remote);
-                    if !creds.api_key.trim().is_empty()
-                        || !creds.aws_secret_access_key.trim().is_empty()
-                    {
-                        persist_third_party_credentials(&mut metadata, &creds, &vault)?;
-                        changed = true;
-                    }
-                }
-            }
-        }
 
         if changed {
             manager

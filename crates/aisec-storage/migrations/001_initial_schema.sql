@@ -128,20 +128,6 @@ CREATE TABLE IF NOT EXISTS reports (
 CREATE INDEX IF NOT EXISTS idx_reports_project_id ON reports(project_id);
 CREATE INDEX IF NOT EXISTS idx_reports_scan_id ON reports(scan_id);
 
-CREATE TABLE IF NOT EXISTS models (
-    id              TEXT PRIMARY KEY NOT NULL,
-    name            TEXT NOT NULL,
-    file_path       TEXT NOT NULL,
-    format          TEXT NOT NULL DEFAULT 'gguf',
-    checksum_sha256 TEXT,
-    size_bytes      INTEGER,
-    metadata_json   TEXT,
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_models_name ON models(name);
-
 CREATE TABLE IF NOT EXISTS plugins (
     id            TEXT PRIMARY KEY NOT NULL,
     plugin_id     TEXT NOT NULL UNIQUE,

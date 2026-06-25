@@ -27,7 +27,8 @@ mod tests {
         let entry = entry_to_catalog(&BuiltinRegistryEntry {
             id: "test".into(),
             name: "Test".into(),
-            purpose: "general".into(),
+            provider: "Meta".into(),
+            purpose: String::new(),
             recommended: false,
             engine: "llama.cpp".into(),
             format: "gguf".into(),

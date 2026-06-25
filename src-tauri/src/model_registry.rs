@@ -69,7 +69,7 @@ pub fn open_test_model_stack(
     std::sync::Arc<tauri::async_runtime::Mutex<aisec_plugin_host::PluginManager>>,
 )> {
     let (catalog, meta) = load_repo_catalog_for_tests()?;
-    let manager = crate::judge_config::open_model_manager(data_dir, catalog)
+    let manager = crate::inference_host::open_model_manager(data_dir, catalog)
         .map_err(|err| aisec_core::AisecError::internal(err.to_string()))?;
     let manager = std::sync::Arc::new(tokio::sync::Mutex::new(manager));
     let provider = std::sync::Arc::new(EmbeddedModelProvider::new(manager.clone()));
@@ -89,7 +89,7 @@ pub async fn open_model_manager_with_registry(
     data_dir: &Path,
 ) -> AisecResult<(LocalModelManager, BuiltinCatalogMeta)> {
     let (catalog, meta) = load_builtin_catalog(app).await?;
-    let mut manager = crate::judge_config::open_model_manager(data_dir, catalog)
+    let mut manager = crate::inference_host::open_model_manager(data_dir, catalog)
         .map_err(|err| aisec_core::AisecError::internal(err.to_string()))?;
     let recovered = manager
         .recover_orphan_downloads()

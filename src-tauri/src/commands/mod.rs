@@ -11,7 +11,6 @@ pub mod auth;
 pub mod discovery;
 pub mod domain;
 pub mod generator;
-pub mod judge;
 pub mod models;
 pub mod planner;
 pub mod plugins;

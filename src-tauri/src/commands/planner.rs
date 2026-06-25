@@ -1,23 +1,17 @@
 //! Attack planner IPC — generate scan plans from endpoint fingerprints.
 
-use aisec_attack::AttackCategory;
 use aisec_core::AisecError;
 use aisec_fingerprint::StackFingerprintReport;
-use aisec_judge::{JudgeProviderConfig, JudgeRuntimeContext};
-use aisec_judge::providers::LocalLlmBackend;
 use aisec_planner::{
     generate_attack_plan, FingerprintEndpoint, FingerprintResult, PlannerMode,
 };
-use aisec_runtime::ModelProviderRuntime;
 use aisec_storage::EndpointRepository;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::State;
-use tokio::sync::Mutex;
 
+use crate::inference_host::{is_inference_ready, HostPlannerLlm};
 use crate::error::{CommandError, CommandResult};
-use crate::judge_config::{load_judge_config, prepare_judge_runtime_context};
-use crate::planner_service::JudgePlannerLlm;
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -120,27 +114,21 @@ pub async fn planner_generate_op(
     let mode = parse_planner_mode(&request.mode);
 
     let plan = if mode == PlannerMode::LocalLlm {
-        let mut config = load_judge_config(state.data_dir()).await?;
-        let manager = state.model_manager().lock().await;
-        let mut runtime_mgr = state.runtime_manager().lock().await;
-        let runtime = prepare_judge_runtime_context(
-            &mut config,
-            &manager,
+        let inference = state.inference_manager().lock().await;
+        if !is_inference_ready(&inference) {
+            return Err(CommandError::invalid_input(
+                "AI runtime is not configured for local LLM planning",
+            ));
+        }
+        drop(inference);
+        let llm = Arc::new(HostPlannerLlm::new(
+            state.data_dir().to_path_buf(),
+            state.inference_manager().clone(),
+            state.model_manager().clone(),
             state.model_provider().clone(),
-            runtime_mgr.supervisor_mut(),
-        )
-        .await?
-        .ok_or_else(|| {
-            CommandError::invalid_input(
-                "local LLM planner requires a vault model — configure Models page first",
-            )
-        })?;
-        drop(manager);
-        drop(runtime_mgr);
-
-        let backend = build_planner_llm_backend(&config, &runtime).await?;
-        let adapter = JudgePlannerLlm::new(backend);
-        generate_attack_plan(&input, mode, Some(&adapter))
+            state.runtime_manager().clone(),
+        ));
+        generate_attack_plan(&input, mode, Some(llm.as_ref()))
             .await
             .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?
     } else {
@@ -150,35 +138,6 @@ pub async fn planner_generate_op(
     };
 
     Ok(plan_to_dto(plan))
-}
-
-async fn build_planner_llm_backend(
-    config: &JudgeProviderConfig,
-    runtime: &JudgeRuntimeContext,
-) -> CommandResult<Arc<dyn aisec_judge::providers::LlmBackend>> {
-    let model_id = config
-        .local
-        .vault_model_id
-        .clone()
-        .unwrap_or_else(|| runtime.active_model_id.clone());
-    if model_id.trim().is_empty() {
-        return Err(CommandError::invalid_input(
-            "select an active vault model for local LLM planner mode",
-        ));
-    }
-
-    let provider_runtime =
-        ModelProviderRuntime::new(runtime.model_provider.clone(), model_id.clone());
-    let label = match config.local.provider {
-        aisec_judge::LocalProvider::Ollama => "runtime/ollama",
-        aisec_judge::LocalProvider::LlamaCpp => "runtime/llama_cpp",
-    };
-
-    Ok(Arc::new(LocalLlmBackend::new(
-        label,
-        config.local.model.clone(),
-        Arc::new(Mutex::new(provider_runtime)),
-    )))
 }
 
 #[tauri::command]

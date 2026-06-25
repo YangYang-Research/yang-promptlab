@@ -21,72 +21,35 @@ pub struct RuntimeHealthReport {
 pub struct RuntimeMonitor;
 
 impl RuntimeMonitor {
-    pub async fn check(supervisor: &mut RuntimeSupervisor, lifecycle_state: &str) -> RuntimeResult<RuntimeHealthReport> {
+    pub async fn check(
+        supervisor: &mut RuntimeSupervisor,
+        lifecycle_state: &str,
+    ) -> RuntimeResult<RuntimeHealthReport> {
         let started = std::time::Instant::now();
-        let endpoint_reachable = supervisor.check_health().await.unwrap_or(false);
+        let healthy = supervisor.check_health().await.unwrap_or(false);
         let latency_ms = started.elapsed().as_millis() as u64;
-        let model_loaded = supervisor.llama_runtime().is_loaded();
-        let process_alive = model_loaded || supervisor.is_process_alive();
+        let model_loaded = supervisor.local_runtime().is_loaded();
+        let runtime_alive = supervisor.is_process_alive_async().await;
 
-        let memory_bytes = if let Some(pid) = supervisor.pid().await {
-            process_memory_bytes(Some(pid))
-        } else {
-            None
-        };
-        let gpu_memory_bytes = None;
-
-        let message = if endpoint_reachable && model_loaded {
-            "runtime healthy — inference endpoint reachable with model loaded".into()
-        } else if endpoint_reachable {
-            String::new()
+        let message = if healthy && model_loaded {
+            "runtime healthy — embedded libllama model loaded".into()
         } else if model_loaded {
-            "model loaded but inference endpoint unreachable".into()
-        } else if supervisor.binary_available() {
-            String::new()
+            "model loaded but runtime health check failed".into()
+        } else if runtime_alive {
+            "embedded libllama initialized — no model loaded".into()
         } else {
-            "runtime not installed".into()
+            "runtime not initialized".into()
         };
 
         Ok(RuntimeHealthReport {
             lifecycle_state: lifecycle_state.to_string(),
-            process_alive,
-            endpoint_reachable,
+            process_alive: runtime_alive,
+            endpoint_reachable: healthy,
             latency_ms,
-            memory_bytes,
-            gpu_memory_bytes,
+            memory_bytes: None,
+            gpu_memory_bytes: None,
             model_loaded,
             message,
         })
     }
-}
-
-fn process_memory_bytes(pid: Option<u32>) -> Option<u64> {
-    let pid = pid?;
-    #[cfg(target_os = "macos")]
-    {
-        let output = std::process::Command::new("ps")
-            .args(["-o", "rss=", "-p", &pid.to_string()])
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let kb: u64 = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .parse()
-            .ok()?;
-        return Some(kb * 1024);
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
-        for line in status.lines() {
-            if let Some(rest) = line.strip_prefix("VmRSS:") {
-                let kb: u64 = rest.trim().trim_end_matches(" kB").parse().ok()?;
-                return Some(kb * 1024);
-            }
-        }
-    }
-    let _ = pid;
-    None
 }

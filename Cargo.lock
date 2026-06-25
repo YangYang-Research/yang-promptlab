@@ -141,6 +141,7 @@ dependencies = [
  "aisec-fingerprint",
  "aisec-generator",
  "aisec-harness",
+ "aisec-inference",
  "aisec-judge",
  "aisec-models",
  "aisec-planner",
@@ -208,6 +209,7 @@ version = "0.1.0"
 dependencies = [
  "aisec-attack",
  "aisec-core",
+ "aisec-inference",
  "aisec-payload",
  "aisec-planner",
  "async-trait",
@@ -238,6 +240,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "aisec-inference"
+version = "0.1.0"
+dependencies = [
+ "aisec-core",
+ "aisec-models",
+ "aisec-runtime",
+ "async-trait",
+ "hex",
+ "hmac",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "aisec-integration-tests"
 version = "0.1.0"
 dependencies = [
@@ -263,6 +286,7 @@ version = "0.1.0"
 dependencies = [
  "aisec-core",
  "aisec-harness",
+ "aisec-inference",
  "aisec-models",
  "aisec-runtime",
  "async-trait",
@@ -325,6 +349,7 @@ dependencies = [
  "aisec-attack",
  "aisec-core",
  "aisec-fingerprint",
+ "aisec-inference",
  "async-trait",
  "serde",
  "serde_json",
@@ -376,18 +401,14 @@ dependencies = [
  "aisec-core",
  "aisec-models",
  "async-trait",
- "flate2",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "sha2",
- "tar",
  "tempfile",
  "thiserror 2.0.18",
  "time",
  "tokio",
  "tracing",
- "zip",
 ]
 
 [[package]]

@@ -1,29 +1,26 @@
 //! Local model vault commands — browse, install, remove, verify, inference test.
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use aisec_auth::SecretStore;
 use aisec_core::AisecError;
-use aisec_judge::{
-    test_connectivity, JudgeMode, JudgeProviderConfig, RemoteProvider,
-};
 use aisec_models::{
     DownloadManager, DownloadProgress, DownloadStatus, LocalModelManager, ModelCatalogEntry,
-    ModelEntry, ModelProvider, ModelSource, VerificationResult, remote_entry_id,
+    ModelEntry, ModelFormat, ModelProvider, ModelSource, VerificationResult, remote_entry_id,
 };
-use aisec_runtime::{InferRequest, RuntimeError};
+use aisec_runtime::RuntimeError;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tauri::async_runtime::Mutex as AsyncMutex;
 use tauri::State;
 
-use std::sync::Arc;
-
-use crate::ai_inference_settings::{
-    apply_third_party_health_check, format_health_check_timestamp, load_settings, save_settings,
-    AiInferenceRoute,
+use crate::inference_host::{test_connectivity_with_remote};
+use aisec_inference::InferenceRuntimeManager;
+use crate::inference_settings::{
+    apply_third_party_health_check, format_health_check_timestamp,
 };
-use crate::commands::runtime::load_model_with_loading_cache;
+use aisec_inference::config::InferenceMode;
+use crate::inference_host::test_inference_for_entry;
 use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
 use crate::third_party_credentials::{
@@ -31,6 +28,7 @@ use crate::third_party_credentials::{
     has_new_credential_input, open_model_credential_vault, persist_third_party_credentials,
     resolve_third_party_credentials, validate_metadata_credentials, ThirdPartyCredentialFields,
     API_KEY_CREDENTIAL_ID, API_KEY_ENV, AWS_SECRET_CREDENTIAL_ID, AWS_SESSION_CREDENTIAL_ID,
+    LAST_CONNECTIVITY_OK,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -261,7 +259,7 @@ fn apply_credential_fields(
 }
 
 async fn run_third_party_connectivity_test(
-    data_dir: &std::path::Path,
+    state: &AppState,
     mut request: ThirdPartyModelSaveRequest,
     metadata: Option<serde_json::Value>,
 ) -> CommandResult<ThirdPartyModelConnectivityResultDto> {
@@ -273,7 +271,7 @@ async fn run_third_party_connectivity_test(
     }
 
     let mut credentials = credential_fields_from_request(&request);
-    let vault = open_model_credential_vault(data_dir)?;
+    let vault = open_model_credential_vault(state.data_dir())?;
     let secrets = SecretStore::new().map_err(|e| {
         CommandError::invalid_input(format!("secure storage unavailable: {e}"))
     })?;
@@ -285,10 +283,23 @@ async fn run_third_party_connectivity_test(
     )?;
     apply_credential_fields(&mut request, &credentials);
 
-    let config = third_party_request_to_judge_config(&request)?;
-    let result = test_connectivity(&config, None)
-        .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+    let entry = staging_remote_entry(&request, metadata.as_ref())?;
+    let remote = InferenceRuntimeManager::remote_settings_from_entry(
+        &entry,
+        credentials.api_key,
+        Some(credentials.aws_secret_access_key).filter(|s| !s.trim().is_empty()),
+        Some(credentials.aws_session_token).filter(|s| !s.trim().is_empty()),
+    )
+    .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+    let mut runtime_mgr = state.runtime_manager().lock().await;
+    let result = test_connectivity_with_remote(
+        state.data_dir(),
+        &entry,
+        Some(remote),
+        state.model_provider().clone(),
+        &mut runtime_mgr,
+    )
+    .await?;
 
     Ok(ThirdPartyModelConnectivityResultDto {
         ok: result.ok,
@@ -300,38 +311,39 @@ async fn run_third_party_connectivity_test(
     })
 }
 
-fn parse_third_party_remote_provider(value: &str) -> Result<RemoteProvider, CommandError> {
-    match value {
-        "openai" => Ok(RemoteProvider::OpenAi),
-        "anthropic" => Ok(RemoteProvider::Anthropic),
-        "gemini" | "google" => Ok(RemoteProvider::Gemini),
-        "openrouter" => Ok(RemoteProvider::OpenRouter),
-        "azure" => Ok(RemoteProvider::Azure),
-        "bedrock" | "aws_bedrock" => Ok(RemoteProvider::Bedrock),
-        _ => Ok(RemoteProvider::OpenAi),
-    }
-}
-
-fn third_party_request_to_judge_config(
+fn staging_remote_entry(
     request: &ThirdPartyModelSaveRequest,
-) -> Result<JudgeProviderConfig, CommandError> {
-    Ok(JudgeProviderConfig {
-        mode: JudgeMode::RemoteLlm,
-        local: aisec_judge::LocalProviderSettings::default(),
-        remote: aisec_judge::RemoteProviderSettings {
-            provider: parse_third_party_remote_provider(request.provider.trim())?,
-            base_url: request.base_url.clone(),
-            model: request.model.trim().to_string(),
-            api_key: request.api_key.clone(),
-            api_key_credential_id: None,
-            api_key_env: request.api_key_env.clone(),
-            aws_secret_access_key: request.aws_secret_access_key.clone(),
-            aws_secret_access_key_credential_id: None,
-            aws_region: request.region.clone(),
-            aws_session_token: request.aws_session_token.clone(),
-            aws_session_token_credential_id: None,
+    metadata: Option<&serde_json::Value>,
+) -> Result<ModelEntry, CommandError> {
+    let provider = request.provider.trim();
+    let model = request.model.trim();
+    let now = OffsetDateTime::now_utc();
+    Ok(ModelEntry {
+        id: remote_entry_id(provider, model),
+        name: model.to_string(),
+        format: ModelFormat::Api,
+        provider: ModelProvider::Remote,
+        version: String::new(),
+        capabilities: aisec_models::ModelCapabilities {
+            chat: true,
+            completion: true,
+            embeddings: false,
         },
-        ..JudgeProviderConfig::default()
+        source: ModelSource::Remote {
+            provider: provider.to_string(),
+            model: model.to_string(),
+            base_url: request.base_url.clone(),
+            region: request.region.clone(),
+        },
+        file_path: std::path::PathBuf::new(),
+        size_bytes: None,
+        checksum_sha256: None,
+        verified: false,
+        created_at: now,
+        updated_at: now,
+        metadata: metadata.cloned().unwrap_or_else(|| {
+            serde_json::json!({ "remoteProvider": provider })
+        }),
     })
 }
 
@@ -378,11 +390,22 @@ pub struct ModelInferenceTestResult {
     pub message: String,
 }
 
+fn registry_verified_status(entry: &ModelEntry) -> bool {
+    if entry.provider == ModelProvider::Remote {
+        return entry.metadata
+            .get(LAST_CONNECTIVITY_OK)
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+    }
+    entry.verified
+}
+
 pub(crate) fn entry_to_dto(entry: &ModelEntry, vault: &std::path::Path) -> ModelEntryDto {
     let size_gb = entry
         .size_bytes
         .map(|b| (b as f64) / (1024.0 * 1024.0 * 1024.0))
         .unwrap_or(0.0);
+    let verified = registry_verified_status(entry);
     ModelEntryDto {
         id: entry.id.clone(),
         name: entry.name.clone(),
@@ -391,7 +414,7 @@ pub(crate) fn entry_to_dto(entry: &ModelEntry, vault: &std::path::Path) -> Model
         format: entry.format.as_str().into(),
         size_bytes: entry.size_bytes,
         size_gb,
-        verified: entry.verified,
+        verified,
         path: aisec_models::ModelRegistry::display_uri(vault, &entry.file_path),
         sha256: entry.checksum_sha256.clone(),
         capabilities: ModelCapabilitiesDto {
@@ -399,7 +422,7 @@ pub(crate) fn entry_to_dto(entry: &ModelEntry, vault: &std::path::Path) -> Model
             completion: entry.capabilities.completion,
             embeddings: entry.capabilities.embeddings,
         },
-        status: if entry.verified {
+        status: if verified {
             "installed".into()
         } else {
             "available".into()
@@ -411,7 +434,11 @@ fn catalog_to_dto(entry: &ModelCatalogEntry) -> ModelCatalogEntryDto {
     ModelCatalogEntryDto {
         id: entry.id.clone(),
         name: entry.name.clone(),
-        provider: entry.provider.as_str().into(),
+        provider: if entry.provider_label.trim().is_empty() {
+            entry.provider.as_str().into()
+        } else {
+            entry.provider_label.clone()
+        },
         version: entry.version.clone(),
         description: entry.description.clone(),
         purpose: entry.purpose.clone(),
@@ -743,8 +770,9 @@ pub async fn models_save_third_party(
         let vault = open_model_credential_vault(state.data_dir())?;
         let creds = credential_fields_from_request(&request);
         let mut metadata = serde_json::json!({ "remoteProvider": provider });
+        let credential_input_changed = has_new_credential_input(&creds);
 
-        if has_new_credential_input(&creds) {
+        if credential_input_changed {
             persist_third_party_credentials(&mut metadata, &creds, &vault)?;
         } else {
             let source_metadata = preserved_metadata.as_ref().unwrap_or(&entry.metadata);
@@ -762,6 +790,14 @@ pub async fn models_save_third_party(
         manager
             .update_model_metadata(&entry.id, metadata)
             .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+
+        let is_new_model = existing_id.is_none();
+        let renamed = existing_id.is_some_and(|old_id| old_id != entry.id);
+        if is_new_model || renamed || credential_input_changed {
+            manager
+                .set_model_verified(&entry.id, false)
+                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        }
     } else {
         return Err(CommandError::invalid_input(
             "secure storage is unavailable — cannot save third-party credentials",
@@ -773,13 +809,6 @@ pub async fn models_save_third_party(
         .ok_or_else(|| CommandError::invalid_input(format!("model not found: {}", entry.id)))?
         .clone();
     let vault = manager.vault_path().to_path_buf();
-    drop(manager);
-
-    let model_id = saved.id.clone();
-    let is_edit = existing_id.is_some();
-    if !is_edit {
-        sync_third_party_inference_after_add(state.inner(), &model_id).await?;
-    }
 
     Ok(entry_to_dto(&saved, &vault))
 }
@@ -808,7 +837,17 @@ pub async fn models_test_third_party(
             .get_model(&model_id)
             .map(|entry| entry.metadata.clone())
     };
-    run_third_party_connectivity_test(state.data_dir(), request, metadata).await
+    let result = run_third_party_connectivity_test(state.inner(), request, metadata.clone()).await?;
+    if metadata.is_some() {
+        persist_third_party_model_connectivity(
+            state.inner(),
+            &model_id,
+            result.ok,
+            result.latency_ms,
+        )
+        .await?;
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -837,7 +876,7 @@ pub(crate) async fn test_third_party_model_connection(
         let request = third_party_request_from_entry(entry)?;
         (request, metadata)
     };
-    let result = run_third_party_connectivity_test(state.data_dir(), request, Some(metadata)).await?;
+    let result = run_third_party_connectivity_test(state, request, Some(metadata)).await?;
     persist_third_party_model_connectivity(state, model_id, result.ok, result.latency_ms).await?;
     Ok(result)
 }
@@ -849,7 +888,6 @@ async fn persist_third_party_model_connectivity(
     latency_ms: u64,
 ) -> CommandResult<()> {
     let checked_at = format_health_check_timestamp(OffsetDateTime::now_utc());
-    let data_dir = state.data_dir().to_path_buf();
 
     {
         let mut manager = state.model_manager().lock().await;
@@ -861,47 +899,25 @@ async fn persist_third_party_model_connectivity(
         manager
             .update_model_metadata(model_id, metadata)
             .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        manager
+            .set_model_verified(model_id, ok)
+            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
     }
 
-    let mut settings = load_settings(&data_dir).await?;
-    if settings.initialized
-        && settings.route == AiInferenceRoute::ThirdParty
-        && settings.selected_model_id.as_deref() == Some(model_id)
+    let mut inference = state.inference_manager().lock().await;
+    let mut config = inference.config().clone();
+    if config.initialized
+        && config.mode == InferenceMode::ThirdParty
+        && config.selected_model_id.as_deref() == Some(model_id)
     {
-        apply_third_party_health_check(&mut settings, &checked_at, ok, latency_ms);
-        save_settings(&data_dir, &settings).await?;
+        apply_third_party_health_check(&mut config, &checked_at, ok, latency_ms);
+        *inference.config_mut() = config;
+        inference
+            .save()
+            .await
+            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
     }
 
-    Ok(())
-}
-
-async fn sync_third_party_inference_after_add(
-    state: &AppState,
-    model_id: &str,
-) -> CommandResult<()> {
-    let data_dir = state.data_dir().to_path_buf();
-    let mut settings = load_settings(&data_dir).await?;
-    if !settings.initialized || settings.route != AiInferenceRoute::ThirdParty {
-        return Ok(());
-    }
-
-    let checked_at = format_health_check_timestamp(OffsetDateTime::now_utc());
-    match test_third_party_model_connection(state, model_id).await {
-        Ok(result) if result.ok => {
-            settings.selected_model_id = Some(model_id.to_string());
-            apply_third_party_health_check(
-                &mut settings,
-                &checked_at,
-                true,
-                result.latency_ms,
-            );
-            save_settings(&data_dir, &settings).await?;
-        }
-        Ok(_) | Err(_) => {
-            // Connection test failed or errored — metadata is updated on the model entry,
-            // but AI Runtime selection stays on the previously active model.
-        }
-    }
     Ok(())
 }
 
@@ -1042,16 +1058,15 @@ pub async fn models_verify(
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
 }
 
-fn llama_server_missing_error(supervisor: &aisec_runtime::RuntimeSupervisor) -> CommandError {
-    CommandError::invalid_input(format!(
-        "llama-server not found at {} — build or download llama.cpp server to runtime/llama-server (see runtime/README.md) or install llama-server on PATH",
-        supervisor.binary_path().display()
-    ))
+fn runtime_unavailable_error() -> CommandError {
+    CommandError::invalid_input(
+        "embedded libllama engine is unavailable — reinitialize the engine from AI Runtime",
+    )
 }
 
-fn map_runtime_test_error(err: RuntimeError, supervisor: &aisec_runtime::RuntimeSupervisor) -> CommandError {
+fn map_runtime_test_error(err: RuntimeError, _supervisor: &aisec_runtime::RuntimeSupervisor) -> CommandError {
     match err {
-        RuntimeError::Unavailable => llama_server_missing_error(supervisor),
+        RuntimeError::Unavailable => runtime_unavailable_error(),
         other => CommandError::from(AisecError::internal(other.to_string())),
     }
 }
@@ -1061,70 +1076,64 @@ pub async fn models_test_inference(
     state: State<'_, AppState>,
     model_id: String,
 ) -> CommandResult<ModelInferenceTestResult> {
-    let manager = state.model_manager().lock().await;
-    let entry = manager
-        .get_model(&model_id)
-        .ok_or_else(|| CommandError::invalid_input(format!("model not found: {model_id}")))?;
+    let entry = {
+        let manager = state.model_manager().lock().await;
+        let entry = manager
+            .get_model(&model_id)
+            .ok_or_else(|| CommandError::invalid_input(format!("model not found: {model_id}")))?;
 
-    if entry.provider == ModelProvider::Remote {
-        return Err(CommandError::invalid_input(
-            "use Test Connection for third-party cloud models",
-        ));
-    }
+        if entry.provider == ModelProvider::Remote {
+            return Err(CommandError::invalid_input(
+                "use Test Connection for third-party cloud models",
+            ));
+        }
 
-    if !entry.file_path.exists() {
-        return Err(CommandError::invalid_input(format!(
-            "model file missing: {}",
-            entry.file_path.display()
-        )));
-    }
+        if !entry.file_path.exists() {
+            return Err(CommandError::invalid_input(format!(
+                "model file missing: {}",
+                entry.file_path.display()
+            )));
+        }
+        entry.clone()
+    };
 
     let file_path = entry.file_path.clone();
     let use_chat = entry.capabilities.chat;
-    drop(manager);
 
-    let mut manager = state.runtime_manager().lock().await;
-    if !manager.supervisor().binary_available() {
-        return Err(llama_server_missing_error(manager.supervisor()));
+    let mut runtime_mgr = state.runtime_manager().lock().await;
+    if !runtime_mgr.supervisor().runtime_available() {
+        return Err(runtime_unavailable_error());
     }
 
-    if !manager.is_model_loaded_at(&file_path).await {
-        load_model_with_loading_cache(state.inner(), &mut manager, &file_path, &model_id)
-            .await
-            .map_err(|err| map_runtime_test_error(err, manager.supervisor()))?;
-        manager.sync_lifecycle_from_supervisor();
-    }
-
-    let prompt = if use_chat {
-        "User: Reply with exactly: AISec OK\nAssistant: ".into()
-    } else {
-        "Reply with exactly: AISec OK".into()
-    };
-
-    let response = manager
-        .supervisor()
-        .llama_runtime()
-        .infer(InferRequest {
-            prompt,
-            max_tokens: 16,
-            temperature: 0.0,
-        })
+    if !runtime_mgr.is_model_loaded_at(&file_path).await {
+        crate::commands::runtime::load_model_with_loading_cache(
+            state.inner(),
+            &mut runtime_mgr,
+            &file_path,
+            &model_id,
+        )
         .await
-        .map_err(|err| map_runtime_test_error(err, manager.supervisor()))?;
+        .map_err(|err| map_runtime_test_error(err, runtime_mgr.supervisor()))?;
+        runtime_mgr.sync_lifecycle_from_supervisor();
+    }
+
+    let result = test_inference_for_entry(
+        state.data_dir(),
+        &entry,
+        state.model_provider().clone(),
+        &mut runtime_mgr,
+    )
+    .await?;
 
     Ok(ModelInferenceTestResult {
-        ok: !response.text.is_empty(),
+        ok: result.ok,
         mode: if use_chat {
             "chat".into()
         } else {
             "completion".into()
         },
-        sample: response.text,
-        message: if use_chat {
-            "Chat inference succeeded".into()
-        } else {
-            "Completion inference succeeded".into()
-        },
+        sample: result.sample_response.unwrap_or_default(),
+        message: result.message,
     })
 }
 

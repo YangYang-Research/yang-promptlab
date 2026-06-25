@@ -55,7 +55,7 @@ function ModelStatusBadge({ model }: { model: ModelEntryDto }) {
   if (isThirdPartyModel(model)) {
     return (
       <Badge variant={model.verified ? "success" : "warning"}>
-        {model.verified ? "Verified" : "Needs setup"}
+        {model.verified ? "Verified" : "Not Verified"}
       </Badge>
     );
   }
@@ -113,8 +113,8 @@ export function ModelRegistrySection({
             disabled: !thirdParty || actionsDisabled,
           },
           {
-            id: "test",
-            label: "Test",
+            id: "verify",
+            label: "Verify",
             onClick: () => onTest(model),
             disabled: testRemoveDisabled,
           },

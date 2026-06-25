@@ -439,15 +439,19 @@ export function ModelsPage() {
     try {
       if (isThirdPartyModel(model)) {
         setBusyModelId(model.id);
-        const result = await testModelConnection(model.id);
-        const latency = result.latencyMs > 0 ? ` (${result.latencyMs} ms)` : "";
-        const label = `${result.provider} / ${result.model}`;
-        if (result.ok) {
-          notify(`Connection Successful — ${label}${latency}`, "success");
-        } else {
-          notify(`Connection Failed — ${label}: ${result.message}`, "error");
+        try {
+          const result = await testModelConnection(model.id);
+          const latency = result.latencyMs > 0 ? ` (${result.latencyMs} ms)` : "";
+          const label = `${result.provider} / ${result.model}`;
+          if (result.ok) {
+            notify(`Connection Successful — ${label}${latency}`, "success");
+          } else {
+            notify(`Connection Failed — ${label}: ${result.message}`, "error");
+          }
+          await refreshModels();
+        } finally {
+          setBusyModelId(null);
         }
-        setBusyModelId(null);
       } else {
         if (runtimeModelLoading) return;
         const config = await getRuntimeConfiguration();

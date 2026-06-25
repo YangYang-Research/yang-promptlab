@@ -13,7 +13,8 @@ use aisec_attack::{
 use aisec_auth::{resolve_descriptor_for_runtime, AuthSessionManager, SecretStore};
 use aisec_judge::{JudgeVerdict, Severity as JudgeSeverity};
 use aisec_plugin_host::evaluate_with_judge_plugins;
-use aisec_runtime::{RuntimeSupervisor, SharedModelProvider};
+use aisec_inference::InferenceRuntimeManager;
+use aisec_runtime::{RuntimeManager, SharedModelProvider};
 use aisec_storage::{
     AttackResultRepository, CreateAttackResult, CreateFinding, CreateScan, Endpoint,
     EndpointRepository, FindingRepository, Repositories, ScanRepository, TargetRepository,
@@ -31,7 +32,7 @@ use tauri::async_runtime::Mutex as AsyncMutex;
 use crate::dto::{AttackRunDto, FindingDto, ScanDto};
 use crate::error::{CommandError, CommandResult};
 use crate::events::{ScanProgressEmitter, ScanProgressLevel};
-use crate::judge_config::build_configured_judge_engine;
+use crate::inference_host::build_judge_engine_from_gateway;
 use crate::session_auth::{attack_executor, build_attack_runtime, AttackRuntime};
 use crate::state::AppState;
 
@@ -84,9 +85,10 @@ pub async fn run_category_on_endpoint(
     category: AttackCategory,
     runtime: AttackRuntime,
     data_dir: &std::path::Path,
+    inference: &InferenceRuntimeManager,
     model_manager: &aisec_models::LocalModelManager,
     model_provider: SharedModelProvider,
-    runtime_supervisor: &mut RuntimeSupervisor,
+    runtime_manager: &mut RuntimeManager,
     plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
     generated_payloads: Option<&HashMap<AttackCategory, Vec<AttackPayload>>>,
     progress: Option<&ScanProgressEmitter>,
@@ -148,11 +150,12 @@ pub async fn run_category_on_endpoint(
         .await
         .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
 
-    let judge = build_configured_judge_engine(
+    let judge = build_judge_engine_from_gateway(
         data_dir,
+        inference,
         model_manager,
-        model_provider,
-        runtime_supervisor,
+        model_provider.clone(),
+        runtime_manager,
     )
     .await?;
     let category_name = category.as_str();
@@ -390,6 +393,7 @@ pub async fn attack_run_prompt_injection_op(
         .await;
 
     let category = AttackCategory::PromptInjection;
+    let inference = state.inference_manager().lock().await;
     let manager = state.model_manager().lock().await;
     let mut runtime_mgr = state.runtime_manager().lock().await;
     let run = match run_category_on_endpoint(
@@ -401,9 +405,10 @@ pub async fn attack_run_prompt_injection_op(
         category,
         runtime,
         state.data_dir(),
+        &inference,
         &manager,
         state.model_provider().clone(),
-        runtime_mgr.supervisor_mut(),
+        &mut runtime_mgr,
         state.plugin_manager().clone(),
         None,
         None,

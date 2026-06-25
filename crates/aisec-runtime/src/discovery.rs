@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tokio::fs;
@@ -29,18 +28,18 @@ pub async fn discover_models_in_dir(models_dir: &Path) -> RuntimeResult<Vec<Disc
     while let Some(current) = stack.pop() {
         let mut entries = fs::read_dir(&current)
             .await
-            .map_err(|err| RuntimeError::Process(err.to_string()))?;
+            .map_err(|err| RuntimeError::NativeRuntimeError(err.to_string()))?;
 
         while let Some(entry) = entries
             .next_entry()
             .await
-            .map_err(|err| RuntimeError::Process(err.to_string()))?
+            .map_err(|err| RuntimeError::NativeRuntimeError(err.to_string()))?
         {
             let path = entry.path();
             let file_type = entry
                 .file_type()
                 .await
-                .map_err(|err| RuntimeError::Process(err.to_string()))?;
+                .map_err(|err| RuntimeError::NativeRuntimeError(err.to_string()))?;
 
             if file_type.is_dir() {
                 stack.push(path);
@@ -59,7 +58,7 @@ pub async fn discover_models_in_dir(models_dir: &Path) -> RuntimeResult<Vec<Disc
             let metadata = entry
                 .metadata()
                 .await
-                .map_err(|err| RuntimeError::Process(err.to_string()))?;
+                .map_err(|err| RuntimeError::NativeRuntimeError(err.to_string()))?;
 
             let name = path
                 .strip_prefix(models_dir)
@@ -90,48 +89,16 @@ pub async fn discover_models_in_dir(models_dir: &Path) -> RuntimeResult<Vec<Disc
     Ok(discovered)
 }
 
-/// Probe llama-server `/health` over HTTP only (no vault fallback).
-pub async fn probe_endpoint_health(base_url: Option<&str>) -> RuntimeResult<bool> {
-    let default_url = crate::config::default_llama_base_url();
-    let base = base_url
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or(default_url.as_str());
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .map_err(|err| RuntimeError::Process(err.to_string()))?;
-
-    let url = format!("{}/health", base.trim_end_matches('/'));
-    match client.get(&url).send().await {
-        Ok(resp) if resp.status().is_success() => Ok(true),
-        Ok(_) => Ok(false),
-        Err(err) => {
-            debug!(%err, "llama.cpp health probe failed");
-            Ok(false)
-        }
-    }
-}
-
-/// Probe llama-server health via `/health`, or report vault availability when idle.
-pub async fn check_health(base_url: Option<&str>, models_dir: Option<&Path>) -> RuntimeResult<bool> {
-    if probe_endpoint_health(base_url).await? {
-        return Ok(true);
-    }
-
-    // Idle supervisor: vault has GGUF files (API may still be offline until a model loads).
+/// Embedded runtime health — vault has models when idle.
+pub async fn check_health(_base_url: Option<&str>, models_dir: Option<&Path>) -> RuntimeResult<bool> {
     if let Some(dir) = models_dir {
         let models = discover_models_in_dir(dir).await?;
         return Ok(!models.is_empty());
     }
-
     Ok(false)
 }
 
-/// Backward-compatible wrapper — lists GGUF models from the vault at `models_dir`.
-pub async fn discover_models(
-    models_dir: &Path,
-) -> RuntimeResult<Vec<DiscoveredModel>> {
+pub async fn discover_models(models_dir: &Path) -> RuntimeResult<Vec<DiscoveredModel>> {
     discover_models_in_dir(models_dir).await
 }
 

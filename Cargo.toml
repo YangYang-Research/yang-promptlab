@@ -16,6 +16,7 @@ members = [
     "crates/aisec-discovery",
     "crates/aisec-harness",
     "crates/aisec-runtime",
+    "crates/aisec-inference",
     "crates/aisec-storage",
     "src-tauri",
     "tests/integration",
@@ -29,6 +30,7 @@ authors = ["AISec"]
 rust-version = "1.77"
 
 [workspace.dependencies]
+aisec-inference = { path = "crates/aisec-inference" }
 aisec-attack = { path = "crates/aisec-attack" }
 aisec-payload = { path = "crates/aisec-payload" }
 aisec-models = { path = "crates/aisec-models" }

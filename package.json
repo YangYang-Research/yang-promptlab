@@ -11,8 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "setup:playwright": "npm install --prefix crates/aisec-auth/playwright && npx --prefix crates/aisec-auth/playwright playwright install chromium",
-    "bundle:playwright": "bash scripts/bundle-playwright-auth.sh",
-    "bundle:llama": "bash scripts/bundle-llama-runtime.sh"
+    "bundle:playwright": "bash scripts/bundle-playwright-auth.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import { Button, Card, PageHeader, Select } from "@/shared/components";
@@ -63,7 +64,7 @@ function SecuritySecretsCard({ backendConnected }: { backendConnected: boolean }
   return (
     <>
       <p className="text-muted text-sm">
-        Move plaintext credentials from targets, auth profiles, sessions, and judge config into the
+        Move plaintext credentials from targets, auth profiles, sessions, and legacy judge config into the
         OS keychain and encrypted session vault.
       </p>
       {!backendConnected ? (
@@ -194,6 +195,18 @@ export function SettingsPage() {
             </Card>
 
             <Card>
+              <h3 className="card__title">AI Runtime</h3>
+              <p className="text-muted text-sm">
+                All AI features (judge, planner, payload generator) use the single AI Runtime
+                configuration. Choose local llama.cpp or a third-party API model on the AI Runtime
+                page.
+              </p>
+              <Link className="button button--secondary" to="/runtime">
+                Open AI Runtime
+              </Link>
+            </Card>
+
+            <Card>
               <h3 className="card__title">Security Testing</h3>
               <label className="settings-toggle">
                 <input
@@ -209,7 +222,7 @@ export function SettingsPage() {
                   checked={settings.autoJudge}
                   onChange={(e) => update("autoJudge", e.target.checked)}
                 />
-                <span>Auto-run judge after attacks</span>
+                <span>Auto-run AI judge after attacks (uses AI Runtime)</span>
               </label>
               <label className="settings-toggle">
                 <input

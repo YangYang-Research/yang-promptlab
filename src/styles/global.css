@@ -2175,6 +2175,29 @@ a:hover {
   overflow: hidden;
 }
 
+.hf-catalog__detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding-right: 0.25rem;
+}
+
+.hf-catalog__detail-header .hf-catalog__detail-title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.hf-catalog__detail-header .badge {
+  flex-shrink: 0;
+}
+
+.runtime-engine-intro {
+  margin: 0 0 0.75rem;
+}
+
 .hf-catalog__icon--import {
   font-size: 1.125rem;
   font-weight: 700;

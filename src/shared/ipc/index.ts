@@ -50,19 +50,6 @@ export {
   type ScanProgressEvent,
 } from "./client";
 export {
-  getJudgeConfig,
-  saveJudgeConfig,
-  testJudgeConnectivity,
-  testJudgeModel,
-  JUDGE_MODES,
-  LOCAL_PROVIDERS,
-  REMOTE_PROVIDERS,
-  DEFAULT_JUDGE_CONFIG,
-  type JudgeConfigDto,
-  type JudgeConnectivityResult,
-  type JudgeMode,
-} from "./judge";
-export {
   listModels,
   browseModels,
   installModel,

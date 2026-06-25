@@ -24,11 +24,9 @@ pub use hardware::detect_hardware;
 pub use manager::LocalModelManager;
 pub use registry::{remote_entry_id, ModelRegistry};
 pub use runtime::{
-    InferenceRuntime, LocalInferenceEngine, LlamaCppConfig, LlamaCppRuntime,
+    InferenceRuntime, LocalInferenceEngine, LlamaInProcessRuntime, LlamaModelConfig,
     MockInferenceRuntime, OllamaConfig, OllamaRuntime,
 };
-#[cfg(feature = "llama")]
-pub use runtime::{LlamaInProcessRuntime, LlamaModelConfig};
 pub use types::*;
 pub use registry_validate::{validate_registry, RegistryValidationIssue, RegistryValidationReport};
 pub use verify::VerificationEngine;

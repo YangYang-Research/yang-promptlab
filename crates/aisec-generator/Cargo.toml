@@ -12,6 +12,7 @@ aisec-attack = { workspace = true }
 aisec-core = { workspace = true }
 aisec-payload = { workspace = true }
 aisec-planner = { workspace = true }
+aisec-inference = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -145,21 +145,40 @@ pub struct ModelEntry {
 impl ModelEntry {
     /// Human-readable provider label (e.g. OpenAI instead of `remote`).
     pub fn display_provider(&self) -> String {
-        if self.provider != ModelProvider::Remote {
-            return self.provider.as_str().to_string();
+        if let Some(label) = self
+            .metadata
+            .get("providerLabel")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return label.to_string();
         }
 
-        let raw = self
-            .metadata
-            .get("remoteProvider")
-            .and_then(|value| value.as_str())
-            .or_else(|| match &self.source {
-                ModelSource::Remote { provider, .. } => Some(provider.as_str()),
-                _ => None,
-            })
-            .unwrap_or("remote");
+        if self.provider == ModelProvider::Remote {
+            let raw = self
+                .metadata
+                .get("remoteProvider")
+                .and_then(|value| value.as_str())
+                .or_else(|| match &self.source {
+                    ModelSource::Remote { provider, .. } => Some(provider.as_str()),
+                    _ => None,
+                })
+                .unwrap_or("remote");
 
-        remote_provider_display_name(raw)
+            return remote_provider_display_name(raw);
+        }
+
+        if let Some(label) = local_publisher_display_name(&self.name) {
+            return label;
+        }
+
+        match self.provider {
+            ModelProvider::HuggingFace => "Hugging Face".into(),
+            ModelProvider::Ollama => "Ollama".into(),
+            ModelProvider::Gguf => "Local".into(),
+            ModelProvider::Remote => "Remote".into(),
+        }
     }
 
     /// Model identifier for display (remote API model id, or local display name).
@@ -168,6 +187,19 @@ impl ModelEntry {
             ModelSource::Remote { model, .. } => model.clone(),
             _ => self.name.clone(),
         }
+    }
+}
+
+fn local_publisher_display_name(name: &str) -> Option<String> {
+    let lower = name.to_ascii_lowercase();
+    if lower.contains("qwen") {
+        Some("Qwen Team".into())
+    } else if lower.contains("llama") {
+        Some("Meta".into())
+    } else if lower.contains("mistral") {
+        Some("Mistral AI".into())
+    } else {
+        None
     }
 }
 
@@ -196,6 +228,8 @@ pub struct ModelCatalogEntry {
     pub id: String,
     pub name: String,
     pub provider: ModelProvider,
+    /// Human-readable model publisher (e.g. Meta, Qwen Team).
+    pub provider_label: String,
     pub version: String,
     pub description: String,
     pub purpose: String,

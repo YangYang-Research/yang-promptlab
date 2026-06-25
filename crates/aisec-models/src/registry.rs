@@ -212,6 +212,7 @@ impl ModelRegistry {
         let now = OffsetDateTime::now_utc();
         let previous = self.entries.get(&id);
         let created_at = previous.map(|existing| existing.created_at).unwrap_or(now);
+        let verified = previous.map(|existing| existing.verified).unwrap_or(false);
         let mut metadata = previous
             .map(|existing| existing.metadata.clone())
             .unwrap_or_else(|| serde_json::json!({}));
@@ -232,7 +233,7 @@ impl ModelRegistry {
             file_path: PathBuf::from(path),
             size_bytes: None,
             checksum_sha256: None,
-            verified: true,
+            verified,
             created_at,
             updated_at: now,
             metadata,
@@ -479,6 +480,8 @@ mod tests {
         assert_eq!(a.id, "remote-openai-gpt-4o");
         assert_eq!(b.id, "remote-openai-gpt-4o-mini");
         assert_eq!(registry.len(), 2);
+        assert!(!a.verified);
+        assert!(!b.verified);
     }
 
     #[test]

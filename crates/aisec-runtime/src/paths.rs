@@ -1,37 +1,19 @@
 use std::path::{Path, PathBuf};
 
+/// Model vault directory under the app data root.
 pub fn models_dir(data_root: impl AsRef<Path>) -> PathBuf {
     data_root.as_ref().join("models")
 }
 
-pub fn bundled_runtime_dir(app_root: impl AsRef<Path>) -> PathBuf {
-    app_root.as_ref().join("runtime")
+/// Runtime metadata directory.
+pub fn runtime_dir(data_root: impl AsRef<Path>) -> PathBuf {
+    data_root.as_ref().join("runtime")
 }
 
-pub fn bundled_llama_server_binary(app_root: impl AsRef<Path>) -> PathBuf {
-    let base = bundled_runtime_dir(app_root);
-    if cfg!(target_os = "windows") {
-        base.join("llama-server.exe")
-    } else {
-        base.join("llama-server")
-    }
-}
-
-/// Deprecated — Ollama binary path; use [`bundled_llama_server_binary`].
-#[deprecated(note = "use bundled_llama_server_binary")]
-pub fn bundled_ollama_binary(app_root: impl AsRef<Path>) -> PathBuf {
-    let base = bundled_runtime_dir(app_root);
-    if cfg!(target_os = "windows") {
-        base.join("ollama.exe")
-    } else {
-        base.join("ollama")
-    }
-}
-
-/// Compare two paths, resolving symlinks when possible.
 pub fn same_paths(a: &Path, b: &Path) -> bool {
-    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
-        (Ok(left), Ok(right)) => left == right,
-        _ => a == b,
-    }
+    std::fs::canonicalize(a)
+        .ok()
+        .zip(std::fs::canonicalize(b).ok())
+        .map(|(a, b)| a == b)
+        .unwrap_or_else(|| a == b)
 }

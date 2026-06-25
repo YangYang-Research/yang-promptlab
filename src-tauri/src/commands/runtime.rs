@@ -10,12 +10,13 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 use time::OffsetDateTime;
 
-use crate::ai_inference_settings::{
-    apply_third_party_health_check, format_health_check_timestamp, is_local_model,
-    is_third_party_model, load_settings, reconcile_settings, save_settings, settings_to_dto,
-    settings_to_dto_with_connectivity_test, third_party_status_label, AiInferenceRoute,
-    AiInferenceSettings, AiInferenceSettingsDto,
+use aisec_inference::config::{AiRuntimeConfiguration, InferenceMode};
+use crate::inference_settings::{
+    apply_third_party_health_check, config_to_dto, config_to_dto_with_connectivity_test,
+    format_health_check_timestamp, is_local_model, is_third_party_model, parse_route,
+    reconcile_config, third_party_status_label, AiInferenceSettingsDto,
 };
+use crate::inference_host::{connectivity_to_judge, open_gateway_session};
 use crate::commands::models::test_third_party_model_connection;
 use crate::error::{CommandError, CommandResult};
 use crate::events::emit_runtime_install_progress;
@@ -94,6 +95,13 @@ pub struct RuntimeConfigurationDto {
     pub model_load_in_progress: bool,
     pub settings: AiInferenceSettingsDto,
     pub runtime_status: RuntimeStatusDto,
+}
+
+fn local_runtime_display_name(backend: Option<&str>) -> Option<String> {
+    match backend.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(backend) => Some(format!("llama.cpp - {backend}")),
+        None => None,
+    }
 }
 
 fn snapshot_to_dto(snap: RuntimeStatusSnapshot, recommended_runtime: Option<String>) -> RuntimeStatusDto {
@@ -228,18 +236,16 @@ pub async fn runtime_load_model(
         (entry.file_path.clone(), entry.id.clone())
     };
 
-    let data_dir = state.data_dir();
-    let models: Vec<ModelEntry> = {
-        let manager = state.model_manager().lock().await;
-        manager.list_models().into_iter().cloned().collect()
-    };
     {
-        let mut settings = load_settings(&data_dir).await?;
-        settings.route = AiInferenceRoute::Local;
-        settings.initialized = true;
-        settings.selected_model_id = Some(model_id.clone());
-        let settings = reconcile_settings(settings, &models);
-        save_settings(&data_dir, &settings).await?;
+        let mut inference = state.inference_manager().lock().await;
+        let manager = state.model_manager().lock().await;
+        let entry = manager
+            .get_model(&model_id)
+            .ok_or_else(|| CommandError::invalid_input(format!("model not found: {model_id}")))?;
+        inference
+            .update_from_model(entry, None)
+            .await
+            .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
     }
 
     {
@@ -365,59 +371,58 @@ pub struct RuntimeInferenceRouteRequest {
     pub selected_model_id: Option<String>,
 }
 
-async fn run_third_party_connectivity_test_for_settings(
+async fn run_third_party_connectivity_test_for_config(
     state: &AppState,
-    settings: &mut AiInferenceSettings,
+    config: &mut AiRuntimeConfiguration,
     model_id: &str,
 ) -> (bool, String) {
     let checked_at = format_health_check_timestamp(OffsetDateTime::now_utc());
     match test_third_party_model_connection(state, model_id).await {
         Ok(result) => {
-            apply_third_party_health_check(
-                settings,
-                &checked_at,
-                result.ok,
-                result.latency_ms,
-            );
+            apply_third_party_health_check(config, &checked_at, result.ok, result.latency_ms);
             (result.ok, result.message)
         }
         Err(err) => {
-            apply_third_party_health_check(settings, &checked_at, false, 0);
+            apply_third_party_health_check(config, &checked_at, false, 0);
             (false, err.to_string())
         }
     }
 }
 
-async fn reconcile_inference_settings(
+async fn reconcile_inference_config(
     state: &AppState,
     models: &[ModelEntry],
-) -> CommandResult<(AiInferenceSettings, Option<(bool, String)>)> {
-    let data_dir = state.data_dir().to_path_buf();
-    let loaded = load_settings(&data_dir).await?;
+) -> CommandResult<(AiRuntimeConfiguration, Option<(bool, String)>)> {
+    let mut inference = state.inference_manager().lock().await;
+    let loaded = inference.config().clone();
     if !loaded.initialized {
         return Ok((loaded, None));
     }
 
-    let mut settings = loaded.clone();
-    let previous_selected = settings.selected_model_id.clone();
-    settings = reconcile_settings(settings, models);
+    let mut config = loaded.clone();
+    let previous_selected = config.selected_model_id.clone();
+    config = reconcile_config(config, models);
 
     let mut connectivity_test = None;
-    if settings.route == AiInferenceRoute::ThirdParty
-        && settings.selected_model_id != previous_selected
-        && settings.selected_model_id.is_some()
+    if config.mode == InferenceMode::ThirdParty
+        && config.selected_model_id != previous_selected
+        && config.selected_model_id.is_some()
     {
-        if let Some(id) = settings.selected_model_id.clone() {
+        if let Some(id) = config.selected_model_id.clone() {
             let result =
-                run_third_party_connectivity_test_for_settings(state, &mut settings, &id).await;
+                run_third_party_connectivity_test_for_config(state, &mut config, &id).await;
             connectivity_test = Some(result);
         }
     }
 
-    if settings != loaded {
-        save_settings(&data_dir, &settings).await?;
+    if config != loaded {
+        *inference.config_mut() = config.clone();
+        inference
+            .save()
+            .await
+            .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
     }
-    Ok((settings, connectivity_test))
+    Ok((config, connectivity_test))
 }
 
 async fn inference_settings_for_state(state: &AppState) -> CommandResult<AiInferenceSettingsDto> {
@@ -426,9 +431,9 @@ async fn inference_settings_for_state(state: &AppState) -> CommandResult<AiInfer
         manager.list_models().into_iter().cloned().collect()
     };
 
-    let (settings, connectivity_test) = reconcile_inference_settings(state, &models).await?;
-    Ok(settings_to_dto_with_connectivity_test(
-        &settings,
+    let (config, connectivity_test) = reconcile_inference_config(state, &models).await?;
+    Ok(config_to_dto_with_connectivity_test(
+        &config,
         &models,
         connectivity_test,
     ))
@@ -464,19 +469,19 @@ async fn store_runtime_configuration_cache(state: &AppState, dto: &RuntimeConfig
 
 async fn assemble_runtime_configuration(
     models: &[ModelEntry],
-    settings: &AiInferenceSettings,
+    config: &AiRuntimeConfiguration,
     inference: &AiInferenceSettingsDto,
     runtime_manager: &aisec_runtime::RuntimeManager,
 ) -> RuntimeConfigurationDto {
     let runtime_status = status_dto_for_manager(runtime_manager).await;
     let last_health = runtime_manager.last_health().cloned();
 
-    let selected_model = settings.selected_model_id.as_ref().and_then(|id| {
+    let selected_model = config.selected_model_id.as_ref().and_then(|id| {
         models.iter().find(|m| &m.id == id)
     });
 
     let (mode, status_label, provider, model_name, runtime_name, runtime_version, connectivity, last_health_check) =
-        if !settings.initialized {
+        if !config.initialized {
             (
                 "not_configured".to_string(),
                 "Setup Required".to_string(),
@@ -487,11 +492,11 @@ async fn assemble_runtime_configuration(
                 None,
                 None,
             )
-        } else if settings.route == AiInferenceRoute::ThirdParty {
+        } else if config.mode == InferenceMode::ThirdParty {
             (
                 "third_party".to_string(),
                 third_party_status_label(
-                    settings,
+                    config,
                     inference.third_party_available,
                     selected_model,
                 ),
@@ -499,8 +504,12 @@ async fn assemble_runtime_configuration(
                 inference.selected_model_name.clone(),
                 None,
                 None,
-                settings.third_party_connectivity.clone(),
-                settings.third_party_last_health_check.clone(),
+                if config.health.message.is_empty() {
+                    None
+                } else {
+                    Some(config.health.message.clone())
+                },
+                config.health.checked_at.clone(),
             )
         } else {
             let lifecycle = runtime_status.lifecycle_state.as_str();
@@ -527,7 +536,7 @@ async fn assemble_runtime_configuration(
                 } else {
                     None
                 },
-                runtime_status.backend.clone().or(Some("llama.cpp".into())),
+                local_runtime_display_name(runtime_status.backend.as_deref()),
                 runtime_status.runtime_version.clone(),
                 last_health.as_ref().map(|h| {
                     if h.endpoint_reachable {
@@ -569,16 +578,16 @@ fn fallback_runtime_status_when_busy() -> RuntimeStatusDto {
     RuntimeStatusDto {
         lifecycle_state: "starting".into(),
         runtime_version: None,
-        backend: Some("llama.cpp".into()),
+        backend: None,
         platform: None,
         install_path: None,
         installed: true,
         verified: false,
         binary_available: true,
-        base_url: aisec_runtime::default_llama_base_url(),
+        base_url: "embedded".into(),
         model_loaded: false,
         loaded_model_path: None,
-        message: "Loading model into llama-server — large models may take several minutes on CPU".into(),
+        message: "Loading GGUF model via embedded libllama — large models may take several minutes on CPU".into(),
         requires_attention: false,
         last_error: None,
         recommended_runtime: None,
@@ -587,16 +596,16 @@ fn fallback_runtime_status_when_busy() -> RuntimeStatusDto {
 
 async fn assemble_runtime_configuration_busy_fallback(
     models: &[ModelEntry],
-    settings: &AiInferenceSettings,
+    config: &AiRuntimeConfiguration,
     inference: &AiInferenceSettingsDto,
 ) -> RuntimeConfigurationDto {
-    let selected_model = settings.selected_model_id.as_ref().and_then(|id| {
+    let selected_model = config.selected_model_id.as_ref().and_then(|id| {
         models.iter().find(|m| &m.id == id)
     });
     let runtime_status = fallback_runtime_status_when_busy();
 
     let (mode, status_label, provider, model_name, runtime_name, runtime_version, connectivity, last_health_check) =
-        if !settings.initialized {
+        if !config.initialized {
             (
                 "not_configured".to_string(),
                 "Setup Required".to_string(),
@@ -607,11 +616,11 @@ async fn assemble_runtime_configuration_busy_fallback(
                 None,
                 None,
             )
-        } else if settings.route == AiInferenceRoute::ThirdParty {
+        } else if config.mode == InferenceMode::ThirdParty {
             (
                 "third_party".to_string(),
                 third_party_status_label(
-                    settings,
+                    config,
                     inference.third_party_available,
                     selected_model,
                 ),
@@ -619,8 +628,12 @@ async fn assemble_runtime_configuration_busy_fallback(
                 inference.selected_model_name.clone(),
                 None,
                 None,
-                settings.third_party_connectivity.clone(),
-                settings.third_party_last_health_check.clone(),
+                if config.health.message.is_empty() {
+                    None
+                } else {
+                    Some(config.health.message.clone())
+                },
+                config.health.checked_at.clone(),
             )
         } else {
             (
@@ -628,7 +641,7 @@ async fn assemble_runtime_configuration_busy_fallback(
                 "Loading model".into(),
                 None,
                 inference.selected_model_name.clone(),
-                Some("llama.cpp".into()),
+                local_runtime_display_name(runtime_status.backend.as_deref()),
                 None,
                 Some("Offline — load a model".into()),
                 None,
@@ -668,7 +681,7 @@ fn apply_model_loading_overlay(dto: &mut RuntimeConfigurationDto, loading_model_
     dto.runtime_status.model_loaded = false;
     dto.runtime_status.loaded_model_path = None;
     dto.runtime_status.message =
-        "Loading model into llama-server — large models may take several minutes on CPU".into();
+        "Loading GGUF model via embedded libllama — large models may take several minutes on CPU".into();
     if dto.mode == "not_configured" {
         dto.mode = "local".into();
     }
@@ -687,11 +700,12 @@ pub(crate) async fn prime_runtime_configuration_cache(
         let manager = state.model_manager().lock().await;
         manager.list_models().into_iter().cloned().collect()
     };
-    let Ok(settings) = load_settings(state.data_dir()).await else {
-        return;
+    let config = {
+        let inference = state.inference_manager().lock().await;
+        inference.config().clone()
     };
-    let inference = settings_to_dto(&settings, &models);
-    let dto = assemble_runtime_configuration(&models, &settings, &inference, runtime_manager).await;
+    let inference_dto = config_to_dto(&config, &models);
+    let dto = assemble_runtime_configuration(&models, &config, &inference_dto, runtime_manager).await;
     store_runtime_configuration_cache(state, &dto).await;
 }
 
@@ -727,19 +741,19 @@ async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<Runt
         manager.list_models().into_iter().cloned().collect()
     };
 
-    let (settings, _) = reconcile_inference_settings(state, &models).await?;
-    let inference = settings_to_dto(&settings, &models);
+    let (config, _) = reconcile_inference_config(state, &models).await?;
+    let inference = config_to_dto(&config, &models);
     let loading_model_id = runtime_model_loading_id(state).await;
 
     let base = if let Ok(runtime_manager) = state.runtime_manager().try_lock() {
         let dto =
-            assemble_runtime_configuration(&models, &settings, &inference, &runtime_manager).await;
+            assemble_runtime_configuration(&models, &config, &inference, &runtime_manager).await;
         store_runtime_configuration_cache(state, &dto).await;
         dto
     } else if let Some(cached) = state.runtime_config_cache().lock().await.clone() {
         cached
     } else {
-        assemble_runtime_configuration_busy_fallback(&models, &settings, &inference).await
+        assemble_runtime_configuration_busy_fallback(&models, &config, &inference).await
     };
 
     let mut response = base;
@@ -766,7 +780,7 @@ pub async fn runtime_set_inference_route(
     state: State<'_, AppState>,
     request: RuntimeInferenceRouteRequest,
 ) -> CommandResult<AiInferenceSettingsDto> {
-    let route = AiInferenceRoute::parse(&request.route).ok_or_else(|| {
+    let route = parse_route(&request.route).ok_or_else(|| {
         CommandError::invalid_input(format!("unknown inference route: {}", request.route))
     })?;
 
@@ -776,7 +790,7 @@ pub async fn runtime_set_inference_route(
         ));
     }
 
-    if route == AiInferenceRoute::ThirdParty {
+    if route == InferenceMode::ThirdParty {
         let mut runtime_mgr = state.runtime_manager().lock().await;
         let snap = runtime_mgr.status_snapshot();
         if snap.lifecycle_state == RuntimeLifecycleState::Starting.as_str() && !snap.model_loaded {
@@ -789,78 +803,135 @@ pub async fn runtime_set_inference_route(
         }
     }
 
-    let data_dir = state.data_dir().to_path_buf();
     let models: Vec<ModelEntry> = {
         let manager = state.model_manager().lock().await;
         manager.list_models().into_iter().cloned().collect()
     };
 
-    let run_connectivity_test = route == AiInferenceRoute::ThirdParty
+    let run_connectivity_test = route == InferenceMode::ThirdParty
         && request
             .selected_model_id
             .as_ref()
             .is_some_and(|value| !value.trim().is_empty());
 
-    let mut settings = load_settings(&data_dir).await?;
-    settings.route = route;
-    settings.initialized = true;
+    let mut inference = state.inference_manager().lock().await;
+    let mut config = inference.config().clone();
+    config.mode = route;
+    config.initialized = true;
 
     if let Some(id) = request
         .selected_model_id
         .filter(|value| !value.trim().is_empty())
     {
         let valid = models.iter().any(|model| match route {
-            AiInferenceRoute::ThirdParty => is_third_party_model(model) && model.id == id,
-            AiInferenceRoute::Local => is_local_model(model) && model.id == id,
+            InferenceMode::ThirdParty => is_third_party_model(model) && model.id == id,
+            InferenceMode::Local => is_local_model(model) && model.id == id,
+            InferenceMode::Deterministic => false,
         });
         if valid {
-            settings.selected_model_id = Some(id);
+            config.selected_model_id = Some(id);
         }
     } else {
-        let selection_matches_route = settings
+        let selection_matches_route = config
             .selected_model_id
             .as_ref()
             .is_some_and(|id| {
                 models.iter().any(|model| match route {
-                    AiInferenceRoute::ThirdParty => is_third_party_model(model) && model.id == *id,
-                    AiInferenceRoute::Local => is_local_model(model) && model.id == *id,
+                    InferenceMode::ThirdParty => is_third_party_model(model) && model.id == *id,
+                    InferenceMode::Local => is_local_model(model) && model.id == *id,
+                    InferenceMode::Deterministic => false,
                 })
             });
         if !selection_matches_route {
-            settings.selected_model_id = None;
-            if route == AiInferenceRoute::ThirdParty {
-                settings.third_party_connectivity = None;
-                settings.third_party_last_health_check = None;
+            config.selected_model_id = None;
+            if route == InferenceMode::ThirdParty {
+                config.health = Default::default();
             }
         }
     }
 
-    settings = reconcile_settings(settings, &models);
+    config = reconcile_config(config, &models);
 
     if run_connectivity_test {
         let mut connectivity_test: Option<(bool, String)> = None;
-        if let Some(id) = settings.selected_model_id.clone() {
+        if let Some(id) = config.selected_model_id.clone() {
+            drop(inference);
             connectivity_test = Some(
-                run_third_party_connectivity_test_for_settings(state.inner(), &mut settings, &id)
+                run_third_party_connectivity_test_for_config(state.inner(), &mut config, &id)
                     .await,
             );
+            let mut inference = state.inference_manager().lock().await;
+            *inference.config_mut() = config.clone();
+            inference
+                .save()
+                .await
+                .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
+            return Ok(config_to_dto_with_connectivity_test(
+                &config,
+                &models,
+                connectivity_test,
+            ));
         }
-        save_settings(&data_dir, &settings).await?;
-        return Ok(settings_to_dto_with_connectivity_test(
-            &settings,
-            &models,
-            connectivity_test,
-        ));
     }
 
-    save_settings(&data_dir, &settings).await?;
-    Ok(settings_to_dto(&settings, &models))
+    *inference.config_mut() = config.clone();
+    inference
+        .save()
+        .await
+        .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
+    Ok(config_to_dto(&config, &models))
+}
+
+#[tauri::command]
+pub async fn runtime_test_connectivity(
+    state: State<'_, AppState>,
+) -> CommandResult<aisec_judge::JudgeConnectivityResult> {
+    let inference = state.inference_manager().lock().await;
+    let manager = state.model_manager().lock().await;
+    let mut runtime_mgr = state.runtime_manager().lock().await;
+    let mut session = open_gateway_session(
+        state.data_dir(),
+        &inference,
+        &manager,
+        state.model_provider().clone(),
+        &mut runtime_mgr,
+    )
+    .await?;
+    let result = session
+        .test_connectivity()
+        .await
+        .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
+    Ok(connectivity_to_judge(result))
+}
+
+#[tauri::command]
+pub async fn runtime_test_inference(
+    state: State<'_, AppState>,
+) -> CommandResult<aisec_judge::JudgeConnectivityResult> {
+    let inference = state.inference_manager().lock().await;
+    let manager = state.model_manager().lock().await;
+    let mut runtime_mgr = state.runtime_manager().lock().await;
+    let mut session = open_gateway_session(
+        state.data_dir(),
+        &inference,
+        &manager,
+        state.model_provider().clone(),
+        &mut runtime_mgr,
+    )
+    .await?;
+    let result = session
+        .test_inference()
+        .await
+        .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
+    Ok(connectivity_to_judge(result))
 }
 
 fn map_runtime_err(err: aisec_runtime::RuntimeError) -> CommandError {
     match err {
         aisec_runtime::RuntimeError::Unavailable => {
-            CommandError::invalid_input("AI runtime binary not available — run Install Runtime")
+            CommandError::invalid_input(
+                "Embedded libllama engine is unavailable — reinitialize the engine from AI Runtime",
+            )
         }
         other => CommandError::from(aisec_core::AisecError::internal(other.to_string())),
     }
