@@ -110,7 +110,8 @@ export function ModelsPage() {
 
   const isModelBusy = useCallback((modelId: string) => busyModelIds.has(modelId), [busyModelIds]);
   const installedNames = useMemo(() => new Set(installed.map((m) => m.name)), [installed]);
-  const { modelLoading: runtimeModelLoading } = useRuntimeModelLoading(backendConnected);
+  const { modelLoading: runtimeModelLoading, modelTesting: runtimeModelTesting, testingModelId: runtimeTestingModelId } =
+    useRuntimeModelLoading(backendConnected);
 
   useEffect(() => {
     const state = location.state as ModelsPageLocationState | null;
@@ -596,6 +597,8 @@ export function ModelsPage() {
         models={installed}
         isModelBusy={isModelBusy}
         runtimeModelLoading={runtimeModelLoading}
+        runtimeModelTesting={runtimeModelTesting}
+        runtimeTestingModelId={runtimeTestingModelId}
         onTest={(model) => void handleTest(model)}
         onEdit={(model) => void handleEdit(model)}
         onRemove={(modelId) => void handleRemove(modelId)}

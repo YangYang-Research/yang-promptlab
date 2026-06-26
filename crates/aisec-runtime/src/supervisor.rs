@@ -76,10 +76,13 @@ impl RuntimeSupervisor {
     }
 
     pub fn set_hardware_profile(&mut self, profile: RuntimeHardwareProfile) {
+        self.hardware = Some(profile.clone());
+        if self.adapter.is_loaded() {
+            return;
+        }
         let backend = resolve_backend(self.config.backend, Some(&profile));
         self.adapter
             .set_backend(gfx_from_manifest(backend), Some(&profile));
-        self.hardware = Some(profile);
     }
 
     pub fn set_n_gpu_layers(&mut self, n_gpu_layers: u32) {
@@ -167,15 +170,14 @@ impl RuntimeSupervisor {
             return Err(RuntimeError::Unavailable);
         }
 
-        if self.adapter.is_loaded() {
-            if let Some(loaded) = self.adapter.loaded_model_path().await {
-                if crate::paths::same_paths(&loaded, model_path)
-                    && self.check_health().await.unwrap_or(false)
-                {
-                    self.state = RuntimeProcessState::Running;
-                    return Ok(());
-                }
+        if let Some(loaded) = self.adapter.loaded_model_path().await {
+            if crate::paths::same_paths(&loaded, model_path) && self.adapter.is_loaded() {
+                self.state = RuntimeProcessState::Running;
+                return Ok(());
             }
+        }
+
+        if self.adapter.is_loaded() {
             self.stop().await?;
         }
 

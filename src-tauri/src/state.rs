@@ -30,6 +30,8 @@ pub struct AppState {
     runtime_config_cache: Arc<AsyncMutex<Option<crate::commands::runtime::RuntimeConfigurationDto>>>,
     /// Model id currently loading into embedded libllama (survives stale config cache).
     runtime_model_loading_id: Arc<AsyncMutex<Option<String>>>,
+    /// Model id currently running a local inference verify/test.
+    runtime_model_testing_id: Arc<AsyncMutex<Option<String>>>,
     _log_guard: LogGuard,
 }
 
@@ -60,6 +62,7 @@ impl AppState {
             inference_manager: Arc::new(AsyncMutex::new(InferenceRuntimeManager::new(&data_dir))),
             runtime_config_cache: Arc::new(AsyncMutex::new(None)),
             runtime_model_loading_id: Arc::new(AsyncMutex::new(None)),
+            runtime_model_testing_id: Arc::new(AsyncMutex::new(None)),
             _log_guard: log_guard,
         }
     }
@@ -116,6 +119,10 @@ impl AppState {
 
     pub fn runtime_model_loading_id(&self) -> &Arc<AsyncMutex<Option<String>>> {
         &self.runtime_model_loading_id
+    }
+
+    pub fn runtime_model_testing_id(&self) -> &Arc<AsyncMutex<Option<String>>> {
+        &self.runtime_model_testing_id
     }
 
     pub async fn ollama_base_url(&self) -> String {

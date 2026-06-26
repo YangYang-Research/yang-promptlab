@@ -8,13 +8,14 @@ use aisec_models::{
     DownloadManager, DownloadProgress, DownloadStatus, LocalModelManager, ModelCatalogEntry,
     ModelEntry, ModelFormat, ModelProvider, ModelSource, VerificationResult, remote_entry_id,
 };
-use aisec_runtime::RuntimeError;
+use aisec_inference::prompts::PromptRegistry;
+use aisec_runtime::{InferRequest, RuntimeError};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tauri::async_runtime::Mutex as AsyncMutex;
 use tauri::State;
 
-use crate::inference_host::{test_inference_for_entry, test_remote_connectivity_only};
+use crate::inference_host::test_remote_connectivity_only;
 use crate::inference_settings::{
     apply_third_party_health_check, format_health_check_timestamp,
 };
@@ -1055,6 +1056,13 @@ fn runtime_unavailable_error() -> CommandError {
     )
 }
 
+fn map_runtime_err(err: RuntimeError) -> CommandError {
+    match err {
+        RuntimeError::Unavailable => runtime_unavailable_error(),
+        other => CommandError::from(AisecError::internal(other.to_string())),
+    }
+}
+
 fn map_runtime_test_error(err: RuntimeError, _supervisor: &aisec_runtime::RuntimeSupervisor) -> CommandError {
     match err {
         RuntimeError::Unavailable => runtime_unavailable_error(),
@@ -1091,50 +1099,98 @@ pub async fn models_test_inference(
     let file_path = entry.file_path.clone();
     let use_chat = entry.capabilities.chat;
 
-    let need_load = {
-        let runtime_mgr = state.runtime_manager().lock().await;
-        !runtime_mgr.is_same_model_loaded_at(&file_path).await
-    };
+    if let Some(testing) = state.runtime_model_testing_id().lock().await.clone() {
+        return Err(CommandError::invalid_input(if testing == model_id {
+            "model verify already in progress".into()
+        } else {
+            format!("another model verify is in progress ({testing})")
+        }));
+    }
 
-    if need_load {
+    crate::commands::runtime::set_runtime_model_testing(state.inner(), Some(model_id.clone())).await;
+    let test_result = async {
+        let need_load = {
+            let runtime_mgr = state.runtime_manager().lock().await;
+            !runtime_mgr.is_same_model_loaded_at(&file_path).await
+        };
+
+        if need_load {
+            if state
+                .runtime_model_loading_id()
+                .lock()
+                .await
+                .as_deref()
+                == Some(model_id.as_str())
+            {
+                crate::commands::runtime::wait_for_runtime_model_load(
+                    state.inner(),
+                    &model_id,
+                    &file_path,
+                )
+                .await
+                .map_err(map_runtime_err)?;
+            } else {
+                let mut runtime_mgr = state.runtime_manager().lock().await;
+                if !runtime_mgr.supervisor().runtime_available() {
+                    return Err(runtime_unavailable_error());
+                }
+                crate::commands::runtime::load_model_with_loading_cache(
+                    state.inner(),
+                    &mut runtime_mgr,
+                    &file_path,
+                    &model_id,
+                )
+                .await
+                .map_err(|err| map_runtime_test_error(err, runtime_mgr.supervisor()))?;
+                runtime_mgr.sync_lifecycle_from_supervisor();
+            }
+        }
+
         let mut runtime_mgr = state.runtime_manager().lock().await;
         if !runtime_mgr.supervisor().runtime_available() {
             return Err(runtime_unavailable_error());
         }
-        crate::commands::runtime::load_model_with_loading_cache(
-            state.inner(),
-            &mut runtime_mgr,
-            &file_path,
-            &model_id,
-        )
-        .await
-        .map_err(|err| map_runtime_test_error(err, runtime_mgr.supervisor()))?;
-        runtime_mgr.sync_lifecycle_from_supervisor();
+
+        let prompt = format!(
+            "{}\n\n{}",
+            PromptRegistry::health_check_system(),
+            PromptRegistry::health_check_user()
+        );
+        let started = std::time::Instant::now();
+        let response = runtime_mgr
+            .supervisor()
+            .infer(InferRequest {
+                prompt,
+                max_tokens: 32,
+                temperature: 0.0,
+            })
+            .await
+            .map_err(|err| map_runtime_test_error(err, runtime_mgr.supervisor()))?;
+        let sample = response.text;
+        let ok = !sample.trim().is_empty();
+
+        Ok(ModelInferenceTestResult {
+            ok,
+            mode: if use_chat {
+                "chat".into()
+            } else {
+                "completion".into()
+            },
+            sample,
+            message: if ok {
+                format!(
+                    "Inference smoke test succeeded ({} ms)",
+                    started.elapsed().as_millis()
+                )
+            } else {
+                "Inference smoke test returned an empty response".into()
+            },
+        })
     }
+    .await;
 
-    let mut runtime_mgr = state.runtime_manager().lock().await;
-    if !runtime_mgr.supervisor().runtime_available() {
-        return Err(runtime_unavailable_error());
-    }
-
-    let result = test_inference_for_entry(
-        state.data_dir(),
-        &entry,
-        state.model_provider().clone(),
-        &mut runtime_mgr,
-    )
-    .await?;
-
-    Ok(ModelInferenceTestResult {
-        ok: result.ok,
-        mode: if use_chat {
-            "chat".into()
-        } else {
-            "completion".into()
-        },
-        sample: result.sample_response.unwrap_or_default(),
-        message: result.message,
-    })
+    crate::commands::runtime::set_runtime_model_testing(state.inner(), None).await;
+    test_result
 }
 
 #[tauri::command]

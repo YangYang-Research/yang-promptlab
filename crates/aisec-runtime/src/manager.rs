@@ -275,13 +275,13 @@ impl RuntimeManager {
 
     pub async fn is_same_model_loaded_at(&self, model_path: &std::path::Path) -> bool {
         let adapter = self.supervisor.local_runtime();
-        if !adapter.is_loaded() {
-            return false;
-        }
         let Some(loaded) = adapter.loaded_model_path().await else {
             return false;
         };
-        crate::paths::same_paths(&loaded, model_path)
+        if !crate::paths::same_paths(&loaded, model_path) {
+            return false;
+        }
+        adapter.is_loaded_async().await
     }
 
     pub async fn is_model_loaded_at(&mut self, model_path: &std::path::Path) -> bool {
@@ -337,13 +337,25 @@ impl RuntimeManager {
         Ok(())
     }
 
+    /// Load persisted hardware profile, detecting only when no profile exists yet.
+    pub async fn ensure_hardware_profile(&mut self) -> RuntimeResult<RuntimeHardwareProfile> {
+        self.log("info", "loading hardware profile").await;
+        let profile = HardwareDetector::new(&self.data_dir)
+            .ensure_profile()
+            .await?;
+        self.supervisor.set_hardware_profile(profile.clone());
+        self.hardware = Some(profile.clone());
+        Ok(profile)
+    }
+
+    /// Full hardware re-detection (Reinitialize Engine / explicit refresh only).
     pub async fn refresh_hardware(&mut self) -> RuntimeResult<RuntimeHardwareProfile> {
         self.log("info", "refreshing hardware profile").await;
         let profile = HardwareDetector::new(&self.data_dir)
             .detect_and_persist()
             .await?;
-        self.hardware = Some(profile.clone());
         self.supervisor.set_hardware_profile(profile.clone());
+        self.hardware = Some(profile.clone());
         Ok(profile)
     }
 

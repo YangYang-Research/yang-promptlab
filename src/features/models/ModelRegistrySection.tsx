@@ -79,6 +79,8 @@ type ModelRegistrySectionProps = {
   models: ModelEntryDto[];
   isModelBusy: (modelId: string) => boolean;
   runtimeModelLoading: boolean;
+  runtimeModelTesting: boolean;
+  runtimeTestingModelId: string | null;
   onTest: (model: ModelEntryDto) => void;
   onEdit: (model: ModelEntryDto) => void;
   onRemove: (modelId: string) => void;
@@ -88,6 +90,8 @@ export function ModelRegistrySection({
   models,
   isModelBusy,
   runtimeModelLoading,
+  runtimeModelTesting,
+  runtimeTestingModelId,
   onTest,
   onEdit,
   onRemove,
@@ -96,9 +100,12 @@ export function ModelRegistrySection({
   const [pageSize, setPageSize] = usePageSizePreference("models-registry");
   const { page, setPage, pagination } = usePaginatedList(models, pageSize);
 
-  const actionsDisabled = (modelId: string) => isModelBusy(modelId);
+  const actionsDisabled = (modelId: string) =>
+    isModelBusy(modelId) || (runtimeModelTesting && runtimeTestingModelId === modelId);
   const localActionsDisabled = (modelId: string) =>
-    isModelBusy(modelId) || runtimeModelLoading;
+    isModelBusy(modelId) ||
+    runtimeModelLoading ||
+    (runtimeModelTesting && runtimeTestingModelId === modelId);
 
   function renderTableActions(model: ModelEntryDto) {
     const thirdParty = isThirdPartyModel(model);

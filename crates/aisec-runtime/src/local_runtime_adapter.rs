@@ -160,6 +160,14 @@ impl LocalRuntimeAdapter {
     }
 
     pub async fn load_model(&self, model_path: &Path) -> RuntimeResult<()> {
+        if self.is_loaded() {
+            if let Some(loaded) = self.loaded_model_path().await {
+                if crate::paths::same_paths(&loaded, model_path) {
+                    return Ok(());
+                }
+            }
+        }
+
         self.initialize().await?;
         let quant = detect_quantization(model_path);
         let mut caps = LocalRuntimeCapabilities::default();

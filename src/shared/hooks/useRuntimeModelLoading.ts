@@ -7,11 +7,15 @@ const POLL_MS = 500;
 type RuntimeModelLoadingSnapshot = {
   modelLoading: boolean;
   loadingModelId: string | null;
+  modelTesting: boolean;
+  testingModelId: string | null;
 };
 
 let snapshot: RuntimeModelLoadingSnapshot = {
   modelLoading: false,
   loadingModelId: null,
+  modelTesting: false,
+  testingModelId: null,
 };
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -27,9 +31,12 @@ function deriveSnapshot(
   config: Awaited<ReturnType<typeof getRuntimeConfiguration>>,
 ): RuntimeModelLoadingSnapshot {
   const isLoading = config.modelLoadInProgress === true;
+  const isTesting = config.modelTestInProgress === true;
   return {
     modelLoading: isLoading,
     loadingModelId: isLoading ? (config.settings.selectedModelId ?? null) : null,
+    modelTesting: isTesting,
+    testingModelId: isTesting ? (config.settings.selectedModelId ?? null) : null,
   };
 }
 
@@ -38,7 +45,9 @@ export async function refreshRuntimeModelLoading(): Promise<RuntimeModelLoadingS
   const next = deriveSnapshot(config);
   const changed =
     next.modelLoading !== snapshot.modelLoading ||
-    next.loadingModelId !== snapshot.loadingModelId;
+    next.loadingModelId !== snapshot.loadingModelId ||
+    next.modelTesting !== snapshot.modelTesting ||
+    next.testingModelId !== snapshot.testingModelId;
   snapshot = next;
   if (changed) {
     emit();
@@ -79,7 +88,7 @@ export function useRuntimeModelLoadingPoll(enabled: boolean) {
   useEffect(() => {
     if (!enabled) {
       stopPolling();
-      snapshot = { modelLoading: false, loadingModelId: null };
+      snapshot = { modelLoading: false, loadingModelId: null, modelTesting: false, testingModelId: null };
       emit();
       return;
     }

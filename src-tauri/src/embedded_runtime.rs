@@ -10,8 +10,7 @@ use tauri::{AppHandle, Manager};
 use tracing::{info, warn};
 
 use crate::commands::runtime::{
-    load_model_with_loading_cache, prime_loading_configuration_cache, prime_runtime_configuration_cache,
-    set_runtime_model_loading,
+    load_model_with_loading_cache, prime_runtime_configuration_cache, set_runtime_model_loading,
 };
 use crate::runtime_watch;
 use crate::state::AppState;
@@ -38,17 +37,17 @@ pub async fn bootstrap_runtime_manager(
     }
 }
 
-/// Detect hardware synchronously during app startup (before the window is shown).
+/// Load persisted hardware profile at startup (detect only when missing).
 pub async fn detect_hardware_on_startup(manager: &mut RuntimeManager) {
-    match manager.refresh_hardware().await {
+    match manager.ensure_hardware_profile().await {
         Ok(profile) => {
             info!(
                 cpu_cores = profile.cpu_cores,
                 ram_bytes = profile.ram_bytes,
-                "hardware profile detected on startup"
+                "hardware profile loaded on startup"
             );
         }
-        Err(err) => warn!(error = %err, "hardware detect on startup failed"),
+        Err(err) => warn!(error = %err, "hardware profile load on startup failed"),
     }
 }
 
@@ -91,9 +90,6 @@ pub async fn resume_local_runtime_on_startup(app: &AppHandle, state: &AppState) 
         entry.file_path.clone()
     };
 
-    set_runtime_model_loading(state, Some(model_id.clone())).await;
-    prime_loading_configuration_cache(state, &model_id).await;
-
     let mut runtime = state.runtime_manager().lock().await;
     if !runtime.supervisor().runtime_available() {
         set_runtime_model_loading(state, None).await;
@@ -101,7 +97,7 @@ pub async fn resume_local_runtime_on_startup(app: &AppHandle, state: &AppState) 
         return;
     }
 
-    if runtime.is_model_loaded_at(&file_path).await {
+    if runtime.is_same_model_loaded_at(&file_path).await {
         runtime.sync_lifecycle_from_supervisor();
         set_runtime_model_loading(state, None).await;
         prime_runtime_configuration_cache(state, &runtime).await;
@@ -116,12 +112,20 @@ pub async fn resume_local_runtime_on_startup(app: &AppHandle, state: &AppState) 
         return;
     }
 
+    info!(
+        model_id = %model_id,
+        path = %file_path.display(),
+        "local runtime auto-resume: loading model"
+    );
+
     match load_model_with_loading_cache(state, &mut runtime, &file_path, &model_id).await {
         Ok(()) => {
             info!(model_id = %model_id, "local runtime auto-resume: model loaded");
             runtime_watch::spawn_runtime_watch(app.clone());
         }
         Err(err) => {
+            set_runtime_model_loading(state, None).await;
+            prime_runtime_configuration_cache(state, &runtime).await;
             warn!(
                 error = %err,
                 model_id = %model_id,

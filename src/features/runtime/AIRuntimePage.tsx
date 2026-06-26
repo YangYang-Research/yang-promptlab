@@ -11,7 +11,6 @@ import {
   getRuntimeHealth,
   getRuntimeLogs,
   loadRuntimeModel,
-  refreshRuntimeHardware,
   reinitializeRuntimeEngine,
   resetRuntimeConfig,
   restartRuntime,
@@ -313,11 +312,7 @@ export function AIRuntimePage() {
   const lifecycle = status?.lifecycleState ?? "not_installed";
 
   const refreshHardware = useCallback(async () => {
-    try {
-      setHardware(await refreshRuntimeHardware());
-    } catch {
-      setHardware(await getRuntimeHardware());
-    }
+    setHardware(await getRuntimeHardware());
   }, []);
 
   const refreshLocalData = useCallback(async () => {
@@ -843,14 +838,6 @@ export function AIRuntimePage() {
                       <dt>Inference</dt>
                       <dd>
                         <ConnectivityStatus label={inferenceLabel} />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Model status</dt>
-                      <dd>
-                        {status?.modelLoaded
-                          ? (configuration?.connectivity ?? "Not checked")
-                          : "No model loaded"}
                       </dd>
                     </div>
                     <div>

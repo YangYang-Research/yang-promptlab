@@ -10,7 +10,8 @@ export function connectivityStatusVariant(
     value.startsWith("Connected") ||
     value.startsWith("Reachable") ||
     value === "Running" ||
-    value === "Ready"
+    value === "Ready" ||
+    value.startsWith("In-process")
   ) {
     return "success";
   }

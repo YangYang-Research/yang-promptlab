@@ -123,6 +123,7 @@ export type RuntimeConfigurationDto = {
   connectivity: string | null;
   lastHealthCheck: string | null;
   modelLoadInProgress: boolean;
+  modelTestInProgress: boolean;
   settings: AiInferenceSettingsDto;
   runtimeStatus: RuntimeStatusDto;
 };

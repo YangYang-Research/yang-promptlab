@@ -93,6 +93,7 @@ pub struct RuntimeConfigurationDto {
     pub connectivity: Option<String>,
     pub last_health_check: Option<String>,
     pub model_load_in_progress: bool,
+    pub model_test_in_progress: bool,
     pub settings: AiInferenceSettingsDto,
     pub runtime_status: RuntimeStatusDto,
 }
@@ -439,6 +440,39 @@ async fn inference_settings_for_state(state: &AppState) -> CommandResult<AiInfer
     ))
 }
 
+/// Local embedded runtime: health check is a state probe, not HTTP — avoid fake `Reachable (0 ms)`.
+fn local_inference_connectivity_label(
+    lifecycle: &str,
+    model_loaded: bool,
+    last_health: Option<&aisec_runtime::RuntimeHealthReport>,
+) -> String {
+    if matches!(lifecycle, "starting") {
+        return "Loading model".into();
+    }
+    if model_loaded {
+        if let Some(h) = last_health {
+            if h.endpoint_reachable {
+                return if h.latency_ms > 0 {
+                    format!("In-process ({} ms)", h.latency_ms)
+                } else {
+                    "In-process".into()
+                };
+            }
+            return "Unavailable".into();
+        }
+        return "In-process".into();
+    }
+    if matches!(lifecycle, "running" | "busy") {
+        return "No model loaded".into();
+    }
+    if let Some(h) = last_health {
+        if h.model_loaded && !h.endpoint_reachable {
+            return "Unavailable".into();
+        }
+    }
+    "Not checked".into()
+}
+
 fn local_status_label(
     lifecycle: &str,
     binary_available: bool,
@@ -538,17 +572,11 @@ async fn assemble_runtime_configuration(
                 },
                 local_runtime_display_name(runtime_status.backend.as_deref()),
                 runtime_status.runtime_version.clone(),
-                last_health.as_ref().map(|h| {
-                    if h.endpoint_reachable {
-                        format!("Reachable ({} ms)", h.latency_ms)
-                    } else if h.model_loaded {
-                        "Unreachable".into()
-                    } else if matches!(lifecycle, "running" | "busy" | "starting") {
-                        "Offline — load a model".into()
-                    } else {
-                        "Not checked".into()
-                    }
-                }),
+                Some(local_inference_connectivity_label(
+                    lifecycle,
+                    runtime_status.model_loaded,
+                    last_health.as_ref(),
+                )),
                 last_health.as_ref().and_then(|h| {
                     if h.message.is_empty() {
                         None
@@ -569,6 +597,7 @@ async fn assemble_runtime_configuration(
         connectivity,
         last_health_check,
         model_load_in_progress: false,
+        model_test_in_progress: false,
         settings: inference.clone(),
         runtime_status,
     }
@@ -658,6 +687,7 @@ async fn assemble_runtime_configuration_busy_fallback(
         connectivity,
         last_health_check,
         model_load_in_progress: false,
+        model_test_in_progress: false,
         settings: inference.clone(),
         runtime_status,
     }
@@ -671,10 +701,21 @@ pub(crate) async fn set_runtime_model_loading(state: &AppState, model_id: Option
     *state.runtime_model_loading_id().lock().await = model_id;
 }
 
+async fn runtime_model_testing_id(state: &AppState) -> Option<String> {
+    state.runtime_model_testing_id().lock().await.clone()
+}
+
+pub(crate) async fn set_runtime_model_testing(state: &AppState, model_id: Option<String>) {
+    *state.runtime_model_testing_id().lock().await = model_id;
+}
+
 fn apply_model_loading_overlay(dto: &mut RuntimeConfigurationDto, loading_model_id: Option<&str>) {
     let Some(model_id) = loading_model_id else {
         return;
     };
+    let runtime_name = dto.runtime_name.clone();
+    let runtime_version = dto.runtime_version.clone();
+    let recommended_runtime = dto.runtime_status.recommended_runtime.clone();
     dto.model_load_in_progress = true;
     dto.status_label = "Loading model".into();
     dto.runtime_status.lifecycle_state = "starting".into();
@@ -682,6 +723,21 @@ fn apply_model_loading_overlay(dto: &mut RuntimeConfigurationDto, loading_model_
     dto.runtime_status.loaded_model_path = None;
     dto.runtime_status.message =
         "Loading GGUF model via embedded libllama — large models may take several minutes on CPU".into();
+    dto.runtime_name = runtime_name;
+    dto.runtime_version = runtime_version;
+    dto.runtime_status.recommended_runtime = recommended_runtime;
+    if dto.mode == "not_configured" {
+        dto.mode = "local".into();
+    }
+    dto.settings.selected_model_id = Some(model_id.to_string());
+}
+
+fn apply_model_testing_overlay(dto: &mut RuntimeConfigurationDto, testing_model_id: Option<&str>) {
+    let Some(model_id) = testing_model_id else {
+        return;
+    };
+    dto.model_test_in_progress = true;
+    dto.status_label = "Verifying model".into();
     if dto.mode == "not_configured" {
         dto.mode = "local".into();
     }
@@ -709,6 +765,40 @@ pub(crate) async fn prime_runtime_configuration_cache(
     store_runtime_configuration_cache(state, &dto).await;
 }
 
+/// Wait until an in-flight model load for `model_id` completes.
+pub(crate) async fn wait_for_runtime_model_load(
+    state: &AppState,
+    model_id: &str,
+    file_path: &std::path::Path,
+) -> Result<(), aisec_runtime::RuntimeError> {
+    const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+    let started = std::time::Instant::now();
+
+    loop {
+        let loading = state.runtime_model_loading_id().lock().await.clone();
+        if loading.as_deref() != Some(model_id) {
+            let manager = state.runtime_manager().lock().await;
+            if manager.is_same_model_loaded_at(file_path).await {
+                return Ok(());
+            }
+            if loading.is_some() {
+                return Err(aisec_runtime::RuntimeError::NativeRuntimeError(
+                    "another model is loading into the runtime".into(),
+                ));
+            }
+            return Err(aisec_runtime::RuntimeError::NativeRuntimeError(
+                "model load did not complete".into(),
+            ));
+        }
+        if started.elapsed() >= MAX_WAIT {
+            return Err(aisec_runtime::RuntimeError::NativeRuntimeError(
+                "timed out waiting for model load".into(),
+            ));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+}
+
 /// Shared model-load path for manual IPC and startup auto-resume.
 pub(crate) async fn load_model_with_loading_cache(
     state: &AppState,
@@ -716,14 +806,21 @@ pub(crate) async fn load_model_with_loading_cache(
     file_path: &std::path::Path,
     model_id: &str,
 ) -> Result<(), aisec_runtime::RuntimeError> {
+    if manager.is_same_model_loaded_at(file_path).await {
+        prime_runtime_configuration_cache(state, manager).await;
+        return Ok(());
+    }
+
     set_runtime_model_loading(state, Some(model_id.to_string())).await;
 
     let result = async {
-        if !manager.is_model_loaded_at(file_path).await {
+        if !manager.is_same_model_loaded_at(file_path).await {
             manager.on_model_load_started();
             prime_runtime_configuration_cache(state, manager).await;
+            manager.load_model_at_path(file_path).await
+        } else {
+            Ok(())
         }
-        manager.load_model_at_path(file_path).await
     }
     .await;
 
@@ -744,6 +841,7 @@ async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<Runt
     let (config, _) = reconcile_inference_config(state, &models).await?;
     let inference = config_to_dto(&config, &models);
     let loading_model_id = runtime_model_loading_id(state).await;
+    let testing_model_id = runtime_model_testing_id(state).await;
 
     let base = if let Ok(runtime_manager) = state.runtime_manager().try_lock() {
         let dto =
@@ -758,6 +856,7 @@ async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<Runt
 
     let mut response = base;
     apply_model_loading_overlay(&mut response, loading_model_id.as_deref());
+    apply_model_testing_overlay(&mut response, testing_model_id.as_deref());
     Ok(response)
 }
 

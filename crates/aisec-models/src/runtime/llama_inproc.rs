@@ -122,8 +122,15 @@ impl InferenceRuntime for LlamaInProcessRuntime {
             )));
         }
 
-        // Tear down any previously loaded model first (ensures a single
-        // llama backend is active at a time).
+        if self.state() == RuntimeState::Ready {
+            if let Some(current) = self.model_path.lock().unwrap().as_ref() {
+                if paths_equal(current, model_path) {
+                    return Ok(());
+                }
+            }
+        }
+
+        // Tear down any previously loaded model before loading a different GGUF.
         self.unload().await.ok();
         self.set_state(RuntimeState::Loading);
 
@@ -254,6 +261,14 @@ fn worker_loop(
         }
     }
     debug!("llama worker shut down");
+}
+
+fn paths_equal(a: &Path, b: &Path) -> bool {
+    std::fs::canonicalize(a)
+        .ok()
+        .zip(std::fs::canonicalize(b).ok())
+        .map(|(a, b)| a == b)
+        .unwrap_or_else(|| a == b)
 }
 
 /// Run a single real inference pass (prefill + token-by-token generation).
