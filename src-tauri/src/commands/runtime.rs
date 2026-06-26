@@ -264,7 +264,7 @@ pub async fn runtime_load_model(
                 "Start Runtime before loading a model",
             ));
         }
-        if !manager.is_model_loaded_at(&file_path).await {
+        if !manager.is_same_model_loaded_at(&file_path).await {
             load_model_with_loading_cache(
                 state.inner(),
                 &mut manager,

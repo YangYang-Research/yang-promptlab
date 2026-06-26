@@ -273,15 +273,22 @@ impl RuntimeManager {
         result
     }
 
-    pub async fn is_model_loaded_at(&mut self, model_path: &std::path::Path) -> bool {
+    pub async fn is_same_model_loaded_at(&self, model_path: &std::path::Path) -> bool {
         let adapter = self.supervisor.local_runtime();
+        if !adapter.is_loaded() {
+            return false;
+        }
         let Some(loaded) = adapter.loaded_model_path().await else {
             return false;
         };
-        if !crate::paths::same_paths(&loaded, model_path) {
+        crate::paths::same_paths(&loaded, model_path)
+    }
+
+    pub async fn is_model_loaded_at(&mut self, model_path: &std::path::Path) -> bool {
+        if !self.is_same_model_loaded_at(model_path).await {
             return false;
         }
-        adapter.is_loaded_async().await && self.supervisor.check_health().await.unwrap_or(false)
+        self.supervisor.check_health().await.unwrap_or(false)
     }
 
     pub async fn unload_loaded_model(&mut self) -> RuntimeResult<()> {

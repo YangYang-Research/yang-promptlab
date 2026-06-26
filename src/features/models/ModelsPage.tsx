@@ -84,7 +84,7 @@ export function ModelsPage() {
   const [downloadProgress, setDownloadProgress] =
     useState<ModelDownloadProgressDto | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [busyModelId, setBusyModelId] = useState<string | null>(null);
+  const [busyModelIds, setBusyModelIds] = useState<Set<string>>(() => new Set());
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [addModelOpen, setAddModelOpen] = useState(false);
   const [addModelInitialTab, setAddModelInitialTab] = useState<AddModelTab>("public");
@@ -99,6 +99,16 @@ export function ModelsPage() {
   const verifyInFlightRef = useRef(false);
   const deepLinkEditRef = useRef<string | null>(null);
 
+  const setModelBusy = useCallback((modelId: string, busy: boolean) => {
+    setBusyModelIds((prev) => {
+      const next = new Set(prev);
+      if (busy) next.add(modelId);
+      else next.delete(modelId);
+      return next;
+    });
+  }, []);
+
+  const isModelBusy = useCallback((modelId: string) => busyModelIds.has(modelId), [busyModelIds]);
   const installedNames = useMemo(() => new Set(installed.map((m) => m.name)), [installed]);
   const { modelLoading: runtimeModelLoading } = useRuntimeModelLoading(backendConnected);
 
@@ -121,7 +131,7 @@ export function ModelsPage() {
 
     void (async () => {
       setError(null);
-      setBusyModelId(state.editModelId!);
+      setModelBusy(state.editModelId!, true);
       try {
         const form = await loadThirdPartyModelForm(state.editModelId!);
         setEditThirdPartyForm(form);
@@ -131,7 +141,7 @@ export function ModelsPage() {
       } catch (err) {
         notify(toAppError(err).message, "error");
       } finally {
-        setBusyModelId(null);
+        setModelBusy(state.editModelId!, false);
       }
     })();
   }, [location.state, backendConnected, notify]);
@@ -390,7 +400,7 @@ export function ModelsPage() {
       return;
     }
     setError(null);
-    setBusyModelId(model.id);
+    setModelBusy(model.id, true);
     try {
       const form = await loadThirdPartyModelForm(model.id);
       setEditThirdPartyForm(form);
@@ -400,7 +410,7 @@ export function ModelsPage() {
     } catch (err) {
       notify(toAppError(err).message, "error");
     } finally {
-      setBusyModelId(null);
+      setModelBusy(model.id, false);
     }
   }
 
@@ -410,27 +420,27 @@ export function ModelsPage() {
       if (model && !isThirdPartyModel(model)) return;
     }
     setError(null);
-    setBusyModelId(modelId);
+    setModelBusy(modelId, true);
     try {
       await removeModel(modelId);
       await refreshModels();
     } catch (err) {
       setError(toAppError(err).message);
     } finally {
-      setBusyModelId(null);
+      setModelBusy(modelId, false);
     }
   }
 
   async function runLocalModelTest(model: ModelEntryDto) {
     setError(null);
-    setBusyModelId(model.id);
+    setModelBusy(model.id, true);
     try {
       const result = await testModelInference(model.id);
       notify(`${result.mode}: ${result.sample}`, result.ok ? "success" : "error");
     } catch (err) {
       notify(toAppError(err).message, "error");
     } finally {
-      setBusyModelId(null);
+      setModelBusy(model.id, false);
     }
   }
 
@@ -438,7 +448,7 @@ export function ModelsPage() {
     setError(null);
     try {
       if (isThirdPartyModel(model)) {
-        setBusyModelId(model.id);
+        setModelBusy(model.id, true);
         try {
           const result = await testModelConnection(model.id);
           const latency = result.latencyMs > 0 ? ` (${result.latencyMs} ms)` : "";
@@ -450,7 +460,7 @@ export function ModelsPage() {
           }
           await refreshModels();
         } finally {
-          setBusyModelId(null);
+          setModelBusy(model.id, false);
         }
       } else {
         if (runtimeModelLoading) return;
@@ -479,7 +489,6 @@ export function ModelsPage() {
       }
     } catch (err) {
       notify(toAppError(err).message, "error");
-      setBusyModelId(null);
     }
   }
 
@@ -585,7 +594,7 @@ export function ModelsPage() {
 
       <ModelRegistrySection
         models={installed}
-        busyModelId={busyModelId}
+        isModelBusy={isModelBusy}
         runtimeModelLoading={runtimeModelLoading}
         onTest={(model) => void handleTest(model)}
         onEdit={(model) => void handleEdit(model)}
@@ -603,7 +612,7 @@ export function ModelsPage() {
             </Button>
             <Button
               variant="primary"
-              disabled={busyModelId !== null}
+              disabled={runtimeModelLoading}
               onClick={() => {
                 const target = localTestConfirm?.target;
                 setLocalTestConfirm(null);

@@ -77,7 +77,7 @@ function ModelRegistryBadges({ model }: { model: ModelEntryDto }) {
 
 type ModelRegistrySectionProps = {
   models: ModelEntryDto[];
-  busyModelId: string | null;
+  isModelBusy: (modelId: string) => boolean;
   runtimeModelLoading: boolean;
   onTest: (model: ModelEntryDto) => void;
   onEdit: (model: ModelEntryDto) => void;
@@ -86,7 +86,7 @@ type ModelRegistrySectionProps = {
 
 export function ModelRegistrySection({
   models,
-  busyModelId,
+  isModelBusy,
   runtimeModelLoading,
   onTest,
   onEdit,
@@ -96,12 +96,15 @@ export function ModelRegistrySection({
   const [pageSize, setPageSize] = usePageSizePreference("models-registry");
   const { page, setPage, pagination } = usePaginatedList(models, pageSize);
 
-  const actionsDisabled = busyModelId !== null;
-  const localActionsDisabled = actionsDisabled || runtimeModelLoading;
+  const actionsDisabled = (modelId: string) => isModelBusy(modelId);
+  const localActionsDisabled = (modelId: string) =>
+    isModelBusy(modelId) || runtimeModelLoading;
 
   function renderTableActions(model: ModelEntryDto) {
     const thirdParty = isThirdPartyModel(model);
-    const testRemoveDisabled = thirdParty ? actionsDisabled : localActionsDisabled;
+    const testRemoveDisabled = thirdParty
+      ? actionsDisabled(model.id)
+      : localActionsDisabled(model.id);
 
     return (
       <ActionsDropdown
@@ -110,7 +113,7 @@ export function ModelRegistrySection({
             id: "edit",
             label: "Edit",
             onClick: () => onEdit(model),
-            disabled: !thirdParty || actionsDisabled,
+            disabled: !thirdParty || actionsDisabled(model.id),
           },
           {
             id: "verify",
@@ -137,7 +140,7 @@ export function ModelRegistrySection({
           <Button
             variant="ghost"
             size="sm"
-            disabled={actionsDisabled}
+            disabled={actionsDisabled(model.id)}
             onClick={() => onEdit(model)}
           >
             Edit
@@ -145,7 +148,7 @@ export function ModelRegistrySection({
           <Button
             variant="ghost"
             size="sm"
-            disabled={actionsDisabled}
+            disabled={actionsDisabled(model.id)}
             onClick={() => onTest(model)}
           >
             Test
@@ -153,7 +156,7 @@ export function ModelRegistrySection({
           <Button
             variant="ghost"
             size="sm"
-            disabled={actionsDisabled}
+            disabled={actionsDisabled(model.id)}
             onClick={() => onRemove(model.id)}
           >
             Remove
@@ -166,7 +169,7 @@ export function ModelRegistrySection({
         <Button
           variant="ghost"
           size="sm"
-          disabled={localActionsDisabled}
+          disabled={localActionsDisabled(model.id)}
           onClick={() => onTest(model)}
         >
           Test
@@ -174,7 +177,7 @@ export function ModelRegistrySection({
         <Button
           variant="ghost"
           size="sm"
-          disabled={localActionsDisabled}
+          disabled={localActionsDisabled(model.id)}
           onClick={() => onRemove(model.id)}
         >
           Remove

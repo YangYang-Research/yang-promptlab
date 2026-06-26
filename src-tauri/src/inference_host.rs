@@ -285,6 +285,29 @@ fn configure_scratch_for_entry(
     Ok(())
 }
 
+pub async fn test_remote_connectivity_only(
+    entry: &ModelEntry,
+    remote: RemoteAdapterSettings,
+) -> CommandResult<ConnectivityTestResult> {
+    use aisec_inference::{ProviderAdapter, RemoteProviderAdapter};
+
+    let adapter = RemoteProviderAdapter::new(remote.clone());
+    let started = std::time::Instant::now();
+    let ok = ProviderAdapter::health(&adapter).await.unwrap_or(false);
+    Ok(ConnectivityTestResult {
+        ok,
+        provider: remote.provider.as_str().into(),
+        model: entry.display_model_name(),
+        latency_ms: started.elapsed().as_millis() as u64,
+        message: if ok {
+            "Connection Successful".into()
+        } else {
+            "Connection Failed".into()
+        },
+        sample_response: None,
+    })
+}
+
 pub async fn test_connectivity_for_entry(
     data_dir: &Path,
     entry: &ModelEntry,

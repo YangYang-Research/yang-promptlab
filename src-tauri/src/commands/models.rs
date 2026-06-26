@@ -14,13 +14,12 @@ use time::OffsetDateTime;
 use tauri::async_runtime::Mutex as AsyncMutex;
 use tauri::State;
 
-use crate::inference_host::{test_connectivity_with_remote};
-use aisec_inference::InferenceRuntimeManager;
+use crate::inference_host::{test_inference_for_entry, test_remote_connectivity_only};
 use crate::inference_settings::{
     apply_third_party_health_check, format_health_check_timestamp,
 };
 use aisec_inference::config::InferenceMode;
-use crate::inference_host::test_inference_for_entry;
+use aisec_inference::InferenceRuntimeManager;
 use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
 use crate::third_party_credentials::{
@@ -291,15 +290,7 @@ async fn run_third_party_connectivity_test(
         Some(credentials.aws_session_token).filter(|s| !s.trim().is_empty()),
     )
     .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-    let mut runtime_mgr = state.runtime_manager().lock().await;
-    let result = test_connectivity_with_remote(
-        state.data_dir(),
-        &entry,
-        Some(remote),
-        state.model_provider().clone(),
-        &mut runtime_mgr,
-    )
-    .await?;
+    let result = test_remote_connectivity_only(&entry, remote).await?;
 
     Ok(ThirdPartyModelConnectivityResultDto {
         ok: result.ok,
@@ -1100,12 +1091,16 @@ pub async fn models_test_inference(
     let file_path = entry.file_path.clone();
     let use_chat = entry.capabilities.chat;
 
-    let mut runtime_mgr = state.runtime_manager().lock().await;
-    if !runtime_mgr.supervisor().runtime_available() {
-        return Err(runtime_unavailable_error());
-    }
+    let need_load = {
+        let runtime_mgr = state.runtime_manager().lock().await;
+        !runtime_mgr.is_same_model_loaded_at(&file_path).await
+    };
 
-    if !runtime_mgr.is_model_loaded_at(&file_path).await {
+    if need_load {
+        let mut runtime_mgr = state.runtime_manager().lock().await;
+        if !runtime_mgr.supervisor().runtime_available() {
+            return Err(runtime_unavailable_error());
+        }
         crate::commands::runtime::load_model_with_loading_cache(
             state.inner(),
             &mut runtime_mgr,
@@ -1115,6 +1110,11 @@ pub async fn models_test_inference(
         .await
         .map_err(|err| map_runtime_test_error(err, runtime_mgr.supervisor()))?;
         runtime_mgr.sync_lifecycle_from_supervisor();
+    }
+
+    let mut runtime_mgr = state.runtime_manager().lock().await;
+    if !runtime_mgr.supervisor().runtime_available() {
+        return Err(runtime_unavailable_error());
     }
 
     let result = test_inference_for_entry(
