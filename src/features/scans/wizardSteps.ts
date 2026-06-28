@@ -1,6 +1,6 @@
 import type { AttackPlanConfig } from "./attackProfiles";
 import type { TargetFormState } from "./targetDescriptor";
-import type { TargetProfileFormState } from "./targetProfile";
+import { validateTargetProfile, type TargetProfileFormState } from "./targetProfile";
 import type { Target } from "@/shared/types";
 
 export type WizardStepId = 1 | 2 | 3 | 4 | 5 | 6;
@@ -119,7 +119,10 @@ export function canProceedFromStep(step: WizardStepId, draft: WizardDraft): bool
     case 1:
       return draft.projectId.trim().length > 0;
     case 2:
-      return draft.target !== null;
+      return (
+        draft.projectId.trim().length > 0 &&
+        validateTargetProfile(draft.targetProfile) === null
+      );
     case 3:
       return draft.profileVerified;
     case 4:

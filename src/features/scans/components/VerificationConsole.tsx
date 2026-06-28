@@ -3,9 +3,10 @@ import type { VerificationConsoleEntryDto } from "../targetProfile";
 
 type VerificationConsoleProps = {
   entry: VerificationConsoleEntryDto | null;
+  pending?: boolean;
 };
 
-export function VerificationConsole({ entry }: VerificationConsoleProps) {
+export function VerificationConsole({ entry, pending = false }: VerificationConsoleProps) {
   if (!entry) {
     return (
       <div className="verification-console verification-console--empty">
@@ -14,28 +15,69 @@ export function VerificationConsole({ entry }: VerificationConsoleProps) {
     );
   }
 
+  const statusLabel =
+    entry.statusCode > 0 ? `${entry.method} ${entry.statusCode}` : entry.method || "REQUEST";
+
   return (
     <div className="verification-console">
       <div className="verification-console__header">
-        <Badge variant={entry.success ? "success" : "danger"}>
-          {entry.success ? "Verified" : "Failed"}
+        <Badge variant={pending ? "warning" : entry.success ? "success" : "danger"}>
+          {pending ? "Sending…" : entry.success ? "Verified" : "Failed"}
         </Badge>
         <span className="text-muted">
-          {entry.method} {entry.statusCode} · {entry.responseTimeMs}ms
+          {statusLabel}
+          {entry.responseTimeMs > 0 ? ` · ${entry.responseTimeMs}ms` : ""}
         </span>
       </div>
-      <p className="verification-console__message">{entry.message}</p>
+
+      {entry.message && <p className="verification-console__message">{entry.message}</p>}
+
+      {entry.requestLog && (
+        <details open>
+          <summary>Full request (curl)</summary>
+          <pre className="verification-console__block verification-console__block--log">
+            {entry.requestLog}
+          </pre>
+        </details>
+      )}
+
+      {entry.authDebug && (
+        <details open>
+          <summary>Auth debug</summary>
+          <pre className="verification-console__block">{entry.authDebug}</pre>
+        </details>
+      )}
+
       <details open>
-        <summary>Outgoing request</summary>
+        <summary>Request breakdown</summary>
+        <p className="verification-console__label">URL</p>
         <pre className="verification-console__block">{entry.url}</pre>
-        <pre className="verification-console__block">{JSON.stringify(entry.headers, null, 2)}</pre>
-        <pre className="verification-console__block">{entry.body}</pre>
+        <p className="verification-console__label">Headers</p>
+        <pre className="verification-console__block">
+          {JSON.stringify(entry.headers, null, 2)}
+        </pre>
+        {entry.body && (
+          <>
+            <p className="verification-console__label">Body</p>
+            <pre className="verification-console__block">{entry.body}</pre>
+          </>
+        )}
       </details>
+
       {entry.responsePreview && (
         <details open>
-          <summary>Response preview</summary>
-          <pre className="verification-console__block">{entry.responsePreview}</pre>
+          <summary>Response (from target)</summary>
+          <pre className="verification-console__block verification-console__block--log">
+            {entry.responsePreview}
+          </pre>
         </details>
+      )}
+
+      {entry.statusCode > 0 && (
+        <p className="text-muted text-sm verification-console__hint">
+          Backend returned HTTP {entry.statusCode}. Compare with the curl block above if results
+          differ.
+        </p>
       )}
     </div>
   );

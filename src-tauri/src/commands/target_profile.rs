@@ -1,6 +1,6 @@
 //! Target Profile IPC — templates, verification, persistence.
 
-use aisec_auth::{resolve_descriptor_for_runtime, SecretStore};
+use aisec_auth::{resolve_descriptor_for_wizard, SecretStore};
 use aisec_core::AisecError;
 use aisec_storage::TargetRepository;
 use aisec_target_profile::{
@@ -28,46 +28,197 @@ fn profile_to_json(profile: &TargetProfile) -> CommandResult<String> {
     })
 }
 
+fn normalize_credential_prefix(prefix: &str) -> String {
+    let scheme = prefix.trim();
+    if scheme.is_empty() {
+        return String::new();
+    }
+    if scheme.eq_ignore_ascii_case("basic")
+        || scheme.eq_ignore_ascii_case("bearer")
+        || scheme.eq_ignore_ascii_case("token")
+    {
+        return format!("{scheme} ");
+    }
+    prefix.to_string()
+}
+
+fn format_auth_header_value(prefix: Option<&str>, secret: &str) -> String {
+    let trimmed = secret.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    match prefix {
+        Some(p) if !p.is_empty() => {
+            let scheme = p.trim();
+            if trimmed.starts_with(p)
+                || (!scheme.is_empty()
+                    && trimmed
+                        .to_ascii_lowercase()
+                        .starts_with(&format!("{} ", scheme.to_ascii_lowercase())))
+            {
+                trimmed.to_string()
+            } else {
+                format!("{}{trimmed}", normalize_credential_prefix(p))
+            }
+        }
+        _ => trimmed.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod auth_header_tests {
+    use super::format_auth_header_value;
+
+    #[test]
+    fn basic_prefix_without_space_inserts_separator() {
+        assert_eq!(
+            format_auth_header_value(Some("Basic"), "eXlwYXQ="),
+            "Basic eXlwYXQ="
+        );
+    }
+
+    #[test]
+    fn basic_prefix_with_space_is_unchanged() {
+        assert_eq!(
+            format_auth_header_value(Some("Basic "), "eXlwYXQ="),
+            "Basic eXlwYXQ="
+        );
+    }
+}
+
+fn insert_auth_header(
+    headers: &mut std::collections::HashMap<String, String>,
+    header_name: &str,
+    prefix: Option<&str>,
+    secret: &str,
+) {
+    let value = format_auth_header_value(prefix, secret);
+    if value.is_empty() {
+        return;
+    }
+    headers.insert(header_name.to_string(), value);
+}
+
+fn auth_headers_from_auth_value(
+    auth: &serde_json::Value,
+) -> std::collections::HashMap<String, String> {
+    let mut headers = std::collections::HashMap::new();
+
+    if let Some(config) = auth.get("config").and_then(|v| v.as_object()) {
+        let kind = auth
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+
+        if kind == "api_key" {
+            if let Some(key) = config.get("key").and_then(|v| v.as_str()) {
+                let header_name = config
+                    .get("header_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Authorization");
+                let prefix = config.get("prefix").and_then(|v| v.as_str());
+                insert_auth_header(&mut headers, header_name, prefix, key);
+            }
+        }
+
+        if kind == "jwt" {
+            if let Some(token) = config.get("token").and_then(|v| v.as_str()) {
+                let header_name = config
+                    .get("header_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Authorization");
+                let prefix = config.get("prefix").and_then(|v| v.as_str()).or(Some("Bearer "));
+                insert_auth_header(&mut headers, header_name, prefix, token);
+            }
+        }
+
+        if kind == "basic" {
+            if let (Some(user), Some(pass)) = (
+                config.get("username").and_then(|v| v.as_str()),
+                config.get("password").and_then(|v| v.as_str()),
+            ) {
+                use base64::Engine;
+                let encoded =
+                    base64::engine::general_purpose::STANDARD.encode(format!("{user}:{pass}"));
+                headers.insert("Authorization".into(), format!("Basic {encoded}"));
+            }
+        }
+    }
+
+    // Legacy top-level auth fields.
+    if let Some(token) = auth
+        .get("token")
+        .or_else(|| auth.get("api_key"))
+        .and_then(|v| v.as_str())
+    {
+        let header_name = auth
+            .get("header_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Authorization");
+        let prefix = auth.get("prefix").and_then(|v| v.as_str());
+        insert_auth_header(&mut headers, header_name, prefix, token);
+    }
+
+    if let Some(map) = auth.get("headers").and_then(|v| v.as_object()) {
+        for (key, val) in map {
+            if let Some(text) = val.as_str() {
+                headers.insert(key.clone(), text.to_string());
+            }
+        }
+    }
+
+    if let (Some(user), Some(pass)) = (
+        auth.get("username").and_then(|v| v.as_str()),
+        auth.get("password").and_then(|v| v.as_str()),
+    ) {
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{user}:{pass}"));
+        headers.insert("Authorization".into(), format!("Basic {encoded}"));
+    }
+
+    headers
+}
+
+fn merge_auth_headers(
+    base: &mut std::collections::HashMap<String, String>,
+    overlay: std::collections::HashMap<String, String>,
+) {
+    for (key, value) in overlay {
+        base.insert(key, value);
+    }
+}
+
 fn auth_headers_from_descriptor(
     descriptor_json: &str,
 ) -> CommandResult<std::collections::HashMap<String, String>> {
     let secrets = SecretStore::new().map_err(CommandError::from)?;
-    let resolved = resolve_descriptor_for_runtime(descriptor_json, &secrets)
+    let resolved = resolve_descriptor_for_wizard(descriptor_json, &secrets)
         .map_err(CommandError::from)?;
     let value: serde_json::Value = serde_json::from_str(&resolved).map_err(|err| {
         CommandError::invalid_input(err.to_string())
     })?;
 
-    let mut headers = std::collections::HashMap::new();
-    if let Some(auth) = value.get("auth") {
-        if let Some(token) = auth
-            .get("token")
-            .or_else(|| auth.get("api_key"))
-            .and_then(|v| v.as_str())
-        {
-            let header_name = auth
-                .get("header_name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Authorization");
-            let prefix = auth.get("prefix").and_then(|v| v.as_str()).unwrap_or("");
-            headers.insert(header_name.to_string(), format!("{prefix}{token}"));
+    let Some(auth) = value.get("auth") else {
+        return Ok(std::collections::HashMap::new());
+    };
+
+    Ok(auth_headers_from_auth_value(auth))
+}
+
+fn resolve_verify_auth_headers(
+    request: &TargetProfileVerifyRequest,
+    descriptor_json: &str,
+) -> CommandResult<std::collections::HashMap<String, String>> {
+    if let Some(headers) = &request.auth_headers {
+        if !headers.is_empty() {
+            return Ok(headers.clone());
         }
-        if let Some(map) = auth.get("headers").and_then(|v| v.as_object()) {
-            for (key, val) in map {
-                if let Some(text) = val.as_str() {
-                    headers.insert(key.clone(), text.to_string());
-                }
-            }
-        }
-        if let (Some(user), Some(pass)) = (
-            auth.get("username").and_then(|v| v.as_str()),
-            auth.get("password").and_then(|v| v.as_str()),
-        ) {
-            use base64::Engine;
-            let encoded =
-                base64::engine::general_purpose::STANDARD.encode(format!("{user}:{pass}"));
-            headers.insert("Authorization".into(), format!("Basic {encoded}"));
-        }
+    }
+
+    let mut headers = auth_headers_from_descriptor(descriptor_json)?;
+    if let Some(auth) = request.auth.as_ref() {
+        merge_auth_headers(&mut headers, auth_headers_from_auth_value(auth));
     }
     Ok(headers)
 }
@@ -108,6 +259,10 @@ pub async fn target_profile_save_op(
 pub struct TargetProfileVerifyRequest {
     pub target_id: String,
     pub profile: serde_json::Value,
+    /// Inline auth from the wizard form — takes precedence over persisted descriptor secrets.
+    pub auth: Option<serde_json::Value>,
+    /// Resolved auth headers from the wizard form (highest priority).
+    pub auth_headers: Option<std::collections::HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -134,10 +289,11 @@ pub async fn target_profile_verify_op(
         .await
         .map_err(CommandError::from)?;
 
-    let auth_headers = auth_headers_from_descriptor(&target.descriptor_json)?;
+    let auth_headers = resolve_verify_auth_headers(&request, &target.descriptor_json)?;
 
-    match verify_target_profile(&profile, auth_headers).await {
-        Ok((verification, console)) => {
+    let attempt = verify_target_profile(&profile, auth_headers).await;
+    match attempt.result {
+        Ok(verification) => {
             profile.verification = verification;
             let json = profile_to_json(&profile)?;
             state
@@ -150,11 +306,39 @@ pub async fn target_profile_verify_op(
             Ok(TargetProfileVerifyResponse {
                 verified: true,
                 profile: TargetProfileDto::from(profile),
-                console: VerificationConsoleEntryDto::from(console),
+                console: VerificationConsoleEntryDto::from(attempt.console),
                 message: "Verification succeeded — target responded with AI content".into(),
             })
         }
-        Err(err) => Err(CommandError::invalid_input(err.to_string())),
+        Err(err) => {
+            let message = err.to_string();
+            profile.verification = aisec_target_profile::VerificationResult {
+                verified: false,
+                verified_at: None,
+                provider: profile.provider.as_str().into(),
+                model: None,
+                capabilities: profile.default_capabilities.clone(),
+                response_time_ms: attempt.console.response_time_ms,
+                status_code: attempt.console.status_code,
+                status: "failed".into(),
+                response_preview: attempt.console.response_preview.clone(),
+                error_message: Some(message.clone()),
+            };
+            let json = profile_to_json(&profile)?;
+            state
+                .repositories()
+                .targets()
+                .update_profile(&request.target_id, &json)
+                .await
+                .map_err(CommandError::from)?;
+
+            Ok(TargetProfileVerifyResponse {
+                verified: false,
+                profile: TargetProfileDto::from(profile),
+                console: VerificationConsoleEntryDto::from(attempt.console),
+                message,
+            })
+        }
     }
 }
 
@@ -225,12 +409,16 @@ pub async fn target_profile_verify(
     state: State<'_, AppState>,
     target_id: String,
     profile: serde_json::Value,
+    auth: Option<serde_json::Value>,
+    auth_headers: Option<std::collections::HashMap<String, String>>,
 ) -> CommandResult<TargetProfileVerifyResponse> {
     target_profile_verify_op(
         state.inner(),
         TargetProfileVerifyRequest {
             target_id,
             profile,
+            auth,
+            auth_headers,
         },
     )
     .await

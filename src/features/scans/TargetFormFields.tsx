@@ -10,6 +10,8 @@ type TargetFormFieldsProps = {
   onChange: (patch: Partial<TargetFormState>) => void;
   error?: string | null;
   autoFocusUrl?: boolean;
+  /** Wizard Step 3 — endpoint comes from AI Target Profile (Step 2). */
+  hideUrl?: boolean;
 };
 
 const AUTH_BUTTON_CLASS: Record<TargetAuthKind, string> = {
@@ -34,27 +36,30 @@ export function TargetFormFields({
   onChange,
   error,
   autoFocusUrl = false,
+  hideUrl = false,
 }: TargetFormFieldsProps) {
   return (
     <div className="project-form wizard-target-form">
-      <label className="field">
-        <span className="field__label">Target URL</span>
-        <input
-          className="input"
-          type="url"
-          placeholder="https://api.example.com/v1/chat"
-          value={form.url}
-          onChange={(e) =>
-            onChange({
-              url: e.target.value,
-              browserSessionReady: false,
-              browserSessionId: null,
-            })
-          }
-          autoComplete="url"
-          autoFocus={autoFocusUrl}
-        />
-      </label>
+      {!hideUrl && (
+        <label className="field">
+          <span className="field__label">Target URL</span>
+          <input
+            className="input"
+            type="url"
+            placeholder="https://api.example.com/v1/chat"
+            value={form.url}
+            onChange={(e) =>
+              onChange({
+                url: e.target.value,
+                browserSessionReady: false,
+                browserSessionId: null,
+              })
+            }
+            autoComplete="url"
+            autoFocus={autoFocusUrl}
+          />
+        </label>
+      )}
 
       <div className="wizard-auth-fieldset" role="radiogroup" aria-label="Authentication">
         <span className="field__label">Authentication</span>
@@ -69,7 +74,7 @@ export function TargetFormFields({
                 aria-checked={isActive}
                 className={[
                   "wizard-auth-btn",
-                  AUTH_BUTTON_CLASS[option.value],
+                  isActive ? AUTH_BUTTON_CLASS[option.value] : "",
                   isActive ? "wizard-auth-btn--selected" : "",
                 ]
                   .filter(Boolean)

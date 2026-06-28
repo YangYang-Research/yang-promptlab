@@ -20,8 +20,20 @@ export const getTargetProfile = (targetId: string) =>
 export const saveTargetProfile = (targetId: string, profile: Record<string, unknown>) =>
   invokeCommand<{ id: string }>("target_profile_save", { targetId, profile });
 
-export const verifyTargetProfile = (targetId: string, profile: Record<string, unknown>) =>
-  invokeCommand<TargetProfileVerifyResponse>("target_profile_verify", { targetId, profile });
+export const verifyTargetProfile = (
+  targetId: string,
+  profile: Record<string, unknown>,
+  options?: {
+    auth?: Record<string, unknown> | null;
+    authHeaders?: Record<string, string> | null;
+  },
+) =>
+  invokeCommand<TargetProfileVerifyResponse>("target_profile_verify", {
+    targetId,
+    profile,
+    auth: options?.auth ?? null,
+    authHeaders: options?.authHeaders ?? null,
+  });
 
 export const generateAttackPlanFromProfile = (targetId: string, mode = "deterministic") =>
   invokeCommand<import("./planner").AttackPlanDto>("planner_generate_from_profile", {

@@ -9,6 +9,7 @@ import { saveTargetProfile } from "@/shared/ipc/targetProfile";
 import { useToast } from "@/shared/notifications";
 import type { Project, Target } from "@/shared/types";
 
+import { ImportApiModal } from "./components/ImportApiModal";
 import { AttackPlanStep } from "./steps/AttackPlanStep";
 import { AuthVerificationStep } from "./steps/AuthVerificationStep";
 import { ProjectStep } from "./steps/ProjectStep";
@@ -39,6 +40,7 @@ import {
   fetchTargetFormForWizard,
   loadTargetDtoForWizard,
   loadWizardSession,
+  prepareAuthFormForStep3,
   saveWizardSession,
   type ScanWizardSession,
 } from "./wizardState";
@@ -72,6 +74,7 @@ export function ScanWizardPage() {
   const [scanSubmitError, setScanSubmitError] = useState<string | null>(null);
   const [persistingTarget, setPersistingTarget] = useState(false);
   const [startingScan, setStartingScan] = useState(false);
+  const [importApiOpen, setImportApiOpen] = useState(false);
 
   const store = useMemo(
     () => buildWizardStore(session, targets),
@@ -290,7 +293,10 @@ export function ScanWizardPage() {
   }
 
   async function persistAuthDescriptor(): Promise<boolean> {
-    if (!store.savedTarget) return false;
+    if (!store.savedTarget) {
+      setVerificationError("Complete Step 2 and save the target profile before verifying.");
+      return false;
+    }
     const validationError = validateTargetStep(session.targetForm);
     if (validationError) {
       setVerificationError(validationError);
@@ -336,6 +342,24 @@ export function ScanWizardPage() {
       }
     }
 
+    if (nextStep === 3) {
+      try {
+        const targetForm = await prepareAuthFormForStep3(
+          session.targetProfile,
+          session.targetForm,
+          targetId,
+        );
+        updateSession({
+          currentStep: nextStep,
+          targetForm,
+          savedTargetFingerprint: targetFormFingerprint(targetForm),
+        });
+      } catch {
+        updateSession({ currentStep: nextStep });
+      }
+      return;
+    }
+
     updateSession({ currentStep: nextStep });
   }
 
@@ -351,7 +375,16 @@ export function ScanWizardPage() {
     if (session.currentStep === 2) {
       const target = await persistProfileTarget();
       if (!target) return;
-      updateSession({ currentStep: 3 });
+      const targetForm = await prepareAuthFormForStep3(
+        session.targetProfile,
+        session.targetForm,
+        target.id,
+      );
+      updateSession({
+        currentStep: 3,
+        targetForm,
+        savedTargetFingerprint: targetFormFingerprint(targetForm),
+      });
       return;
     }
 
@@ -548,7 +581,14 @@ export function ScanWizardPage() {
             Step {session.currentStep} of 6 · {stepDef.label}
           </p>
           <h2 className="wizard-panel__title">{stepDef.title}</h2>
-          <p className="wizard-panel__hint text-muted">{stepDef.hint}</p>
+          <div className="wizard-panel__hint-row">
+            <p className="wizard-panel__hint text-muted">{stepDef.hint}</p>
+            {session.currentStep === 2 && activeProjectId ? (
+              <Button variant="ghost" onClick={() => setImportApiOpen(true)}>
+                Import
+              </Button>
+            ) : null}
+          </div>
         </header>
 
         <div className="wizard-panel__body">{renderStepBody()}</div>
@@ -608,6 +648,12 @@ export function ScanWizardPage() {
           </div>
         </footer>
       </Card>
+
+      <ImportApiModal
+        open={importApiOpen}
+        onClose={() => setImportApiOpen(false)}
+        onImport={(patch) => patchTargetProfile(patch)}
+      />
     </div>
   );
 }

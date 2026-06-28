@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use reqwest::StatusCode;
+use reqwest::{Method, StatusCode};
 use time::OffsetDateTime;
 
 use crate::prompt::replace_prompt;
-use crate::types::{TargetProfile, VerificationResult};
+use crate::types::{HttpMethod, TargetProfile, VerificationResult};
 
 const VERIFY_PROMPT: &str = "Hello";
 
@@ -50,6 +50,12 @@ pub struct VerificationConsoleEntry {
     pub message: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct VerificationAttempt {
+    pub console: VerificationConsoleEntry,
+    pub result: Result<VerificationResult, VerificationError>,
+}
+
 fn mask_sensitive(value: &str) -> String {
     if value.len() <= 8 {
         return "***".into();
@@ -65,6 +71,7 @@ fn mask_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
             let masked = if lower.contains("authorization")
                 || lower.contains("api-key")
                 || lower.contains("x-api-key")
+                || lower.contains("token")
                 || lower.contains("cookie")
             {
                 mask_sensitive(v)
@@ -74,6 +81,32 @@ fn mask_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
             (k.clone(), masked)
         })
         .collect()
+}
+
+fn merge_profile_and_auth_headers(
+    profile_headers: &HashMap<String, String>,
+    auth_headers: HashMap<String, String>,
+) -> HashMap<String, String> {
+    if auth_headers.is_empty() {
+        return profile_headers.clone();
+    }
+
+    let auth_names: Vec<String> = auth_headers
+        .keys()
+        .map(|name| name.to_ascii_lowercase())
+        .collect();
+
+    let mut headers: HashMap<String, String> = profile_headers
+        .iter()
+        .filter(|(name, _)| !auth_names.contains(&name.to_ascii_lowercase()))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
+    for (key, value) in auth_headers {
+        headers.insert(key, value);
+    }
+
+    headers
 }
 
 fn build_header_map(headers: &HashMap<String, String>) -> Result<HeaderMap, VerificationError> {
@@ -88,13 +121,106 @@ fn build_header_map(headers: &HashMap<String, String>) -> Result<HeaderMap, Veri
     Ok(map)
 }
 
+fn preflight_console(
+    profile: &TargetProfile,
+    headers: &HashMap<String, String>,
+    body: &str,
+    message: impl Into<String>,
+) -> VerificationConsoleEntry {
+    VerificationConsoleEntry {
+        method: profile.method.as_str().into(),
+        url: profile.full_url(),
+        headers: mask_headers(headers),
+        body: body.to_string(),
+        status_code: 0,
+        response_time_ms: 0,
+        response_preview: None,
+        success: false,
+        message: message.into(),
+    }
+}
+
+fn attempt_failure(
+    profile: &TargetProfile,
+    headers: &HashMap<String, String>,
+    body: &str,
+    error: VerificationError,
+) -> VerificationAttempt {
+    VerificationAttempt {
+        console: preflight_console(profile, headers, body, error.to_string()),
+        result: Err(error),
+    }
+}
+
+fn reqwest_method(method: HttpMethod) -> Method {
+    match method {
+        HttpMethod::Get => Method::GET,
+        HttpMethod::Post => Method::POST,
+        HttpMethod::Put => Method::PUT,
+        HttpMethod::Patch => Method::PATCH,
+        HttpMethod::Delete => Method::DELETE,
+    }
+}
+
 fn extract_model_from_response(body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
     value
         .pointer("/model")
+        .or_else(|| value.pointer("/model_name"))
         .or_else(|| value.pointer("/data/model"))
         .and_then(|v| v.as_str())
         .map(str::to_string)
+}
+
+fn json_has_text_content(value: &serde_json::Value) -> bool {
+    let indicators = [
+        "/choices/0/message/content",
+        "/content/0/text",
+        "/candidates/0/content/parts/0/text",
+        "/answer",
+        "/output",
+        "/result",
+        "/response",
+        "/message/content",
+        "/data/choices/0/message/content",
+        "/data/message/content",
+    ];
+    for pointer in indicators {
+        if value
+            .pointer(pointer)
+            .and_then(|v| v.as_str())
+            .is_some_and(|text| !text.trim().is_empty())
+        {
+            return true;
+        }
+    }
+
+    if let Some(messages) = value.get("messages").and_then(|v| v.as_array()) {
+        for message in messages {
+            if message
+                .get("content")
+                .and_then(|v| v.as_str())
+                .is_some_and(|text| !text.trim().is_empty())
+            {
+                return true;
+            }
+            if message
+                .get("content")
+                .and_then(|v| v.as_array())
+                .is_some_and(|parts| {
+                    parts.iter().any(|part| {
+                        part.get("text")
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|text| !text.trim().is_empty())
+                    })
+                })
+            {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 fn has_ai_response(body: &str, status: StatusCode) -> bool {
@@ -105,26 +231,18 @@ fn has_ai_response(body: &str, status: StatusCode) -> bool {
         return false;
     }
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
-        let indicators = [
-            "/choices/0/message/content",
-            "/content/0/text",
-            "/candidates/0/content/parts/0/text",
-            "/answer",
-            "/output",
-            "/result",
-            "/response",
-            "/message/content",
-        ];
-        for pointer in indicators {
-            if value.pointer(pointer).and_then(|v| v.as_str()).is_some() {
-                return true;
-            }
-        }
-        if value.get("error").is_some() {
+        if value.get("error").is_some() || value.get("detail").is_some() {
             return false;
         }
+        if json_has_text_content(&value) {
+            return true;
+        }
+        // OpenAI-style streaming=false may return id + choices without nested content in edge cases.
+        if value.get("choices").and_then(|v| v.as_array()).is_some_and(|c| !c.is_empty()) {
+            return true;
+        }
     }
-    body.len() > 2
+    body.trim().len() > 2
 }
 
 fn map_status_error(status: StatusCode) -> VerificationError {
@@ -143,13 +261,25 @@ fn map_status_error(status: StatusCode) -> VerificationError {
 pub async fn verify_target_profile(
     profile: &TargetProfile,
     auth_headers: HashMap<String, String>,
-) -> Result<(VerificationResult, VerificationConsoleEntry), VerificationError> {
+) -> VerificationAttempt {
     if !profile.request_template.contains(&profile.prompt_placeholder) {
-        return Err(VerificationError::MissingPromptPlaceholder);
+        return attempt_failure(
+            profile,
+            &profile.headers,
+            "",
+            VerificationError::MissingPromptPlaceholder,
+        );
     }
 
     let url = profile.full_url();
-    url::Url::parse(&url).map_err(|e| VerificationError::InvalidUrl(e.to_string()))?;
+    if url::Url::parse(&url).is_err() {
+        return attempt_failure(
+            profile,
+            &profile.headers,
+            "",
+            VerificationError::InvalidUrl(url.clone()),
+        );
+    }
 
     let body = replace_prompt(
         &profile.request_template,
@@ -157,41 +287,66 @@ pub async fn verify_target_profile(
         VERIFY_PROMPT,
     );
 
-    let mut headers = profile.headers.clone();
-    for (k, v) in auth_headers {
-        headers.insert(k, v);
+    let mut headers = merge_profile_and_auth_headers(&profile.headers, auth_headers);
+
+    if profile.method != HttpMethod::Get {
+        let has_content_type = headers.keys().any(|name| name.eq_ignore_ascii_case("content-type"));
+        let body_trimmed = body.trim();
+        if !has_content_type
+            && (body_trimmed.starts_with('{') || body_trimmed.starts_with('['))
+        {
+            headers.insert("Content-Type".into(), "application/json".into());
+        }
     }
 
-    let client = reqwest::Client::builder()
+    let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
-        .map_err(|e| VerificationError::ConnectionFailed(e.to_string()))?;
+    {
+        Ok(client) => client,
+        Err(e) => {
+            return attempt_failure(
+                profile,
+                &headers,
+                &body,
+                VerificationError::ConnectionFailed(e.to_string()),
+            );
+        }
+    };
 
-    let header_map = build_header_map(&headers)?;
+    let header_map = match build_header_map(&headers) {
+        Ok(map) => map,
+        Err(error) => return attempt_failure(profile, &headers, &body, error),
+    };
+
     let started = Instant::now();
+    let mut request = client
+        .request(reqwest_method(profile.method), &url)
+        .headers(header_map);
 
-    let response = client
-        .post(&url)
-        .headers(header_map)
-        .body(body.clone())
-        .send()
-        .await
-        .map_err(|e| {
-            if e.is_timeout() {
+    if profile.method != HttpMethod::Get {
+        request = request.body(body.clone());
+    }
+
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(e) => {
+            let error = if e.is_timeout() {
                 VerificationError::Timeout
             } else {
                 VerificationError::ConnectionFailed(e.to_string())
-            }
-        })?;
+            };
+            return attempt_failure(profile, &headers, &body, error);
+        }
+    };
 
     let elapsed = started.elapsed().as_millis() as u64;
     let status = response.status();
-    let response_text = response
-        .text()
-        .await
-        .unwrap_or_default();
-    let preview = if response_text.len() > 500 {
-        Some(format!("{}…", &response_text[..500]))
+    let response_text = response.text().await.unwrap_or_default();
+    let preview = if response_text.len() > 8000 {
+        Some(format!("{}…", &response_text[..8000]))
+    } else if response_text.is_empty() {
+        None
     } else {
         Some(response_text.clone())
     };
@@ -218,10 +373,16 @@ pub async fn verify_target_profile(
     };
 
     if !status.is_success() {
-        return Err(map_status_error(status));
+        return VerificationAttempt {
+            console,
+            result: Err(map_status_error(status)),
+        };
     }
     if !has_ai_response(&response_text, status) {
-        return Err(VerificationError::NoAiResponse);
+        return VerificationAttempt {
+            console,
+            result: Err(VerificationError::NoAiResponse),
+        };
     }
 
     let model = extract_model_from_response(&response_text);
@@ -243,5 +404,36 @@ pub async fn verify_target_profile(
         error_message: None,
     };
 
-    Ok((result, console))
+    VerificationAttempt {
+        console,
+        result: Ok(result),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::StatusCode;
+
+    #[test]
+    fn accepts_plain_text_success_response() {
+        assert!(has_ai_response(
+            "Hello! I'm Yang Code Review, ready to help.",
+            StatusCode::OK,
+        ));
+    }
+
+    #[test]
+    fn rejects_fastapi_validation_error_json() {
+        let body = r#"{"detail":[{"type":"missing","loc":["body","model_name"]}]}"#;
+        assert!(!has_ai_response(body, StatusCode::OK));
+    }
+
+    #[test]
+    fn rejects_error_object_on_success_status() {
+        assert!(!has_ai_response(
+            r#"{"error":"Internal server error"}"#,
+            StatusCode::OK,
+        ));
+    }
 }

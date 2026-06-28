@@ -18,4 +18,6 @@ pub use planner::plan_from_target_profile;
 pub use prompt::{contains_prompt_placeholder, replace_prompt, PROMPT_PLACEHOLDER};
 pub use templates::{list_provider_templates, template_for_provider};
 pub use types::*;
-pub use verification::{verify_target_profile, VerificationConsoleEntry, VerificationError};
+pub use verification::{
+    verify_target_profile, VerificationAttempt, VerificationConsoleEntry, VerificationError,
+};

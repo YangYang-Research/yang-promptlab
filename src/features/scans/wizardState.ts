@@ -3,13 +3,16 @@ import type { TargetFormState } from "./targetDescriptor";
 import {
   createInitialTargetForm,
   migrateTargetForm,
+  syncAuthFormFromProfile,
   targetFormFingerprint,
   targetFormFromDescriptor,
   targetFormMatchesDescriptor,
+  targetFormNeedsSecretHydration,
 } from "./targetDescriptor";
 import {
   createInitialTargetProfile,
   profileFromDto,
+  fullProfileUrl,
   type TargetProfileFormState,
   type VerificationConsoleEntryDto,
 } from "./targetProfile";
@@ -216,4 +219,29 @@ export async function loadTargetDtoForWizard(targetId: string) {
   } catch {
     return getTarget(targetId);
   }
+}
+
+export async function prepareAuthFormForStep3(
+  profile: TargetProfileFormState,
+  current: TargetFormState,
+  targetId: string | null,
+): Promise<TargetFormState> {
+  const profileUrl = fullProfileUrl(profile);
+  let form = syncAuthFormFromProfile(profile, { ...current, url: profileUrl });
+
+  if (targetId && targetFormNeedsSecretHydration(form)) {
+    try {
+      const fromWizard = await fetchTargetFormForWizard(targetId, profileUrl);
+      form = syncAuthFormFromProfile(profile, {
+        ...form,
+        ...fromWizard,
+        url: profileUrl,
+        authKind: form.authKind !== "none" ? form.authKind : fromWizard.authKind,
+      });
+    } catch {
+      // Fall back to profile header hydration only.
+    }
+  }
+
+  return syncAuthFormFromProfile(profile, form);
 }

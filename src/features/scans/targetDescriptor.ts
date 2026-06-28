@@ -1,5 +1,7 @@
 import type { Target } from "@/shared/types";
 
+import { fullProfileUrl, type TargetProfileFormState } from "./targetProfile";
+
 /** Authentication methods exposed in the Targets / Scan wizard UI. */
 export type TargetAuthKind =
   | "none"
@@ -258,6 +260,305 @@ export function deriveTargetName(url: string): string {
   } catch {
     return trimmed;
   }
+}
+
+const API_KEY_HEADER_NAMES = new Set([
+  "x-api-key",
+  "api-key",
+  "anthropic-api-key",
+  "x-goog-api-key",
+  "openai-api-key",
+]);
+
+const NON_AUTH_HEADER_NAMES = new Set([
+  "content-type",
+  "accept",
+  "user-agent",
+  "accept-encoding",
+  "accept-language",
+  "cache-control",
+  "connection",
+  "host",
+  "origin",
+  "referer",
+]);
+
+/** Common `x-*` headers that are not credentials. */
+const X_HEADER_NON_AUTH_NAMES = new Set([
+  "x-request-id",
+  "x-correlation-id",
+  "x-trace-id",
+  "x-forwarded-for",
+  "x-forwarded-proto",
+  "x-forwarded-host",
+  "x-real-ip",
+  "x-frame-options",
+  "x-content-type-options",
+]);
+
+function isLikelyAuthHeader(name: string): boolean {
+  const lower = name.toLowerCase();
+  if (NON_AUTH_HEADER_NAMES.has(lower)) return false;
+  if (lower === "authorization" || API_KEY_HEADER_NAMES.has(lower)) return true;
+
+  // *-key (api-key, subscription-key, client-key, …)
+  if (lower.endsWith("-key")) return true;
+
+  // x-* vendor / gateway auth headers (x-yang-api-token, x-auth-token, …)
+  if (lower.startsWith("x-") && !X_HEADER_NON_AUTH_NAMES.has(lower)) return true;
+
+  return (
+    /(?:^x-)?(?:api[-_]?)?(?:key|token|auth|credential|secret)/i.test(lower) ||
+    lower.includes("api-token") ||
+    lower.endsWith("-token")
+  );
+}
+
+/** Join auth prefix + credential, ensuring scheme prefixes keep a trailing space. */
+export function formatCredentialWithPrefix(prefix: string, credential: string): string {
+  const secret = credential.trim();
+  if (!secret) return "";
+
+  const rawPrefix = prefix;
+  const scheme = rawPrefix.trim();
+  if (!scheme) return secret;
+
+  if (
+    secret.startsWith(rawPrefix) ||
+    secret.toLowerCase().startsWith(`${scheme.toLowerCase()} `)
+  ) {
+    return secret;
+  }
+
+  const normalized =
+    /^(basic|bearer|token)$/i.test(scheme) ? `${scheme} ` : rawPrefix;
+  return `${normalized}${secret}`;
+}
+
+function splitCredentialPrefix(value: string): { prefix: string; credential: string } {
+  const bearerMatch = value.match(/^(Bearer\s+)(.+)$/i);
+  if (bearerMatch) {
+    return { prefix: "Bearer ", credential: bearerMatch[2]!.trim() };
+  }
+
+  const basicMatch = value.match(/^(Basic\s+)(.+)$/i);
+  if (basicMatch) {
+    return { prefix: "Basic ", credential: basicMatch[2]!.trim() };
+  }
+
+  const tokenMatch = value.match(/^(Token\s+)(.+)$/i);
+  if (tokenMatch) {
+    return { prefix: "Token ", credential: tokenMatch[2]!.trim() };
+  }
+
+  return { prefix: "", credential: value };
+}
+
+function inferApiKeyFromHeader(headerName: string, value: string): Partial<TargetFormState> {
+  const { prefix, credential } = splitCredentialPrefix(value.trim());
+  return {
+    authKind: "api_key",
+    apiKeyHeaderName: headerName,
+    apiKeyPrefix: prefix,
+    apiKeyValue: credential,
+  };
+}
+
+function inferAuthFromHeaderEntry(headerName: string, value: string): Partial<TargetFormState> | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const isAuthorization = headerName.toLowerCase() === "authorization";
+  const { prefix, credential } = splitCredentialPrefix(trimmed);
+
+  if (prefix.toLowerCase().startsWith("bearer")) {
+    if (isAuthorization) {
+      return {
+        authKind: "jwt",
+        jwtHeaderName: headerName,
+        jwtPrefix: prefix,
+        jwtToken: credential,
+      };
+    }
+    return inferApiKeyFromHeader(headerName, trimmed);
+  }
+
+  if (prefix.toLowerCase().startsWith("basic")) {
+    if (isAuthorization) {
+      try {
+        const decoded = atob(credential);
+        const colon = decoded.indexOf(":");
+        if (colon >= 0) {
+          return {
+            authKind: "basic",
+            basicUsername: decoded.slice(0, colon),
+            basicPassword: decoded.slice(colon + 1),
+          };
+        }
+      } catch {
+        // Fall through to API key with Basic prefix.
+      }
+    }
+    return inferApiKeyFromHeader(headerName, trimmed);
+  }
+
+  if (prefix.toLowerCase().startsWith("token")) {
+    return inferApiKeyFromHeader(headerName, trimmed);
+  }
+
+  return inferApiKeyFromHeader(headerName, trimmed);
+}
+
+function parseProfileHeadersJson(headersJson: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(headersJson) as Record<string, string>;
+    return parsed ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function headerEntries(headers: Record<string, string>): Array<[string, string]> {
+  return Object.entries(headers).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string",
+  );
+}
+
+function findHeader(headers: Record<string, string>, name: string): [string, string] | null {
+  const lower = name.toLowerCase();
+  for (const [key, value] of headerEntries(headers)) {
+    if (key.toLowerCase() === lower) return [key, value];
+  }
+  return null;
+}
+
+function findAuthHeaderForForm(
+  headers: Record<string, string>,
+  current: TargetFormState,
+): [string, string] | null {
+  if (current.authKind === "api_key") {
+    const name = current.apiKeyHeaderName.trim();
+    if (name) {
+      const match = findHeader(headers, name);
+      if (match) return match;
+    }
+  }
+  if (current.authKind === "jwt") {
+    const name = current.jwtHeaderName.trim();
+    if (name) {
+      const match = findHeader(headers, name);
+      if (match) return match;
+    }
+  }
+  if (current.authKind === "basic") {
+    const authorization = findHeader(headers, "authorization");
+    if (authorization && /^basic\s+/i.test(authorization[1])) {
+      return authorization;
+    }
+    return null;
+  }
+
+  const authorization = findHeader(headers, "authorization");
+  if (authorization) return authorization;
+
+  for (const [key, value] of headerEntries(headers)) {
+    if (key.toLowerCase() === "authorization") continue;
+    if (API_KEY_HEADER_NAMES.has(key.toLowerCase()) || isLikelyAuthHeader(key)) {
+      return [key, value];
+    }
+  }
+
+  return null;
+}
+
+function mergeInferredAuthFields(
+  current: TargetFormState,
+  inferred: Partial<TargetFormState>,
+): Partial<TargetFormState> {
+  switch (current.authKind) {
+    case "api_key":
+      return {
+        authKind: "api_key",
+        apiKeyHeaderName: current.apiKeyHeaderName.trim() || inferred.apiKeyHeaderName || "",
+        apiKeyPrefix: current.apiKeyPrefix || inferred.apiKeyPrefix || "",
+        apiKeyValue: current.apiKeyValue.trim() || inferred.apiKeyValue || "",
+        apiKeyVaultMissing: false,
+      };
+    case "jwt":
+      return {
+        authKind: "jwt",
+        jwtHeaderName: current.jwtHeaderName.trim() || inferred.jwtHeaderName || "Authorization",
+        jwtPrefix: current.jwtPrefix || inferred.jwtPrefix || "Bearer ",
+        jwtToken: current.jwtToken.trim() || inferred.jwtToken || "",
+        jwtVaultMissing: false,
+      };
+    case "basic":
+      return {
+        authKind: "basic",
+        basicUsername: current.basicUsername.trim() || inferred.basicUsername || "",
+        basicPassword: current.basicPassword || inferred.basicPassword || "",
+        basicPasswordVaultMissing: false,
+      };
+    default:
+      return inferred;
+  }
+}
+
+/** Infer wizard auth fields from Step 2 profile headers. */
+export function inferAuthFromProfileHeaders(
+  profile: TargetProfileFormState,
+  current: TargetFormState,
+): Partial<TargetFormState> {
+  const url = fullProfileUrl(profile);
+  const patch: Partial<TargetFormState> = { url };
+
+  const headers = parseProfileHeadersJson(profile.headersJson);
+
+  if (current.authKind !== "none") {
+    const needsSecretHydration = targetFormNeedsSecretHydration(current);
+    const needsApiKeyPrefix =
+      current.authKind === "api_key" && !current.apiKeyPrefix.trim() && !current.apiKeyValue.trim();
+
+    if (needsSecretHydration || needsApiKeyPrefix) {
+      const matched = findAuthHeaderForForm(headers, current);
+      if (matched) {
+        const inferred = inferAuthFromHeaderEntry(matched[0], matched[1]);
+        if (inferred && inferred.authKind === current.authKind) {
+          return { ...patch, ...mergeInferredAuthFields(current, inferred) };
+        }
+      }
+    }
+
+    return patch;
+  }
+
+  const authorization = findHeader(headers, "authorization");
+
+  if (authorization) {
+    const inferred = inferAuthFromHeaderEntry(authorization[0], authorization[1]);
+    if (inferred) {
+      return { ...patch, ...inferred };
+    }
+  }
+
+  for (const [key, value] of headerEntries(headers)) {
+    if (key.toLowerCase() === "authorization") continue;
+    if (API_KEY_HEADER_NAMES.has(key.toLowerCase()) || isLikelyAuthHeader(key)) {
+      const inferred = inferAuthFromHeaderEntry(key, value);
+      if (inferred) {
+        return { ...patch, ...inferred };
+      }
+    }
+  }
+
+  return patch;
+}
+
+export function syncAuthFormFromProfile(
+  profile: TargetProfileFormState,
+  current: TargetFormState,
+): TargetFormState {
+  return { ...current, ...inferAuthFromProfileHeaders(profile, current) };
 }
 
 function validateUrl(url: string): string | null {

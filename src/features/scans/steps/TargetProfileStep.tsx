@@ -7,6 +7,7 @@ import {
   PROMPT_PLACEHOLDER,
   PROVIDER_OPTIONS,
   applyApiEndpointToProfile,
+  createEmptyVerification,
   formatApiEndpoint,
   profileFromDto,
   type TargetProfileFormState,
@@ -54,39 +55,20 @@ export function TargetProfileStep({ profile, onChange, error }: TargetProfileSte
     void listTargetProfileTemplates().then((templates) => {
       const template = templates.find((t) => t.provider === provider);
       if (template) {
-        const next = profileFromDto(template);
-        const keepEndpoint = apiEndpoint.trim().length > 0;
-        onChange(
-          keepEndpoint
-            ? { ...next, baseUrl: profile.baseUrl, path: profile.path, provider }
-            : next,
-        );
+        onChange({
+          ...profileFromDto(template),
+          verification: createEmptyVerification(),
+        });
       } else {
-        onChange({ provider });
+        onChange({ provider, verification: createEmptyVerification() });
       }
     });
   }
 
   return (
     <div className="project-form wizard-target-form">
-      <label className="field">
-        <span className="field__label">AI API Endpoint</span>
-        <input
-          className="input wizard-target-form__mono"
-          type="url"
-          value={apiEndpoint}
-          onChange={(e) => handleEndpointChange(e.target.value)}
-          placeholder="https://api.openai.com/v1/chat/completions"
-          autoComplete="url"
-          autoFocus
-        />
-        <span className="text-muted text-sm">
-          Full URL including path and query string if needed.
-        </span>
-      </label>
-
       <div className="wizard-target-form__row">
-        <label className="field wizard-target-form__field-grow">
+        <label className="field wizard-target-form__type">
           <span className="field__label">Type</span>
           <Select
             value={profile.provider}
@@ -111,7 +93,23 @@ export function TargetProfileStep({ profile, onChange, error }: TargetProfileSte
             <option value="GET">GET</option>
           </Select>
         </label>
+
+        <label className="field wizard-target-form__endpoint">
+          <span className="field__label">AI API Endpoint</span>
+          <input
+            className="input wizard-target-form__mono"
+            type="url"
+            value={apiEndpoint}
+            onChange={(e) => handleEndpointChange(e.target.value)}
+            placeholder="https://api.openai.com/v1/chat/completions"
+            autoComplete="url"
+            autoFocus
+          />
+        </label>
       </div>
+      <span className="text-muted text-sm wizard-target-form__hint">
+        Full URL including path and query string if needed.
+      </span>
 
       <label className="field">
         <span className="field__label">Headers (JSON)</span>
@@ -143,31 +141,6 @@ export function TargetProfileStep({ profile, onChange, error }: TargetProfileSte
           never modified.
         </span>
       </div>
-
-      <details className="wizard-target-form__advanced">
-        <summary className="text-muted text-sm">Field mapping (advanced)</summary>
-        <div className="wizard-target-form__row wizard-target-form__row--wrap">
-          {(
-            [
-              ["modelField", "Model field"],
-              ["streamingField", "Streaming field"],
-              ["conversationField", "Conversation field"],
-              ["toolField", "Tool field"],
-              ["attachmentField", "Attachment field"],
-            ] as const
-          ).map(([key, label]) => (
-            <label className="field wizard-target-form__field-grow" key={key}>
-              <span className="field__label">{label}</span>
-              <input
-                className="input"
-                type="text"
-                value={profile[key]}
-                onChange={(e) => onChange({ [key]: e.target.value })}
-              />
-            </label>
-          ))}
-        </div>
-      </details>
 
       {error && <p className="text-danger">{error}</p>}
     </div>

@@ -128,14 +128,42 @@ fn apply_basic_auth(mut target: AttackTarget, auth: &DescriptorAuth) -> AttackTa
     target.with_header("Authorization", format!("Basic {encoded}"))
 }
 
+fn format_credential_with_prefix(prefix: Option<&str>, credential: &str) -> String {
+    let trimmed = credential.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let Some(raw_prefix) = prefix.filter(|p| !p.is_empty()) else {
+        return trimmed.to_string();
+    };
+
+    let scheme = raw_prefix.trim();
+    if trimmed.starts_with(raw_prefix)
+        || (!scheme.is_empty()
+            && trimmed
+                .to_ascii_lowercase()
+                .starts_with(&format!("{} ", scheme.to_ascii_lowercase())))
+    {
+        return trimmed.to_string();
+    }
+
+    let normalized = if scheme.eq_ignore_ascii_case("basic")
+        || scheme.eq_ignore_ascii_case("bearer")
+        || scheme.eq_ignore_ascii_case("token")
+    {
+        format!("{scheme} ")
+    } else {
+        raw_prefix.to_string()
+    };
+    format!("{normalized}{trimmed}")
+}
+
 fn apply_api_key_auth(mut target: AttackTarget, auth: &DescriptorAuth) -> AttackTarget {
     if let Some(config) = &auth.config {
         if let Ok(parsed) = serde_json::from_value::<ApiKeyConfig>(config.clone()) {
             if !parsed.key.trim().is_empty() {
-                let value = match parsed.prefix.as_deref() {
-                    Some(prefix) if !prefix.is_empty() => format!("{prefix}{}", parsed.key.trim()),
-                    _ => parsed.key.trim().to_string(),
-                };
+                let value = format_credential_with_prefix(parsed.prefix.as_deref(), &parsed.key);
                 return target.with_header(parsed.header_name.trim(), value);
             }
         }
@@ -172,10 +200,7 @@ fn apply_jwt_auth(mut target: AttackTarget, auth: &DescriptorAuth) -> AttackTarg
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .unwrap_or("Authorization");
-    let value = match parsed.prefix.as_deref() {
-        Some(prefix) if !prefix.is_empty() => format!("{prefix}{}", parsed.token.trim()),
-        _ => parsed.token.trim().to_string(),
-    };
+    let value = format_credential_with_prefix(parsed.prefix.as_deref(), &parsed.token);
     target.with_header(header, value)
 }
 

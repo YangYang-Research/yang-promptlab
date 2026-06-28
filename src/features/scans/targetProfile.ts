@@ -84,6 +84,10 @@ export type VerificationConsoleEntryDto = {
   responsePreview: string | null;
   success: boolean;
   message: string;
+  /** Full curl command built for debugging (may include secrets). */
+  requestLog?: string | null;
+  /** Auth field summary for debugging. */
+  authDebug?: string | null;
 };
 
 export const PROVIDER_OPTIONS: Array<{ id: TargetProviderId; label: string }> = [
