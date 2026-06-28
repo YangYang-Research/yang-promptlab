@@ -13,6 +13,7 @@ import {
   SeverityBadge,
 } from "@/shared/components";
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
+import { buildScanWizardUrl } from "@/features/scans/wizardState";
 import { buildTargetScanContext } from "@/shared/targetScanContext";
 import { useToast } from "@/shared/notifications";
 import type { Severity, Target } from "@/shared/types";
@@ -126,8 +127,24 @@ export function ProjectDetailsPage() {
         width: "120px",
         render: (target: Target) => buildTargetScanContext(target.id, projectScans).scanStatusLabel,
       },
+      {
+        key: "actions",
+        header: "",
+        width: "90px",
+        render: (target: Target) => (
+          <span onClick={(event) => event.stopPropagation()}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => navigate(buildScanWizardUrl(projectId, target.id))}
+            >
+              Scan
+            </Button>
+          </span>
+        ),
+      },
     ],
-    [projectScans],
+    [projectScans, projectId, navigate],
   );
 
   async function handleDelete() {

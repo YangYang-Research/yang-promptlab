@@ -46,6 +46,7 @@ mod integration_tests {
                 name: "Chatbot UI".into(),
                 target_type: "chatbot".into(),
                 descriptor_json: Some(serde_json::json!({"url": "https://app.example.com"})),
+                profile_json: None,
             })
             .await
             .expect("target");

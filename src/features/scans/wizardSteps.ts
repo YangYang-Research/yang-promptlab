@@ -1,7 +1,6 @@
 import type { AttackPlanConfig } from "./attackProfiles";
-import type { DiscoverySelection } from "./steps/DiscoveryStep";
 import type { TargetFormState } from "./targetDescriptor";
-import { isTargetFormValid } from "./wizardState";
+import type { TargetProfileFormState } from "./targetProfile";
 import type { Target } from "@/shared/types";
 
 export type WizardStepId = 1 | 2 | 3 | 4 | 5 | 6;
@@ -22,25 +21,25 @@ export const WIZARD_STEPS: WizardStepDefinition[] = [
   },
   {
     id: 2,
-    label: "Target",
-    title: "Target & authentication",
-    hint: "Enter the scan target URL and optional credentials",
+    label: "AI Target Profile",
+    title: "AI Target Profile",
+    hint: "Select an AI platform and configure the request template",
   },
   {
     id: 3,
-    label: "Discovery",
-    title: "Discovery",
-    hint: "Run discovery, fingerprint AI platforms, and select endpoints for attack planning",
+    label: "Authentication",
+    title: "Authentication & verification",
+    hint: "Configure credentials and verify the target responds to a real AI request",
   },
   {
     id: 4,
     label: "Attack Planning",
     title: "Attack planning",
-    hint: "Review fingerprint-based attack suggestions and choose a profile",
+    hint: "Review capability-based attack suggestions and choose a profile",
   },
   {
     id: 5,
-    label: "Scan Submission",
+    label: "Scan",
     title: "Scan submission",
     hint: "Review configuration and start the background scan job",
   },
@@ -48,16 +47,16 @@ export const WIZARD_STEPS: WizardStepDefinition[] = [
     id: 6,
     label: "Results",
     title: "Results",
-    hint: "Review findings and export reports from SQLite",
+    hint: "Review findings and export reports",
   },
 ];
 
 export type WizardDraft = {
   projectId: string;
-  targetForm: TargetFormState;
   target: Target | null;
-  discovery: DiscoverySelection;
-  discoveryCompleted: boolean;
+  targetProfile: TargetProfileFormState;
+  targetForm: TargetFormState;
+  profileVerified: boolean;
   attackPlan: AttackPlanConfig | null;
   submittedScanId: string | null;
 };
@@ -71,9 +70,9 @@ export function isStepComplete(step: WizardStepId, draft: WizardDraft): boolean 
     case 1:
       return draft.projectId.trim().length > 0;
     case 2:
-      return draft.target !== null && isTargetFormValid(draft.targetForm);
+      return draft.target !== null;
     case 3:
-      return draft.discoveryCompleted && draft.discovery.selectedCount > 0;
+      return draft.profileVerified;
     case 4:
       return (draft.attackPlan?.categories.length ?? 0) > 0;
     case 5:
@@ -89,7 +88,7 @@ export function canStartScan(draft: WizardDraft): boolean {
   return (
     draft.projectId.trim().length > 0 &&
     draft.target !== null &&
-    draft.discovery.selectedCount > 0 &&
+    draft.profileVerified &&
     (draft.attackPlan?.categories.length ?? 0) > 0 &&
     draft.submittedScanId === null
   );
@@ -97,8 +96,8 @@ export function canStartScan(draft: WizardDraft): boolean {
 
 export function maxCompletableStep(draft: WizardDraft): WizardStepId {
   if (!draft.projectId.trim()) return 1;
-  if (!isTargetFormValid(draft.targetForm) || !draft.target) return 2;
-  if (!draft.discoveryCompleted || draft.discovery.selectedCount === 0) return 3;
+  if (!draft.target) return 2;
+  if (!draft.profileVerified) return 3;
   if ((draft.attackPlan?.categories.length ?? 0) === 0) return 4;
   if (!draft.submittedScanId) return 5;
   return 6;
@@ -120,9 +119,9 @@ export function canProceedFromStep(step: WizardStepId, draft: WizardDraft): bool
     case 1:
       return draft.projectId.trim().length > 0;
     case 2:
-      return isTargetFormValid(draft.targetForm);
+      return draft.target !== null;
     case 3:
-      return draft.discoveryCompleted && draft.discovery.selectedCount > 0;
+      return draft.profileVerified;
     case 4:
       return (draft.attackPlan?.categories.length ?? 0) > 0;
     case 5:

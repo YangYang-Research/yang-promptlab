@@ -21,6 +21,8 @@ pub struct FingerprintEndpoint {
     pub endpoint_id: String,
     pub url: String,
     pub report: StackFingerprintReport,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<aisec_endpoint_metadata::AiEndpointMetadata>,
 }
 
 impl FingerprintResult {
@@ -30,6 +32,7 @@ impl FingerprintResult {
                 endpoint_id: endpoint_id.into(),
                 url: url.into(),
                 report,
+                metadata: None,
             }],
         }
     }
@@ -50,6 +53,24 @@ impl FingerprintResult {
     pub fn merged_capabilities(&self) -> MergedCapabilities {
         let mut caps = MergedCapabilities::default();
         for endpoint in &self.endpoints {
+            if let Some(metadata) = &endpoint.metadata {
+                caps.memory_enabled |= metadata.capabilities.supports_memory;
+                caps.tools_enabled |= metadata.capabilities.supports_tools;
+                caps.rag_enabled |= metadata.capabilities.supports_agent;
+                if !metadata.fingerprint.framework.is_empty() {
+                    caps.platforms.insert(metadata.fingerprint.framework.clone());
+                }
+                if metadata.capabilities.supports_agent
+                    || metadata.classification.endpoint_type
+                        == aisec_endpoint_metadata::EndpointType::Mcp
+                {
+                    caps.mcp_detected = true;
+                }
+                caps.has_ai_surface |= metadata.classification.endpoint_type
+                    != aisec_endpoint_metadata::EndpointType::NonAi;
+                caps.max_risk_score = caps.max_risk_score.max(metadata.risk.score);
+                continue;
+            }
             let p = &endpoint.report.platform_profile;
             caps.memory_enabled |= p.memory_enabled;
             caps.tools_enabled |= p.tools_enabled;
@@ -66,12 +87,13 @@ impl FingerprintResult {
                 caps.mcp_detected = true;
             }
         }
-        caps.has_ai_surface = !self.endpoints.is_empty()
-            && self.endpoints.iter().any(|e| {
-                e.report.confidence > 0.0
-                    || !e.report.platform_profile.platform.is_empty()
-                    || !e.report.technologies.is_empty()
-            });
+        caps.has_ai_surface = caps.has_ai_surface
+            || (!self.endpoints.is_empty()
+                && self.endpoints.iter().any(|e| {
+                    e.report.confidence > 0.0
+                        || !e.report.platform_profile.platform.is_empty()
+                        || !e.report.technologies.is_empty()
+                }));
         caps
     }
 }
@@ -84,6 +106,7 @@ pub struct MergedCapabilities {
     pub rag_enabled: bool,
     pub mcp_detected: bool,
     pub platforms: std::collections::HashSet<String>,
+    pub max_risk_score: u8,
 }
 
 /// Generated attack plan for the Scan Wizard / scan_start playbook.

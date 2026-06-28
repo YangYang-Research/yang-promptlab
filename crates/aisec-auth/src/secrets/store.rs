@@ -108,19 +108,30 @@ impl SecretStore {
     }
 
     pub fn load(&self, scope: SecretScope, id: &CredentialReferenceId) -> AisecResult<String> {
+        self.load_optional(scope, id)?
+            .ok_or_else(|| AisecError::not_found("secret not found in secure storage"))
+    }
+
+    /// Load a secret when present; returns `None` if the keychain entry was removed or never existed.
+    pub fn load_optional(
+        &self,
+        scope: SecretScope,
+        id: &CredentialReferenceId,
+    ) -> AisecResult<Option<String>> {
         #[cfg(test)]
         {
-            return test_backend()
+            return Ok(test_backend()
                 .lock()
                 .expect("test secret store lock")
                 .get(&storage_key(scope, id.as_str()))
-                .cloned()
-                .ok_or_else(|| AisecError::internal("load secret: not found in test store"));
+                .cloned());
         }
         #[cfg(not(test))]
-        Self::entry(scope, id.as_str())?
-            .get_password()
-            .map_err(|err| AisecError::internal(format!("load secret: {err}")))
+        match Self::entry(scope, id.as_str())?.get_password() {
+            Ok(password) => Ok(Some(password)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(err) => Err(AisecError::internal(format!("load secret: {err}"))),
+        }
     }
 
     pub fn delete(&self, scope: SecretScope, id: &CredentialReferenceId) -> AisecResult<()> {

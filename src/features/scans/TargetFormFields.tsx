@@ -185,12 +185,19 @@ export function TargetFormFields({
                 <input
                   className="input"
                   type="password"
-                  placeholder="sk-…"
+                  placeholder={form.apiKeyVaultMissing ? "Re-enter API key (missing from keychain)" : "sk-…"}
                   value={form.apiKeyValue}
-                  onChange={(e) => onChange({ apiKeyValue: e.target.value })}
+                  onChange={(e) =>
+                    onChange({ apiKeyValue: e.target.value, apiKeyVaultMissing: false })
+                  }
                   autoComplete="off"
                 />
               </label>
+              {form.apiKeyVaultMissing && (
+                <p className="text-warning text-sm">
+                  Stored API key is no longer in the system keychain. Enter it again to continue.
+                </p>
+              )}
             </div>
           )}
 

@@ -17,6 +17,7 @@ import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
 import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
 import { useViewPreference } from "@/shared/hooks/useViewPreference";
 import { useToast } from "@/shared/notifications";
+import { assertAiRuntimeReady } from "@/shared/runtime/aiRuntimeReadiness";
 import type { Project } from "@/shared/types";
 
 import { NewProjectModal } from "./NewProjectModal";
@@ -30,21 +31,38 @@ function formatDate(iso: string) {
 }
 
 export function ProjectsPage() {
-  const { projects, ui, loading, error, actions } = useAppStore();
+  const { projects, ui, loading, error, actions, backendConnected } = useAppStore();
   const { notify } = useToast();
   const location = useLocation();
   const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
+  const [openingProject, setOpeningProject] = useState(false);
   const [viewMode, setViewMode] = useViewPreference("projects");
   const [pageSize, setPageSize] = usePageSizePreference("projects");
 
   useEffect(() => {
     const state = location.state as { openNewProject?: boolean } | null;
     if (state?.openNewProject) {
-      setModalOpen(true);
       navigate(location.pathname, { replace: true, state: null });
+      void openNewProjectModal();
     }
   }, [location, navigate]);
+
+  async function openNewProjectModal() {
+    if (openingProject) return;
+    setOpeningProject(true);
+    try {
+      const readiness = await assertAiRuntimeReady(backendConnected);
+      if (!readiness.ready) {
+        notify(readiness.message, "error");
+        navigate("/runtime");
+        return;
+      }
+      setModalOpen(true);
+    } finally {
+      setOpeningProject(false);
+    }
+  }
 
   const filtered = useMemo(
     () =>
@@ -139,8 +157,12 @@ export function ProjectsPage() {
         actions={
           <>
             <RefreshButton loading={loading} error={error} onClick={() => void actions.refresh()} />
-            <Button variant="primary" onClick={() => setModalOpen(true)}>
-              New Project
+            <Button
+              variant="primary"
+              disabled={openingProject}
+              onClick={() => void openNewProjectModal()}
+            >
+              {openingProject ? "Checking AI Runtime…" : "New Project"}
             </Button>
           </>
         }

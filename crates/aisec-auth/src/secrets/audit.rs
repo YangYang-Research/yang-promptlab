@@ -164,6 +164,7 @@ mod tests {
                     "url": "https://example.com",
                     "auth": { "kind": "basic", "config": { "username": "u", "password": "secret" } }
                 })),
+                profile_json: None,
             })
             .await
             .unwrap();

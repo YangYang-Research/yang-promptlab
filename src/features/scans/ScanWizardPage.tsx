@@ -1,24 +1,33 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { mapProjects } from "@/app/store/mappers";
+import { mapProjects, mapTargets } from "@/app/store/mappers";
 import { Button, Card, PageHeader } from "@/shared/components";
-import { getProject, startScan } from "@/shared/ipc";
+import { getProject, startScan, updateTargetDescriptor } from "@/shared/ipc";
+import { saveTargetProfile } from "@/shared/ipc/targetProfile";
 import { useToast } from "@/shared/notifications";
 import type { Project, Target } from "@/shared/types";
 
 import { AttackPlanStep } from "./steps/AttackPlanStep";
-import { DiscoveryStep } from "./steps/DiscoveryStep";
+import { AuthVerificationStep } from "./steps/AuthVerificationStep";
 import { ProjectStep } from "./steps/ProjectStep";
 import { ResultsStep } from "./steps/ResultsStep";
 import { SubmitStep } from "./steps/SubmitStep";
-import { TargetStep } from "./steps/TargetStep";
+import { TargetProfileStep } from "./steps/TargetProfileStep";
 import { mergeScanStatus, useScanStatuses } from "./useScanStatuses";
 import {
+  deriveTargetNameFromProfile,
+  fullProfileUrl,
+  profileFromDto,
+  profileToPayload,
+  validateTargetProfile,
+} from "./targetProfile";
+import {
   buildTargetDescriptor,
-  deriveTargetName,
   targetFormFingerprint,
+  targetFormFromDescriptor,
+  targetFormNeedsSecretHydration,
   validateTargetStep,
   type TargetFormState,
 } from "./targetDescriptor";
@@ -26,9 +35,11 @@ import { WizardStepper } from "./WizardStepper";
 import {
   buildWizardStore,
   clearWizardSession,
+  createSessionForTargetScan,
+  fetchTargetFormForWizard,
+  loadTargetDtoForWizard,
   loadWizardSession,
   saveWizardSession,
-  shouldPersistTarget,
   type ScanWizardSession,
 } from "./wizardState";
 import {
@@ -44,15 +55,20 @@ export function ScanWizardPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const lockedProjectId = searchParams.get("projectId")?.trim() ?? "";
+  const lockedTargetId = searchParams.get("targetId")?.trim() ?? "";
+  const requestedStep = searchParams.get("step")?.trim() ?? "";
   const { projects, targets, loading, error, dispatch, actions } = useAppStore();
   const { notify } = useToast();
+  const deepLinkApplied = useRef(false);
+  const deepLinkTargetId = useRef<string | null>(null);
 
   const [session, setSession] = useState<ScanWizardSession>(() =>
     loadWizardSession(lockedProjectId),
   );
   const [resolvedProject, setResolvedProject] = useState<Project | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
-  const [targetStepError, setTargetStepError] = useState<string | null>(null);
+  const [profileStepError, setProfileStepError] = useState<string | null>(null);
+  const [verificationError, setVerificationError] = useState<string | null>(null);
   const [scanSubmitError, setScanSubmitError] = useState<string | null>(null);
   const [persistingTarget, setPersistingTarget] = useState(false);
   const [startingScan, setStartingScan] = useState(false);
@@ -73,8 +89,8 @@ export function ScanWizardPage() {
       projectId: activeProjectId,
       targetForm: session.targetForm,
       target: store.savedTarget,
-      discovery: store.discoverySelection,
-      discoveryCompleted: session.discovery.completed,
+      targetProfile: session.targetProfile,
+      profileVerified: store.profileVerified,
       attackPlan: session.attackPlan,
       submittedScanId: session.submittedScanId,
     }),
@@ -82,8 +98,8 @@ export function ScanWizardPage() {
       activeProjectId,
       session.targetForm,
       store.savedTarget,
-      store.discoverySelection,
-      session.discovery.completed,
+      session.targetProfile,
+      store.profileVerified,
       session.attackPlan,
       session.submittedScanId,
     ],
@@ -136,6 +152,58 @@ export function ScanWizardPage() {
   }, [lockedProjectId, storeProject, loading, dispatch]);
 
   useEffect(() => {
+    if (deepLinkTargetId.current !== lockedTargetId) {
+      deepLinkTargetId.current = lockedTargetId || null;
+      deepLinkApplied.current = false;
+    }
+    if (!lockedTargetId || deepLinkApplied.current) return;
+
+    let cancelled = false;
+    const step: WizardStepId = 3;
+
+    void loadTargetDtoForWizard(lockedTargetId)
+      .then((dto) => {
+        if (cancelled) return;
+        const target = mapTargets([dto])[0];
+        if (lockedProjectId && target.projectId !== lockedProjectId) {
+          notify("Target does not belong to this project", "error");
+          return;
+        }
+
+        const profileState =
+          dto.profile && typeof dto.profile === "object"
+            ? profileFromDto(dto.profile as Parameters<typeof profileFromDto>[0])
+            : session.targetProfile;
+        const targetForm = targetFormFromDescriptor(dto.descriptor, fullProfileUrl(profileState));
+        const next = {
+          ...createSessionForTargetScan(
+            lockedProjectId || target.projectId,
+            target,
+            dto.descriptor,
+            dto.profile,
+            step,
+          ),
+          targetForm,
+          savedTargetFingerprint: targetFormFingerprint(targetForm),
+        };
+        deepLinkApplied.current = true;
+        setSession(next);
+        saveWizardSession(next);
+        dispatch({ type: "SET_SELECTED_PROJECT", projectId: next.selectedProjectId });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : "Failed to load target";
+          notify(message || "Target not found — start a new scan manually", "error");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lockedTargetId, lockedProjectId, requestedStep, dispatch, notify]);
+
+  useEffect(() => {
     if (!session.submittedScanId || session.currentStep < 5) return;
     const timer = window.setInterval(() => void actions.refresh(), 3000);
     return () => window.clearInterval(timer);
@@ -170,8 +238,17 @@ export function ScanWizardPage() {
   const nextDisabled = !canProceedFromStep(session.currentStep, draft);
   const startScanDisabled = !canStartScan(draft) || startingScan;
 
+  function patchTargetProfile(patch: Partial<typeof session.targetProfile>) {
+    setProfileStepError(null);
+    setSession((prev) => {
+      const next = { ...prev, targetProfile: { ...prev.targetProfile, ...patch } };
+      saveWizardSession(next);
+      return next;
+    });
+  }
+
   function patchTargetForm(patch: Partial<TargetFormState>) {
-    setTargetStepError(null);
+    setVerificationError(null);
     setSession((prev) => {
       const next = { ...prev, targetForm: { ...prev.targetForm, ...patch } };
       saveWizardSession(next);
@@ -179,37 +256,32 @@ export function ScanWizardPage() {
     });
   }
 
-  async function persistTargetIfNeeded(): Promise<Target | null> {
-    const validationError = validateTargetStep(session.targetForm);
+  async function persistProfileTarget(): Promise<Target | null> {
+    const validationError = validateTargetProfile(session.targetProfile);
     if (validationError) {
-      setTargetStepError(validationError);
+      setProfileStepError(validationError);
       return null;
     }
 
-    const fingerprint = targetFormFingerprint(session.targetForm);
-    if (
-      store.savedTarget &&
-      !shouldPersistTarget(session.targetForm, store.savedTarget, session.savedTargetFingerprint)
-    ) {
-      // Reuse existing target when form unchanged.
-      return store.savedTarget;
-    }
-
     setPersistingTarget(true);
-    setTargetStepError(null);
+    setProfileStepError(null);
     try {
-      const descriptor = buildTargetDescriptor(session.targetForm);
-      const name = deriveTargetName(session.targetForm.url);
-      const target = await actions.createTarget(activeProjectId, name, "web", descriptor);
-      updateSession({
-        savedTargetId: target.id,
-        savedTargetFingerprint: fingerprint,
-      });
-      notify(`Target "${name}" saved`, "success");
+      const url = fullProfileUrl(session.targetProfile);
+      const descriptor = { url, baseUrl: session.targetProfile.baseUrl.trim() };
+      const name = deriveTargetNameFromProfile(session.targetProfile);
+
+      let target = store.savedTarget;
+      if (!target) {
+        target = await actions.createTarget(activeProjectId, name, "llm_api", descriptor);
+        updateSession({ savedTargetId: target.id });
+      }
+
+      await saveTargetProfile(target.id, profileToPayload(session.targetProfile));
+      notify(`Target profile saved for "${name}"`, "success");
       return target;
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to save target";
-      setTargetStepError(message);
+      const message = err instanceof Error ? err.message : "Failed to save target profile";
+      setProfileStepError(message);
       notify(message, "error");
       return null;
     } finally {
@@ -217,9 +289,59 @@ export function ScanWizardPage() {
     }
   }
 
+  async function persistAuthDescriptor(): Promise<boolean> {
+    if (!store.savedTarget) return false;
+    const validationError = validateTargetStep(session.targetForm);
+    if (validationError) {
+      setVerificationError(validationError);
+      return false;
+    }
+
+    setPersistingTarget(true);
+    try {
+      const url = fullProfileUrl(session.targetProfile);
+      const descriptor = buildTargetDescriptor({ ...session.targetForm, url });
+      await updateTargetDescriptor(store.savedTarget.id, descriptor);
+      updateSession({ savedTargetFingerprint: targetFormFingerprint(session.targetForm) });
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to save authentication";
+      setVerificationError(message);
+      notify(message, "error");
+      return false;
+    } finally {
+      setPersistingTarget(false);
+    }
+  }
+
+  async function navigateToStep(nextStep: WizardStepId) {
+    const targetId = session.savedTargetId;
+    const fallbackUrl = session.targetForm.url || store.savedTarget?.url || "";
+
+    if (
+      nextStep === 2 &&
+      targetId &&
+      targetFormNeedsSecretHydration(session.targetForm)
+    ) {
+      try {
+        const targetForm = await fetchTargetFormForWizard(targetId, fallbackUrl);
+        updateSession({
+          currentStep: nextStep,
+          targetForm,
+          savedTargetFingerprint: targetFormFingerprint(targetForm),
+        });
+        return;
+      } catch {
+        // Fall through — show step with whatever form state we have.
+      }
+    }
+
+    updateSession({ currentStep: nextStep });
+  }
+
   function handleStepChange(step: WizardStepId) {
     if (canNavigateToStep(step, draft)) {
-      updateSession({ currentStep: step });
+      void navigateToStep(step);
     }
   }
 
@@ -227,9 +349,20 @@ export function ScanWizardPage() {
     if (session.currentStep >= 6) return;
 
     if (session.currentStep === 2) {
-      const target = await persistTargetIfNeeded();
+      const target = await persistProfileTarget();
       if (!target) return;
       updateSession({ currentStep: 3 });
+      return;
+    }
+
+    if (session.currentStep === 3) {
+      if (!session.targetProfile.verification.verified) {
+        setVerificationError("Verify the target connection before continuing.");
+        return;
+      }
+      const saved = await persistAuthDescriptor();
+      if (!saved) return;
+      updateSession({ currentStep: 4 });
       return;
     }
 
@@ -239,7 +372,7 @@ export function ScanWizardPage() {
 
   function handleBack() {
     if (session.currentStep > 1) {
-      updateSession({ currentStep: (session.currentStep - 1) as WizardStepId });
+      void navigateToStep((session.currentStep - 1) as WizardStepId);
     }
   }
 
@@ -261,7 +394,6 @@ export function ScanWizardPage() {
       const result = await startScan({
         projectId: activeProjectId,
         targetId: store.savedTarget.id,
-        endpointIds: session.discovery.selectedEndpointIds,
         categories: session.attackPlan.categories,
         profile: session.attackPlan.profileId,
         disabledTests: session.attackPlan.disabledTests,
@@ -305,36 +437,36 @@ export function ScanWizardPage() {
         );
       case 2:
         return activeProjectId ? (
-          <TargetStep
-            form={session.targetForm}
-            onChange={patchTargetForm}
-            error={targetStepError}
+          <TargetProfileStep
+            profile={session.targetProfile}
+            onChange={patchTargetProfile}
+            error={profileStepError}
           />
         ) : (
-          <p className="text-muted">Select a project in step 1 to configure the target.</p>
+          <p className="text-muted">Select a project in step 1 to configure the AI target profile.</p>
         );
       case 3:
         return store.savedTarget ? (
-          <DiscoveryStep
-            target={store.savedTarget}
-            discovery={session.discovery}
-            onDiscoveryChange={(patch) =>
-              setSession((prev) => {
-                const next = { ...prev, discovery: { ...prev.discovery, ...patch } };
-                saveWizardSession(next);
-                return next;
-              })
-            }
+          <AuthVerificationStep
+            targetId={store.savedTarget.id}
+            profile={session.targetProfile}
+            onProfileChange={patchTargetProfile}
+            authForm={session.targetForm}
+            onAuthChange={patchTargetForm}
+            verificationConsole={session.verificationConsole}
+            onVerificationConsole={(entry) => updateSession({ verificationConsole: entry })}
+            error={verificationError}
+            onError={setVerificationError}
+            onBeforeVerify={persistAuthDescriptor}
           />
         ) : (
-          <p className="text-muted">Complete step 2 to run discovery.</p>
+          <p className="text-muted">Complete step 2 to configure authentication.</p>
         );
       case 4:
-        return session.discovery.selectedEndpointIds.length > 0 ? (
+        return store.savedTarget && session.targetProfile.verification.verified ? (
           <AttackPlanStep
-            selectedEndpointCount={session.discovery.selectedEndpointIds.length}
-            endpoints={session.discovery.endpoints}
-            selectedEndpointIds={session.discovery.selectedEndpointIds}
+            targetId={store.savedTarget.id}
+            targetProfile={session.targetProfile}
             planUi={session.attackPlanUi}
             onPlanUiChange={(patch) =>
               setSession((prev) => {
@@ -346,18 +478,18 @@ export function ScanWizardPage() {
             onPlanChange={(plan) => updateSession({ attackPlan: plan })}
           />
         ) : (
-          <p className="text-muted">Select at least one endpoint in step 3 to plan attacks.</p>
+          <p className="text-muted">Verify the target in step 3 before attack planning.</p>
         );
       case 5:
         return activeProjectId &&
           store.savedTarget &&
           session.attackPlan &&
           session.attackPlan.categories.length > 0 &&
-          session.discovery.selectedEndpointIds.length > 0 ? (
+          session.targetProfile.verification.verified ? (
           <>
             <SubmitStep
               target={store.savedTarget}
-              endpointIds={session.discovery.selectedEndpointIds}
+              targetProfile={session.targetProfile}
               attackPlan={session.attackPlan}
               submittedScanId={session.submittedScanId}
               onViewResult={() => updateSession({ currentStep: 6 })}

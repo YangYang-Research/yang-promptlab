@@ -56,7 +56,9 @@ fn build_request(ctx: &AttackContext, payload_content: &str) -> AttackResult<Tra
         .unwrap_or_else(|| "POST".into());
 
     let body = if let Some(template) = &target.body_template {
-        template.replace("{{payload}}", payload_content)
+        template
+            .replace("{{PROMPT}}", payload_content)
+            .replace("{{payload}}", payload_content)
     } else {
         payload_content.to_string()
     };

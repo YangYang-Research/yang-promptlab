@@ -23,6 +23,7 @@ aisec-core = { workspace = true }
 aisec-storage = { workspace = true }
 aisec-report = { workspace = true }
 aisec-discovery = { workspace = true }
+aisec-endpoint-metadata = { workspace = true }
 aisec-attack = { workspace = true }
 aisec-auth = { workspace = true }
 aisec-harness = { workspace = true, features = ["playwright"] }
@@ -35,6 +36,7 @@ aisec-planner = { workspace = true }
 aisec-generator = { workspace = true }
 aisec-agent = { workspace = true }
 aisec-plugin-host = { workspace = true }
+aisec-target-profile = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 time = { workspace = true }
@@ -42,10 +44,12 @@ url = { workspace = true }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-process = "2"
 reqwest = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing = { workspace = true }
+base64 = "0.22"
 which = "7"
 tar = "0.4"
 flate2 = "1"

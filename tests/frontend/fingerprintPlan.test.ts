@@ -19,25 +19,14 @@ function endpoint(id: string, category: string): EndpointDto {
     evidence: null,
     source_url: null,
     discovered_at: "2026-01-01T00:00:00Z",
-    fingerprint: {
-      confidence: 0.9,
-      technologies: [],
-      agentFrameworks: [],
-      aiComponents: [],
-      attackRecommendations: [{ category, reason: "test", priority: 1 }],
-      methodsUsed: [],
-      primaryProvider: null,
-      apiStyle: null,
-      platformProfile: {
-        platform: "dify",
-        version: "",
-        authType: "api_key",
-        llmProvider: "openai",
-        memoryEnabled: true,
-        toolsEnabled: true,
-        ragEnabled: true,
-      },
-    },
+    endpoint_type: "ai_chat",
+    ai_framework: "dify",
+    risk_score: 70,
+    metadata_confidence: 0.9,
+    discovery_source: "discovery",
+    auth_required: false,
+    metadata: null,
+    attack_recommendations: [{ category, reason: "test", priority: 1 }],
   };
 }
 

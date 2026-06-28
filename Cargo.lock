@@ -138,6 +138,7 @@ dependencies = [
  "aisec-auth",
  "aisec-core",
  "aisec-discovery",
+ "aisec-endpoint-metadata",
  "aisec-fingerprint",
  "aisec-generator",
  "aisec-harness",
@@ -149,7 +150,9 @@ dependencies = [
  "aisec-report",
  "aisec-runtime",
  "aisec-storage",
+ "aisec-target-profile",
  "async-trait",
+ "base64 0.22.1",
  "flate2",
  "reqwest 0.12.28",
  "serde",
@@ -160,6 +163,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
+ "tauri-plugin-process",
  "tempfile",
  "time",
  "tokio",
@@ -188,6 +192,22 @@ dependencies = [
  "url",
  "uuid",
  "wiremock",
+]
+
+[[package]]
+name = "aisec-endpoint-metadata"
+version = "0.1.0"
+dependencies = [
+ "aisec-core",
+ "aisec-fingerprint",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]
@@ -348,6 +368,7 @@ version = "0.1.0"
 dependencies = [
  "aisec-attack",
  "aisec-core",
+ "aisec-endpoint-metadata",
  "aisec-fingerprint",
  "aisec-inference",
  "async-trait",
@@ -425,6 +446,21 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "aisec-target-profile"
+version = "0.1.0"
+dependencies = [
+ "aisec-attack",
+ "aisec-harness",
+ "aisec-planner",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "url",
 ]
 
 [[package]]
@@ -5522,6 +5558,16 @@ dependencies = [
  "url",
  "windows",
  "zbus",
+]
+
+[[package]]
+name = "tauri-plugin-process"
+version = "2.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d55511a7bf6cd70c8767b02c97bf8134fa434daf3926cfc1be0a0f94132d165a"
+dependencies = [
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

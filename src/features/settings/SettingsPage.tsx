@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { ask } from "@tauri-apps/plugin-dialog";
 
 import { useAppStore } from "@/app/store/AppStore";
 import { Button, Card, PageHeader, Select } from "@/shared/components";
 import type { AppSettings } from "@/app/store/types";
 import { toAppError } from "@/shared/errors";
+import { clearAllAppData } from "@/shared/ipc/app";
 import { getModelsRegistryDiagnostics, type ModelRegistryDiagnosticsDto } from "@/shared/ipc/models";
 import {
   securityAudit,
@@ -23,6 +25,66 @@ const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: "paths", label: "Paths" },
   { id: "about", label: "About" },
 ];
+
+function clearBrowserAppStorage() {
+  if (typeof window === "undefined") return;
+  const keysToRemove: string[] = [];
+  for (let i = 0; i < window.localStorage.length; i += 1) {
+    const key = window.localStorage.key(i);
+    if (key?.startsWith("aisec:")) keysToRemove.push(key);
+  }
+  for (const key of keysToRemove) {
+    window.localStorage.removeItem(key);
+  }
+  window.sessionStorage.removeItem("aisec:scan-wizard");
+}
+
+function ClearAllDataCard({ backendConnected }: { backendConnected: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleClearAllData() {
+    if (!backendConnected || busy) return;
+
+    const confirmed = await ask(
+      "This permanently deletes all AISec data on this device — projects, targets, scans, findings, reports, models, runtime state, and cached wizard sessions — then restarts the app.\n\nThis cannot be undone.",
+      {
+        title: "Clear All Data",
+        kind: "warning",
+        okLabel: "Clear All Data",
+        cancelLabel: "Cancel",
+      },
+    );
+    if (!confirmed) return;
+
+    setBusy(true);
+    setError(null);
+    try {
+      clearBrowserAppStorage();
+      await clearAllAppData();
+    } catch (err) {
+      setError(toAppError(err).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="settings-danger-card">
+      <h3 className="card__title">Data</h3>
+      <p className="text-muted text-sm">
+        Remove all application data from this device and restart AISec with a fresh workspace.
+      </p>
+      {error ? <p className="text-danger text-sm">{error}</p> : null}
+      <Button
+        variant="danger"
+        disabled={!backendConnected || busy}
+        onClick={() => void handleClearAllData()}
+      >
+        {busy ? "Clearing…" : "Clear All Data"}
+      </Button>
+    </Card>
+  );
+}
 
 function SecuritySecretsCard({ backendConnected }: { backendConnected: boolean }) {
   const [audit, setAudit] = useState<SecretMigrationAudit | null>(null);
@@ -233,6 +295,8 @@ export function SettingsPage() {
                 <span>Anonymous usage telemetry</span>
               </label>
             </Card>
+
+            <ClearAllDataCard backendConnected={backendConnected} />
           </div>
         </div>
       )}

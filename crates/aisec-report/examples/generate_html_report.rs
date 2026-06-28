@@ -36,6 +36,7 @@ async fn main() {
             name: "Production Chat API".into(),
             target_type: "llm_api".into(),
             descriptor_json: Some(json!({ "url": "https://api.example.com/v1/chat/completions" })),
+            profile_json: None,
         })
         .await
         .unwrap();

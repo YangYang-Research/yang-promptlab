@@ -5,6 +5,7 @@ import { useAppStore } from "@/app/store/AppStore";
 import { AiRuntimeDashboardCard } from "@/features/dashboard/AiRuntimeDashboardCard";
 import { severityCounts } from "@/shared/stats";
 import { getRuntimeConfiguration, type RuntimeConfigurationDto } from "@/shared/ipc/runtime";
+import { assertAiRuntimeReady } from "@/shared/runtime/aiRuntimeReadiness";
 import {
   Badge,
   Button,
@@ -14,6 +15,7 @@ import {
   SeverityBadge,
   StatCard,
 } from "@/shared/components";
+import { useToast } from "@/shared/notifications";
 
 function formatRelativeTime(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -27,12 +29,14 @@ export function DashboardPage() {
   const { stats, findings, activity, discoveryJobs, attackRuns, projects, backendConnected } =
     useAppStore();
   const navigate = useNavigate();
+  const { notify } = useToast();
   const counts = severityCounts(findings);
   const maxCount = Math.max(...Object.values(counts), 1);
   const [runtimeConfiguration, setRuntimeConfiguration] = useState<RuntimeConfigurationDto | null>(
     null,
   );
   const [runtimeLoading, setRuntimeLoading] = useState(false);
+  const [openingProject, setOpeningProject] = useState(false);
 
   const loadRuntimeConfiguration = useCallback(async () => {
     if (!backendConnected) {
@@ -53,6 +57,22 @@ export function DashboardPage() {
     void loadRuntimeConfiguration();
   }, [loadRuntimeConfiguration]);
 
+  async function handleNewProject() {
+    if (openingProject) return;
+    setOpeningProject(true);
+    try {
+      const readiness = await assertAiRuntimeReady(backendConnected);
+      if (!readiness.ready) {
+        notify(readiness.message, "error");
+        navigate("/runtime");
+        return;
+      }
+      navigate("/projects", { state: { openNewProject: true } });
+    } finally {
+      setOpeningProject(false);
+    }
+  }
+
   return (
     <div className="page dashboard-page">
       <PageHeader
@@ -61,9 +81,10 @@ export function DashboardPage() {
         actions={
           <Button
             variant="primary"
-            onClick={() => navigate("/projects", { state: { openNewProject: true } })}
+            disabled={openingProject}
+            onClick={() => void handleNewProject()}
           >
-            New Project
+            {openingProject ? "Checking AI Runtime…" : "New Project"}
           </Button>
         }
       />

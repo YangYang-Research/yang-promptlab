@@ -1,29 +1,23 @@
 import type { AttackPlanConfig, AttackCategoryId, AttackProfileId } from "./attackProfiles";
-import type { DiscoverySelection } from "./steps/DiscoveryStep";
 import type { TargetFormState } from "./targetDescriptor";
 import {
   createInitialTargetForm,
   migrateTargetForm,
   targetFormFingerprint,
+  targetFormFromDescriptor,
   targetFormMatchesDescriptor,
-  validateTargetStep,
 } from "./targetDescriptor";
+import {
+  createInitialTargetProfile,
+  profileFromDto,
+  type TargetProfileFormState,
+  type VerificationConsoleEntryDto,
+} from "./targetProfile";
 import type { WizardStepId } from "./wizardSteps";
-import type { DiscoveryStatsDto, EndpointDto } from "@/shared/ipc";
 import type { Target } from "@/shared/types";
 
 const STORAGE_KEY = "aisec:scan-wizard";
-const STORAGE_VERSION = 2;
-
-export type DiscoveryWizardState = {
-  scanId: string | null;
-  selectedEndpointIds: string[];
-  completed: boolean;
-  stats: DiscoveryStatsDto | null;
-  endpoints: EndpointDto[];
-  manualMethod: string;
-  manualPath: string;
-};
+const STORAGE_VERSION = 3;
 
 export type AttackPlanUiState = {
   profileId: AttackProfileId;
@@ -42,10 +36,11 @@ export type ScanWizardSession = {
   version: typeof STORAGE_VERSION;
   currentStep: WizardStepId;
   selectedProjectId: string;
+  targetProfile: TargetProfileFormState;
   targetForm: TargetFormState;
   savedTargetId: string | null;
   savedTargetFingerprint: string | null;
-  discovery: DiscoveryWizardState;
+  verificationConsole: VerificationConsoleEntryDto | null;
   attackPlanUi: AttackPlanUiState;
   attackPlan: AttackPlanConfig | null;
   submittedScanId: string | null;
@@ -53,20 +48,8 @@ export type ScanWizardSession = {
 
 export type ScanWizardStore = ScanWizardSession & {
   savedTarget: Target | null;
-  discoverySelection: DiscoverySelection;
+  profileVerified: boolean;
 };
-
-export function createInitialDiscoveryState(): DiscoveryWizardState {
-  return {
-    scanId: null,
-    selectedEndpointIds: [],
-    completed: false,
-    stats: null,
-    endpoints: [],
-    manualMethod: "GET",
-    manualPath: "",
-  };
-}
 
 export function createInitialAttackPlanUi(): AttackPlanUiState {
   return {
@@ -98,28 +81,18 @@ export function createInitialSession(lockedProjectId = ""): ScanWizardSession {
     version: STORAGE_VERSION,
     currentStep: 1,
     selectedProjectId: lockedProjectId,
+    targetProfile: createInitialTargetProfile(),
     targetForm: createInitialTargetForm(),
     savedTargetId: null,
     savedTargetFingerprint: null,
-    discovery: createInitialDiscoveryState(),
+    verificationConsole: null,
     attackPlanUi: createInitialAttackPlanUi(),
     attackPlan: null,
     submittedScanId: null,
   };
 }
 
-function toDiscoverySelection(discovery: DiscoveryWizardState): DiscoverySelection {
-  return {
-    scanId: discovery.scanId,
-    selectedCount: discovery.selectedEndpointIds.length,
-    selectedEndpointIds: discovery.selectedEndpointIds,
-  };
-}
-
-export function buildWizardStore(
-  session: ScanWizardSession,
-  targets: Target[],
-): ScanWizardStore {
+export function buildWizardStore(session: ScanWizardSession, targets: Target[]): ScanWizardStore {
   const savedTarget = session.savedTargetId
     ? targets.find((target) => target.id === session.savedTargetId) ?? null
     : null;
@@ -127,7 +100,7 @@ export function buildWizardStore(
   return {
     ...session,
     savedTarget,
-    discoverySelection: toDiscoverySelection(session.discovery),
+    profileVerified: session.targetProfile.verification.verified,
   };
 }
 
@@ -151,8 +124,8 @@ export function loadWizardSession(lockedProjectId: string): ScanWizardSession {
       ...createInitialSession(lockedProjectId),
       ...parsed,
       selectedProjectId: lockedProjectId || parsed.selectedProjectId,
+      targetProfile: { ...createInitialTargetProfile(), ...parsed.targetProfile },
       targetForm: migrateTargetForm(parsed.targetForm ?? {}),
-      discovery: { ...createInitialDiscoveryState(), ...parsed.discovery },
       attackPlanUi: { ...createInitialAttackPlanUi(), ...parsed.attackPlanUi },
     };
   } catch {
@@ -165,17 +138,13 @@ export function saveWizardSession(session: ScanWizardSession): void {
   try {
     window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session));
   } catch {
-    // Ignore quota or private-mode errors; in-memory state still works.
+    // Ignore quota errors.
   }
 }
 
 export function clearWizardSession(): void {
   if (typeof window === "undefined") return;
   window.sessionStorage.removeItem(STORAGE_KEY);
-}
-
-export function isTargetFormValid(form: TargetFormState): boolean {
-  return validateTargetStep(form) === null;
 }
 
 export function shouldPersistTarget(
@@ -196,4 +165,55 @@ export function resetSessionForNewScan(
     ...createInitialSession(lockedProjectId),
     selectedProjectId: lockedProjectId || selectedProjectId,
   };
+}
+
+export function createSessionForTargetScan(
+  projectId: string,
+  target: Target,
+  descriptor: unknown,
+  profile: unknown,
+  step: WizardStepId = 3,
+): ScanWizardSession {
+  const targetForm = targetFormFromDescriptor(descriptor, target.url);
+  const targetProfile =
+    profile && typeof profile === "object"
+      ? profileFromDto(profile as Parameters<typeof profileFromDto>[0])
+      : createInitialTargetProfile();
+
+  return {
+    ...createInitialSession(projectId),
+    selectedProjectId: projectId,
+    currentStep: step,
+    savedTargetId: target.id,
+    savedTargetFingerprint: targetFormFingerprint(targetForm),
+    targetForm,
+    targetProfile,
+  };
+}
+
+export function buildScanWizardUrl(projectId: string, targetId: string): string {
+  const params = new URLSearchParams({ projectId, targetId });
+  return `/scans/new?${params.toString()}`;
+}
+
+export async function fetchTargetFormForWizard(
+  targetId: string,
+  fallbackUrl = "",
+): Promise<TargetFormState> {
+  const dto = await loadTargetDtoForWizard(targetId);
+  const url =
+    fallbackUrl ||
+    (typeof (dto.descriptor as { url?: string } | null)?.url === "string"
+      ? (dto.descriptor as { url: string }).url
+      : "");
+  return targetFormFromDescriptor(dto.descriptor, url);
+}
+
+export async function loadTargetDtoForWizard(targetId: string) {
+  const { getTarget, getTargetWizardDescriptor } = await import("@/shared/ipc/client");
+  try {
+    return await getTargetWizardDescriptor(targetId);
+  } catch {
+    return getTarget(targetId);
+  }
 }

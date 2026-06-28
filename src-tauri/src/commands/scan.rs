@@ -18,7 +18,7 @@ use tauri::{AppHandle, State};
 use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
 
-use crate::commands::attack::run_category_on_endpoint;
+use crate::commands::attack::{run_category_on_target_profile, run_category_on_endpoint};
 use crate::agent_service::{agent_config_from_scan, run_agent_endpoint, ScanAgentHost};
 use crate::commands::generator::{
     attack_plan_from_scan, generate_payloads_for_scan_job, parse_generator_mode_optional,
@@ -26,6 +26,7 @@ use crate::commands::generator::{
 };
 use crate::events::{emit_app_data_changed, ScanProgressEmitter};
 use crate::session_auth::{build_attack_runtime_parts, fallback_attack_runtime, seed_url_from_descriptor, AttackRuntime};
+use crate::commands::target_profile::parse_target_profile;
 use crate::dto::{ScanStartDto, ScanStatusDto};
 use crate::error::{CommandError, CommandResult};
 use crate::jobs::{ScanJobManager, ScanProgress};
@@ -110,7 +111,6 @@ async fn run_scan_job(
     scan_id: String,
     project_id: String,
     target_id: Option<String>,
-    endpoint_ids: Vec<String>,
     categories: Vec<AttackCategory>,
     disabled_tests: Vec<String>,
     profile: String,
@@ -131,9 +131,24 @@ async fn run_scan_job(
     let progress_emitter = ScanProgressEmitter::new(app.clone(), scan_id.clone());
     progress_emitter.info("Loading attack plan...");
     let default_runtime = fallback_attack_runtime();
+
+    let target_profile = if let Some(tid) = &target_id {
+        repos
+            .targets()
+            .get(tid)
+            .await
+            .ok()
+            .and_then(|t| parse_target_profile(&t.profile_json).ok())
+    } else {
+        None
+    };
+
     let attack_runtime: AttackRuntime = if let Some(tid) = &target_id {
         if let Ok(target) = repos.targets().get(tid).await {
-            let probe_url = seed_url_from_descriptor(&target.descriptor_json)
+            let probe_url = target_profile
+                .as_ref()
+                .map(|p| p.full_url())
+                .or_else(|| seed_url_from_descriptor(&target.descriptor_json))
                 .unwrap_or_else(|| "https://localhost".into());
             build_attack_runtime_parts(
                 db.clone(),
@@ -189,28 +204,20 @@ async fn run_scan_job(
             None
         };
 
-    let total = (endpoint_ids.len() * categories.len()) as u64;
+    let total = categories.len() as u64;
     let mut findings_total = 0u64;
     let mut had_error = false;
 
-    for endpoint_id in &endpoint_ids {
-        if cancel.load(Ordering::Relaxed) {
-            break;
+    let profile_ref = match (&target_id, &target_profile) {
+        (Some(tid), Some(p)) if p.is_verified() => Some((tid.as_str(), p)),
+        _ => {
+            warn!(scan_id = %scan_id, "target profile missing or not verified");
+            had_error = true;
+            None
         }
-        wait_if_paused(&paused, &cancel).await;
-        if cancel.load(Ordering::Relaxed) {
-            break;
-        }
+    };
 
-        let endpoint = match repos.endpoints().get(endpoint_id).await {
-            Ok(endpoint) => endpoint,
-            Err(err) => {
-                warn!(scan_id = %scan_id, endpoint_id = %endpoint_id, error = %err, "endpoint lookup failed");
-                had_error = true;
-                continue;
-            }
-        };
-
+    if let Some((tid, target_profile)) = profile_ref {
         for category in &categories {
             if cancel.load(Ordering::Relaxed) {
                 break;
@@ -227,7 +234,7 @@ async fn run_scan_job(
                     } else {
                         "running".into()
                     };
-                    p.current_endpoint = Some(endpoint.url.clone());
+                    p.current_endpoint = Some(target_profile.full_url());
                     p.current_test = Some(category.display_name().to_string());
                 }
             }
@@ -235,12 +242,12 @@ async fn run_scan_job(
             let inference = inference_manager.lock().await;
             let manager = model_manager.lock().await;
             let mut runtime_mgr = runtime_manager.lock().await;
-            match run_category_on_endpoint(
+            match run_category_on_target_profile(
                 &repos,
                 &scan_id,
                 &project_id,
-                target_id.clone(),
-                &endpoint,
+                tid,
+                target_profile,
                 *category,
                 attack_runtime.clone(),
                 &data_dir,
@@ -264,7 +271,7 @@ async fn run_scan_job(
                 Err(err) => {
                     warn!(
                         scan_id = %scan_id,
-                        endpoint_id = %endpoint_id,
+                        target_id = %tid,
                         category = %category.as_str(),
                         error = %err,
                         "attack unit failed"
@@ -517,7 +524,6 @@ pub async fn scan_start_op(
     app: &AppHandle,
     project_id: String,
     target_id: String,
-    endpoint_ids: Vec<String>,
     profile: String,
     categories: Vec<String>,
     disabled_tests: Vec<String>,
@@ -525,10 +531,6 @@ pub async fn scan_start_op(
     agent_mode: Option<bool>,
     max_agent_attempts: Option<usize>,
 ) -> CommandResult<ScanStartDto> {
-    if endpoint_ids.is_empty() {
-        return Err(CommandError::invalid_input("At least one endpoint is required"));
-    }
-
     let parsed_categories: Vec<AttackCategory> = categories
         .iter()
         .filter_map(|value| parse_category(value))
@@ -546,23 +548,17 @@ pub async fn scan_start_op(
         .get(&project_id)
         .await
         .map_err(CommandError::from)?;
-    repos
+    let target = repos
         .targets()
         .get(&target_id)
         .await
         .map_err(CommandError::from)?;
 
-    for endpoint_id in &endpoint_ids {
-        let endpoint = repos
-            .endpoints()
-            .get(endpoint_id)
-            .await
-            .map_err(CommandError::from)?;
-        if endpoint.target_id.as_deref() != Some(target_id.as_str()) {
-            return Err(CommandError::invalid_input(format!(
-                "Endpoint {endpoint_id} does not belong to target {target_id}"
-            )));
-        }
+    let target_profile = parse_target_profile(&target.profile_json)?;
+    if !target_profile.is_verified() {
+        return Err(CommandError::invalid_input(
+            "Target profile must be verified before starting a scan",
+        ));
     }
 
     let agentic = agent_mode.unwrap_or(false);
@@ -584,7 +580,7 @@ pub async fn scan_start_op(
                 "profile": profile,
                 "categories": categories,
                 "disabled_tests": disabled_tests,
-                "endpoint_ids": endpoint_ids,
+                "target_profile": true,
                 "generator_mode": generator_mode,
                 "agent_mode": agentic,
                 "max_agent_attempts": config.max_attempts_per_category,
@@ -605,11 +601,9 @@ pub async fn scan_start_op(
         .await;
 
     let total = if agentic {
-        (endpoint_ids.len() as u64)
-            * (parsed_categories.len() as u64)
-            * config.max_attempts_per_category as u64
+        (parsed_categories.len() as u64) * config.max_attempts_per_category as u64
     } else {
-        (endpoint_ids.len() * parsed_categories.len()) as u64
+        parsed_categories.len() as u64
     };
     let cancel = Arc::new(AtomicBool::new(false));
     let paused = Arc::new(AtomicBool::new(false));
@@ -644,63 +638,38 @@ pub async fn scan_start_op(
     emit_app_data_changed(app, "scan_created");
 
     if agentic {
-        tauri::async_runtime::spawn(async move {
-            run_agent_scan_job(
-                app_for_job,
-                db,
-                jobs,
-                scan_id,
-                project_id,
-                Some(target_id),
-                endpoint_ids,
-                parsed_categories,
-                disabled_for_job,
-                profile_for_job,
-                generator_mode_for_job,
-                max_attempts_for_job,
-                cancel,
-                paused,
-                progress,
-                data_dir,
-                auth_config,
-                harness_factory,
-                plugin_manager,
-                inference_manager,
-                model_manager,
-                model_provider,
-                runtime_manager,
-            )
-            .await;
-        });
-    } else {
-        tauri::async_runtime::spawn(async move {
-            run_scan_job(
-                app_for_job,
-                db,
-                jobs,
-                scan_id,
-                project_id,
-                Some(target_id),
-                endpoint_ids,
-                parsed_categories,
-                disabled_for_job,
-                profile_for_job,
-                generator_mode_for_job,
-                cancel,
-                paused,
-                progress,
-                data_dir,
-                auth_config,
-                harness_factory,
-                plugin_manager,
-                inference_manager,
-                model_manager,
-                model_provider,
-                runtime_manager,
-            )
-            .await;
-        });
+        warn!(
+            scan_id = %scan.id,
+            "agent mode runs as target-profile batch scan until agent adapter migrates"
+        );
     }
+
+    tauri::async_runtime::spawn(async move {
+        run_scan_job(
+            app_for_job,
+            db,
+            jobs,
+            scan_id,
+            project_id,
+            Some(target_id),
+            parsed_categories,
+            disabled_for_job,
+            profile_for_job,
+            generator_mode_for_job,
+            cancel,
+            paused,
+            progress,
+            data_dir,
+            auth_config,
+            harness_factory,
+            plugin_manager,
+            inference_manager,
+            model_manager,
+            model_provider,
+            runtime_manager,
+        )
+        .await;
+    });
 
     info!(
         scan_id = %scan.id,
@@ -854,7 +823,6 @@ pub async fn scan_start(
     state: State<'_, AppState>,
     project_id: String,
     target_id: String,
-    endpoint_ids: Vec<String>,
     profile: String,
     categories: Vec<String>,
     disabled_tests: Vec<String>,
@@ -867,7 +835,6 @@ pub async fn scan_start(
         &app,
         project_id,
         target_id,
-        endpoint_ids,
         profile,
         categories,
         disabled_tests,

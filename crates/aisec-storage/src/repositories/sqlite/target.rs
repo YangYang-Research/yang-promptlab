@@ -28,11 +28,15 @@ impl TargetRepository for SqliteTargetRepository {
             Some(value) => crate::models::json_string_required(value)?,
             None => "{}".to_string(),
         };
+        let profile_json = match &input.profile_json {
+            Some(value) => crate::models::json_string_required(value)?,
+            None => "{}".to_string(),
+        };
 
         sqlx::query(
             r#"
-            INSERT INTO targets (id, project_id, name, target_type, descriptor_json, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO targets (id, project_id, name, target_type, descriptor_json, profile_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&id)
@@ -40,6 +44,7 @@ impl TargetRepository for SqliteTargetRepository {
         .bind(&input.name)
         .bind(&input.target_type)
         .bind(&descriptor_json)
+        .bind(&profile_json)
         .bind(timestamp)
         .bind(timestamp)
         .execute(&self.pool)
@@ -82,18 +87,23 @@ impl TargetRepository for SqliteTargetRepository {
             Some(value) => crate::models::json_string_required(&value)?,
             None => existing.descriptor_json,
         };
+        let profile_json = match input.profile_json {
+            Some(value) => crate::models::json_string_required(&value)?,
+            None => existing.profile_json,
+        };
         let updated_at = now();
 
         let result = sqlx::query(
             r#"
             UPDATE targets
-            SET name = ?, target_type = ?, descriptor_json = ?, updated_at = ?
+            SET name = ?, target_type = ?, descriptor_json = ?, profile_json = ?, updated_at = ?
             WHERE id = ?
             "#,
         )
         .bind(&name)
         .bind(&target_type)
         .bind(&descriptor_json)
+        .bind(&profile_json)
         .bind(updated_at)
         .bind(id)
         .execute(&self.pool)
@@ -110,6 +120,21 @@ impl TargetRepository for SqliteTargetRepository {
             "UPDATE targets SET descriptor_json = ?, updated_at = ? WHERE id = ?",
         )
         .bind(descriptor_json)
+        .bind(updated_at)
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_storage()?;
+        ensure_rows_affected(result, "target")?;
+        self.get(id).await
+    }
+
+    async fn update_profile(&self, id: &str, profile_json: &str) -> AisecResult<Target> {
+        let updated_at = now();
+        let result = sqlx::query(
+            "UPDATE targets SET profile_json = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(profile_json)
         .bind(updated_at)
         .bind(id)
         .execute(&self.pool)
@@ -157,6 +182,7 @@ mod tests {
                 name: "OpenAI API".into(),
                 target_type: "llm".into(),
                 descriptor_json: Some(serde_json::json!({"url": "https://api.example.com"})),
+                profile_json: None,
             })
             .await
             .unwrap();

@@ -22,6 +22,7 @@ pub struct Target {
     pub name: String,
     pub target_type: String,
     pub descriptor_json: String,
+    pub profile_json: String,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -69,7 +70,13 @@ pub struct Endpoint {
     pub source_url: Option<String>,
     pub discovered_at: OffsetDateTime,
     pub created_at: OffsetDateTime,
-    pub fingerprint_json: Option<String>,
+    pub metadata_json: Option<String>,
+    pub endpoint_type: String,
+    pub ai_framework: Option<String>,
+    pub risk_score: i64,
+    pub metadata_confidence: f64,
+    pub discovery_source: String,
+    pub auth_required: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
@@ -160,6 +167,7 @@ pub struct CreateTarget {
     pub name: String,
     pub target_type: String,
     pub descriptor_json: Option<serde_json::Value>,
+    pub profile_json: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -167,6 +175,7 @@ pub struct UpdateTarget {
     pub name: Option<String>,
     pub target_type: Option<String>,
     pub descriptor_json: Option<serde_json::Value>,
+    pub profile_json: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -222,7 +231,13 @@ pub struct CreateEndpoint {
     pub evidence: Option<String>,
     pub source_url: Option<String>,
     pub discovered_at: OffsetDateTime,
-    pub fingerprint_json: Option<String>,
+    pub metadata_json: Option<String>,
+    pub endpoint_type: Option<String>,
+    pub ai_framework: Option<String>,
+    pub risk_score: Option<i64>,
+    pub metadata_confidence: Option<f64>,
+    pub discovery_source: Option<String>,
+    pub auth_required: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -98,6 +98,7 @@ async fn mvp_end_to_end_flow() {
             name: "MVP Target".into(),
             target_type: "llm_api".into(),
             descriptor_json: Some(json!({ "url": base })),
+            profile_json: None,
         })
         .await
         .expect("step 2: add target");

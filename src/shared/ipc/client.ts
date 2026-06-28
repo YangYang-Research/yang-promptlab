@@ -37,6 +37,7 @@ export type TargetDto = {
   name: string;
   target_type: string;
   descriptor: unknown;
+  profile: unknown;
   created_at: string;
   updated_at: string;
 };
@@ -83,9 +84,120 @@ export type EndpointDto = {
   evidence: string | null;
   source_url: string | null;
   discovered_at: string;
-  fingerprint: EndpointFingerprintDto | null;
+  endpoint_type: string;
+  ai_framework: string | null;
+  risk_score: number;
+  metadata_confidence: number;
+  discovery_source: string;
+  auth_required: boolean;
+  metadata: AiEndpointMetadataDto | null;
+  attack_recommendations: EndpointAttackRecommendationDto[];
 };
 
+export type AiEndpointMetadataDto = {
+  basic: EndpointBasicDto;
+  fingerprint: FingerprintMetadataDto;
+  schema: SchemaMetadataDto;
+  inference: InferenceFieldsDto;
+  capabilities: EndpointCapabilitiesDto;
+  classification: EndpointClassificationDto;
+  risk: RiskAssessmentDto;
+  provenance: DiscoveryProvenanceDto;
+  raw?: RawObservationDto | null;
+};
+
+export type EndpointBasicDto = {
+  id: string;
+  url: string;
+  method: string;
+  host: string;
+  protocol: string;
+  status: number;
+};
+
+export type FingerprintMetadataDto = {
+  framework: string;
+  provider: string;
+  version: string;
+  confidence: number;
+  apiStyle: string;
+  technologies: string[];
+};
+
+export type SchemaMetadataDto = {
+  contentType: string | null;
+  requestSchema: NormalizedSchemaDto | null;
+  responseSchema: NormalizedSchemaDto | null;
+  transport: string[];
+};
+
+export type NormalizedSchemaDto = {
+  format: string;
+  fields: SchemaFieldDto[];
+};
+
+export type SchemaFieldDto = {
+  name: string;
+  fieldType: string;
+  required: boolean;
+};
+
+export type InferenceFieldsDto = {
+  promptField: string | null;
+  historyField: string | null;
+  conversationField: string | null;
+  modelField: string | null;
+  streamField: string | null;
+  toolField: string | null;
+  attachmentField: string | null;
+};
+
+export type EndpointCapabilitiesDto = {
+  supportsChat: boolean;
+  supportsStreaming: boolean;
+  supportsEmbedding: boolean;
+  supportsVision: boolean;
+  supportsTools: boolean;
+  supportsJsonMode: boolean;
+  supportsThinking: boolean;
+  supportsMemory: boolean;
+  supportsAgent: boolean;
+};
+
+export type EndpointClassificationDto = {
+  endpointType: string;
+  aiFramework: string;
+  confidence: number;
+  riskScore: number;
+};
+
+export type RiskAssessmentDto = {
+  score: number;
+  factors: string[];
+};
+
+export type DiscoveryProvenanceDto = {
+  discoverySource: string;
+  authenticationRequired: boolean;
+  discoveredAt: string;
+  kind: string;
+  evidence: string | null;
+};
+
+export type RawObservationDto = {
+  requestHeaders: Record<string, string>;
+  requestBody: string | null;
+  responseHeaders: Record<string, string>;
+  responseBody: string | null;
+};
+
+export type EndpointAttackRecommendationDto = {
+  category: string;
+  reason: string;
+  priority: number;
+};
+
+/** @deprecated Use metadata + attack_recommendations */
 export type EndpointFingerprintDto = {
   confidence: number;
   technologies: FingerprintTechnologyDto[];
@@ -144,6 +256,7 @@ export type DiscoveryStatsDto = {
   duration_ms: number;
   endpoint_count: number;
   errors: string[];
+  phases?: string[];
 };
 
 export type DiscoveryRunDto = {
@@ -167,7 +280,6 @@ export type ScanStartDto = {
 export type ScanStartRequest = {
   projectId: string;
   targetId: string;
-  endpointIds: string[];
   profile: string;
   categories: string[];
   disabledTests?: string[];
@@ -232,6 +344,12 @@ export const listTargets = (projectId: string) =>
   invokeCommand<TargetDto[]>("target_list", { projectId });
 
 export const getTarget = (id: string) => invokeCommand<TargetDto>("target_get", { id });
+
+export const getTargetWizardDescriptor = (id: string) =>
+  invokeCommand<TargetDto>("target_wizard_descriptor", { id });
+
+export const updateTargetDescriptor = (id: string, descriptor: unknown) =>
+  invokeCommand<TargetDto>("target_update_descriptor", { id, descriptor });
 
 export const createTarget = (
   projectId: string,
@@ -311,7 +429,6 @@ export const startScan = (request: ScanStartRequest) =>
   invokeCommand<ScanStartDto>("scan_start", {
     projectId: request.projectId,
     targetId: request.targetId,
-    endpointIds: request.endpointIds,
     profile: request.profile,
     categories: request.categories,
     disabledTests: request.disabledTests ?? [],

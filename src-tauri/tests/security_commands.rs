@@ -57,6 +57,7 @@ async fn audit_detects_legacy_target_session_secrets() {
                 "url": "https://example.com",
                 "auth": { "kind": "basic", "config": { "username": "u", "password": "secret" } }
             })),
+            profile_json: None,
         })
         .await
         .unwrap();
@@ -125,6 +126,7 @@ async fn migrate_clears_plaintext_secrets() {
             name: "t".into(),
             target_type: "web".into(),
             descriptor_json: Some(descriptor.clone()),
+            profile_json: None,
         })
         .await
         .unwrap();

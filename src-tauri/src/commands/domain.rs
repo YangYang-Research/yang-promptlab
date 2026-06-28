@@ -4,7 +4,9 @@
 //! function that takes `&AppState`, so the same logic is exercised by the
 //! integration tests without a Tauri runtime.
 
-use aisec_auth::{sanitize_target_descriptor, SecretStore};
+use aisec_auth::{
+    resolve_descriptor_for_wizard, sanitize_target_descriptor, SecretStore,
+};
 use aisec_core::AisecError;
 use aisec_report::{
     ReportDataBuilder, ReportFormat, ReportKind, ReportingEngine, StorageFindingRow,
@@ -76,6 +78,7 @@ pub async fn target_create_op(
             name,
             target_type,
             descriptor_json,
+            profile_json: None,
         })
         .await
         .map_err(CommandError::from)?;
@@ -98,6 +101,49 @@ pub async fn target_get_op(state: &AppState, target_id: String) -> CommandResult
         .repositories()
         .targets()
         .get(&target_id)
+        .await
+        .map_err(CommandError::from)?;
+    Ok(TargetDto::from(target))
+}
+
+/// Return a target descriptor with auth secrets resolved for the scan wizard edit form.
+pub async fn target_wizard_descriptor_op(
+    state: &AppState,
+    target_id: String,
+) -> CommandResult<TargetDto> {
+    let target = state
+        .repositories()
+        .targets()
+        .get(&target_id)
+        .await
+        .map_err(CommandError::from)?;
+    let descriptor_json = target.descriptor_json.clone();
+    let mut dto = TargetDto::from(target);
+    let secrets = SecretStore::new().map_err(CommandError::from)?;
+    let resolved = resolve_descriptor_for_wizard(&descriptor_json, &secrets)
+        .map_err(CommandError::from)?;
+    dto.descriptor = serde_json::from_str(&resolved).map_err(|err| {
+        CommandError::from(AisecError::internal(format!(
+            "invalid resolved descriptor json: {err}"
+        )))
+    })?;
+    Ok(dto)
+}
+
+pub async fn target_update_descriptor_op(
+    state: &AppState,
+    target_id: String,
+    descriptor: serde_json::Value,
+) -> CommandResult<TargetDto> {
+    let raw = serde_json::to_string(&descriptor).map_err(|err| {
+        CommandError::from(AisecError::invalid_input(err.to_string()))
+    })?;
+    let secrets = SecretStore::new().map_err(CommandError::from)?;
+    let (sanitized, _) = sanitize_target_descriptor(&raw, &secrets).map_err(CommandError::from)?;
+    let target = state
+        .repositories()
+        .targets()
+        .update_descriptor(&target_id, &sanitized)
         .await
         .map_err(CommandError::from)?;
     Ok(TargetDto::from(target))
@@ -357,6 +403,23 @@ pub async fn target_list(
 #[tauri::command]
 pub async fn target_get(state: State<'_, AppState>, id: String) -> CommandResult<TargetDto> {
     target_get_op(state.inner(), id).await
+}
+
+#[tauri::command]
+pub async fn target_wizard_descriptor(
+    state: State<'_, AppState>,
+    id: String,
+) -> CommandResult<TargetDto> {
+    target_wizard_descriptor_op(state.inner(), id).await
+}
+
+#[tauri::command]
+pub async fn target_update_descriptor(
+    state: State<'_, AppState>,
+    id: String,
+    descriptor: serde_json::Value,
+) -> CommandResult<TargetDto> {
+    target_update_descriptor_op(state.inner(), id, descriptor).await
 }
 
 #[tauri::command]

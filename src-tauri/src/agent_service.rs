@@ -64,16 +64,11 @@ impl AgentHost for ScanAgentHost<'_> {
         if endpoint_id != self.endpoint.id {
             return Err(AgentError::InvalidInput("endpoint mismatch".into()));
         }
-        let report: StackFingerprintReport = self
-            .endpoint
-            .fingerprint_json
-            .as_deref()
-            .and_then(|raw| serde_json::from_str(raw).ok())
-            .ok_or_else(|| {
-                AgentError::InvalidInput(format!(
-                    "endpoint {url} has no fingerprint — re-run discovery first"
-                ))
-            })?;
+        let report = crate::dto::stack_fingerprint_from_endpoint(&self.endpoint).ok_or_else(|| {
+            AgentError::InvalidInput(format!(
+                "endpoint {url} has no AI metadata — re-run discovery first"
+            ))
+        })?;
         Ok(report)
     }
 

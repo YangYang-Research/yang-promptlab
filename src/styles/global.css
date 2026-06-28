@@ -3224,6 +3224,43 @@ a:hover {
 .wizard-target-form {
   max-width: 36rem;
 }
+.wizard-target-form__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+}
+.wizard-target-form__row--wrap {
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+.wizard-target-form__field-grow {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.wizard-target-form__method {
+  flex: 0 0 7.5rem;
+}
+.wizard-target-form__label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.wizard-target-form__mono {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+}
+.wizard-target-form__template {
+  min-height: 14rem;
+}
+.wizard-target-form__advanced {
+  margin-top: 0.25rem;
+}
+.wizard-target-form__advanced summary {
+  cursor: pointer;
+  user-select: none;
+}
 .wizard-auth-fieldset {
   border: none;
   margin: 0;
@@ -3468,6 +3505,45 @@ a:hover {
 }
 .wizard-discovery-stats {
   margin: 0;
+}
+.verification-console {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+}
+.verification-console__header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.verification-console__message {
+  margin: 0;
+}
+.verification-console__block {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-base);
+  overflow-x: auto;
+  font-size: 0.8125rem;
+}
+.auth-verification-step {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 36rem;
+}
+.auth-verification-step__status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 .wizard-endpoints {
   display: flex;
@@ -4223,4 +4299,137 @@ a:hover {
   .settings-grid { grid-template-columns: 1fr; }
   .third-party-models__form { grid-template-columns: 1fr; }
   .topbar__context { display: none; }
+}
+
+/* AI endpoint metadata (discovery wizard) */
+.wizard-endpoint-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  align-items: center;
+}
+
+.wizard-endpoint-filters__range {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.wizard-endpoint-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.wizard-endpoint-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.endpoint-metadata-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  background: var(--surface-elevated);
+  cursor: pointer;
+}
+
+.endpoint-metadata-card--selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.endpoint-metadata-card__header {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.endpoint-metadata-card__title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.endpoint-metadata-card__stats {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 1rem;
+  margin: 0.75rem 0 0;
+  font-size: 0.8125rem;
+}
+
+.endpoint-metadata-card__stats dt {
+  color: var(--text-muted);
+}
+
+.endpoint-metadata-card__caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.endpoint-cap {
+  font-size: 0.75rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+.endpoint-cap--on {
+  color: var(--success);
+}
+
+.endpoint-cap--off {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.endpoint-details-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  background: var(--surface);
+  max-height: 520px;
+  overflow: auto;
+}
+
+.endpoint-details-panel--empty {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.endpoint-details-panel__title {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+}
+
+.endpoint-details-panel section {
+  margin-bottom: 1rem;
+}
+
+.endpoint-details-panel section h5 {
+  margin: 0 0 0.5rem;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.endpoint-details-panel__raw {
+  font-size: 0.75rem;
+  max-height: 160px;
+  overflow: auto;
+  background: var(--surface-elevated);
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
 }

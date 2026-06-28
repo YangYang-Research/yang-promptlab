@@ -20,6 +20,7 @@ pub trait TargetRepository: Send + Sync {
     async fn list_all(&self) -> AisecResult<Vec<Target>>;
     async fn update(&self, id: &str, input: UpdateTarget) -> AisecResult<Target>;
     async fn update_descriptor(&self, id: &str, descriptor_json: &str) -> AisecResult<Target>;
+    async fn update_profile(&self, id: &str, profile_json: &str) -> AisecResult<Target>;
     async fn delete(&self, id: &str) -> AisecResult<()>;
 }
 

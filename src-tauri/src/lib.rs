@@ -9,7 +9,6 @@ pub mod db;
 pub mod dto;
 pub mod error;
 pub mod events;
-pub mod fingerprint_service;
 pub mod jobs;
 pub mod logging;
 pub mod method_heuristic;
@@ -19,6 +18,7 @@ pub mod inference_settings;
 pub mod model_registry;
 pub mod third_party_credentials;
 pub mod embedded_runtime;
+pub mod endpoint_pipeline;
 pub mod plugin_service;
 pub mod plugin_transport;
 pub mod playwright_runtime;
@@ -61,6 +61,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // 5. Logging.
             let log_guard = logging::init_app_logging(app)?;
@@ -163,6 +164,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
         .invoke_handler(tauri::generate_handler![
             commands::health,
             commands::app_info,
+            commands::app::app_clear_all_data,
             commands::db_health,
             commands::projects::project_create,
             commands::projects::project_list,
@@ -172,6 +174,8 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::domain::target_create,
             commands::domain::target_list,
             commands::domain::target_get,
+            commands::domain::target_wizard_descriptor,
+            commands::domain::target_update_descriptor,
             commands::domain::scan_create,
             commands::domain::scan_list,
             commands::domain::scan_get,
@@ -221,6 +225,11 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::models::models_test_embeddings,
             commands::models::models_vault_path,
             commands::models::models_vault_stats,
+            commands::target_profile::target_profile_list_templates,
+            commands::target_profile::target_profile_save,
+            commands::target_profile::target_profile_verify,
+            commands::target_profile::target_profile_get,
+            commands::target_profile::planner_generate_from_profile,
             commands::planner::planner_generate,
             commands::generator::generator_generate,
             commands::runtime::runtime_status,

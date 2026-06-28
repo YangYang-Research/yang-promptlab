@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import { Button, Modal } from "@/shared/components";
+import { assertAiRuntimeReady } from "@/shared/runtime/aiRuntimeReadiness";
 import { useToast } from "@/shared/notifications";
 
 type NewProjectModalProps = {
@@ -11,7 +12,7 @@ type NewProjectModalProps = {
 };
 
 export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
-  const { actions } = useAppStore();
+  const { actions, backendConnected } = useAppStore();
   const { notify } = useToast();
   const navigate = useNavigate();
   const [name, setName] = useState("");
@@ -42,6 +43,15 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
     setSubmitting(true);
     setFormError(null);
     try {
+      const readiness = await assertAiRuntimeReady(backendConnected);
+      if (!readiness.ready) {
+        setFormError(readiness.message);
+        notify(readiness.message, "error");
+        navigate("/runtime");
+        setSubmitting(false);
+        return;
+      }
+
       const project = await actions.createProject(trimmed, description.trim() || null);
       notify(`Project "${trimmed}" created`, "success");
       reset();

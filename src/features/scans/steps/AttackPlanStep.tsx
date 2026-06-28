@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { Badge, Button } from "@/shared/components";
-import type { EndpointDto } from "@/shared/ipc";
-import { generateAttackPlan, type AttackPlanDto } from "@/shared/ipc/planner";
+import { generateAttackPlanFromProfile } from "@/shared/ipc/targetProfile";
+import type { AttackPlanDto } from "@/shared/ipc/planner";
 import { generatePromptPayloads, type PromptPayloadsDto } from "@/shared/ipc/generator";
 import { toAppError } from "@/shared/errors";
 
@@ -19,26 +19,21 @@ import {
   type AttackProfileId,
   type GeneratorMode,
 } from "../attackProfiles";
-import {
-  aggregateAttackSuggestions,
-  aggregatePlatformSummary,
-  platformLabel,
-} from "../fingerprintPlan";
+import type { TargetProfileFormState } from "../targetProfile";
+import { PROVIDER_OPTIONS } from "../targetProfile";
 import type { AttackPlanUiState } from "../wizardState";
 
 type AttackPlanStepProps = {
-  selectedEndpointCount: number;
-  endpoints: EndpointDto[];
-  selectedEndpointIds: string[];
+  targetId: string;
+  targetProfile: TargetProfileFormState;
   planUi: AttackPlanUiState;
   onPlanUiChange: (patch: Partial<AttackPlanUiState>) => void;
   onPlanChange?: (plan: AttackPlanConfig) => void;
 };
 
 export function AttackPlanStep({
-  selectedEndpointCount,
-  endpoints,
-  selectedEndpointIds,
+  targetId,
+  targetProfile,
   planUi,
   onPlanUiChange,
   onPlanChange,
@@ -53,15 +48,18 @@ export function AttackPlanStep({
   const [plannerError, setPlannerError] = useState<string | null>(null);
   const [generatorError, setGeneratorError] = useState<string | null>(null);
 
-  const fingerprintSuggestions = useMemo(
-    () => aggregateAttackSuggestions(endpoints, selectedEndpointIds),
-    [endpoints, selectedEndpointIds],
-  );
+  const providerLabel =
+    PROVIDER_OPTIONS.find((p) => p.id === targetProfile.provider)?.label ?? targetProfile.provider;
 
-  const detectedPlatforms = useMemo(
-    () => aggregatePlatformSummary(endpoints, selectedEndpointIds),
-    [endpoints, selectedEndpointIds],
-  );
+  const capabilityHints = useMemo(() => {
+    const caps = targetProfile.defaultCapabilities;
+    const hints: string[] = [];
+    if (caps.supportsTools || caps.supportsAgent) hints.push("tools/agent");
+    if (caps.supportsMemory) hints.push("memory");
+    if (caps.supportsConversation) hints.push("conversation");
+    if (caps.supportsStreaming) hints.push("streaming");
+    return hints;
+  }, [targetProfile.defaultCapabilities]);
 
   const activeCategories = useMemo(() => {
     if (profileId === "custom") return customCategories;
@@ -70,12 +68,12 @@ export function AttackPlanStep({
 
   const estimateInput = useMemo(
     () => ({
-      selectedEndpointCount,
+      selectedEndpointCount: 1,
       profileId,
       customCategories,
       disabledTestIds: disabledTestSet,
     }),
-    [selectedEndpointCount, profileId, customCategories, disabledTestSet],
+    [profileId, customCategories, disabledTestSet],
   );
 
   const estimatedRequests = estimateRequests(estimateInput);
@@ -135,14 +133,11 @@ export function AttackPlanStep({
   }
 
   async function handleGeneratePlan(mode: "deterministic" | "local_llm") {
-    if (selectedEndpointIds.length === 0) return;
+    if (!targetId) return;
     setGenerating(mode);
     setPlannerError(null);
     try {
-      const plan = await generateAttackPlan({
-        endpointIds: selectedEndpointIds,
-        mode,
-      });
+      const plan = await generateAttackPlanFromProfile(targetId, mode);
       setGeneratedPlan(plan);
       applyGeneratedPlan(plan);
     } catch (err) {
@@ -175,80 +170,74 @@ export function AttackPlanStep({
     }
   }
 
-  function applyFingerprintSuggestions() {
-    if (fingerprintSuggestions.categories.length === 0) return;
+  function applyCapabilitySuggestions() {
     onPlanUiChange({
       profileId: "custom",
-      customCategories: fingerprintSuggestions.categories,
+      customCategories: [
+        "prompt_injection",
+        "jailbreak",
+        "system_prompt_extraction",
+        ...(targetProfile.defaultCapabilities.supportsMemory
+          ? (["memory_poisoning", "cross_user_leakage"] as AttackCategoryId[])
+          : []),
+        ...(targetProfile.defaultCapabilities.supportsTools ||
+        targetProfile.defaultCapabilities.supportsAgent
+          ? (["tool_abuse", "agent_goal_hijacking"] as AttackCategoryId[])
+          : []),
+        ...(targetProfile.provider === "mcp" ? (["mcp_abuse"] as AttackCategoryId[]) : []),
+      ],
       disabledTests: [],
     });
   }
 
   return (
     <div className="wizard-step">
-      {detectedPlatforms.length > 0 && (
-        <div className="wizard-fingerprint-summary">
-          <h4 className="wizard-endpoints__title">Attack Planner</h4>
-          <p className="text-muted text-sm">
-            Platforms identified before attack execution:{" "}
-            {detectedPlatforms
-              .map((p) => {
-                const flags = [
-                  p.memoryEnabled && "memory",
-                  p.toolsEnabled && "tools",
-                  p.ragEnabled && "RAG",
-                ]
-                  .filter(Boolean)
-                  .join(", ");
-                return flags
-                  ? `${platformLabel(p.platform)} (${flags})`
-                  : platformLabel(p.platform);
-              })
-              .join(" · ")}
-          </p>
-          <div className="wizard-fingerprint-summary__actions">
-            <Button
-              variant="primary"
-              type="button"
-              disabled={generating !== null || selectedEndpointIds.length === 0}
-              onClick={() => void handleGeneratePlan("deterministic")}
-            >
-              {generating === "deterministic" ? "Planning…" : "Generate (Deterministic)"}
-            </Button>
-            <Button
-              variant="secondary"
-              type="button"
-              disabled={generating !== null || selectedEndpointIds.length === 0}
-              onClick={() => void handleGeneratePlan("local_llm")}
-            >
-              {generating === "local_llm" ? "Planning…" : "Generate (Local LLM)"}
-            </Button>
-            {fingerprintSuggestions.categories.length > 0 && (
-              <Button variant="ghost" type="button" onClick={applyFingerprintSuggestions}>
-                Apply rule suggestions
-              </Button>
-            )}
-          </div>
-          {(plannerSummary || generatedPlan?.summary) && (
-            <p className="text-sm wizard-planner-summary">
-              <strong>Plan:</strong> {plannerSummary ?? generatedPlan?.summary}
-              {(plannerMode ?? generatedPlan?.mode) && (
-                <Badge variant="muted">{plannerMode ?? generatedPlan?.mode ?? ""}</Badge>
-              )}
-            </p>
-          )}
-          {generatedPlan && generatedPlan.rationales.length > 0 && (
-            <ul className="wizard-planner-rationales text-sm text-muted">
-              {generatedPlan.rationales.slice(0, 6).map((item) => (
-                <li key={`${item.category}-${item.source}`}>
-                  {getCategory(item.category as AttackCategoryId).label}: {item.reason}
-                </li>
-              ))}
-            </ul>
-          )}
-          {plannerError && <p className="text-danger text-sm">{plannerError}</p>}
+      <div className="wizard-fingerprint-summary">
+        <h4 className="wizard-endpoints__title">Attack Planner</h4>
+        <p className="text-muted text-sm">
+          Target profile: <strong>{providerLabel}</strong>
+          {capabilityHints.length > 0 && <> · {capabilityHints.join(", ")}</>}
+        </p>
+        <div className="wizard-fingerprint-summary__actions">
+          <Button
+            variant="primary"
+            type="button"
+            disabled={generating !== null || !targetId}
+            onClick={() => void handleGeneratePlan("deterministic")}
+          >
+            {generating === "deterministic" ? "Planning…" : "Generate (Deterministic)"}
+          </Button>
+          <Button
+            variant="secondary"
+            type="button"
+            disabled={generating !== null || !targetId}
+            onClick={() => void handleGeneratePlan("local_llm")}
+          >
+            {generating === "local_llm" ? "Planning…" : "Generate (Local LLM)"}
+          </Button>
+          <Button variant="ghost" type="button" onClick={applyCapabilitySuggestions}>
+            Apply capability suggestions
+          </Button>
         </div>
-      )}
+        {(plannerSummary || generatedPlan?.summary) && (
+          <p className="text-sm wizard-planner-summary">
+            <strong>Plan:</strong> {plannerSummary ?? generatedPlan?.summary}
+            {(plannerMode ?? generatedPlan?.mode) && (
+              <Badge variant="muted">{plannerMode ?? generatedPlan?.mode ?? ""}</Badge>
+            )}
+          </p>
+        )}
+        {generatedPlan && generatedPlan.rationales.length > 0 && (
+          <ul className="wizard-planner-rationales text-sm text-muted">
+            {generatedPlan.rationales.slice(0, 6).map((item) => (
+              <li key={`${item.category}-${item.source}`}>
+                {getCategory(item.category as AttackCategoryId).label}: {item.reason}
+              </li>
+            ))}
+          </ul>
+        )}
+        {plannerError && <p className="text-danger text-sm">{plannerError}</p>}
+      </div>
 
       <div className="wizard-fingerprint-summary">
         <h4 className="wizard-endpoints__title">Payload Generator</h4>
@@ -335,15 +324,6 @@ export function AttackPlanStep({
           </div>
         )}
       </div>
-
-      {detectedPlatforms.length === 0 && (
-        <div className="wizard-fingerprint-summary">
-          <h4 className="wizard-endpoints__title">Attack Planner</h4>
-          <p className="text-muted text-sm">
-            Run discovery with fingerprinted endpoints to generate a dynamic attack plan.
-          </p>
-        </div>
-      )}
 
       <div className="wizard-attack-profiles">
         {ATTACK_PROFILES.map((profile) => {

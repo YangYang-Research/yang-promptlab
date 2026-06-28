@@ -1,33 +1,30 @@
-//! Discovery execution commands.
-//!
-//! `discovery_run` executes the real `aisec-discovery` engine against a target's
-//! seed URL, persists a scan plus the discovered endpoints into SQLite, and
-//! returns the run summary. `endpoint_list` re-reads persisted endpoints for a
-//! scan (used to display results and reload after restart).
+//! Discovery execution — enumerate endpoints then run the AI metadata pipeline.
+
+use std::collections::HashSet;
 
 use aisec_discovery::{DiscoveryConfig, DiscoveryEngine};
+use aisec_endpoint_metadata::{analyze_endpoint, DiscoveryAnalysisInput};
 use aisec_plugin_host::collect_discovery_endpoints;
 use aisec_storage::{
     CreateEndpoint, CreateScan, EndpointRepository, ScanRepository, TargetRepository, UpdateEndpoint,
     UpdateScan,
 };
-use std::collections::HashSet;
 use tauri::{AppHandle, State};
 use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
 use url::Url;
 
 use crate::dto::{DiscoveryRunDto, DiscoveryStatsDto, EndpointDto, ScanDto};
-use crate::error::{CommandError, CommandResult};
-use crate::events::emit_app_data_changed;
-use crate::fingerprint_service::{
-    fingerprint_endpoint_url, fingerprint_json, should_fingerprint_kind,
+use crate::endpoint_pipeline::{
+    analysis_client, analysis_concurrency, build_metadata_for_discovered, target_requires_auth,
+    PipelineProgress, DISCOVERY_PIPELINE_PHASES,
 };
+use crate::error::{CommandError, CommandResult};
+use crate::events::{emit_app_data_changed, emit_discovery_progress};
 use crate::method_heuristic::default_http_method_for_path;
 use crate::session_auth::resolve_discovery_auth;
 use crate::state::AppState;
 
-/// Extract a seed URL from a target's descriptor JSON (`url` or `base_url`).
 fn seed_url_from_descriptor(descriptor_json: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(descriptor_json).ok()?;
     for key in ["url", "base_url", "baseUrl"] {
@@ -76,13 +73,6 @@ fn inferred_method(path_or_url: &str) -> String {
     default_http_method_for_path(path_or_url).to_string()
 }
 
-fn method_for_discovered_endpoint(url: &str, reported: Option<&str>) -> String {
-    reported
-        .map(|m| m.trim().to_ascii_uppercase())
-        .filter(|m| !m.is_empty())
-        .unwrap_or_else(|| inferred_method(url))
-}
-
 fn normalize_http_method(method: Option<String>) -> CommandResult<String> {
     const ALLOWED: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"];
     let method = method.unwrap_or_else(|| "GET".into());
@@ -96,6 +86,22 @@ fn normalize_http_method(method: Option<String>) -> CommandResult<String> {
         )));
     }
     Ok(upper)
+}
+
+fn plugin_to_discovered(
+    endpoint: aisec_plugin_host::PluginDiscoveryEndpoint,
+    seed_url: &str,
+) -> aisec_discovery::types::DiscoveredEndpoint {
+    use aisec_discovery::types::{DiscoveredEndpoint, EndpointKind};
+    DiscoveredEndpoint {
+        url: endpoint.url,
+        kind: EndpointKind::RestApi,
+        method: endpoint.method,
+        confidence: 0.6,
+        evidence: "Discovered by plugin".into(),
+        source_url: Some(seed_url.into()),
+        discovered_at: OffsetDateTime::now_utc(),
+    }
 }
 
 #[instrument(skip(state))]
@@ -121,18 +127,27 @@ pub async fn endpoint_create_op(
         _ => inferred_method(&path),
     };
 
-    let fingerprint_client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
-    let fingerprint_json = fingerprint_endpoint_url(
-        &fingerprint_client,
-        &url,
-        Some(method.as_str()),
-        "rest_api",
+    let auth_required = target_requires_auth(state, &target.descriptor_json, &url).await;
+    let client = analysis_client();
+    let metadata = analyze_endpoint(
+        &client,
+        DiscoveryAnalysisInput {
+            endpoint_id: aisec_storage::util::new_id(),
+            url: url.clone(),
+            method: method.clone(),
+            kind: "manual".into(),
+            discovery_confidence: 1.0,
+            discovery_source: "manual".into(),
+            evidence: Some("Manual entry".into()),
+            discovered_at: OffsetDateTime::now_utc(),
+            auth_required,
+        },
     )
-    .await
-    .map(|report| fingerprint_json(&report));
+    .await;
+
+    let json = metadata
+        .to_json()
+        .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
 
     let endpoint = repos
         .endpoints()
@@ -142,16 +157,22 @@ pub async fn endpoint_create_op(
             url,
             kind: "manual".into(),
             method: Some(method),
-            confidence: 1.0,
+            confidence: metadata.classification.confidence as f64,
             evidence: Some("Manual entry".into()),
             source_url: Some("manual".into()),
             discovered_at: OffsetDateTime::now_utc(),
-            fingerprint_json,
+            metadata_json: Some(json),
+            endpoint_type: Some(metadata.classification.endpoint_type.as_str().into()),
+            ai_framework: Some(metadata.classification.ai_framework.clone()),
+            risk_score: Some(metadata.risk.score as i64),
+            metadata_confidence: Some(metadata.classification.confidence as f64),
+            discovery_source: Some("manual".into()),
+            auth_required: Some(auth_required),
         })
         .await
         .map_err(CommandError::from)?;
 
-    info!(id = %endpoint.id, url = %endpoint.url, "manual endpoint created");
+    info!(id = %endpoint.id, url = %endpoint.url, "manual endpoint created with AI metadata");
     Ok(endpoint.into())
 }
 
@@ -215,12 +236,14 @@ pub async fn discovery_run_op(
         created
     };
 
-    // Run the real discovery engine. allow_private_network is enabled so the
-    // desktop tool can scan localhost / internal targets the operator owns.
-    // worker_count is pinned to 1: the crawler has a known deadlock with
-    // concurrent workers (see crates/aisec-discovery/examples/verify_target.rs
-    // and docs/DISCOVERY_VERIFICATION_REPORT.md), so single-worker is the
-    // proven-stable setting until that is fixed.
+    emit_discovery_progress(
+        app,
+        DISCOVERY_PIPELINE_PHASES[0],
+        0,
+        0,
+        0,
+    );
+
     let config = DiscoveryConfig {
         max_depth: 2,
         max_pages: 25,
@@ -262,10 +285,16 @@ pub async fn discovery_run_op(
         }
     };
 
-    let fingerprint_client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
+    let mut discovered = report.endpoints.clone();
+  {
+        let mut plugin_manager = state.plugin_manager().lock().await;
+        if let Ok(plugin_endpoints) = collect_discovery_endpoints(&mut plugin_manager, &seed_url).await
+        {
+            for endpoint in plugin_endpoints {
+                discovered.push(plugin_to_discovered(endpoint, &seed_url));
+            }
+        }
+    }
 
     let existing_endpoints = repos
         .endpoints()
@@ -273,89 +302,32 @@ pub async fn discovery_run_op(
         .await
         .map_err(CommandError::from)?;
     let existing_urls: HashSet<String> = existing_endpoints.iter().map(|e| e.url.clone()).collect();
+    discovered.retain(|e| !existing_urls.contains(&e.url));
 
-    let mut inputs: Vec<CreateEndpoint> = Vec::with_capacity(report.endpoints.len());
-    for e in &report.endpoints {
-        if existing_urls.contains(&e.url) {
-            continue;
-        }
-        let method = method_for_discovered_endpoint(&e.url, e.method.as_deref());
-        let fingerprint_json = if should_fingerprint_kind(e.kind.as_str()) {
-            fingerprint_endpoint_url(
-                &fingerprint_client,
-                &e.url,
-                Some(method.as_str()),
-                e.kind.as_str(),
-            )
-            .await
-            .map(|report| fingerprint_json(&report))
-        } else {
-            None
-        };
+    let auth_required = target_requires_auth(state, &target.descriptor_json, &seed_url).await;
+    let client = analysis_client();
+    let app_handle = app.clone();
+    let scan_id = scan.id.clone();
+    let target_id = target.id.clone();
 
-        inputs.push(CreateEndpoint {
-            scan_id: scan.id.clone(),
-            target_id: Some(target.id.clone()),
-            url: e.url.clone(),
-            kind: e.kind.as_str().to_string(),
-            method: Some(method),
-            confidence: e.confidence as f64,
-            evidence: Some(e.evidence.clone()),
-            source_url: e.source_url.clone(),
-            discovered_at: e.discovered_at,
-            fingerprint_json,
-        });
-    }
-
-    {
-        let mut plugin_manager = state.plugin_manager().lock().await;
-        if let Ok(plugin_endpoints) = collect_discovery_endpoints(&mut plugin_manager, &seed_url).await
-        {
-            let mut known: HashSet<String> = existing_urls
-                .iter()
-                .chain(inputs.iter().map(|e| &e.url))
-                .cloned()
-                .collect();
-            for endpoint in plugin_endpoints {
-                if known.contains(&endpoint.url) {
-                    continue;
-                }
-                let method = method_for_discovered_endpoint(
-                    &endpoint.url,
-                    endpoint.method.as_deref(),
-                );
-                let fingerprint_json = fingerprint_endpoint_url(
-                    &fingerprint_client,
-                    &endpoint.url,
-                    Some(method.as_str()),
-                    if endpoint.kind.is_empty() {
-                        "rest_api"
-                    } else {
-                        endpoint.kind.as_str()
-                    },
-                )
-                .await
-                .map(|report| fingerprint_json(&report));
-                known.insert(endpoint.url.clone());
-                inputs.push(CreateEndpoint {
-                    scan_id: scan.id.clone(),
-                    target_id: Some(target.id.clone()),
-                    url: endpoint.url,
-                    kind: if endpoint.kind.is_empty() {
-                        "plugin".into()
-                    } else {
-                        endpoint.kind
-                    },
-                    method: Some(method),
-                    confidence: 0.6,
-                    evidence: Some("Discovered by plugin".into()),
-                    source_url: Some(seed_url.clone()),
-                    discovered_at: OffsetDateTime::now_utc(),
-                    fingerprint_json,
-                });
-            }
-        }
-    }
+    let inputs = build_metadata_for_discovered(
+        &client,
+        &discovered,
+        &target_id,
+        &scan_id,
+        auth_required,
+        analysis_concurrency(),
+        |progress: PipelineProgress| {
+            emit_discovery_progress(
+                &app_handle,
+                &progress.phase,
+                progress.processed,
+                progress.total,
+                progress.elapsed_ms,
+            );
+        },
+    )
+    .await;
 
     let newly_saved = if inputs.is_empty() {
         Vec::new()
@@ -381,6 +353,10 @@ pub async fn discovery_run_op(
         duration_ms: report.stats.duration_ms,
         endpoint_count: all_endpoints.len() as u64,
         errors: report.errors.clone(),
+        phases: DISCOVERY_PIPELINE_PHASES
+            .iter()
+            .map(|p| (*p).to_string())
+            .collect(),
     };
 
     let updated = repos
@@ -399,6 +375,7 @@ pub async fn discovery_run_op(
                     "duration_ms": stats.duration_ms,
                     "endpoint_count": stats.endpoint_count,
                     "errors": stats.errors,
+                    "pipeline": "ai_endpoint_metadata",
                 })),
                 ..Default::default()
             },
@@ -459,10 +436,6 @@ pub async fn endpoint_update_op(
     emit_app_data_changed(app, "endpoint_updated");
     Ok(updated.into())
 }
-
-// ---------------------------------------------------------------------------
-// Tauri command wrappers
-// ---------------------------------------------------------------------------
 
 #[tauri::command]
 pub async fn endpoint_create(

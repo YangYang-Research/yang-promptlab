@@ -66,7 +66,18 @@ pub fn resolve_descriptor_for_runtime(
 ) -> AisecResult<String> {
     let mut value: Value = serde_json::from_str(descriptor_json)
         .map_err(|err| AisecError::invalid_input(format!("invalid descriptor json: {err}")))?;
-    resolve_auth_block(value.get_mut("auth"), secrets)?;
+    resolve_auth_block(value.get_mut("auth"), secrets, false)?;
+    Ok(value.to_string())
+}
+
+/// Resolve secrets for wizard edit forms. Missing keychain entries are dropped so the user can re-enter credentials.
+pub fn resolve_descriptor_for_wizard(
+    descriptor_json: &str,
+    secrets: &SecretStore,
+) -> AisecResult<String> {
+    let mut value: Value = serde_json::from_str(descriptor_json)
+        .map_err(|err| AisecError::invalid_input(format!("invalid descriptor json: {err}")))?;
+    resolve_auth_block(value.get_mut("auth"), secrets, true)?;
     Ok(value.to_string())
 }
 
@@ -106,7 +117,11 @@ fn sanitize_auth_block(auth: Option<&mut Value>, secrets: &SecretStore) -> Aisec
     Ok(changed)
 }
 
-fn resolve_auth_block(auth: Option<&mut Value>, secrets: &SecretStore) -> AisecResult<()> {
+fn resolve_auth_block(
+    auth: Option<&mut Value>,
+    secrets: &SecretStore,
+    lenient: bool,
+) -> AisecResult<()> {
     let Some(auth_value) = auth else {
         return Ok(());
     };
@@ -115,9 +130,9 @@ fn resolve_auth_block(auth: Option<&mut Value>, secrets: &SecretStore) -> AisecR
     };
 
     if let Some(config) = obj.get_mut("config").and_then(|v| v.as_object_mut()) {
-        resolve_secret_field(config, "password_credential_id", "password", secrets)?;
-        resolve_secret_field(config, "token_credential_id", "token", secrets)?;
-        resolve_secret_field(config, "key_credential_id", "key", secrets)?;
+        resolve_secret_field(config, "password_credential_id", "password", secrets, lenient)?;
+        resolve_secret_field(config, "token_credential_id", "token", secrets, lenient)?;
+        resolve_secret_field(config, "key_credential_id", "key", secrets, lenient)?;
     }
 
     if let Some(id) = obj
@@ -125,13 +140,25 @@ fn resolve_auth_block(auth: Option<&mut Value>, secrets: &SecretStore) -> AisecR
         .and_then(|v| v.as_str())
         .map(str::to_string)
     {
-        let secret = secrets.load(SecretScope::Target, &CredentialReferenceId::parse(id))?;
-        if let Ok(parsed) = serde_json::from_str::<Value>(&secret) {
-            if let Some(key) = parsed.get("key").and_then(|v| v.as_str()) {
-                if let Some(config) = obj.get_mut("config").and_then(|v| v.as_object_mut()) {
-                    config.insert("key".into(), Value::String(key.to_string()));
+        let secret = if lenient {
+            secrets
+                .load_optional(SecretScope::Target, &CredentialReferenceId::parse(id))?
+        } else {
+            Some(secrets.load(
+                SecretScope::Target,
+                &CredentialReferenceId::parse(id),
+            )?)
+        };
+        if let Some(secret) = secret {
+            if let Ok(parsed) = serde_json::from_str::<Value>(&secret) {
+                if let Some(key) = parsed.get("key").and_then(|v| v.as_str()) {
+                    if let Some(config) = obj.get_mut("config").and_then(|v| v.as_object_mut()) {
+                        config.insert("key".into(), Value::String(key.to_string()));
+                    }
                 }
             }
+        } else if lenient {
+            obj.remove("credential_reference_id");
         }
     }
 
@@ -160,6 +187,7 @@ fn resolve_secret_field(
     ref_key: &str,
     secret_key: &str,
     secrets: &SecretStore,
+    lenient: bool,
 ) -> AisecResult<()> {
     if obj.contains_key(secret_key) {
         return Ok(());
@@ -171,8 +199,27 @@ fn resolve_secret_field(
     else {
         return Ok(());
     };
-    let secret = secrets.load(SecretScope::Target, &CredentialReferenceId::parse(id))?;
-    obj.insert(secret_key.into(), Value::String(secret));
+    let credential_id = CredentialReferenceId::parse(id);
+    let secret = if lenient {
+        secrets.load_optional(SecretScope::Target, &credential_id)?
+    } else {
+        Some(secrets.load(SecretScope::Target, &credential_id)?)
+    };
+    match secret {
+        Some(value) => {
+            obj.insert(secret_key.into(), Value::String(value));
+        }
+        None if lenient => {
+            tracing::debug!(
+                ref_key,
+                credential_id = %credential_id,
+                "orphaned target credential reference removed for wizard"
+            );
+            obj.remove(ref_key);
+            obj.insert(format!("{secret_key}_vault_missing"), json!(true));
+        }
+        None => {}
+    }
     Ok(())
 }
 
@@ -192,5 +239,14 @@ mod tests {
         assert!(changed);
         assert!(!sanitized.contains("secret"));
         assert!(sanitized.contains("password_credential_id"));
+    }
+
+    #[test]
+    fn wizard_resolve_drops_orphaned_api_key_reference() {
+        let store = secrets();
+        let raw = r#"{"url":"https://api.example.com","auth":{"kind":"api_key","config":{"header_name":"Authorization","key_credential_id":"missing-id"}}}"#;
+        let resolved = resolve_descriptor_for_wizard(raw, &store).unwrap();
+        assert!(!resolved.contains("key_credential_id"));
+        assert!(resolved.contains("key_vault_missing"));
     }
 }

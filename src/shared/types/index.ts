@@ -109,6 +109,15 @@ export type DiscoveredEndpoint = {
   evidence: string | null;
   sourceUrl: string | null;
   discoveredAt: string;
+  endpointType?: string;
+  aiFramework?: string | null;
+  riskScore?: number;
+  metadataConfidence?: number;
+  discoverySource?: string;
+  authRequired?: boolean;
+  metadata?: import("@/shared/ipc/client").AiEndpointMetadataDto | null;
+  attackRecommendations?: import("@/shared/ipc/client").EndpointAttackRecommendationDto[];
+  /** @deprecated use metadata */
   fingerprint: EndpointFingerprint | null;
 };
 

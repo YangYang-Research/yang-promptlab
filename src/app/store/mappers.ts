@@ -168,27 +168,15 @@ export function mapEndpoints(endpoints: EndpointDto[]): DiscoveredEndpoint[] {
     evidence: e.evidence,
     sourceUrl: e.source_url,
     discoveredAt: e.discovered_at,
-    fingerprint: e.fingerprint
-      ? {
-          confidence: e.fingerprint.confidence,
-          technologies: e.fingerprint.technologies,
-          agentFrameworks: e.fingerprint.agentFrameworks,
-          aiComponents: e.fingerprint.aiComponents,
-          attackRecommendations: e.fingerprint.attackRecommendations,
-          methodsUsed: e.fingerprint.methodsUsed,
-          primaryProvider: e.fingerprint.primaryProvider,
-          apiStyle: e.fingerprint.apiStyle,
-          platformProfile: e.fingerprint.platformProfile ?? {
-            platform: "",
-            version: "",
-            authType: "",
-            llmProvider: "",
-            memoryEnabled: false,
-            toolsEnabled: false,
-            ragEnabled: false,
-          },
-        }
-      : null,
+    endpointType: e.endpoint_type,
+    aiFramework: e.ai_framework,
+    riskScore: e.risk_score,
+    metadataConfidence: e.metadata_confidence,
+    discoverySource: e.discovery_source,
+    authRequired: e.auth_required,
+    metadata: e.metadata,
+    attackRecommendations: e.attack_recommendations,
+    fingerprint: null,
   }));
 }
 

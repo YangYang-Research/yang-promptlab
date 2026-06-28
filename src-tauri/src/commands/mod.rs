@@ -8,6 +8,7 @@ use crate::state::AppState;
 
 pub mod attack;
 pub mod auth;
+pub mod app;
 pub mod discovery;
 pub mod domain;
 pub mod generator;
@@ -18,6 +19,7 @@ pub mod projects;
 pub mod runtime;
 pub mod scan;
 pub mod security;
+pub mod target_profile;
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {

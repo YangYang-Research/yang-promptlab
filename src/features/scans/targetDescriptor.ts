@@ -37,6 +37,10 @@ export type TargetFormState = {
   jwtToken: string;
   jwtHeaderName: string;
   jwtPrefix: string;
+  /** Set when a keychain reference existed but the secret is missing — user must re-enter. */
+  apiKeyVaultMissing?: boolean;
+  jwtVaultMissing?: boolean;
+  basicPasswordVaultMissing?: boolean;
 };
 
 export type TargetDescriptorInput = TargetFormState;
@@ -106,7 +110,107 @@ export function createInitialTargetForm(): TargetFormState {
     jwtToken: "",
     jwtHeaderName: "Authorization",
     jwtPrefix: "Bearer ",
+    apiKeyVaultMissing: false,
+    jwtVaultMissing: false,
+    basicPasswordVaultMissing: false,
   };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/** Hydrate wizard target form from a persisted target descriptor. */
+export function targetFormFromDescriptor(descriptor: unknown, fallbackUrl = ""): TargetFormState {
+  const form = createInitialTargetForm();
+  const root = asRecord(descriptor);
+  const url =
+    (typeof root?.url === "string" && root.url) ||
+    (typeof root?.base_url === "string" && root.base_url) ||
+    fallbackUrl;
+  form.url = url;
+
+  const auth = asRecord(root?.auth);
+  const kind = typeof auth?.kind === "string" ? auth.kind : "none";
+  const config = asRecord(auth?.config);
+  const sessionId = typeof auth?.session_id === "string" ? auth.session_id : null;
+
+  switch (kind) {
+    case "username_password":
+      form.authKind = "username_password";
+      form.loginUrl = typeof config?.login_url === "string" ? config.login_url : url;
+      form.loginUsername = typeof config?.username === "string" ? config.username : "";
+      form.loginPassword = typeof config?.password === "string" ? config.password : "";
+      form.browserSessionId = sessionId;
+      form.browserSessionReady = Boolean(sessionId);
+      break;
+    case "sso":
+      form.authKind = "sso";
+      form.ssoLoginUrl = typeof config?.login_url === "string" ? config.login_url : url;
+      form.ssoSuccessUrlPattern =
+        typeof config?.success_url_pattern === "string" ? config.success_url_pattern : "";
+      form.browserSessionId = sessionId;
+      form.browserSessionReady = Boolean(sessionId);
+      break;
+    case "basic":
+      form.authKind = "basic";
+      form.basicUsername =
+        typeof config?.username === "string"
+          ? config.username
+          : typeof auth?.username === "string"
+            ? auth.username
+            : "";
+      form.basicPassword = typeof config?.password === "string" ? config.password : "";
+      form.basicPasswordVaultMissing = config?.password_vault_missing === true;
+      break;
+    case "api_key":
+      form.authKind = "api_key";
+      form.apiKeyHeaderName =
+        typeof config?.header_name === "string"
+          ? config.header_name
+          : typeof auth?.header === "string"
+            ? auth.header
+            : "Authorization";
+      form.apiKeyValue =
+        typeof config?.key === "string"
+          ? config.key
+          : typeof auth?.value === "string"
+            ? auth.value
+            : "";
+      form.apiKeyPrefix = typeof config?.prefix === "string" ? config.prefix : "";
+      form.apiKeyVaultMissing = config?.key_vault_missing === true;
+      break;
+    case "jwt":
+      form.authKind = "jwt";
+      form.jwtToken = typeof config?.token === "string" ? config.token : "";
+      form.jwtHeaderName =
+        typeof config?.header_name === "string" ? config.header_name : "Authorization";
+      form.jwtPrefix = typeof config?.prefix === "string" ? config.prefix : "Bearer ";
+      form.jwtVaultMissing = config?.token_vault_missing === true;
+      break;
+    default:
+      form.authKind = "none";
+      break;
+  }
+
+  return migrateTargetForm(form);
+}
+
+export function targetFormNeedsSecretHydration(form: TargetFormState): boolean {
+  switch (form.authKind) {
+    case "api_key":
+      return !form.apiKeyValue.trim();
+    case "jwt":
+      return !form.jwtToken.trim();
+    case "basic":
+      return !form.basicPassword;
+    case "username_password":
+      return !form.loginPassword;
+    default:
+      return false;
+  }
 }
 
 /** Merge persisted wizard session fields from older auth shapes. */

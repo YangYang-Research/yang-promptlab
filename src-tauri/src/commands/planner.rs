@@ -50,7 +50,7 @@ fn parse_planner_mode(raw: &str) -> PlannerMode {
     }
 }
 
-fn plan_to_dto(plan: aisec_planner::AttackPlan) -> AttackPlanDto {
+pub fn plan_to_dto(plan: aisec_planner::AttackPlan) -> AttackPlanDto {
     AttackPlanDto {
         mode: match plan.mode {
             PlannerMode::Deterministic => "deterministic".into(),
@@ -93,20 +93,23 @@ pub async fn planner_generate_op(
             .get(id)
             .await
             .map_err(CommandError::from)?;
-        let report: StackFingerprintReport = endpoint
-            .fingerprint_json
-            .as_deref()
-            .and_then(|raw| serde_json::from_str(raw).ok())
-            .ok_or_else(|| {
-                CommandError::invalid_input(format!(
-                    "endpoint {} has no fingerprint — re-run discovery first",
-                    endpoint.url
-                ))
-            })?;
+        let report = crate::dto::stack_fingerprint_from_endpoint(&endpoint).ok_or_else(|| {
+            CommandError::invalid_input(format!(
+                "endpoint {} has no AI metadata — re-run discovery first",
+                endpoint.url
+            ))
+        })?;
+        let metadata = crate::dto::metadata_from_endpoint(&endpoint).ok_or_else(|| {
+            CommandError::invalid_input(format!(
+                "endpoint {} metadata is invalid — re-run discovery first",
+                endpoint.url
+            ))
+        })?;
         endpoints.push(FingerprintEndpoint {
             endpoint_id: endpoint.id,
             url: endpoint.url,
             report,
+            metadata: Some(metadata),
         });
     }
 

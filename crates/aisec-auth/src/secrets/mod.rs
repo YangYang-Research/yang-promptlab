@@ -20,5 +20,6 @@ pub use audit::{
     audit_database_secrets, merge_judge_config_audit, SecretAuditItem, SecretMigrationAudit,
 };
 pub use descriptor::{
-    descriptor_has_plaintext_secrets, resolve_descriptor_for_runtime, sanitize_target_descriptor,
+    descriptor_has_plaintext_secrets, resolve_descriptor_for_runtime,
+    resolve_descriptor_for_wizard, sanitize_target_descriptor,
 };

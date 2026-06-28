@@ -8,6 +8,8 @@ import {
   formatEstimatedRuntime,
   type AttackPlanConfig,
 } from "@/features/scans/attackProfiles";
+import type { TargetProfileFormState } from "@/features/scans/targetProfile";
+import { fullProfileUrl, PROVIDER_OPTIONS } from "@/features/scans/targetProfile";
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
 import type { Target } from "@/shared/types";
 
@@ -15,7 +17,7 @@ import { ScanConsole } from "./ScanConsole";
 
 type SubmitStepProps = {
   target: Target;
-  endpointIds: string[];
+  targetProfile: TargetProfileFormState;
   attackPlan: AttackPlanConfig;
   submittedScanId: string | null;
   onViewResult: () => void;
@@ -24,7 +26,7 @@ type SubmitStepProps = {
 
 export function SubmitStep({
   target,
-  endpointIds,
+  targetProfile,
   attackPlan,
   submittedScanId,
   onViewResult,
@@ -38,21 +40,23 @@ export function SubmitStep({
 
   const estimateInput = useMemo(
     () => ({
-      selectedEndpointCount: endpointIds.length,
+      selectedEndpointCount: 1,
       profileId: attackPlan.profileId,
       customCategories: attackPlan.customCategories,
       disabledTestIds: new Set(attackPlan.disabledTests),
     }),
-    [attackPlan, endpointIds.length],
+    [attackPlan],
   );
 
   const summaryRows = useMemo(() => {
     const profileLabel =
       ATTACK_PROFILES.find((profile) => profile.id === attackPlan.profileId)?.label ??
       attackPlan.profileId;
+    const providerLabel =
+      PROVIDER_OPTIONS.find((p) => p.id === targetProfile.provider)?.label ?? targetProfile.provider;
     return [
-      { label: "Target", value: target.url },
-      { label: "Endpoints", value: String(endpointIds.length) },
+      { label: "Target", value: fullProfileUrl(targetProfile) || target.url },
+      { label: "AI Platform", value: providerLabel },
       { label: "Profile", value: profileLabel },
       { label: "Categories", value: attackPlan.categories.join(", ") },
       {
@@ -70,7 +74,7 @@ export function SubmitStep({
         value: formatEstimatedRuntime(estimateRuntimeSeconds(estimateInput)),
       },
     ];
-  }, [attackPlan, endpointIds.length, estimateInput, target.url]);
+  }, [attackPlan, estimateInput, target.url, targetProfile]);
 
   if (submittedScanId && status) {
     const isRunning = ["running", "paused", "pending"].includes(status.status);

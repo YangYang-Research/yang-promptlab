@@ -1,3 +1,4 @@
+export { clearAllAppData } from "./app";
 export {
   listProjects,
   createProject,
@@ -8,6 +9,8 @@ export {
 } from "./projects";
 export {
   getTarget,
+  getTargetWizardDescriptor,
+  updateTargetDescriptor,
   createTarget,
   listTargets,
   healthCheck,

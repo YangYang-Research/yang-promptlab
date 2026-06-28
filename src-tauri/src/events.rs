@@ -7,6 +7,7 @@ use time::OffsetDateTime;
 pub const SCAN_PROGRESS_EVENT: &str = "scan-progress";
 pub const APP_DATA_CHANGED_EVENT: &str = "app-data-changed";
 pub const RUNTIME_INSTALL_PROGRESS_EVENT: &str = "runtime-install-progress";
+pub const DISCOVERY_PROGRESS_EVENT: &str = "discovery-progress";
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
@@ -106,6 +107,33 @@ pub fn emit_runtime_install_progress(
             step: step.into(),
             message: message.into(),
             phase,
+        },
+    );
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveryProgressEvent {
+    pub phase: String,
+    pub processed: usize,
+    pub total: usize,
+    pub elapsed_ms: u64,
+}
+
+pub fn emit_discovery_progress(
+    app: &AppHandle,
+    phase: &str,
+    processed: usize,
+    total: usize,
+    elapsed_ms: u64,
+) {
+    let _ = app.emit(
+        DISCOVERY_PROGRESS_EVENT,
+        DiscoveryProgressEvent {
+            phase: phase.into(),
+            processed,
+            total,
+            elapsed_ms,
         },
     );
 }

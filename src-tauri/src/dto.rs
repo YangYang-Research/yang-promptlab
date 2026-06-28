@@ -4,7 +4,7 @@
 //! timestamps become RFC 3339 strings and JSON text columns become parsed
 //! `serde_json::Value`s.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -54,6 +54,7 @@ pub struct TargetDto {
     pub name: String,
     pub target_type: String,
     pub descriptor: serde_json::Value,
+    pub profile: serde_json::Value,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -66,8 +67,139 @@ impl From<Target> for TargetDto {
             name: t.name,
             target_type: t.target_type,
             descriptor: json_str(&t.descriptor_json),
+            profile: json_str(&t.profile_json),
             created_at: ts(t.created_at),
             updated_at: ts(t.updated_at),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetCapabilitiesDto {
+    pub supports_streaming: bool,
+    pub supports_tools: bool,
+    pub supports_conversation: bool,
+    pub supports_attachments: bool,
+    pub supports_memory: bool,
+    pub supports_agent: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerificationResultDto {
+    pub verified: bool,
+    pub verified_at: Option<String>,
+    pub provider: String,
+    pub model: Option<String>,
+    pub capabilities: TargetCapabilitiesDto,
+    pub response_time_ms: u64,
+    pub status_code: u16,
+    pub status: String,
+    pub response_preview: Option<String>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetProfileDto {
+    pub provider: String,
+    pub framework: String,
+    pub method: String,
+    pub base_url: String,
+    pub path: String,
+    pub headers: std::collections::HashMap<String, String>,
+    pub request_template: String,
+    pub prompt_placeholder: String,
+    pub model_field: Option<String>,
+    pub streaming_field: Option<String>,
+    pub conversation_field: Option<String>,
+    pub tool_field: Option<String>,
+    pub attachment_field: Option<String>,
+    pub default_capabilities: TargetCapabilitiesDto,
+    pub verification_strategy: String,
+    pub verification: VerificationResultDto,
+}
+
+impl From<aisec_target_profile::TargetCapabilities> for TargetCapabilitiesDto {
+    fn from(c: aisec_target_profile::TargetCapabilities) -> Self {
+        Self {
+            supports_streaming: c.supports_streaming,
+            supports_tools: c.supports_tools,
+            supports_conversation: c.supports_conversation,
+            supports_attachments: c.supports_attachments,
+            supports_memory: c.supports_memory,
+            supports_agent: c.supports_agent,
+        }
+    }
+}
+
+impl From<aisec_target_profile::VerificationResult> for VerificationResultDto {
+    fn from(v: aisec_target_profile::VerificationResult) -> Self {
+        Self {
+            verified: v.verified,
+            verified_at: v.verified_at.map(|dt| ts(dt)),
+            provider: v.provider,
+            model: v.model,
+            capabilities: v.capabilities.into(),
+            response_time_ms: v.response_time_ms,
+            status_code: v.status_code,
+            status: v.status,
+            response_preview: v.response_preview,
+            error_message: v.error_message,
+        }
+    }
+}
+
+impl From<aisec_target_profile::TargetProfile> for TargetProfileDto {
+    fn from(p: aisec_target_profile::TargetProfile) -> Self {
+        Self {
+            provider: p.provider.as_str().into(),
+            framework: p.framework,
+            method: p.method.as_str().into(),
+            base_url: p.base_url,
+            path: p.path,
+            headers: p.headers,
+            request_template: p.request_template,
+            prompt_placeholder: p.prompt_placeholder,
+            model_field: p.model_field,
+            streaming_field: p.streaming_field,
+            conversation_field: p.conversation_field,
+            tool_field: p.tool_field,
+            attachment_field: p.attachment_field,
+            default_capabilities: p.default_capabilities.into(),
+            verification_strategy: p.verification_strategy,
+            verification: p.verification.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerificationConsoleEntryDto {
+    pub method: String,
+    pub url: String,
+    pub headers: std::collections::HashMap<String, String>,
+    pub body: String,
+    pub status_code: u16,
+    pub response_time_ms: u64,
+    pub response_preview: Option<String>,
+    pub success: bool,
+    pub message: String,
+}
+
+impl From<aisec_target_profile::VerificationConsoleEntry> for VerificationConsoleEntryDto {
+    fn from(c: aisec_target_profile::VerificationConsoleEntry) -> Self {
+        Self {
+            method: c.method,
+            url: c.url,
+            headers: c.headers,
+            body: c.body,
+            status_code: c.status_code,
+            response_time_ms: c.response_time_ms,
+            response_preview: c.response_preview,
+            success: c.success,
+            message: c.message,
         }
     }
 }
@@ -179,66 +311,141 @@ pub struct EndpointDto {
     pub evidence: Option<String>,
     pub source_url: Option<String>,
     pub discovered_at: String,
-    pub fingerprint: Option<EndpointFingerprintDto>,
+    pub endpoint_type: String,
+    pub ai_framework: Option<String>,
+    pub risk_score: u8,
+    pub metadata_confidence: f32,
+    pub discovery_source: String,
+    pub auth_required: bool,
+    pub metadata: Option<AiEndpointMetadataDto>,
+    pub attack_recommendations: Vec<EndpointAttackRecommendationDto>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct EndpointFingerprintDto {
-    pub confidence: f32,
-    pub technologies: Vec<FingerprintTechnologyDto>,
-    pub agent_frameworks: Vec<FingerprintFrameworkDto>,
-    pub ai_components: Vec<FingerprintComponentDto>,
-    pub attack_recommendations: Vec<FingerprintRecommendationDto>,
-    pub methods_used: Vec<String>,
-    pub primary_provider: Option<String>,
-    pub api_style: Option<String>,
-    pub platform_profile: PlatformProfileDto,
+pub struct AiEndpointMetadataDto {
+    pub basic: EndpointBasicDto,
+    pub fingerprint: FingerprintMetadataDto,
+    pub schema: SchemaMetadataDto,
+    pub inference: InferenceFieldsDto,
+    pub capabilities: EndpointCapabilitiesDto,
+    pub classification: EndpointClassificationDto,
+    pub risk: RiskAssessmentDto,
+    pub provenance: DiscoveryProvenanceDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw: Option<RawObservationDto>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PlatformProfileDto {
-    pub platform: String,
+pub struct EndpointBasicDto {
+    pub id: String,
+    pub url: String,
+    pub method: String,
+    pub host: String,
+    pub protocol: String,
+    pub status: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FingerprintMetadataDto {
+    pub framework: String,
+    pub provider: String,
     pub version: String,
-    pub auth_type: String,
-    pub llm_provider: String,
-    pub memory_enabled: bool,
-    pub tools_enabled: bool,
-    pub rag_enabled: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FingerprintTechnologyDto {
-    pub id: String,
-    pub name: String,
-    pub category: String,
     pub confidence: f32,
-    pub signals: Vec<String>,
+    pub api_style: String,
+    pub technologies: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct FingerprintFrameworkDto {
-    pub id: String,
+pub struct SchemaMetadataDto {
+    pub content_type: Option<String>,
+    pub request_schema: Option<NormalizedSchemaDto>,
+    pub response_schema: Option<NormalizedSchemaDto>,
+    pub transport: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct NormalizedSchemaDto {
+    pub format: String,
+    pub fields: Vec<SchemaFieldDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaFieldDto {
     pub name: String,
+    pub field_type: String,
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct InferenceFieldsDto {
+    pub prompt_field: Option<String>,
+    pub history_field: Option<String>,
+    pub conversation_field: Option<String>,
+    pub model_field: Option<String>,
+    pub stream_field: Option<String>,
+    pub tool_field: Option<String>,
+    pub attachment_field: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EndpointCapabilitiesDto {
+    pub supports_chat: bool,
+    pub supports_streaming: bool,
+    pub supports_embedding: bool,
+    pub supports_vision: bool,
+    pub supports_tools: bool,
+    pub supports_json_mode: bool,
+    pub supports_thinking: bool,
+    pub supports_memory: bool,
+    pub supports_agent: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndpointClassificationDto {
+    pub endpoint_type: String,
+    pub ai_framework: String,
     pub confidence: f32,
-    pub signals: Vec<String>,
+    pub risk_score: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RiskAssessmentDto {
+    pub score: u8,
+    pub factors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveryProvenanceDto {
+    pub discovery_source: String,
+    pub authentication_required: bool,
+    pub discovered_at: String,
+    pub kind: String,
+    pub evidence: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RawObservationDto {
+    pub request_headers: std::collections::HashMap<String, String>,
+    pub request_body: Option<String>,
+    pub response_headers: std::collections::HashMap<String, String>,
+    pub response_body: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FingerprintComponentDto {
-    pub id: String,
-    pub name: String,
-    pub confidence: f32,
-    pub signals: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FingerprintRecommendationDto {
+pub struct EndpointAttackRecommendationDto {
     pub category: String,
     pub reason: String,
     pub priority: u8,
@@ -246,7 +453,24 @@ pub struct FingerprintRecommendationDto {
 
 impl From<Endpoint> for EndpointDto {
     fn from(e: Endpoint) -> Self {
-        let fingerprint = e.fingerprint_json.as_deref().and_then(parse_fingerprint_json);
+        let metadata = e
+            .metadata_json
+            .as_deref()
+            .and_then(parse_metadata_json);
+        let attack_recommendations =
+            stack_fingerprint_from_endpoint(&e)
+                .map(|report| {
+                    report
+                        .attack_recommendations
+                        .into_iter()
+                        .map(|r| EndpointAttackRecommendationDto {
+                            category: r.category,
+                            reason: r.reason,
+                            priority: r.priority,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
         Self {
             id: e.id,
             scan_id: e.scan_id,
@@ -258,82 +482,33 @@ impl From<Endpoint> for EndpointDto {
             evidence: e.evidence,
             source_url: e.source_url,
             discovered_at: ts(e.discovered_at),
-            fingerprint,
+            endpoint_type: e.endpoint_type,
+            ai_framework: e.ai_framework,
+            risk_score: e.risk_score.clamp(0, 100) as u8,
+            metadata_confidence: e.metadata_confidence as f32,
+            discovery_source: e.discovery_source,
+            auth_required: e.auth_required != 0,
+            metadata,
+            attack_recommendations,
         }
     }
 }
 
-fn parse_fingerprint_json(raw: &str) -> Option<EndpointFingerprintDto> {
-    let report: aisec_fingerprint::StackFingerprintReport = serde_json::from_str(raw).ok()?;
-    Some(EndpointFingerprintDto {
-        confidence: report.confidence,
-        technologies: report
-            .technologies
-            .into_iter()
-            .map(|t| FingerprintTechnologyDto {
-                id: t.id,
-                name: t.name,
-                category: t.category,
-                confidence: t.confidence,
-                signals: t.signals,
-            })
-            .collect(),
-        agent_frameworks: report
-            .agent_frameworks
-            .into_iter()
-            .map(|f| FingerprintFrameworkDto {
-                id: f.framework.as_str().into(),
-                name: f.name,
-                confidence: f.confidence,
-                signals: f.signals,
-            })
-            .collect(),
-        ai_components: report
-            .ai_components
-            .into_iter()
-            .map(|c| FingerprintComponentDto {
-                id: c.component.as_str().into(),
-                name: c.name,
-                confidence: c.confidence,
-                signals: c.signals,
-            })
-            .collect(),
-        attack_recommendations: report
-            .attack_recommendations
-            .into_iter()
-            .map(|r| FingerprintRecommendationDto {
-                category: r.category,
-                reason: r.reason,
-                priority: r.priority,
-            })
-            .collect(),
-        methods_used: report.methods_used,
-        primary_provider: report
-            .provider_report
-            .primary
-            .as_ref()
-            .map(|p| p.provider.as_str().into()),
-        api_style: report.provider_report.primary.as_ref().map(|p| {
-            match p.inferred_api_style {
-                aisec_fingerprint::ApiStyle::OpenAiCompatible => "openai_compatible",
-                aisec_fingerprint::ApiStyle::AnthropicMessages => "anthropic_messages",
-                aisec_fingerprint::ApiStyle::GeminiGenerateContent => "gemini_generate_content",
-                aisec_fingerprint::ApiStyle::BedrockInvoke => "bedrock_invoke",
-                aisec_fingerprint::ApiStyle::OllamaNative => "ollama_native",
-                aisec_fingerprint::ApiStyle::Unknown => "unknown",
-            }
-            .into()
-        }),
-        platform_profile: PlatformProfileDto {
-            platform: report.platform_profile.platform,
-            version: report.platform_profile.version,
-            auth_type: report.platform_profile.auth_type,
-            llm_provider: report.platform_profile.llm_provider,
-            memory_enabled: report.platform_profile.memory_enabled,
-            tools_enabled: report.platform_profile.tools_enabled,
-            rag_enabled: report.platform_profile.rag_enabled,
-        },
-    })
+fn parse_metadata_json(raw: &str) -> Option<AiEndpointMetadataDto> {
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    serde_json::from_value(value).ok()
+}
+
+pub fn stack_fingerprint_from_endpoint(endpoint: &Endpoint) -> Option<aisec_fingerprint::StackFingerprintReport> {
+    let metadata = aisec_endpoint_metadata::AiEndpointMetadata::from_json(
+        endpoint.metadata_json.as_deref()?,
+    )
+    .ok()?;
+    metadata.stack_fingerprint
+}
+
+pub fn metadata_from_endpoint(endpoint: &Endpoint) -> Option<aisec_endpoint_metadata::AiEndpointMetadata> {
+    aisec_endpoint_metadata::AiEndpointMetadata::from_json(endpoint.metadata_json.as_deref()?).ok()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -345,6 +520,8 @@ pub struct DiscoveryStatsDto {
     pub duration_ms: u64,
     pub endpoint_count: u64,
     pub errors: Vec<String>,
+    #[serde(default)]
+    pub phases: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
