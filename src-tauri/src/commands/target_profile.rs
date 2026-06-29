@@ -207,17 +207,18 @@ fn auth_headers_from_descriptor(
 }
 
 fn resolve_verify_auth_headers(
-    request: &TargetProfileVerifyRequest,
     descriptor_json: &str,
+    auth: Option<&serde_json::Value>,
+    inline_auth_headers: Option<&std::collections::HashMap<String, String>>,
 ) -> CommandResult<std::collections::HashMap<String, String>> {
-    if let Some(headers) = &request.auth_headers {
+    if let Some(headers) = inline_auth_headers {
         if !headers.is_empty() {
             return Ok(headers.clone());
         }
     }
 
     let mut headers = auth_headers_from_descriptor(descriptor_json)?;
-    if let Some(auth) = request.auth.as_ref() {
+    if let Some(auth) = auth {
         merge_auth_headers(&mut headers, auth_headers_from_auth_value(auth));
     }
     Ok(headers)
@@ -278,18 +279,29 @@ pub async fn target_profile_verify_op(
     state: &AppState,
     request: TargetProfileVerifyRequest,
 ) -> CommandResult<TargetProfileVerifyResponse> {
-    let mut profile: TargetProfile = serde_json::from_value(request.profile).map_err(|err| {
-        CommandError::invalid_input(format!("invalid target profile: {err}"))
-    })?;
+    let TargetProfileVerifyRequest {
+        target_id,
+        profile: profile_value,
+        auth,
+        auth_headers: inline_auth_headers,
+    } = request;
 
     let target = state
         .repositories()
         .targets()
-        .get(&request.target_id)
+        .get(&target_id)
         .await
         .map_err(CommandError::from)?;
 
-    let auth_headers = resolve_verify_auth_headers(&request, &target.descriptor_json)?;
+    let auth_headers = resolve_verify_auth_headers(
+        &target.descriptor_json,
+        auth.as_ref(),
+        inline_auth_headers.as_ref(),
+    )?;
+
+    let mut profile: TargetProfile = serde_json::from_value(profile_value).map_err(|err| {
+        CommandError::invalid_input(format!("invalid target profile: {err}"))
+    })?;
 
     let attempt = verify_target_profile(&profile, auth_headers).await;
     match attempt.result {
@@ -299,7 +311,7 @@ pub async fn target_profile_verify_op(
             state
                 .repositories()
                 .targets()
-                .update_profile(&request.target_id, &json)
+                .update_profile(&target_id, &json)
                 .await
                 .map_err(CommandError::from)?;
 
@@ -328,7 +340,7 @@ pub async fn target_profile_verify_op(
             state
                 .repositories()
                 .targets()
-                .update_profile(&request.target_id, &json)
+                .update_profile(&target_id, &json)
                 .await
                 .map_err(CommandError::from)?;
 
