@@ -48,22 +48,6 @@ export function VerificationConsole({ entry, pending = false }: VerificationCons
         </details>
       )}
 
-      <details open>
-        <summary>Request breakdown</summary>
-        <p className="verification-console__label">URL</p>
-        <pre className="verification-console__block">{entry.url}</pre>
-        <p className="verification-console__label">Headers</p>
-        <pre className="verification-console__block">
-          {JSON.stringify(entry.headers, null, 2)}
-        </pre>
-        {entry.body && (
-          <>
-            <p className="verification-console__label">Body</p>
-            <pre className="verification-console__block">{entry.body}</pre>
-          </>
-        )}
-      </details>
-
       {entry.responsePreview && (
         <details open>
           <summary>Response (from target)</summary>

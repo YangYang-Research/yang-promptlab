@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Badge, Button } from "@/shared/components";
+import { Button } from "@/shared/components";
 import { verifyTargetProfile } from "@/shared/ipc/targetProfile";
 import { useToast } from "@/shared/notifications";
 
@@ -135,18 +135,6 @@ export function AuthVerificationStep({
 
   return (
     <div className="auth-verification-step">
-      <div className="auth-verification-step__status">
-        <Badge variant={profile.verification.verified ? "success" : "warning"}>
-          {profile.verification.verified ? "Verified" : "Not verified"}
-        </Badge>
-        {profile.verification.model && (
-          <span className="text-muted">Model: {profile.verification.model}</span>
-        )}
-        {profile.verification.verified && profile.verification.responseTimeMs > 0 && (
-          <span className="text-muted">{profile.verification.responseTimeMs}ms</span>
-        )}
-      </div>
-
       <section>
         <h3 className="wizard-section-title">Authentication</h3>
         {authDetectedFromProfile && authForm.authKind !== "none" && (
@@ -157,6 +145,7 @@ export function AuthVerificationStep({
         )}
         <TargetFormFields
           form={authForm}
+          authKindLabel="Authentication Type"
           onChange={(patch) => {
             if (patch.authKind && patch.authKind !== authForm.authKind) {
               setAuthDetectedFromProfile(false);

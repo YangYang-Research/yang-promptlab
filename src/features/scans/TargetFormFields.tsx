@@ -12,6 +12,8 @@ type TargetFormFieldsProps = {
   autoFocusUrl?: boolean;
   /** Wizard Step 3 — endpoint comes from AI Target Profile (Step 2). */
   hideUrl?: boolean;
+  /** Label for the auth method selector (default: Authentication). */
+  authKindLabel?: string;
 };
 
 const AUTH_BUTTON_CLASS: Record<TargetAuthKind, string> = {
@@ -37,6 +39,7 @@ export function TargetFormFields({
   error,
   autoFocusUrl = false,
   hideUrl = false,
+  authKindLabel = "Authentication",
 }: TargetFormFieldsProps) {
   return (
     <div className="project-form wizard-target-form">
@@ -61,8 +64,8 @@ export function TargetFormFields({
         </label>
       )}
 
-      <div className="wizard-auth-fieldset" role="radiogroup" aria-label="Authentication">
-        <span className="field__label">Authentication</span>
+      <div className="wizard-auth-fieldset" role="radiogroup" aria-label={authKindLabel}>
+        <span className="field__label">{authKindLabel}</span>
         <div className="wizard-auth-buttons">
           {AUTH_METHOD_OPTIONS.map((option) => {
             const isActive = form.authKind === option.value;

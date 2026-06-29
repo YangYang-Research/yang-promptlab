@@ -225,7 +225,9 @@ export function ScanWizardPage() {
     : null;
 
   const stepDef = getWizardStep(session.currentStep);
-  const showFooterNext = session.currentStep < 5;
+  const showFooterNext =
+    session.currentStep < 5 &&
+    (session.currentStep !== 3 || draft.profileVerified);
   const showStartScan = session.currentStep === 5 && session.submittedScanId === null;
   const showFooterDone = session.currentStep === 6;
   const showViewResult =
