@@ -3625,6 +3625,15 @@ a:hover {
   margin-top: 0.75rem;
 }
 
+.wizard-planner-summary__url {
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent-muted);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border-subtle));
+  word-break: break-all;
+}
+
 .wizard-planner-rationales {
   margin: 0.5rem 0 0;
   padding-left: 1.25rem;
@@ -3707,6 +3716,10 @@ a:hover {
 }
 .wizard-attack-category--off {
   opacity: 0.55;
+}
+.wizard-attack-category--na {
+  opacity: 0.45;
+  border-style: dashed;
 }
 .wizard-attack-category__row {
   display: flex;

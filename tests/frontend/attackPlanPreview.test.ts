@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  extractPlannerEndpoint,
+  formatExecutionStrategySummary,
   previewPlanForProfile,
   recomputePlanPreview,
   type AttackPlanConfig,
@@ -55,7 +57,7 @@ function samplePlan(): AttackPlanConfig {
     adaptivePlanning: false,
     rationales: [],
     confidence: 0.85,
-    summary: "Plan for https://api.example.com/v1/chat: 4 categories, 12 active tests, ~60 requests, ~150s runtime — sequential execution; mutation payloads, medium mutation, 5 variants/test, budget 20",
+    summary: "Plan for https://api.example.com/v1/chat",
     riskScore: 50,
     riskLevel: "medium",
     estimatedRequests: 60,
@@ -90,6 +92,11 @@ function samplePlan(): AttackPlanConfig {
 }
 
 describe("attack plan preview", () => {
+  it("extracts full https endpoint from planner summary", () => {
+    const url = "https://api.yyng.icu/ycre/v1/code-review/github/completions";
+    expect(extractPlannerEndpoint(`Plan for ${url}`)).toBe(url);
+  });
+
   it("reduces categories and estimates when switching to quick profile", () => {
     const preview = previewPlanForProfile(samplePlan(), "quick", []);
     expect(preview.categories).toEqual([
@@ -98,7 +105,7 @@ describe("attack plan preview", () => {
       "system_prompt_extraction",
     ]);
     expect(preview.estimatedRequests).toBeLessThan(samplePlan().estimatedRequests);
-    expect(preview.summary).toContain("3 categories");
+    expect(preview.categories).toHaveLength(3);
     expect(preview.attackGraph.find((node) => node.category === "tool_abuse")?.enabled).toBe(
       false,
     );
@@ -111,7 +118,7 @@ describe("attack plan preview", () => {
       maxAttempts: 3,
     });
     expect(preview.estimatedRequests).toBe(samplePlan().estimatedRequests * 3);
-    expect(preview.summary).toContain("agentic execution");
+    expect(formatExecutionStrategySummary(preview)).toBe("Agentic");
   });
 
   it("ignores stale attack plan ui state", () => {

@@ -8,8 +8,9 @@ use crate::types::{TargetCapabilities, TargetProfile};
 /// Generate an attack plan from Target Profile capabilities only.
 /// No schema inference, no fingerprinting, no raw payload inspection.
 pub fn plan_from_target_profile(profile: &TargetProfile) -> AttackPlan {
+    let caps = crate::capabilities::effective_capabilities(profile);
     let mut plan = plan_from_capabilities(
-        &profile.default_capabilities,
+        &caps,
         &profile.framework,
         profile.provider.as_str(),
     );

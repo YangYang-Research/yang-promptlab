@@ -4,13 +4,14 @@ use aisec_auth::{resolve_descriptor_for_wizard, SecretStore};
 use aisec_core::AisecError;
 use aisec_storage::TargetRepository;
 use aisec_target_profile::{
-    build_wizard_attack_plan, list_provider_templates, verify_target_profile, TargetProfile,
+    build_wizard_attack_plan_with_llm, list_provider_templates, verify_target_profile, TargetProfile,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::dto::{TargetDto, TargetProfileDto, VerificationConsoleEntryDto};
 use crate::error::{CommandError, CommandResult};
+use crate::inference_host::{is_inference_ready, HostPlannerLlm};
 use crate::state::AppState;
 
 fn profile_from_json(raw: &str) -> CommandResult<TargetProfile> {
@@ -385,14 +386,27 @@ pub async fn planner_generate_from_profile_op(
         ));
     }
 
-    let mut plan = build_wizard_attack_plan(&profile);
+    let llm_host = {
+        let inference = state.inference_manager().lock().await;
+        if !is_inference_ready(&inference) {
+            None
+        } else {
+            drop(inference);
+            Some(HostPlannerLlm::new(
+                state.data_dir().to_path_buf(),
+                state.inference_manager().clone(),
+                state.model_manager().clone(),
+                state.model_provider().clone(),
+                state.runtime_manager().clone(),
+            ))
+        }
+    };
 
-    // AI Runtime may refine planning internally; summary stays endpoint + category count.
-    let inference = state.inference_manager().lock().await;
-    if crate::inference_host::is_inference_ready(&inference) {
-        plan.confidence = (plan.confidence + 0.05).min(1.0);
-    }
-    drop(inference);
+    let plan = build_wizard_attack_plan_with_llm(
+        &profile,
+        llm_host.as_ref().map(|host| host as &dyn aisec_planner::PlannerLlm),
+    )
+    .await;
 
     Ok(crate::commands::planner::wizard_plan_to_dto(plan))
 }

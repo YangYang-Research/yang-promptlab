@@ -54,7 +54,7 @@ impl Default for PayloadStrategy {
 }
 
 pub fn recommend_payload_strategy(profile: &TargetProfile) -> PayloadStrategy {
-    let caps = &profile.default_capabilities;
+    let caps = &crate::capabilities::effective_capabilities(profile);
     let provider = profile.provider.as_str();
     let mut strategy = payload_strategy_for_attack_profile("standard", &PayloadStrategy::default());
 

@@ -7,8 +7,7 @@ use aisec_planner::types::{AttackPlan, CategoryRationale, PlannerMode};
 use serde::{Deserialize, Serialize};
 
 use crate::payload_strategy::{
-    payload_strategy_for_attack_profile, recommend_payload_strategy, MutationLevel,
-    PayloadGenerationStrategy, PayloadStrategy,
+    payload_strategy_for_attack_profile, recommend_payload_strategy, PayloadStrategy,
 };
 use crate::types::{TargetCapabilities, TargetProfile};
 
@@ -85,11 +84,12 @@ pub fn profile_categories_for_id(profile_id: &str) -> Vec<AttackCategory> {
 }
 
 pub fn build_wizard_attack_plan(profile: &TargetProfile) -> WizardAttackPlan {
+    let caps = crate::capabilities::effective_capabilities(profile);
     let base = super::planner::plan_from_target_profile(profile);
-    let capability_graph = capability_labels(&profile.default_capabilities, &profile.framework, profile.provider.as_str());
+    let capability_graph = capability_labels(&caps, &profile.framework, profile.provider.as_str());
     let suggested = base.categories.clone();
     let attack_graph = build_attack_graph(&base.rationales, &suggested);
-    let risk_score = compute_risk_score(&profile.default_capabilities, suggested.len());
+    let risk_score = compute_risk_score(&caps, suggested.len());
     let risk_level = risk_level_label(risk_score).to_string();
 
     let recommended = recommend_payload_strategy(profile);
@@ -121,6 +121,29 @@ pub fn build_wizard_attack_plan(profile: &TargetProfile) -> WizardAttackPlan {
         payload_strategy: payload_strategy.clone(),
         recommended_payload_strategy: recommended,
     };
+    recompute_estimates(&mut plan);
+    plan.summary = build_wizard_plan_summary(&plan, &profile.full_url());
+    plan
+}
+
+pub(crate) fn rebuild_wizard_plan_from_analysis(
+    profile: &TargetProfile,
+    mut plan: WizardAttackPlan,
+    profile_id: String,
+    suggested: Vec<AttackCategory>,
+    rationales: Vec<CategoryRationale>,
+    caps: &TargetCapabilities,
+    confidence: f32,
+) -> WizardAttackPlan {
+    plan.profile_id = profile_id.clone();
+    plan.suggested_categories = suggested.clone();
+    plan.categories = active_categories_for_profile(&profile_id, &suggested);
+    plan.capability_graph = capability_labels(caps, &profile.framework, profile.provider.as_str());
+    plan.attack_graph = build_attack_graph(&rationales, &suggested);
+    plan.rationales = rationales;
+    plan.confidence = plan.confidence.max(confidence).min(1.0);
+    plan.risk_score = compute_risk_score(caps, suggested.len());
+    plan.risk_level = risk_level_label(plan.risk_score).to_string();
     recompute_estimates(&mut plan);
     plan.summary = build_wizard_plan_summary(&plan, &profile.full_url());
     plan
@@ -162,53 +185,18 @@ pub fn adjust_wizard_attack_plan(
     }
 
     recompute_estimates(&mut plan);
+
+    let active: HashSet<_> = plan.categories.iter().copied().collect();
+    plan.rationales.retain(|r| active.contains(&r.category));
+    plan.rationales.sort_by_key(|r| r.priority);
+
     plan
 }
 
-/// Human-readable planner summary for wizard Step 4 — reflects live plan configuration.
+/// Human-readable planner summary for wizard Step 4 — endpoint label only; metrics live in the UI grid.
 pub fn build_wizard_plan_summary(plan: &WizardAttackPlan, api_endpoint: &str) -> String {
-    let execution = match plan.execution_strategy {
-        ExecutionStrategy::Sequential => "sequential execution".to_string(),
-        ExecutionStrategy::Agentic => {
-            let mut label = format!("agentic execution (max {} attempts/category)", plan.max_attempts);
-            if plan.reflection_enabled {
-                label.push_str(", reflection on");
-            }
-            if plan.adaptive_planning {
-                label.push_str(", adaptive planning");
-            }
-            label
-        }
-    };
-
-    let payload_strategy = match plan.payload_strategy.strategy {
-        PayloadGenerationStrategy::Deterministic => "deterministic payloads",
-        PayloadGenerationStrategy::Mutation => "mutation payloads",
-        PayloadGenerationStrategy::Adaptive => "adaptive payloads",
-    };
-    let mutation = match plan.payload_strategy.mutation_level {
-        MutationLevel::Low => "low mutation",
-        MutationLevel::Medium => "medium mutation",
-        MutationLevel::High => "high mutation",
-        MutationLevel::Extreme => "extreme mutation",
-    };
-
-    let disabled_tests = plan.disabled_tests.len();
-    let disabled_suffix = if disabled_tests > 0 {
-        format!(", {disabled_tests} tests disabled")
-    } else {
-        String::new()
-    };
-
-    format!(
-        "Plan for {api_endpoint}: {} categories, {} active tests{disabled_suffix}, ~{} requests, ~{}s runtime — {execution}; {payload_strategy}, {mutation}, {} variants/test, budget {}",
-        plan.categories.len(),
-        plan.total_testcases,
-        plan.estimated_requests,
-        plan.estimated_runtime_seconds,
-        plan.payload_strategy.variants_per_test,
-        plan.payload_strategy.max_total_payloads,
-    )
+    let _ = plan;
+    format!("Plan for {api_endpoint}")
 }
 
 pub fn active_categories_for_profile(
@@ -454,11 +442,9 @@ mod tests {
     }
 
     #[test]
-    fn summary_reflects_configuration() {
+    fn summary_is_endpoint_label_only() {
         let plan = build_wizard_attack_plan(&sample_profile());
         let summary = build_wizard_plan_summary(&plan, "https://api.example.com/v1/chat");
-        assert!(summary.contains("categories"));
-        assert!(summary.contains("sequential execution"));
-        assert!(summary.contains("mutation payloads"));
+        assert_eq!(summary, "Plan for https://api.example.com/v1/chat");
     }
 }

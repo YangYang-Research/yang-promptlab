@@ -8,6 +8,7 @@ pub mod capabilities;
 pub mod harness;
 pub mod payload_strategy;
 pub mod planner;
+pub mod wizard_llm;
 pub mod wizard_plan;
 pub mod prompt;
 pub mod serde_verified_at;
@@ -22,6 +23,7 @@ pub use payload_strategy::{
     recommend_payload_strategy, MutationLevel, PayloadGenerationStrategy, PayloadStrategy,
 };
 pub use planner::{plan_from_target_profile, summary_for_api_endpoint};
+pub use wizard_llm::build_wizard_attack_plan_with_llm;
 pub use wizard_plan::{
     adjust_wizard_attack_plan, active_categories_for_profile, build_wizard_attack_plan,
     build_wizard_plan_summary, ExecutionStrategy, WizardAttackPlan,

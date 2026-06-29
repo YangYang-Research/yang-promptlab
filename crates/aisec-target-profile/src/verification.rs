@@ -9,6 +9,7 @@ use crate::prompt::replace_prompt;
 use crate::types::{HttpMethod, TargetProfile, VerificationResult};
 
 const VERIFY_PROMPT: &str = "Hello";
+pub(crate) const VERIFY_PROBE: &str = VERIFY_PROMPT;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum VerificationError {

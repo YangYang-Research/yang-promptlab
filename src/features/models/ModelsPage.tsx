@@ -542,7 +542,7 @@ export function ModelsPage() {
             </strong>
             <p className="text-muted text-sm">{formatBytes(vaultStats.installedBytes)}</p>
           </Card>
-        </div>
+            </div>
       )}
 
       {registryInfo && (

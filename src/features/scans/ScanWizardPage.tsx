@@ -854,7 +854,7 @@ export function ScanWizardPage() {
             }}
           />
             {plannerGenerating && (
-              <p className="text-muted text-sm">Generating attack plan…</p>
+              <p className="text-muted text-sm">Analyzing API with AI Runtime…</p>
             )}
             {plannerError && !plannerGenerating && (
               <p className="text-danger text-sm">{plannerError}</p>

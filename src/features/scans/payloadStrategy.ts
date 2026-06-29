@@ -192,6 +192,10 @@ export function payloadStrategyToDto(strategy: PayloadStrategyConfig): PayloadSt
   };
 }
 
+export function formatPayloadGenerationStrategy(strategy: PayloadStrategyConfig): string {
+  return GENERATION_STRATEGIES.find((item) => item.id === strategy.strategy)?.label ?? strategy.strategy;
+}
+
 export function formatPayloadStrategySummary(strategy: PayloadStrategyConfig): string {
   const gen = GENERATION_STRATEGIES.find((item) => item.id === strategy.strategy)?.label ?? strategy.strategy;
   const mut =

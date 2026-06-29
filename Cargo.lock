@@ -456,7 +456,9 @@ version = "0.1.0"
 dependencies = [
  "aisec-attack",
  "aisec-harness",
+ "aisec-inference",
  "aisec-planner",
+ "async-trait",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

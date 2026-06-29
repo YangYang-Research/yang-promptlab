@@ -180,13 +180,13 @@ export function AuthVerificationStep({
       </section>
 
       <section>
-        <h3 className="wizard-section-title">Verify connection</h3>
+        <h3 className="wizard-section-title">Verify API</h3>
         <p className="text-muted">
-          Sends a real AI request (<code>Hello</code>) using your Target Profile. Verification does
-          not use AI Runtime.
+          Sends a real AI request (<code>Hello</code>) using your Target Profile. On success, AI
+          Runtime analyzes the request and response to build your attack plan.
         </p>
         <Button variant="primary" disabled={verifying} onClick={() => void handleVerify()}>
-          {verifying ? "Verifying…" : "Verify Connection"}
+          {verifying ? "Verifying…" : "Verify API"}
         </Button>
         {error && <p className="text-danger">{error}</p>}
       </section>

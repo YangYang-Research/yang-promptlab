@@ -132,6 +132,16 @@ function asProfileId(value: string): AttackProfileId {
   return "standard";
 }
 
+function rationalesForActiveCategories(
+  rationales: CategoryRationale[],
+  categories: AttackCategoryId[],
+): CategoryRationale[] {
+  const active = new Set(categories);
+  return rationales
+    .filter((item) => active.has(item.category))
+    .sort((a, b) => a.priority - b.priority);
+}
+
 /** Categories payload for `attack_planner_adjust` — avoids empty custom selection. */
 export function resolveCategoriesForAdjust(
   profileId: AttackProfileId,
@@ -183,18 +193,21 @@ export function attackPlanFromDto(dto: WizardAttackPlanDto): AttackPlanConfig {
     maxAttempts: dto.maxAttempts,
     reflectionEnabled: dto.reflectionEnabled,
     adaptivePlanning: dto.adaptivePlanning,
-    rationales: dto.rationales
-      .map((item) => {
-        const category = asCategoryId(item.category);
-        if (!category) return null;
-        return {
-          category,
-          reason: item.reason,
-          priority: item.priority,
-          source: item.source,
-        };
-      })
-      .filter((item): item is CategoryRationale => item !== null),
+    rationales: rationalesForActiveCategories(
+      dto.rationales
+        .map((item) => {
+          const category = asCategoryId(item.category);
+          if (!category) return null;
+          return {
+            category,
+            reason: item.reason,
+            priority: item.priority,
+            source: item.source,
+          };
+        })
+        .filter((item): item is CategoryRationale => item !== null),
+      mapCategories(dto.categories),
+    ),
     confidence: dto.confidence,
     summary: dto.summary,
     riskScore: dto.riskScore,
@@ -288,28 +301,25 @@ function categoryRisk(category: AttackCategoryId): number {
 }
 
 export function extractPlannerEndpoint(summary: string): string {
-  const match = summary.match(/^Plan for (.+?):/);
-  return match?.[1] ?? "target";
+  const prefix = "Plan for ";
+  if (!summary.startsWith(prefix)) return "target";
+
+  let endpoint = summary.slice(prefix.length).trim();
+  const legacyMetrics = endpoint.search(/: \d+ categor(?:ies|y)/);
+  if (legacyMetrics > 0) {
+    endpoint = endpoint.slice(0, legacyMetrics).trim();
+  }
+  return endpoint || "target";
 }
 
-export function buildPlannerSummaryPreview(plan: AttackPlanConfig, endpoint: string): string {
-  const execution =
-    plan.executionStrategy === "agentic"
-      ? `agentic execution (max ${plan.maxAttempts} attempts/category${
-          plan.reflectionEnabled ? ", reflection on" : ""
-        }${plan.adaptivePlanning ? ", adaptive planning" : ""})`
-      : "sequential execution";
-  const payloadStrategy =
-    plan.payloadStrategy.strategy === "deterministic"
-      ? "deterministic payloads"
-      : plan.payloadStrategy.strategy === "adaptive"
-        ? "adaptive payloads"
-        : "mutation payloads";
-  const mutation = `${plan.payloadStrategy.mutationLevel} mutation`;
-  const disabledSuffix =
-    plan.disabledTests.length > 0 ? `, ${plan.disabledTests.length} tests disabled` : "";
+export function formatExecutionStrategySummary(
+  plan: Pick<AttackPlanConfig, "executionStrategy">,
+): string {
+  return plan.executionStrategy === "agentic" ? "Agentic" : "Sequential";
+}
 
-  return `Plan for ${endpoint}: ${plan.categories.length} categories, ${plan.totalTestcases} active tests${disabledSuffix}, ~${plan.estimatedRequests} requests, ~${plan.estimatedRuntimeSeconds}s runtime — ${execution}; ${payloadStrategy}, ${mutation}, ${plan.payloadStrategy.variantsPerTest} variants/test, budget ${plan.payloadStrategy.maxTotalPayloads}`;
+export function buildPlannerSummaryPreview(_plan: AttackPlanConfig, endpoint: string): string {
+  return `Plan for ${endpoint}`;
 }
 
 export function computeWizardPlanMetrics(
@@ -358,7 +368,8 @@ export function computeWizardPlanMetrics(
 export function recomputePlanPreview(plan: AttackPlanConfig): AttackPlanConfig {
   const endpoint = extractPlannerEndpoint(plan.summary);
   const metrics = computeWizardPlanMetrics(plan);
-  const next = { ...plan, ...metrics };
+  const rationales = rationalesForActiveCategories(plan.rationales, plan.categories);
+  const next = { ...plan, ...metrics, rationales };
   return { ...next, summary: buildPlannerSummaryPreview(next, endpoint) };
 }
 

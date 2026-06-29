@@ -8,6 +8,8 @@ import {
   attackPlanFromDto,
   formatCoverageScore,
   formatEstimatedRuntime,
+  formatExecutionStrategySummary,
+  extractPlannerEndpoint,
   payloadStrategyToDto,
   previewPlanForProfile,
   recomputePlanPreview,
@@ -23,6 +25,7 @@ import {
   type ExecutionStrategy,
 } from "../attackProfiles";
 import type { PayloadStrategyConfig } from "../payloadStrategy";
+import { formatPayloadGenerationStrategy } from "../payloadStrategy";
 import { attackPlanUiFromPlan, type AttackPlanUiState } from "../wizardState";
 import { PayloadStrategySection } from "./PayloadStrategySection";
 
@@ -51,6 +54,18 @@ export function ReviewAttackPlanStep({
   const adjustRequestRef = useRef(0);
 
   const activeCategories = attackPlan.categories;
+  const suggestedSet = useMemo(
+    () => new Set(attackPlan.suggestedCategories),
+    [attackPlan.suggestedCategories],
+  );
+  const notApplicableCount = ATTACK_CATALOG.length - attackPlan.suggestedCategories.length;
+  const activeRationales = useMemo(
+    () =>
+      attackPlan.rationales
+        .filter((item) => activeCategories.includes(item.category))
+        .sort((a, b) => a.priority - b.priority),
+    [attackPlan.rationales, activeCategories],
+  );
 
   async function applyAdjust(
     patch: Partial<AttackPlanUiState>,
@@ -121,29 +136,6 @@ export function ReviewAttackPlanStep({
     void applyAdjust(patch);
   }
 
-  function toggleGraphNode(category: AttackCategoryId, enabled: boolean) {
-    const nextDisabled = new Set(disabledGraphNodes);
-    if (enabled) nextDisabled.delete(category);
-    else nextDisabled.add(category);
-    const patch = {
-      profileId: "custom" as const,
-      disabledGraphNodes: [...nextDisabled],
-      customCategories: attackPlan.suggestedCategories.filter((id) => !nextDisabled.has(id)),
-    };
-    onPlanChange(
-      recomputePlanPreview({
-        ...attackPlan,
-        profileId: "custom",
-        categories: patch.customCategories,
-        attackGraph: attackPlan.attackGraph.map((node) => ({
-          ...node,
-          enabled: patch.customCategories.includes(node.category),
-        })),
-      }),
-    );
-    void applyAdjust(patch);
-  }
-
   function toggleCustomCategory(id: AttackCategoryId, enabled: boolean) {
     const nextDisabled = new Set(disabledGraphNodes);
     if (enabled) nextDisabled.delete(id);
@@ -192,23 +184,27 @@ export function ReviewAttackPlanStep({
     void applyAdjust({}, undefined, attackPlan.recommendedPayloadStrategy);
   }
 
-  const enabledGraph = attackPlan.attackGraph.filter((node) => node.enabled);
-
   return (
     <div className="wizard-step">
       <section className="wizard-fingerprint-summary">
         <h4 className="wizard-endpoints__title">Planner summary</h4>
         <dl className="wizard-attack-estimates">
           <div className="wizard-attack-estimate">
-            <span className="wizard-attack-estimate__label">Total testcases</span>
+            <span className="wizard-attack-estimate__label">Active tests</span>
             <span className="wizard-attack-estimate__value">
               {attackPlan.totalTestcases.toLocaleString()}
             </span>
           </div>
           <div className="wizard-attack-estimate">
-            <span className="wizard-attack-estimate__label">Confidence</span>
+            <span className="wizard-attack-estimate__label">Execution strategy</span>
             <span className="wizard-attack-estimate__value">
-              {Math.round(attackPlan.confidence * 100)}%
+              {formatExecutionStrategySummary(attackPlan)}
+            </span>
+          </div>
+          <div className="wizard-attack-estimate">
+            <span className="wizard-attack-estimate__label">Payload strategy</span>
+            <span className="wizard-attack-estimate__value">
+              {formatPayloadGenerationStrategy(attackPlan.payloadStrategy)}
             </span>
           </div>
           <div className="wizard-attack-estimate">
@@ -237,57 +233,19 @@ export function ReviewAttackPlanStep({
           </div>
         </dl>
         <p className="text-sm wizard-planner-summary">
-          <strong>Summary:</strong> {attackPlan.summary}
+          <strong>Summary:</strong> Plan for{" "}
+          <span className="wizard-planner-summary__url mono">
+            {extractPlannerEndpoint(attackPlan.summary)}
+          </span>
         </p>
-        {attackPlan.rationales.length > 0 && (
+        {activeRationales.length > 0 && (
           <ul className="wizard-planner-rationales text-sm text-muted">
-            {attackPlan.rationales.slice(0, 8).map((item) => (
+            {activeRationales.map((item) => (
               <li key={`${item.category}-${item.source}`}>
                 {getCategory(item.category).label}: {item.reason}
               </li>
             ))}
           </ul>
-        )}
-      </section>
-
-      <section className="wizard-fingerprint-summary">
-        <h4 className="wizard-endpoints__title">Attack graph</h4>
-        <p className="text-muted text-sm">
-          Execution order suggested by the planner. Disable nodes to exclude categories.
-        </p>
-        <ol className="wizard-attack-graph">
-          {attackPlan.attackGraph.map((node, index) => {
-            const included = activeCategories.includes(node.category);
-            return (
-              <li key={node.category} className={`wizard-attack-graph__node${included ? "" : " wizard-attack-graph__node--off"}`}>
-                <div className="wizard-attack-graph__row">
-                  <label className="wizard-attack-category__toggle">
-                    <input
-                      type="checkbox"
-                      checked={included}
-                      onChange={(e) => toggleGraphNode(node.category, e.target.checked)}
-                    />
-                    <span>{getCategory(node.category).label}</span>
-                  </label>
-                  {index < attackPlan.attackGraph.length - 1 && (
-                    <span className="wizard-attack-graph__arrow" aria-hidden>
-                      ↓
-                    </span>
-                  )}
-                </div>
-                <div className="wizard-attack-graph__meta text-sm text-muted">
-                  Priority {node.priority} · Risk {node.risk} · Confidence{" "}
-                  {Math.round(node.confidence * 100)}%
-                  {node.dependencies.length > 0 && (
-                    <> · Depends on {node.dependencies.map((d) => getCategory(d).label).join(", ")}</>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ol>
-        {enabledGraph.length === 0 && (
-          <p className="text-danger text-sm">Enable at least one attack category to continue.</p>
         )}
       </section>
 
@@ -320,12 +278,33 @@ export function ReviewAttackPlanStep({
         <div className="wizard-attack-categories__header">
           <h4 className="wizard-endpoints__title">Attack categories</h4>
           <span className="text-muted text-sm">
-            {activeCategories.length} of {ATTACK_CATALOG.length} selected
+            {activeCategories.length} of {attackPlan.suggestedCategories.length} applicable selected
+            {notApplicableCount > 0 ? ` · ${notApplicableCount} not applicable` : ""}
           </span>
         </div>
         <div className="wizard-attack-category-list">
-          {ATTACK_CATALOG.filter((cat) => attackPlan.suggestedCategories.includes(cat.id)).map(
-            (category) => {
+          {ATTACK_CATALOG.map((category) => {
+              const applicable = suggestedSet.has(category.id);
+              if (!applicable) {
+                return (
+                  <div
+                    key={category.id}
+                    className="wizard-attack-category wizard-attack-category--na"
+                  >
+                    <div className="wizard-attack-category__row">
+                      <div className="wizard-attack-category__title">
+                        <span>{category.label}</span>
+                        <Badge variant="muted">Not applicable</Badge>
+                      </div>
+                    </div>
+                    <p className="wizard-attack-category__note text-sm text-muted">
+                      {category.description} — not suggested for this target based on its
+                      capabilities.
+                    </p>
+                  </div>
+                );
+              }
+
               const included = activeCategories.includes(category.id);
               const expanded = expandedCategory === category.id;
               const enabledTests = category.tests.filter((test) => !disabledTestSet.has(test.id));
@@ -403,7 +382,7 @@ export function ReviewAttackPlanStep({
           >
             <span className="wizard-attack-profile__label">Sequential</span>
             <span className="wizard-attack-profile__description text-sm">
-              One execution pass through the approved attack graph.
+              One execution pass through the selected attack categories.
             </span>
           </button>
           <button
