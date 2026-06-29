@@ -8,6 +8,7 @@ pub mod capabilities;
 pub mod harness;
 pub mod planner;
 pub mod prompt;
+pub mod serde_verified_at;
 pub mod templates;
 pub mod types;
 pub mod verification;

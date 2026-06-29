@@ -120,6 +120,25 @@ export function createEmptyVerification(): VerificationResultForm {
   };
 }
 
+/** Wizard/DB may carry verifiedAt as RFC3339 string or legacy time-crate array — normalize for IPC. */
+export function normalizeVerifiedAt(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return null;
+}
+
+export function normalizeVerification(
+  verification: Partial<VerificationResultForm> | undefined,
+): VerificationResultForm {
+  const base = createEmptyVerification();
+  if (!verification) return base;
+  return {
+    ...base,
+    ...verification,
+    verifiedAt: normalizeVerifiedAt(verification.verifiedAt),
+  };
+}
+
 export function createEmptyCapabilities(): TargetCapabilitiesForm {
   return {
     supportsStreaming: false,
@@ -182,7 +201,7 @@ export function profileFromDto(dto: TargetProfileDto): TargetProfileFormState {
     attachmentField: dto.attachmentField ?? "",
     defaultCapabilities: dto.defaultCapabilities ?? createEmptyCapabilities(),
     verificationStrategy: dto.verificationStrategy,
-    verification: dto.verification ?? createEmptyVerification(),
+    verification: normalizeVerification(dto.verification),
   };
 }
 
@@ -211,7 +230,7 @@ export function profileToPayload(form: TargetProfileFormState): Record<string, u
     attachmentField: form.attachmentField || null,
     defaultCapabilities: form.defaultCapabilities,
     verificationStrategy: form.verificationStrategy,
-    verification: form.verification,
+    verification: normalizeVerification(form.verification),
   };
 }
 

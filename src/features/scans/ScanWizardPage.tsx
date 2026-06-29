@@ -6,6 +6,7 @@ import { mapProjects, mapTargets } from "@/app/store/mappers";
 import { Button, Card, PageHeader } from "@/shared/components";
 import { getProject, startScan, updateTargetDescriptor } from "@/shared/ipc";
 import { saveTargetProfile } from "@/shared/ipc/targetProfile";
+import { toAppError } from "@/shared/errors";
 import { useToast } from "@/shared/notifications";
 import type { Project, Target } from "@/shared/types";
 
@@ -283,7 +284,7 @@ export function ScanWizardPage() {
       notify(`Target profile saved for "${name}"`, "success");
       return target;
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to save target profile";
+      const message = toAppError(err).message || "Failed to save target profile";
       setProfileStepError(message);
       notify(message, "error");
       return null;
@@ -311,7 +312,7 @@ export function ScanWizardPage() {
       updateSession({ savedTargetFingerprint: targetFormFingerprint(session.targetForm) });
       return true;
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to save authentication";
+      const message = toAppError(err).message || "Failed to save authentication";
       setVerificationError(message);
       notify(message, "error");
       return false;
@@ -321,6 +322,9 @@ export function ScanWizardPage() {
   }
 
   async function navigateToStep(nextStep: WizardStepId) {
+    setProfileStepError(null);
+    setVerificationError(null);
+
     const targetId = session.savedTargetId;
     const fallbackUrl = session.targetForm.url || store.savedTarget?.url || "";
 
@@ -474,6 +478,7 @@ export function ScanWizardPage() {
             profile={session.targetProfile}
             onChange={patchTargetProfile}
             error={profileStepError}
+            hasPersistedTarget={session.savedTargetId !== null}
           />
         ) : (
           <p className="text-muted">Select a project in step 1 to configure the AI target profile.</p>

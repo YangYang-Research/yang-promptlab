@@ -17,9 +17,16 @@ type TargetProfileStepProps = {
   profile: TargetProfileFormState;
   onChange: (patch: Partial<TargetProfileFormState>) => void;
   error: string | null;
+  /** When true, skip auto-loading provider template over an existing saved profile. */
+  hasPersistedTarget?: boolean;
 };
 
-export function TargetProfileStep({ profile, onChange, error }: TargetProfileStepProps) {
+export function TargetProfileStep({
+  profile,
+  onChange,
+  error,
+  hasPersistedTarget = false,
+}: TargetProfileStepProps) {
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const apiEndpoint = useMemo(() => formatApiEndpoint(profile), [profile.baseUrl, profile.path]);
 
@@ -28,9 +35,10 @@ export function TargetProfileStep({ profile, onChange, error }: TargetProfileSte
     setLoadingTemplates(true);
     void listTargetProfileTemplates()
       .then((templates) => {
-        if (cancelled || templates.length === 0) return;
+        if (cancelled || templates.length === 0 || hasPersistedTarget) return;
         const match = templates.find((t) => t.provider === profile.provider);
-        if (match && !profile.requestTemplate.trim()) {
+        const hasConfiguredEndpoint = profile.baseUrl.trim().length > 0;
+        if (match && !profile.requestTemplate.trim() && !hasConfiguredEndpoint) {
           onChange(profileFromDto(match));
         }
       })

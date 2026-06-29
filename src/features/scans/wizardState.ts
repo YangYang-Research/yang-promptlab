@@ -11,6 +11,7 @@ import {
 } from "./targetDescriptor";
 import {
   createInitialTargetProfile,
+  normalizeVerification,
   profileFromDto,
   fullProfileUrl,
   type TargetProfileFormState,
@@ -127,7 +128,11 @@ export function loadWizardSession(lockedProjectId: string): ScanWizardSession {
       ...createInitialSession(lockedProjectId),
       ...parsed,
       selectedProjectId: lockedProjectId || parsed.selectedProjectId,
-      targetProfile: { ...createInitialTargetProfile(), ...parsed.targetProfile },
+      targetProfile: {
+        ...createInitialTargetProfile(),
+        ...parsed.targetProfile,
+        verification: normalizeVerification(parsed.targetProfile?.verification),
+      },
       targetForm: migrateTargetForm(parsed.targetForm ?? {}),
       attackPlanUi: { ...createInitialAttackPlanUi(), ...parsed.attackPlanUi },
     };

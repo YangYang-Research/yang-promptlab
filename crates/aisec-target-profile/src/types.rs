@@ -158,6 +158,7 @@ pub struct TargetCapabilities {
 #[serde(rename_all = "camelCase")]
 pub struct VerificationResult {
     pub verified: bool,
+    #[serde(default, with = "crate::serde_verified_at")]
     pub verified_at: Option<OffsetDateTime>,
     pub provider: String,
     pub model: Option<String>,
@@ -197,6 +198,86 @@ impl Default for TargetProfile {
     fn default() -> Self {
         let provider = TargetProvider::OpenAiCompatible;
         crate::templates::template_for_provider(provider)
+    }
+}
+
+#[cfg(test)]
+mod profile_serde_tests {
+    use super::TargetProfile;
+
+    #[test]
+    fn deserializes_verification_verified_at_rfc3339() {
+        let json = r#"{
+          "provider": "generic_http",
+          "framework": "openai",
+          "method": "POST",
+          "baseUrl": "https://api.example.com",
+          "path": "/v1/chat",
+          "requestTemplate": "{\"messages\":[{\"role\":\"user\",\"content\":\"{{PROMPT}}\"}]}",
+          "promptPlaceholder": "{{PROMPT}}",
+          "verificationStrategy": "generic_http",
+          "verification": {
+            "verified": true,
+            "verifiedAt": "2025-06-13T12:00:00Z",
+            "provider": "generic_http",
+            "model": "test",
+            "capabilities": {
+              "supportsStreaming": false,
+              "supportsTools": false,
+              "supportsConversation": true,
+              "supportsAttachments": false,
+              "supportsMemory": false,
+              "supportsAgent": false
+            },
+            "responseTimeMs": 100,
+            "statusCode": 200,
+            "status": "verified",
+            "responsePreview": "hello",
+            "errorMessage": null
+          }
+        }"#;
+        let profile: TargetProfile = serde_json::from_str(json).expect("profile json");
+        assert!(profile.verification.verified);
+        assert!(profile.verification.verified_at.is_some());
+    }
+
+    #[test]
+    fn deserializes_verification_verified_at_legacy_array() {
+        use time::OffsetDateTime;
+
+        let dt = OffsetDateTime::now_utc();
+        let verified_at = serde_json::to_value(dt).expect("array");
+        let json = serde_json::json!({
+          "provider": "generic_http",
+          "framework": "openai",
+          "method": "POST",
+          "baseUrl": "https://api.example.com",
+          "path": "/v1/chat",
+          "requestTemplate": "{\"messages\":[{\"role\":\"user\",\"content\":\"{{PROMPT}}\"}]}",
+          "promptPlaceholder": "{{PROMPT}}",
+          "verificationStrategy": "generic_http",
+          "verification": {
+            "verified": true,
+            "verifiedAt": verified_at,
+            "provider": "generic_http",
+            "model": "test",
+            "capabilities": {
+              "supportsStreaming": false,
+              "supportsTools": false,
+              "supportsConversation": true,
+              "supportsAttachments": false,
+              "supportsMemory": false,
+              "supportsAgent": false
+            },
+            "responseTimeMs": 100,
+            "statusCode": 200,
+            "status": "verified",
+            "responsePreview": "hello",
+            "errorMessage": null
+          }
+        });
+        let profile: TargetProfile = serde_json::from_value(json).expect("profile json");
+        assert!(profile.verification.verified_at.is_some());
     }
 }
 
