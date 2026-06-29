@@ -3,9 +3,7 @@ import type {
   AttackProfileId,
   ExecutionStrategy,
 } from "./attackProfiles";
-import { getProfile } from "./attackProfiles";
 import {
-  payloadStrategyForAttackProfile,
   payloadStrategyFromDto,
   payloadStrategyToDto,
   type PayloadStrategyConfig,
@@ -30,10 +28,22 @@ export type CategoryRationale = {
   source: string;
 };
 
+export type AttackProfileMode = {
+  profileId: AttackProfileId;
+  categories: AttackCategoryId[];
+  executionStrategy: ExecutionStrategy;
+  maxAttempts: number;
+  reflectionEnabled: boolean;
+  adaptivePlanning: boolean;
+  payloadStrategy: PayloadStrategyConfig;
+};
+
 /** Planner output + user review overrides — persisted in wizard session. */
 export type AttackPlanConfig = {
   profileId: AttackProfileId;
+  recommendedProfileId: AttackProfileId;
   suggestedCategories: AttackCategoryId[];
+  profileModes: AttackProfileMode[];
   customCategories: AttackCategoryId[];
   categories: AttackCategoryId[];
   disabledTests: string[];
@@ -59,9 +69,21 @@ export type AttackPlanConfig = {
   recommendedPayloadStrategy: PayloadStrategyConfig;
 };
 
+export type AttackProfileModeDto = {
+  profileId: string;
+  categories: string[];
+  executionStrategy: string;
+  maxAttempts: number;
+  reflectionEnabled: boolean;
+  adaptivePlanning: boolean;
+  payloadStrategy: PayloadStrategyDto;
+};
+
 export type WizardAttackPlanDto = {
   profileId: string;
+  recommendedProfileId: string;
   suggestedCategories: string[];
+  profileModes: AttackProfileModeDto[];
   categories: string[];
   disabledTests: string[];
   capabilityGraph: string[];
@@ -108,6 +130,15 @@ export type PlannerAdjustRequest = {
   reflectionEnabled?: boolean;
   adaptivePlanning?: boolean;
   payloadStrategy?: PayloadStrategyDto;
+  suggestedCategories?: AttackCategoryId[];
+  profileModes?: AttackProfileModeDto[];
+  rationales?: Array<{
+    category: string;
+    reason: string;
+    priority: number;
+    source: string;
+  }>;
+  capabilityGraph?: string[];
 };
 
 const ALL_CATEGORY_IDS = new Set<string>([
@@ -143,14 +174,72 @@ function rationalesForActiveCategories(
     .sort((a, b) => a.priority - b.priority);
 }
 
+function mapCategoryRationales(
+  values: WizardAttackPlanDto["rationales"],
+): CategoryRationale[] {
+  return values
+    .map((item) => {
+      const category = asCategoryId(item.category);
+      if (!category) return null;
+      return {
+        category,
+        reason: item.reason,
+        priority: item.priority,
+        source: item.source,
+      };
+    })
+    .filter((item): item is CategoryRationale => item !== null);
+}
+
+function profileModeFromDto(dto: AttackProfileModeDto): AttackProfileMode | null {
+  const profileId = asProfileId(dto.profileId);
+  if (profileId === "custom") return null;
+  const categories = dto.categories
+    .map(asCategoryId)
+    .filter((id): id is AttackCategoryId => id !== null);
+  if (categories.length === 0) return null;
+  return {
+    profileId,
+    categories,
+    executionStrategy: dto.executionStrategy === "agentic" ? "agentic" : "sequential",
+    maxAttempts: dto.maxAttempts,
+    reflectionEnabled: dto.reflectionEnabled,
+    adaptivePlanning: dto.adaptivePlanning,
+    payloadStrategy: payloadStrategyFromDto(dto.payloadStrategy),
+  };
+}
+
+export function profileModeToDto(mode: AttackProfileMode): AttackProfileModeDto {
+  return {
+    profileId: mode.profileId,
+    categories: mode.categories,
+    executionStrategy: mode.executionStrategy,
+    maxAttempts: mode.maxAttempts,
+    reflectionEnabled: mode.reflectionEnabled,
+    adaptivePlanning: mode.adaptivePlanning,
+    payloadStrategy: payloadStrategyToDto(mode.payloadStrategy),
+  };
+}
+
+export function getProfileMode(
+  plan: Pick<AttackPlanConfig, "profileModes">,
+  profileId: AttackProfileId,
+): AttackProfileMode | null {
+  return plan.profileModes.find((mode) => mode.profileId === profileId) ?? null;
+}
+
 /** Categories payload for `attack_planner_adjust` — avoids empty custom selection. */
 export function resolveCategoriesForAdjust(
   profileId: AttackProfileId,
   planUi: Pick<AttackPlanUiState, "customCategories" | "disabledGraphNodes">,
-  attackPlan: Pick<AttackPlanConfig, "suggestedCategories" | "categories">,
+  attackPlan: Pick<
+    AttackPlanConfig,
+    "suggestedCategories" | "categories" | "profileModes"
+  >,
 ): AttackCategoryId[] {
   if (profileId !== "custom") {
-    return attackPlan.suggestedCategories;
+    const mode = getProfileMode(attackPlan, profileId);
+    return mode?.categories ?? attackPlan.categories;
   }
   if (planUi.customCategories.length > 0) {
     return planUi.customCategories;
@@ -167,7 +256,11 @@ export function attackPlanFromDto(dto: WizardAttackPlanDto): AttackPlanConfig {
 
   return {
     profileId: asProfileId(dto.profileId),
+    recommendedProfileId: asProfileId(dto.recommendedProfileId ?? dto.profileId),
     suggestedCategories: mapCategories(dto.suggestedCategories),
+    profileModes: dto.profileModes
+      .map(profileModeFromDto)
+      .filter((mode): mode is AttackProfileMode => mode !== null),
     customCategories: mapCategories(dto.categories),
     categories: mapCategories(dto.categories),
     disabledTests: dto.disabledTests,
@@ -194,21 +287,7 @@ export function attackPlanFromDto(dto: WizardAttackPlanDto): AttackPlanConfig {
     maxAttempts: dto.maxAttempts,
     reflectionEnabled: dto.reflectionEnabled,
     adaptivePlanning: dto.adaptivePlanning,
-    rationales: rationalesForActiveCategories(
-      dto.rationales
-        .map((item) => {
-          const category = asCategoryId(item.category);
-          if (!category) return null;
-          return {
-            category,
-            reason: item.reason,
-            priority: item.priority,
-            source: item.source,
-          };
-        })
-        .filter((item): item is CategoryRationale => item !== null),
-      mapCategories(dto.categories),
-    ),
+    rationales: mapCategoryRationales(dto.rationales),
     confidence: dto.confidence,
     summary: dto.summary,
     riskScore: dto.riskScore,
@@ -374,6 +453,25 @@ export function recomputePlanPreview(plan: AttackPlanConfig): AttackPlanConfig {
   return { ...next, summary: buildPlannerSummaryPreview(next, endpoint) };
 }
 
+export function plannerAdjustContext(
+  plan: AttackPlanConfig,
+): Pick<
+  PlannerAdjustRequest,
+  "suggestedCategories" | "profileModes" | "rationales" | "capabilityGraph"
+> {
+  return {
+    suggestedCategories: plan.suggestedCategories,
+    profileModes: plan.profileModes.map(profileModeToDto),
+    rationales: plan.rationales.map((item) => ({
+      category: item.category,
+      reason: item.reason,
+      priority: item.priority,
+      source: item.source,
+    })),
+    capabilityGraph: plan.capabilityGraph,
+  };
+}
+
 export function previewPlanForProfile(
   plan: AttackPlanConfig,
   profileId: AttackProfileId,
@@ -383,8 +481,12 @@ export function previewPlanForProfile(
     return recomputePlanPreview({ ...plan, profileId, disabledTests });
   }
 
-  const preset = getProfile(profileId);
-  const categories = plan.suggestedCategories.filter((id) => preset.categories.includes(id));
+  const mode = getProfileMode(plan, profileId);
+  if (!mode) {
+    return recomputePlanPreview({ ...plan, profileId, disabledTests });
+  }
+
+  const categories = mode.categories;
   const attackGraph = plan.attackGraph.map((node) => ({
     ...node,
     enabled: categories.includes(node.category),
@@ -397,7 +499,11 @@ export function previewPlanForProfile(
     attackGraph,
     disabledTests,
     disabledGraphNodes: [],
-    payloadStrategy: payloadStrategyForAttackProfile(profileId, plan.recommendedPayloadStrategy),
+    executionStrategy: mode.executionStrategy,
+    maxAttempts: mode.maxAttempts,
+    reflectionEnabled: mode.reflectionEnabled,
+    adaptivePlanning: mode.adaptivePlanning,
+    payloadStrategy: mode.payloadStrategy,
   });
 }
 
@@ -408,8 +514,7 @@ export function resolveCategoriesForProfile(
   if (profileId === "custom") {
     return plan.categories;
   }
-  const preset = getProfile(profileId);
-  return plan.suggestedCategories.filter((id) => preset.categories.includes(id));
+  return getProfileMode(plan, profileId)?.categories ?? plan.categories;
 }
 
 export function plannerSourceFromPlan(plan: AttackPlanConfig): PlannerSource {

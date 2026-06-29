@@ -9,7 +9,7 @@ use aisec_planner::{
 use aisec_storage::TargetRepository;
 use aisec_target_profile::{
     adjust_wizard_attack_plan, build_wizard_attack_plan, build_wizard_plan_summary,
-    ExecutionStrategy, PayloadStrategy, WizardAttackPlan,
+    AttackProfileMode, ExecutionStrategy, PayloadStrategy, WizardAttackPlan,
 };
 use aisec_storage::EndpointRepository;
 use serde::{Deserialize, Serialize};
@@ -38,11 +38,25 @@ pub struct AttackGraphNodeDto {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttackProfileModeDto {
+    pub profile_id: String,
+    pub categories: Vec<String>,
+    pub execution_strategy: String,
+    pub max_attempts: u8,
+    pub reflection_enabled: bool,
+    pub adaptive_planning: bool,
+    pub payload_strategy: PayloadStrategyDto,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WizardAttackPlanDto {
     pub profile_id: String,
+    pub recommended_profile_id: String,
     pub suggested_categories: Vec<String>,
+    pub profile_modes: Vec<AttackProfileModeDto>,
     pub categories: Vec<String>,
     pub disabled_tests: Vec<String>,
     pub capability_graph: Vec<String>,
@@ -93,6 +107,14 @@ pub struct PlannerAdjustRequest {
     pub reflection_enabled: Option<bool>,
     pub adaptive_planning: Option<bool>,
     pub payload_strategy: Option<PayloadStrategyDto>,
+    #[serde(default)]
+    pub suggested_categories: Vec<String>,
+    #[serde(default)]
+    pub profile_modes: Vec<AttackProfileModeDto>,
+    #[serde(default)]
+    pub rationales: Vec<CategoryRationaleDto>,
+    #[serde(default)]
+    pub capability_graph: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -108,7 +130,7 @@ pub struct AttackPlanDto {
     pub llm_rationale: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CategoryRationaleDto {
     pub category: String,
@@ -180,10 +202,16 @@ fn parse_payload_strategy(dto: PayloadStrategyDto) -> CommandResult<PayloadStrat
 pub fn wizard_plan_to_dto(plan: WizardAttackPlan) -> WizardAttackPlanDto {
     WizardAttackPlanDto {
         profile_id: plan.profile_id,
+        recommended_profile_id: plan.recommended_profile_id,
         suggested_categories: plan
             .suggested_categories
             .iter()
             .map(|c| c.as_str().into())
+            .collect(),
+        profile_modes: plan
+            .profile_modes
+            .into_iter()
+            .map(profile_mode_to_dto)
             .collect(),
         categories: plan.categories.iter().map(|c| c.as_str().into()).collect(),
         disabled_tests: plan.disabled_tests,
@@ -236,6 +264,82 @@ pub fn wizard_plan_to_dto(plan: WizardAttackPlan) -> WizardAttackPlanDto {
     }
 }
 
+fn profile_mode_to_dto(mode: AttackProfileMode) -> AttackProfileModeDto {
+    AttackProfileModeDto {
+        profile_id: mode.profile_id,
+        categories: mode.categories.iter().map(|c| c.as_str().into()).collect(),
+        execution_strategy: match mode.execution_strategy {
+            ExecutionStrategy::Sequential => "sequential".into(),
+            ExecutionStrategy::Agentic => "agentic".into(),
+        },
+        max_attempts: mode.max_attempts,
+        reflection_enabled: mode.reflection_enabled,
+        adaptive_planning: mode.adaptive_planning,
+        payload_strategy: payload_strategy_to_dto(mode.payload_strategy),
+    }
+}
+
+fn parse_profile_modes(modes: &[AttackProfileModeDto]) -> Vec<AttackProfileMode> {
+    modes
+        .iter()
+        .filter_map(|mode| {
+            let categories = parse_attack_categories(&mode.categories);
+            if categories.is_empty() {
+                return None;
+            }
+            Some(AttackProfileMode {
+                profile_id: mode.profile_id.clone(),
+                categories,
+                execution_strategy: parse_execution_strategy(Some(&mode.execution_strategy)),
+                max_attempts: mode.max_attempts.clamp(1, 20),
+                reflection_enabled: mode.reflection_enabled,
+                adaptive_planning: mode.adaptive_planning,
+                payload_strategy: parse_payload_strategy(mode.payload_strategy.clone()).ok()?,
+            })
+        })
+        .collect()
+}
+
+fn parse_category_rationales(
+    raw: &[CategoryRationaleDto],
+) -> Vec<aisec_planner::types::CategoryRationale> {
+    raw.iter()
+        .filter_map(|item| {
+            let category = AttackCategory::all()
+                .iter()
+                .copied()
+                .find(|c| c.as_str() == item.category)?;
+            Some(aisec_planner::types::CategoryRationale {
+                category,
+                reason: item.reason.clone(),
+                priority: item.priority,
+                source: item.source.clone(),
+            })
+        })
+        .collect()
+}
+
+fn merge_adjust_base(profile: &aisec_target_profile::TargetProfile, request: &PlannerAdjustRequest) -> WizardAttackPlan {
+    let mut base = build_wizard_attack_plan(profile);
+    if request.profile_modes.is_empty() {
+        return base;
+    }
+
+    base.suggested_categories = if request.suggested_categories.is_empty() {
+        base.suggested_categories
+    } else {
+        parse_attack_categories(&request.suggested_categories)
+    };
+    base.profile_modes = parse_profile_modes(&request.profile_modes);
+    if !request.rationales.is_empty() {
+        base.rationales = parse_category_rationales(&request.rationales);
+    }
+    if !request.capability_graph.is_empty() {
+        base.capability_graph = request.capability_graph.clone();
+    }
+    base
+}
+
 fn parse_attack_categories(raw: &[String]) -> Vec<AttackCategory> {
     raw.iter()
         .filter_map(|value| AttackCategory::all().iter().copied().find(|c| c.as_str() == value))
@@ -266,7 +370,7 @@ pub async fn planner_adjust_wizard_plan_op(
         ));
     }
 
-    let base = build_wizard_attack_plan(&profile);
+    let base = merge_adjust_base(&profile, &request);
     let categories = if request.profile_id.eq_ignore_ascii_case("custom") {
         Some(parse_attack_categories(&request.categories))
     } else {

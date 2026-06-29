@@ -10,12 +10,60 @@ describe("resolveCategoriesForAdjust", () => {
     "tool_abuse",
   ] as const;
 
-  it("returns suggested categories for preset profiles", () => {
+  const profileModes = [
+    {
+      profileId: "standard" as const,
+      categories: [...suggested],
+      executionStrategy: "sequential" as const,
+      maxAttempts: 5,
+      reflectionEnabled: false,
+      adaptivePlanning: false,
+      payloadStrategy: {
+        strategy: "mutation" as const,
+        mutationLevel: "medium" as const,
+        variantsPerTest: 5,
+        maxTotalPayloads: 20,
+        enableContextAwareness: false,
+        enableConversationMemory: false,
+        enableResponseAdaptation: false,
+        enablePayloadDeduplication: true,
+        enableCrossCategoryMutation: false,
+      },
+    },
+    {
+      profileId: "quick" as const,
+      categories: ["prompt_injection", "jailbreak", "system_prompt_extraction"] as const,
+      executionStrategy: "sequential" as const,
+      maxAttempts: 3,
+      reflectionEnabled: false,
+      adaptivePlanning: false,
+      payloadStrategy: {
+        strategy: "deterministic" as const,
+        mutationLevel: "low" as const,
+        variantsPerTest: 2,
+        maxTotalPayloads: 10,
+        enableContextAwareness: false,
+        enableConversationMemory: false,
+        enableResponseAdaptation: false,
+        enablePayloadDeduplication: true,
+        enableCrossCategoryMutation: false,
+      },
+    },
+  ];
+
+  it("returns AI mode categories for preset profiles", () => {
     expect(
       resolveCategoriesForAdjust(
         "standard",
         { customCategories: [], disabledGraphNodes: [] },
-        { suggestedCategories: [...suggested], categories: [...suggested] },
+        {
+          suggestedCategories: [...suggested],
+          categories: [...suggested],
+          profileModes: profileModes.map((mode) => ({
+            ...mode,
+            categories: [...mode.categories],
+          })),
+        },
       ),
     ).toEqual([...suggested]);
   });
@@ -28,6 +76,7 @@ describe("resolveCategoriesForAdjust", () => {
         {
           suggestedCategories: [...suggested],
           categories: ["prompt_injection", "jailbreak"],
+          profileModes: [],
         },
       ),
     ).toEqual(["prompt_injection", "jailbreak"]);
@@ -38,7 +87,11 @@ describe("resolveCategoriesForAdjust", () => {
       resolveCategoriesForAdjust(
         "custom",
         { customCategories: [], disabledGraphNodes: ["tool_abuse"] },
-        { suggestedCategories: [...suggested], categories: [] },
+        {
+          suggestedCategories: [...suggested],
+          categories: [],
+          profileModes: [],
+        },
       ),
     ).toEqual(["prompt_injection", "jailbreak", "system_prompt_extraction"]);
   });

@@ -9,24 +9,23 @@ import {
 } from "@/features/scans/attackProfiles";
 
 describe("attackProfiles", () => {
-  it("maps quick profile to three core categories", () => {
+  it("exposes preset attack mode labels without fixed categories", () => {
     const quick = ATTACK_PROFILES.find((p) => p.id === "quick");
     expect(quick?.label).toBe("Quick Assessment");
-    expect(quick?.categories).toEqual([
-      "prompt_injection",
-      "jailbreak",
-      "system_prompt_extraction",
-    ]);
-  });
+    expect(quick?.categories).toBeUndefined();
 
-  it("maps standard profile to security review label", () => {
     const standard = ATTACK_PROFILES.find((p) => p.id === "standard");
     expect(standard?.label).toBe("Security Review");
-  });
+    expect(standard?.categories).toBeUndefined();
 
-  it("maps deep profile to red team label", () => {
     const deep = ATTACK_PROFILES.find((p) => p.id === "deep");
     expect(deep?.label).toBe("Red Team");
+    expect(deep?.categories).toBeUndefined();
+  });
+
+  it("keeps manual categories only on custom mode", () => {
+    const custom = ATTACK_PROFILES.find((p) => p.id === "custom");
+    expect(custom?.categories?.length).toBeGreaterThan(0);
   });
 
   it("computes per-category payload variant count", () => {

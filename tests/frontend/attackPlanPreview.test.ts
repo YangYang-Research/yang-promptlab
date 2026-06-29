@@ -12,15 +12,91 @@ import {
 } from "@/features/scans/attackPlan";
 import { createInitialAttackPlanUi } from "@/features/scans/wizardState";
 
+function samplePayload() {
+  return {
+    strategy: "mutation" as const,
+    mutationLevel: "medium" as const,
+    variantsPerTest: 5,
+    maxTotalPayloads: 20,
+    enableContextAwareness: false,
+    enableConversationMemory: false,
+    enableResponseAdaptation: false,
+    enablePayloadDeduplication: true,
+    enableCrossCategoryMutation: false,
+  };
+}
+
 function samplePlan(): AttackPlanConfig {
+  const payload = samplePayload();
+  const profileModes = [
+    {
+      profileId: "quick" as const,
+      categories: [
+        "prompt_injection",
+        "jailbreak",
+        "system_prompt_extraction",
+      ] as const,
+      executionStrategy: "sequential" as const,
+      maxAttempts: 3,
+      reflectionEnabled: false,
+      adaptivePlanning: false,
+      payloadStrategy: {
+        ...payload,
+        strategy: "deterministic" as const,
+        mutationLevel: "low" as const,
+        variantsPerTest: 2,
+        maxTotalPayloads: 10,
+      },
+    },
+    {
+      profileId: "standard" as const,
+      categories: [
+        "prompt_injection",
+        "jailbreak",
+        "system_prompt_extraction",
+        "tool_abuse",
+      ] as const,
+      executionStrategy: "sequential" as const,
+      maxAttempts: 5,
+      reflectionEnabled: false,
+      adaptivePlanning: false,
+      payloadStrategy: payload,
+    },
+    {
+      profileId: "deep" as const,
+      categories: [
+        "prompt_injection",
+        "jailbreak",
+        "system_prompt_extraction",
+        "tool_abuse",
+      ] as const,
+      executionStrategy: "agentic" as const,
+      maxAttempts: 5,
+      reflectionEnabled: true,
+      adaptivePlanning: true,
+      payloadStrategy: {
+        ...payload,
+        strategy: "adaptive" as const,
+        mutationLevel: "extreme" as const,
+        variantsPerTest: 10,
+        maxTotalPayloads: 100,
+      },
+    },
+  ];
+
   return {
     profileId: "standard",
+    recommendedProfileId: "standard",
     suggestedCategories: [
       "prompt_injection",
       "jailbreak",
       "system_prompt_extraction",
       "tool_abuse",
     ],
+    profileModes: profileModes.map((mode) => ({
+      ...mode,
+      categories: [...mode.categories],
+    })),
     customCategories: [
       "prompt_injection",
       "jailbreak",
@@ -69,28 +145,8 @@ function samplePlan(): AttackPlanConfig {
     coverageScore: 0.44,
     riskCoverage: 1,
     totalTestcases: 12,
-    payloadStrategy: {
-      strategy: "mutation",
-      mutationLevel: "medium",
-      variantsPerTest: 5,
-      maxTotalPayloads: 20,
-      enableContextAwareness: false,
-      enableConversationMemory: false,
-      enableResponseAdaptation: false,
-      enablePayloadDeduplication: true,
-      enableCrossCategoryMutation: false,
-    },
-    recommendedPayloadStrategy: {
-      strategy: "mutation",
-      mutationLevel: "medium",
-      variantsPerTest: 5,
-      maxTotalPayloads: 20,
-      enableContextAwareness: false,
-      enableConversationMemory: false,
-      enableResponseAdaptation: false,
-      enablePayloadDeduplication: true,
-      enableCrossCategoryMutation: false,
-    },
+    payloadStrategy: payload,
+    recommendedPayloadStrategy: payload,
   };
 }
 

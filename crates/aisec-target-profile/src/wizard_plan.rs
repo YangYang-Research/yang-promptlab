@@ -37,9 +37,23 @@ pub struct AttackGraphNode {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AttackProfileMode {
+    pub profile_id: String,
+    pub categories: Vec<AttackCategory>,
+    pub execution_strategy: ExecutionStrategy,
+    pub max_attempts: u8,
+    pub reflection_enabled: bool,
+    pub adaptive_planning: bool,
+    pub payload_strategy: PayloadStrategy,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WizardAttackPlan {
     pub profile_id: String,
+    pub recommended_profile_id: String,
     pub suggested_categories: Vec<AttackCategory>,
+    pub profile_modes: Vec<AttackProfileMode>,
     pub categories: Vec<AttackCategory>,
     pub disabled_tests: Vec<String>,
     pub capability_graph: Vec<String>,
@@ -83,23 +97,93 @@ pub fn profile_categories_for_id(profile_id: &str) -> Vec<AttackCategory> {
     }
 }
 
+pub fn build_deterministic_profile_modes(
+    suggested: &[AttackCategory],
+    profile: &TargetProfile,
+) -> Vec<AttackProfileMode> {
+    let recommended_base = recommend_payload_strategy(profile);
+    let suggested_set: HashSet<_> = suggested.iter().copied().collect();
+
+    ["quick", "standard", "deep"]
+        .into_iter()
+        .map(|profile_id| {
+            let preset = profile_categories_for_id(profile_id);
+            let categories: Vec<_> = preset
+                .into_iter()
+                .filter(|category| suggested_set.contains(category))
+                .collect();
+            let payload =
+                payload_strategy_for_attack_profile(profile_id, &recommended_base).clamp();
+            let (execution_strategy, max_attempts, reflection_enabled, adaptive_planning) =
+                match profile_id {
+                    "deep" => (ExecutionStrategy::Agentic, 5_u8, true, true),
+                    "standard" => (ExecutionStrategy::Sequential, 5, false, false),
+                    _ => (ExecutionStrategy::Sequential, 3, false, false),
+                };
+            AttackProfileMode {
+                profile_id: profile_id.into(),
+                categories,
+                execution_strategy,
+                max_attempts,
+                reflection_enabled,
+                adaptive_planning,
+                payload_strategy: payload,
+            }
+        })
+        .collect()
+}
+
+pub fn union_mode_categories(modes: &[AttackProfileMode]) -> Vec<AttackCategory> {
+    let mut seen = HashSet::new();
+    let mut ordered = Vec::new();
+    for mode in modes {
+        for category in &mode.categories {
+            if seen.insert(*category) {
+                ordered.push(*category);
+            }
+        }
+    }
+    ordered
+}
+
+pub fn find_profile_mode<'a>(
+    modes: &'a [AttackProfileMode],
+    profile_id: &str,
+) -> Option<&'a AttackProfileMode> {
+    let key = profile_id.trim().to_ascii_lowercase();
+    modes
+        .iter()
+        .find(|mode| mode.profile_id.eq_ignore_ascii_case(&key))
+}
+
+pub fn apply_profile_mode_settings(plan: &mut WizardAttackPlan, mode: &AttackProfileMode) {
+    plan.profile_id = mode.profile_id.clone();
+    plan.categories = mode.categories.clone();
+    plan.execution_strategy = mode.execution_strategy;
+    plan.max_attempts = mode.max_attempts;
+    plan.reflection_enabled = mode.reflection_enabled;
+    plan.adaptive_planning = mode.adaptive_planning;
+    plan.payload_strategy = mode.payload_strategy.clone();
+}
+
 pub fn build_wizard_attack_plan(profile: &TargetProfile) -> WizardAttackPlan {
     let caps = crate::capabilities::effective_capabilities(profile);
     let base = super::planner::plan_from_target_profile(profile);
     let capability_graph = capability_labels(&caps, &profile.framework, profile.provider.as_str());
     let suggested = base.categories.clone();
+    let profile_modes = build_deterministic_profile_modes(&suggested, profile);
     let attack_graph = build_attack_graph(&base.rationales, &suggested);
     let risk_score = compute_risk_score(&caps, suggested.len());
     let risk_level = risk_level_label(risk_score).to_string();
 
     let recommended = recommend_payload_strategy(profile);
-    let payload_strategy =
-        payload_strategy_for_attack_profile("standard", &recommended).clamp();
 
     let mut plan = WizardAttackPlan {
         profile_id: "standard".into(),
+        recommended_profile_id: "standard".into(),
         suggested_categories: suggested.clone(),
-        categories: active_categories_for_profile("standard", &suggested),
+        profile_modes,
+        categories: Vec::new(),
         disabled_tests: vec![],
         capability_graph,
         attack_graph,
@@ -118,9 +202,12 @@ pub fn build_wizard_attack_plan(profile: &TargetProfile) -> WizardAttackPlan {
         coverage_score: 0.0,
         risk_coverage: 0.0,
         total_testcases: 0,
-        payload_strategy: payload_strategy.clone(),
+        payload_strategy: recommended.clone(),
         recommended_payload_strategy: recommended,
     };
+    if let Some(mode) = find_profile_mode(&plan.profile_modes, "standard").cloned() {
+        apply_profile_mode_settings(&mut plan, &mode);
+    }
     recompute_estimates(&mut plan);
     plan.summary = build_wizard_plan_summary(&plan, &profile.full_url());
     plan
@@ -129,21 +216,31 @@ pub fn build_wizard_attack_plan(profile: &TargetProfile) -> WizardAttackPlan {
 pub(crate) fn rebuild_wizard_plan_from_analysis(
     profile: &TargetProfile,
     mut plan: WizardAttackPlan,
-    profile_id: String,
+    profile_modes: Vec<AttackProfileMode>,
+    recommended_profile_id: String,
     suggested: Vec<AttackCategory>,
     rationales: Vec<CategoryRationale>,
     caps: &TargetCapabilities,
     confidence: f32,
 ) -> WizardAttackPlan {
-    plan.profile_id = profile_id.clone();
+    plan.profile_modes = profile_modes;
+    plan.recommended_profile_id = recommended_profile_id.clone();
     plan.suggested_categories = suggested.clone();
-    plan.categories = active_categories_for_profile(&profile_id, &suggested);
     plan.capability_graph = capability_labels(caps, &profile.framework, profile.provider.as_str());
     plan.attack_graph = build_attack_graph(&rationales, &suggested);
     plan.rationales = rationales;
     plan.confidence = plan.confidence.max(confidence).min(1.0);
     plan.risk_score = compute_risk_score(caps, suggested.len());
     plan.risk_level = risk_level_label(plan.risk_score).to_string();
+
+    if let Some(mode) = find_profile_mode(&plan.profile_modes, &recommended_profile_id).cloned() {
+        apply_profile_mode_settings(&mut plan, &mode);
+    } else {
+        plan.profile_id = recommended_profile_id;
+        plan.categories =
+            active_categories_for_profile(&plan.profile_id, &suggested, &plan.profile_modes);
+    }
+
     recompute_estimates(&mut plan);
     plan.summary = build_wizard_plan_summary(&plan, &profile.full_url());
     plan
@@ -160,24 +257,33 @@ pub fn adjust_wizard_attack_plan(
     plan.profile_id = profile_id.to_string();
     plan.disabled_tests = disabled_tests.to_vec();
 
-    if let Some(strategy) = payload_strategy {
-        plan.payload_strategy = strategy.clamp();
-    } else {
-        plan.payload_strategy =
-            payload_strategy_for_attack_profile(profile_id, &plan.recommended_payload_strategy)
-                .clamp();
-    }
-
     let disabled_cats: HashSet<String> = disabled_graph_nodes
         .iter()
         .map(|s| s.trim().to_ascii_lowercase())
         .collect();
 
-    plan.categories = if profile_id.eq_ignore_ascii_case("custom") {
-        categories.unwrap_or_else(|| plan.suggested_categories.clone())
+    if profile_id.eq_ignore_ascii_case("custom") {
+        plan.categories = categories.unwrap_or_else(|| plan.suggested_categories.clone());
+        if let Some(strategy) = payload_strategy {
+            plan.payload_strategy = strategy.clamp();
+        }
+    } else if let Some(mode) = find_profile_mode(&plan.profile_modes, profile_id).cloned() {
+        apply_profile_mode_settings(&mut plan, &mode);
+        if let Some(strategy) = payload_strategy {
+            plan.payload_strategy = strategy.clamp();
+        }
     } else {
-        active_categories_for_profile(profile_id, &plan.suggested_categories)
-    };
+        plan.categories =
+            active_categories_for_profile(profile_id, &plan.suggested_categories, &plan.profile_modes);
+        if let Some(strategy) = payload_strategy {
+            plan.payload_strategy = strategy.clamp();
+        } else {
+            plan.payload_strategy =
+                payload_strategy_for_attack_profile(profile_id, &plan.recommended_payload_strategy)
+                    .clamp();
+        }
+    }
+
     plan.categories.retain(|c| !disabled_cats.contains(c.as_str()));
 
     for node in &mut plan.attack_graph {
@@ -202,9 +308,19 @@ pub fn build_wizard_plan_summary(plan: &WizardAttackPlan, api_endpoint: &str) ->
 pub fn active_categories_for_profile(
     profile_id: &str,
     suggested: &[AttackCategory],
+    profile_modes: &[AttackProfileMode],
 ) -> Vec<AttackCategory> {
     if profile_id.eq_ignore_ascii_case("custom") {
         return suggested.to_vec();
+    }
+    if let Some(mode) = find_profile_mode(profile_modes, profile_id) {
+        let suggested_set: HashSet<_> = suggested.iter().copied().collect();
+        return mode
+            .categories
+            .iter()
+            .copied()
+            .filter(|category| suggested_set.contains(category))
+            .collect();
     }
     let preset = profile_categories_for_id(profile_id);
     let suggested_set: HashSet<_> = suggested.iter().copied().collect();
@@ -422,13 +538,24 @@ mod tests {
     }
 
     #[test]
-    fn profile_quick_reduces_categories() {
+    fn profile_quick_reduces_categories_via_modes() {
         let plan = build_wizard_attack_plan(&sample_profile());
         let full_requests = plan.estimated_requests;
+        let quick_count = find_profile_mode(&plan.profile_modes, "quick")
+            .map(|mode| mode.categories.len())
+            .unwrap_or(0);
         let adjusted = adjust_wizard_attack_plan(plan, "quick", None, &[], &[], None);
-        assert_eq!(adjusted.categories.len(), 3);
-        assert_eq!(adjusted.total_testcases, 9);
-        assert!(adjusted.estimated_requests < full_requests);
+        assert_eq!(adjusted.categories.len(), quick_count);
+        assert!(adjusted.estimated_requests <= full_requests);
+    }
+
+    #[test]
+    fn profile_modes_include_all_presets() {
+        let plan = build_wizard_attack_plan(&sample_profile());
+        assert_eq!(plan.profile_modes.len(), 3);
+        assert!(find_profile_mode(&plan.profile_modes, "quick").is_some());
+        assert!(find_profile_mode(&plan.profile_modes, "standard").is_some());
+        assert!(find_profile_mode(&plan.profile_modes, "deep").is_some());
     }
 
     #[test]

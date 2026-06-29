@@ -34,7 +34,8 @@ export type AttackProfileDefinition = {
   id: AttackProfileId;
   label: string;
   description: string;
-  categories: AttackCategoryId[];
+  /** Custom mode only — preset modes use AI Runtime `profileModes`. */
+  categories?: AttackCategoryId[];
 };
 
 /** Original payload + up to 3 mutator variants (`PayloadMutator::with_defaults`). */
@@ -160,27 +161,17 @@ export const ATTACK_PROFILES: AttackProfileDefinition[] = [
   {
     id: "quick",
     label: "Quick Assessment",
-    description: "Minimal coverage — fast execution smoke test",
-    categories: ["prompt_injection", "jailbreak", "system_prompt_extraction"],
+    description: "Minimal AI-selected coverage — fast execution smoke test",
   },
   {
     id: "standard",
     label: "Security Review",
-    description: "Balanced OWASP-aligned coverage — recommended",
-    categories: [
-      "prompt_injection",
-      "jailbreak",
-      "system_prompt_extraction",
-      "rag_leakage",
-      "tool_abuse",
-      "cross_user_leakage",
-    ],
+    description: "Balanced AI-selected coverage — recommended",
   },
   {
     id: "deep",
     label: "Red Team",
-    description: "Maximum coverage — long runtime, full catalog",
-    categories: ALL_ATTACK_CATEGORY_IDS,
+    description: "Maximum AI-selected coverage — long runtime",
   },
   {
     id: "custom",
@@ -234,7 +225,7 @@ export function resolveActiveCategories(input: ScanEstimateInput): AttackCategor
   if (input.profileId === "custom") {
     return input.customCategories ?? [];
   }
-  return getProfile(input.profileId).categories;
+  return getProfile(input.profileId).categories ?? [];
 }
 
 /** Legacy scan-history estimates — wizard Step 4 uses backend planner output instead. */

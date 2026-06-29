@@ -72,6 +72,8 @@ type PayloadStrategySectionProps = {
   recommendedStrategy: PayloadStrategyConfig;
   onChange: (patch: Partial<PayloadStrategyConfig>) => void;
   onAcceptRecommended: () => void;
+  readOnly?: boolean;
+  readOnlyHint?: string;
 };
 
 export function PayloadStrategySection({
@@ -79,8 +81,22 @@ export function PayloadStrategySection({
   recommendedStrategy,
   onChange,
   onAcceptRecommended,
+  readOnly = false,
+  readOnlyHint,
 }: PayloadStrategySectionProps) {
   const matchesRecommendation = payloadStrategyMatchesRecommendation(strategy, recommendedStrategy);
+
+  if (readOnly) {
+    return (
+      <section className="wizard-fingerprint-summary">
+        <h4 className="wizard-endpoints__title">Payload strategy</h4>
+        <p className="text-sm text-muted">
+          {readOnlyHint ??
+            `${GENERATION_STRATEGIES.find((s) => s.id === strategy.strategy)?.label ?? strategy.strategy} · ${MUTATION_LEVELS.find((m) => m.id === strategy.mutationLevel)?.label ?? strategy.mutationLevel} · ${strategy.variantsPerTest} variants · budget ${strategy.maxTotalPayloads}`}
+        </p>
+      </section>
+    );
+  }
 
   return (
     <section className="wizard-fingerprint-summary">
