@@ -24,12 +24,17 @@ import type { Target } from "@/shared/types";
 const STORAGE_KEY = "promptlab:scan-wizard";
 const STORAGE_VERSION = 6;
 
+export type PlannerSource = "ai_runtime" | "target_profile";
+
 export type AttackPlanUiState = {
   profileId: AttackProfileId;
   customCategories: AttackCategoryId[];
   expandedCategory: AttackCategoryId | null;
   disabledTests: string[];
   disabledGraphNodes: AttackCategoryId[];
+  /** Set when a planner run completes; used for the summary badge baseline. */
+  plannerSource: PlannerSource | null;
+  suggestedPlanKey: string | null;
 };
 
 export type ScanWizardSession = {
@@ -59,6 +64,8 @@ export function attackPlanUiFromPlan(plan: AttackPlanConfig): AttackPlanUiState 
     expandedCategory: null,
     disabledTests: plan.disabledTests,
     disabledGraphNodes: plan.disabledGraphNodes,
+    plannerSource: null,
+    suggestedPlanKey: null,
   };
 }
 
@@ -69,6 +76,8 @@ export function createInitialAttackPlanUi(): AttackPlanUiState {
     expandedCategory: null,
     disabledTests: [],
     disabledGraphNodes: [],
+    plannerSource: null,
+    suggestedPlanKey: null,
   };
 }
 

@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   extractPlannerEndpoint,
   formatExecutionStrategySummary,
+  planCustomizationKey,
+  plannerSourceFromPlan,
   previewPlanForProfile,
   recomputePlanPreview,
+  resolvePlannerSummaryBadge,
   type AttackPlanConfig,
 } from "@/features/scans/attackPlan";
 import { createInitialAttackPlanUi } from "@/features/scans/wizardState";
@@ -129,5 +132,36 @@ describe("attack plan preview", () => {
     expect(ui.disabledGraphNodes).toEqual(["tool_abuse"]);
     const preview = previewPlanForProfile(samplePlan(), "standard", []);
     expect(preview.categories).toContain("tool_abuse");
+  });
+
+  it("labels AI plans and detects customization", () => {
+    const plan = {
+      ...samplePlan(),
+      rationales: [
+        {
+          category: "prompt_injection" as const,
+          reason: "High exposure",
+          priority: 1,
+          source: "ai_runtime",
+        },
+      ],
+    };
+    const baseline = planCustomizationKey(plan);
+
+    expect(plannerSourceFromPlan(plan)).toBe("ai_runtime");
+    expect(
+      resolvePlannerSummaryBadge(plan, {
+        plannerSource: "ai_runtime",
+        suggestedPlanKey: baseline,
+      }),
+    ).toEqual({ label: "AI suggested", variant: "info" });
+
+    const customized = { ...plan, executionStrategy: "agentic" as const };
+    expect(
+      resolvePlannerSummaryBadge(customized, {
+        plannerSource: "ai_runtime",
+        suggestedPlanKey: baseline,
+      }),
+    ).toEqual({ label: "Customized", variant: "warning" });
   });
 });

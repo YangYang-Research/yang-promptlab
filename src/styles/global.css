@@ -3647,6 +3647,18 @@ a:hover {
   background: var(--surface-elevated);
 }
 
+.wizard-planner-summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.wizard-planner-summary-header .wizard-endpoints__title {
+  margin: 0;
+}
+
 .wizard-fingerprint-summary__actions {
   display: flex;
   flex-wrap: wrap;

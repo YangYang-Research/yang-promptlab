@@ -11,7 +11,8 @@ import {
   type PayloadStrategyConfig,
   type PayloadStrategyDto,
 } from "./payloadStrategy";
-import type { AttackPlanUiState } from "./wizardState";
+import type { AttackPlanUiState, PlannerSource } from "./wizardState";
+import { attackPlanUiFromPlan } from "./wizardState";
 
 export type AttackGraphNode = {
   category: AttackCategoryId;
@@ -409,4 +410,70 @@ export function resolveCategoriesForProfile(
   }
   const preset = getProfile(profileId);
   return plan.suggestedCategories.filter((id) => preset.categories.includes(id));
+}
+
+export function plannerSourceFromPlan(plan: AttackPlanConfig): PlannerSource {
+  return plan.rationales.some((item) => item.source === "ai_runtime")
+    ? "ai_runtime"
+    : "target_profile";
+}
+
+/** Stable fingerprint of user-adjustable plan fields for customization detection. */
+export function planCustomizationKey(plan: AttackPlanConfig): string {
+  return JSON.stringify({
+    profileId: plan.profileId,
+    categories: [...plan.categories].sort(),
+    disabledTests: [...plan.disabledTests].sort(),
+    disabledGraphNodes: [...plan.disabledGraphNodes].sort(),
+    executionStrategy: plan.executionStrategy,
+    maxAttempts: plan.maxAttempts,
+    reflectionEnabled: plan.reflectionEnabled,
+    adaptivePlanning: plan.adaptivePlanning,
+    payloadStrategy: plan.payloadStrategy,
+  });
+}
+
+export type PlannerSummaryBadge = {
+  label: string;
+  variant: "info" | "warning" | "muted";
+};
+
+export function resolvePlannerSummaryBadge(
+  plan: AttackPlanConfig,
+  planUi: Pick<AttackPlanUiState, "plannerSource" | "suggestedPlanKey">,
+): PlannerSummaryBadge {
+  const source = planUi.plannerSource ?? plannerSourceFromPlan(plan);
+  const baselineKey = planUi.suggestedPlanKey ?? planCustomizationKey(plan);
+  const customized = planCustomizationKey(plan) !== baselineKey;
+
+  if (source === "ai_runtime") {
+    return customized
+      ? { label: "Customized", variant: "warning" }
+      : { label: "AI suggested", variant: "info" };
+  }
+
+  return customized
+    ? { label: "Customized", variant: "warning" }
+    : { label: "Suggested", variant: "muted" };
+}
+
+export function attackPlanUiBaselineFromPlan(plan: AttackPlanConfig): AttackPlanUiState {
+  return {
+    ...attackPlanUiFromPlan(plan),
+    plannerSource: plannerSourceFromPlan(plan),
+    suggestedPlanKey: planCustomizationKey(plan),
+  };
+}
+
+export function syncAttackPlanUiAfterAdjust(
+  plan: AttackPlanConfig,
+  prev: AttackPlanUiState,
+): AttackPlanUiState {
+  const synced = attackPlanUiFromPlan(plan);
+  return {
+    ...synced,
+    expandedCategory: prev.expandedCategory,
+    plannerSource: prev.plannerSource,
+    suggestedPlanKey: prev.suggestedPlanKey,
+  };
 }

@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import { Badge } from "@/shared/components";
 import { adjustAttackPlan } from "@/shared/ipc/attackPlanner";
@@ -11,9 +11,13 @@ import {
   formatExecutionStrategySummary,
   extractPlannerEndpoint,
   payloadStrategyToDto,
+  planCustomizationKey,
+  plannerSourceFromPlan,
   previewPlanForProfile,
   recomputePlanPreview,
   resolveCategoriesForAdjust,
+  resolvePlannerSummaryBadge,
+  syncAttackPlanUiAfterAdjust,
   type AttackPlanConfig,
 } from "../attackPlan";
 import {
@@ -26,7 +30,7 @@ import {
 } from "../attackProfiles";
 import type { PayloadStrategyConfig } from "../payloadStrategy";
 import { formatPayloadGenerationStrategy } from "../payloadStrategy";
-import { attackPlanUiFromPlan, type AttackPlanUiState } from "../wizardState";
+import type { AttackPlanUiState } from "../wizardState";
 import { PayloadStrategySection } from "./PayloadStrategySection";
 
 type ReviewAttackPlanStepProps = {
@@ -67,6 +71,19 @@ export function ReviewAttackPlanStep({
     [attackPlan.rationales, activeCategories],
   );
 
+  const plannerBadge = useMemo(
+    () => resolvePlannerSummaryBadge(attackPlan, planUi),
+    [attackPlan, planUi],
+  );
+
+  useEffect(() => {
+    if (planUi.suggestedPlanKey !== null) return;
+    onPlanUiChange({
+      plannerSource: plannerSourceFromPlan(attackPlan),
+      suggestedPlanKey: planCustomizationKey(attackPlan),
+    });
+  }, [attackPlan, onPlanUiChange, planUi.suggestedPlanKey]);
+
   async function applyAdjust(
     patch: Partial<AttackPlanUiState>,
     execution?: {
@@ -106,10 +123,7 @@ export function ReviewAttackPlanStep({
 
       const plan = attackPlanFromDto(dto);
       onPlanChange(plan);
-      onPlanUiChange({
-        ...attackPlanUiFromPlan(plan),
-        expandedCategory: nextUi.expandedCategory,
-      });
+      onPlanUiChange(syncAttackPlanUiAfterAdjust(plan, nextUi));
     } catch (err) {
       console.error(toAppError(err).message);
     } finally {
@@ -187,7 +201,10 @@ export function ReviewAttackPlanStep({
   return (
     <div className="wizard-step">
       <section className="wizard-fingerprint-summary">
-        <h4 className="wizard-endpoints__title">Planner summary</h4>
+        <div className="wizard-planner-summary-header">
+          <h4 className="wizard-endpoints__title">Planner summary</h4>
+          <Badge variant={plannerBadge.variant}>{plannerBadge.label}</Badge>
+        </div>
         <dl className="wizard-attack-estimates">
           <div className="wizard-attack-estimate">
             <span className="wizard-attack-estimate__label">Active tests</span>

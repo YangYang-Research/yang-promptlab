@@ -38,13 +38,12 @@ import {
   type TargetFormState,
 } from "./targetDescriptor";
 import { WizardStepper } from "./WizardStepper";
-import { attackPlanFromDto, payloadStrategyToDto } from "./attackPlan";
+import { attackPlanFromDto, attackPlanUiBaselineFromPlan, payloadStrategyToDto } from "./attackPlan";
 import {
   buildWizardStore,
   clearWizardSession,
   createInitialSession,
   createSessionForTargetScan,
-  attackPlanUiFromPlan,
   createInitialAttackPlanUi,
   fetchTargetFormForWizard,
   loadTargetDtoForWizard,
@@ -345,7 +344,7 @@ export function ScanWizardPage() {
           const next = {
             ...prev,
             attackPlan: plan,
-            attackPlanUi: attackPlanUiFromPlan(plan),
+            attackPlanUi: attackPlanUiBaselineFromPlan(plan),
             currentStep: options?.autoAdvance ? (4 as WizardStepId) : prev.currentStep,
           };
           saveWizardSession(next);
@@ -868,7 +867,11 @@ export function ScanWizardPage() {
           return <p className="text-muted">Waiting for target verification…</p>;
         }
         if (plannerGenerating || (!session.attackPlan && !plannerError)) {
-          return <p className="text-muted">Generating attack plan…</p>;
+          return (
+            <p className="text-muted">
+              {plannerGenerating ? "Analyzing API with AI Runtime…" : "Generating attack plan…"}
+            </p>
+          );
         }
         if (plannerError && !session.attackPlan) {
           return (
@@ -973,6 +976,24 @@ export function ScanWizardPage() {
           <h2 className="wizard-panel__title">{stepDef.title}</h2>
           <div className="wizard-panel__hint-row">
             <p className="wizard-panel__hint text-muted">{stepDef.hint}</p>
+            {session.currentStep === 4 &&
+            store.savedTarget &&
+            session.targetProfile.verification.verified ? (
+              <Button
+                variant="ghost"
+                disabled={plannerGenerating || planAdjusting}
+                onClick={() => {
+                  plannerRunRef.current = null;
+                  updateSession({
+                    attackPlan: null,
+                    attackPlanUi: createInitialAttackPlanUi(),
+                  });
+                  void runAttackPlanner(store.savedTarget!.id);
+                }}
+              >
+                {plannerGenerating ? "Re-planning…" : "Re-plan"}
+              </Button>
+            ) : null}
             {session.currentStep === 3 && session.savedTargetId ? (
               dbVerificationLoading ? (
                 <Badge variant="muted">Checking…</Badge>

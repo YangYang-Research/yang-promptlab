@@ -35,7 +35,7 @@ export const WIZARD_STEPS: WizardStepDefinition[] = [
     id: 4,
     label: "Review Attack Plan",
     title: "Review Attack Plan",
-    hint: "Review the automatically generated plan, adjust categories and execution strategy",
+    hint: "Review and adjust categories, execution, and payloads.",
   },
   {
     id: 5,
