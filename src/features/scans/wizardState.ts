@@ -1,4 +1,5 @@
-import type { AttackPlanConfig, AttackCategoryId, AttackProfileId } from "./attackProfiles";
+import type { AttackPlanConfig } from "./attackPlan";
+import type { AttackCategoryId, AttackProfileId } from "./attackProfiles";
 import type { TargetFormState } from "./targetDescriptor";
 import {
   createInitialTargetForm,
@@ -21,19 +22,14 @@ import type { WizardStepId } from "./wizardSteps";
 import type { Target } from "@/shared/types";
 
 const STORAGE_KEY = "promptlab:scan-wizard";
-const STORAGE_VERSION = 3;
+const STORAGE_VERSION = 4;
 
 export type AttackPlanUiState = {
   profileId: AttackProfileId;
   customCategories: AttackCategoryId[];
   expandedCategory: AttackCategoryId | null;
   disabledTests: string[];
-  plannerSummary: string | null;
-  plannerMode: "deterministic" | "local_llm" | null;
-  generatorMode: "static_pack" | "template_mutation" | "local_llm";
-  generatorSummary: string | null;
-  agentMode: boolean;
-  maxAgentAttempts: number;
+  disabledGraphNodes: AttackCategoryId[];
 };
 
 export type ScanWizardSession = {
@@ -55,28 +51,23 @@ export type ScanWizardStore = ScanWizardSession & {
   profileVerified: boolean;
 };
 
+export function attackPlanUiFromPlan(plan: AttackPlanConfig): AttackPlanUiState {
+  return {
+    profileId: plan.profileId,
+    customCategories: plan.customCategories,
+    expandedCategory: null,
+    disabledTests: plan.disabledTests,
+    disabledGraphNodes: plan.disabledGraphNodes,
+  };
+}
+
 export function createInitialAttackPlanUi(): AttackPlanUiState {
   return {
     profileId: "standard",
-    customCategories: [
-      "prompt_injection",
-      "system_prompt_extraction",
-      "jailbreak",
-      "rag_leakage",
-      "memory_poisoning",
-      "cross_user_leakage",
-      "agent_goal_hijacking",
-      "tool_abuse",
-      "mcp_abuse",
-    ],
+    customCategories: [],
     expandedCategory: null,
     disabledTests: [],
-    plannerSummary: null,
-    plannerMode: null,
-    generatorMode: "static_pack",
-    generatorSummary: null,
-    agentMode: false,
-    maxAgentAttempts: 5,
+    disabledGraphNodes: [],
   };
 }
 

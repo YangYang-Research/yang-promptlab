@@ -32,6 +32,8 @@ type AuthVerificationStepProps = {
   error: string | null;
   onError: (message: string | null) => void;
   onBeforeVerify?: () => Promise<boolean>;
+  onVerifySuccess?: () => void;
+  onVerifySettled?: () => void;
 };
 
 function authMethodLabel(kind: TargetFormState["authKind"]): string {
@@ -49,6 +51,8 @@ export function AuthVerificationStep({
   error,
   onError,
   onBeforeVerify,
+  onVerifySuccess,
+  onVerifySettled,
 }: AuthVerificationStepProps) {
   const { notify } = useToast();
   const [verifying, setVerifying] = useState(false);
@@ -106,9 +110,11 @@ export function AuthVerificationStep({
       });
       onVerificationConsole(mergeConsoleWithPreview(result.console, preview));
       onProfileChange(profileFromDto(result.profile));
+      onVerifySettled?.();
       if (result.verified) {
         onError(null);
         notify(result.message, "success");
+        onVerifySuccess?.();
       } else {
         onError(result.message);
         notify(result.message, "error");

@@ -12,6 +12,8 @@ export type AttackCategoryId =
 
 export type AttackProfileId = "quick" | "standard" | "deep" | "custom";
 
+export type ExecutionStrategy = "sequential" | "agentic";
+
 export type AttackTest = {
   id: string;
   name: string;
@@ -157,14 +159,14 @@ export const ALL_ATTACK_CATEGORY_IDS: AttackCategoryId[] = ATTACK_CATALOG.map((c
 export const ATTACK_PROFILES: AttackProfileDefinition[] = [
   {
     id: "quick",
-    label: "Quick",
-    description: "High-signal smoke test — injection, jailbreak, and system prompt extraction",
+    label: "Quick Assessment",
+    description: "Minimal coverage — fast execution smoke test",
     categories: ["prompt_injection", "jailbreak", "system_prompt_extraction"],
   },
   {
     id: "standard",
-    label: "Standard",
-    description: "Balanced OWASP-aligned coverage for typical LLM API assessments",
+    label: "Security Review",
+    description: "Balanced OWASP-aligned coverage — recommended",
     categories: [
       "prompt_injection",
       "jailbreak",
@@ -176,14 +178,14 @@ export const ATTACK_PROFILES: AttackProfileDefinition[] = [
   },
   {
     id: "deep",
-    label: "Deep",
-    description: "Full engine catalog — all nine attack categories",
+    label: "Red Team",
+    description: "Maximum coverage — long runtime, full catalog",
     categories: ALL_ATTACK_CATEGORY_IDS,
   },
   {
     id: "custom",
     label: "Custom",
-    description: "Pick categories and individual tests manually",
+    description: "Customize categories and individual tests manually",
     categories: ALL_ATTACK_CATEGORY_IDS,
   },
 ];
@@ -221,22 +223,9 @@ export function requestsForCategorySelection(
   return Math.round(requestsPerCategory(category) * ratio);
 }
 
-export type AttackPlanConfig = {
-  profileId: AttackProfileId;
-  customCategories: AttackCategoryId[];
-  disabledTests: string[];
-  categories: AttackCategoryId[];
-  generatorMode: GeneratorMode;
-  agentMode: boolean;
-  maxAgentAttempts: number;
-};
-
-export type GeneratorMode = "static_pack" | "template_mutation" | "local_llm";
-
 export type ScanEstimateInput = {
   selectedEndpointCount: number;
   profileId: AttackProfileId;
-  /** Used when profileId is `custom`; ignored for presets. */
   customCategories?: AttackCategoryId[];
   disabledTestIds?: ReadonlySet<string>;
 };
@@ -248,6 +237,7 @@ export function resolveActiveCategories(input: ScanEstimateInput): AttackCategor
   return getProfile(input.profileId).categories;
 }
 
+/** Legacy scan-history estimates — wizard Step 4 uses backend planner output instead. */
 export function estimateRequests(input: ScanEstimateInput): number {
   const { selectedEndpointCount } = input;
   if (selectedEndpointCount <= 0) return 0;

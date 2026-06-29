@@ -1,4 +1,4 @@
-import type { AttackPlanConfig } from "./attackProfiles";
+import type { AttackPlanConfig } from "./attackPlan";
 import type { TargetFormState } from "./targetDescriptor";
 import { validateTargetProfile, type TargetProfileFormState } from "./targetProfile";
 import type { Target } from "@/shared/types";
@@ -33,9 +33,9 @@ export const WIZARD_STEPS: WizardStepDefinition[] = [
   },
   {
     id: 4,
-    label: "Attack Planning",
-    title: "Attack planning",
-    hint: "Review capability-based attack suggestions and choose a profile",
+    label: "Review Attack Plan",
+    title: "Review Attack Plan",
+    hint: "Review the automatically generated plan, adjust categories and execution strategy",
   },
   {
     id: 5,
@@ -58,6 +58,7 @@ export type WizardDraft = {
   targetForm: TargetFormState;
   profileVerified: boolean;
   attackPlan: AttackPlanConfig | null;
+  attackPlanGenerated: boolean;
   submittedScanId: string | null;
 };
 
@@ -74,7 +75,7 @@ export function isStepComplete(step: WizardStepId, draft: WizardDraft): boolean 
     case 3:
       return draft.profileVerified;
     case 4:
-      return (draft.attackPlan?.categories.length ?? 0) > 0;
+      return draft.attackPlanGenerated && (draft.attackPlan?.categories.length ?? 0) > 0;
     case 5:
       return draft.submittedScanId !== null;
     case 6:
@@ -89,6 +90,7 @@ export function canStartScan(draft: WizardDraft): boolean {
     draft.projectId.trim().length > 0 &&
     draft.target !== null &&
     draft.profileVerified &&
+    draft.attackPlanGenerated &&
     (draft.attackPlan?.categories.length ?? 0) > 0 &&
     draft.submittedScanId === null
   );
@@ -98,7 +100,7 @@ export function maxCompletableStep(draft: WizardDraft): WizardStepId {
   if (!draft.projectId.trim()) return 1;
   if (!draft.target) return 2;
   if (!draft.profileVerified) return 3;
-  if ((draft.attackPlan?.categories.length ?? 0) === 0) return 4;
+  if (!draft.attackPlanGenerated || (draft.attackPlan?.categories.length ?? 0) === 0) return 4;
   if (!draft.submittedScanId) return 5;
   return 6;
 }
@@ -126,7 +128,7 @@ export function canProceedFromStep(step: WizardStepId, draft: WizardDraft): bool
     case 3:
       return draft.profileVerified;
     case 4:
-      return (draft.attackPlan?.categories.length ?? 0) > 0;
+      return draft.attackPlanGenerated && (draft.attackPlan?.categories.length ?? 0) > 0;
     case 5:
       return draft.submittedScanId !== null;
     default:

@@ -34,9 +34,3 @@ export const verifyTargetProfile = (
     auth: options?.auth ?? null,
     authHeaders: options?.authHeaders ?? null,
   });
-
-export const generateAttackPlanFromProfile = (targetId: string, mode = "deterministic") =>
-  invokeCommand<import("./planner").AttackPlanDto>("planner_generate_from_profile", {
-    targetId,
-    mode,
-  });

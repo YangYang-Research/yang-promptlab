@@ -11,6 +11,7 @@ function baseDraft(overrides: Partial<WizardDraft> = {}): WizardDraft {
     targetForm: {} as WizardDraft["targetForm"],
     profileVerified: false,
     attackPlan: null,
+    attackPlanGenerated: false,
     submittedScanId: null,
     ...overrides,
   };

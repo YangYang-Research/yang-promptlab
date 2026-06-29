@@ -127,6 +127,23 @@ export function normalizeVerifiedAt(value: unknown): string | null {
   return null;
 }
 
+export type VerificationBadgeState = {
+  label: string;
+  variant: "success" | "danger" | "warning" | "muted";
+};
+
+export function verificationBadgeFromDb(
+  verification: VerificationResultForm,
+): VerificationBadgeState {
+  if (verification.verified) {
+    return { label: "Verified", variant: "success" };
+  }
+  if (verification.status === "failed" || verification.errorMessage) {
+    return { label: "Verification failed", variant: "danger" };
+  }
+  return { label: "Not verified", variant: "warning" };
+}
+
 export function normalizeVerification(
   verification: Partial<VerificationResultForm> | undefined,
 ): VerificationResultForm {

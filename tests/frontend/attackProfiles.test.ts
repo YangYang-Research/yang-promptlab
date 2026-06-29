@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { formatEstimatedRuntime } from "@/features/scans/attackPlan";
 import {
   ATTACK_PROFILES,
-  estimateRequests,
-  estimateRuntimeSeconds,
-  formatEstimatedRuntime,
   getCategory,
   requestsPerCategory,
   VARIANTS_PER_PAYLOAD,
@@ -13,6 +11,7 @@ import {
 describe("attackProfiles", () => {
   it("maps quick profile to three core categories", () => {
     const quick = ATTACK_PROFILES.find((p) => p.id === "quick");
+    expect(quick?.label).toBe("Quick Assessment");
     expect(quick?.categories).toEqual([
       "prompt_injection",
       "jailbreak",
@@ -20,41 +19,24 @@ describe("attackProfiles", () => {
     ]);
   });
 
-  it("estimates requests as payloads × variants × categories × endpoints", () => {
-    const perCategory = requestsPerCategory(getCategory("prompt_injection"));
-    expect(perCategory).toBe(3 * VARIANTS_PER_PAYLOAD);
-
-    const requests = estimateRequests({
-      selectedEndpointCount: 2,
-      profileId: "quick",
-    });
-    expect(requests).toBe(perCategory * 3 * 2);
+  it("maps standard profile to security review label", () => {
+    const standard = ATTACK_PROFILES.find((p) => p.id === "standard");
+    expect(standard?.label).toBe("Security Review");
   });
 
-  it("reduces estimates when tests are disabled", () => {
-    const full = estimateRequests({
-      selectedEndpointCount: 1,
-      profileId: "quick",
-    });
-    const partial = estimateRequests({
-      selectedEndpointCount: 1,
-      profileId: "quick",
-      disabledTestIds: new Set(["pi-direct-override", "pi-indirect-task", "pi-markdown-fence"]),
-    });
-    expect(partial).toBe(full - requestsPerCategory(getCategory("prompt_injection")));
+  it("maps deep profile to red team label", () => {
+    const deep = ATTACK_PROFILES.find((p) => p.id === "deep");
+    expect(deep?.label).toBe("Red Team");
+  });
+
+  it("computes per-category payload variant count", () => {
+    const perCategory = requestsPerCategory(getCategory("prompt_injection"));
+    expect(perCategory).toBe(3 * VARIANTS_PER_PAYLOAD);
   });
 
   it("formats runtime for sub-minute and multi-minute scans", () => {
     expect(formatEstimatedRuntime(0)).toBe("—");
     expect(formatEstimatedRuntime(45)).toBe("~45s");
     expect(formatEstimatedRuntime(125)).toBe("~2m 5s");
-  });
-
-  it("derives runtime from request count", () => {
-    const seconds = estimateRuntimeSeconds({
-      selectedEndpointCount: 1,
-      profileId: "standard",
-    });
-    expect(seconds).toBeGreaterThan(0);
   });
 });

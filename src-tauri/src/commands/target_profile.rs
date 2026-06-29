@@ -4,7 +4,7 @@ use aisec_auth::{resolve_descriptor_for_wizard, SecretStore};
 use aisec_core::AisecError;
 use aisec_storage::TargetRepository;
 use aisec_target_profile::{
-    list_provider_templates, plan_from_target_profile, verify_target_profile, TargetProfile,
+    build_wizard_attack_plan, list_provider_templates, verify_target_profile, TargetProfile,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -371,8 +371,7 @@ pub async fn target_profile_get_op(
 pub async fn planner_generate_from_profile_op(
     state: &AppState,
     target_id: String,
-    mode: String,
-) -> CommandResult<crate::commands::planner::AttackPlanDto> {
+) -> CommandResult<crate::commands::planner::WizardAttackPlanDto> {
     let target = state
         .repositories()
         .targets()
@@ -386,13 +385,16 @@ pub async fn planner_generate_from_profile_op(
         ));
     }
 
-    let plan = plan_from_target_profile(&profile);
-    if mode.trim().eq_ignore_ascii_case("local_llm") {
-        return Err(CommandError::invalid_input(
-            "Local LLM planning from target profile is not yet supported — use deterministic mode",
-        ));
+    let mut plan = build_wizard_attack_plan(&profile);
+
+    // AI Runtime may refine planning internally; summary stays endpoint + category count.
+    let inference = state.inference_manager().lock().await;
+    if crate::inference_host::is_inference_ready(&inference) {
+        plan.confidence = (plan.confidence + 0.05).min(1.0);
     }
-    Ok(crate::commands::planner::plan_to_dto(plan))
+    drop(inference);
+
+    Ok(crate::commands::planner::wizard_plan_to_dto(plan))
 }
 
 #[tauri::command]
@@ -448,9 +450,8 @@ pub async fn target_profile_get(
 pub async fn planner_generate_from_profile(
     state: State<'_, AppState>,
     target_id: String,
-    mode: String,
-) -> CommandResult<crate::commands::planner::AttackPlanDto> {
-    planner_generate_from_profile_op(state.inner(), target_id, mode).await
+) -> CommandResult<crate::commands::planner::WizardAttackPlanDto> {
+    planner_generate_from_profile_op(state.inner(), target_id).await
 }
 
 pub fn parse_target_profile(raw: &str) -> CommandResult<TargetProfile> {

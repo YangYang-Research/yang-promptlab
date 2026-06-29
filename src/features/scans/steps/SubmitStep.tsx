@@ -2,12 +2,11 @@ import { useMemo } from "react";
 
 import { Badge, Button } from "@/shared/components";
 import {
-  ATTACK_PROFILES,
-  estimateRequests,
-  estimateRuntimeSeconds,
+  formatCoverageScore,
   formatEstimatedRuntime,
   type AttackPlanConfig,
-} from "@/features/scans/attackProfiles";
+} from "@/features/scans/attackPlan";
+import { ATTACK_PROFILES } from "@/features/scans/attackProfiles";
 import type { TargetProfileFormState } from "@/features/scans/targetProfile";
 import { fullProfileUrl, PROVIDER_OPTIONS } from "@/features/scans/targetProfile";
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
@@ -38,16 +37,6 @@ export function SubmitStep({
     ? mergeScanStatus(submittedScanId, "running", liveStatus, 0)
     : null;
 
-  const estimateInput = useMemo(
-    () => ({
-      selectedEndpointCount: 1,
-      profileId: attackPlan.profileId,
-      customCategories: attackPlan.customCategories,
-      disabledTestIds: new Set(attackPlan.disabledTests),
-    }),
-    [attackPlan],
-  );
-
   const summaryRows = useMemo(() => {
     const profileLabel =
       ATTACK_PROFILES.find((profile) => profile.id === attackPlan.profileId)?.label ??
@@ -60,21 +49,26 @@ export function SubmitStep({
       { label: "Profile", value: profileLabel },
       { label: "Categories", value: attackPlan.categories.join(", ") },
       {
-        label: "Mode",
-        value: attackPlan.agentMode
-          ? `Agentic (max ${attackPlan.maxAgentAttempts} attempts/category)`
-          : "Batch",
+        label: "Execution",
+        value:
+          attackPlan.executionStrategy === "agentic"
+            ? `Agentic (max ${attackPlan.maxAttempts} attempts/category)`
+            : "Sequential",
       },
       {
         label: "Est. requests",
-        value: estimateRequests(estimateInput).toLocaleString(),
+        value: attackPlan.estimatedRequests.toLocaleString(),
       },
       {
         label: "Est. runtime",
-        value: formatEstimatedRuntime(estimateRuntimeSeconds(estimateInput)),
+        value: formatEstimatedRuntime(attackPlan.estimatedRuntimeSeconds),
+      },
+      {
+        label: "Coverage",
+        value: formatCoverageScore(attackPlan.coverageScore),
       },
     ];
-  }, [attackPlan, estimateInput, target.url, targetProfile]);
+  }, [attackPlan, target.url, targetProfile]);
 
   if (submittedScanId && status) {
     const isRunning = ["running", "paused", "pending"].includes(status.status);
@@ -89,7 +83,8 @@ export function SubmitStep({
         <div className="wizard-submitted__hero">
           <h3 className="wizard-submitted__title">Scan progress</h3>
           <p className="text-muted">
-            Live output from the attack engine. Monitor progress here or open the scan monitor.
+            Payloads are generated during execution. Monitor live output from the attack engine
+            below.
           </p>
         </div>
 
@@ -163,8 +158,8 @@ export function SubmitStep({
   return (
     <div className="wizard-submit-review">
       <p className="text-muted">
-        Review your configuration, then click <strong>Start Scan</strong> below. The job runs in the
-        background — you will not be blocked on this screen.
+        Review your approved attack plan, then click <strong>Start Scan</strong> below. Payload
+        generation runs lazily during execution — probes are built per category at scan time.
       </p>
 
       <dl className="wizard-submit-review__grid">

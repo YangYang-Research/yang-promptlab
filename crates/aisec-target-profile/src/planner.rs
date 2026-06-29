@@ -8,7 +8,17 @@ use crate::types::{TargetCapabilities, TargetProfile};
 /// Generate an attack plan from Target Profile capabilities only.
 /// No schema inference, no fingerprinting, no raw payload inspection.
 pub fn plan_from_target_profile(profile: &TargetProfile) -> AttackPlan {
-    plan_from_capabilities(&profile.default_capabilities, &profile.framework, &profile.provider.as_str())
+    let mut plan = plan_from_capabilities(
+        &profile.default_capabilities,
+        &profile.framework,
+        profile.provider.as_str(),
+    );
+    plan.summary = summary_for_api_endpoint(&profile.full_url(), plan.categories.len());
+    plan
+}
+
+pub fn summary_for_api_endpoint(api_endpoint: &str, category_count: usize) -> String {
+    format!("Target profile plan for {api_endpoint}: {category_count} categories")
 }
 
 pub fn plan_from_capabilities(
@@ -104,5 +114,24 @@ pub fn plan_from_capabilities(
         confidence: 0.85,
         summary,
         llm_rationale: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summary_uses_api_endpoint() {
+        let profile = TargetProfile {
+            base_url: "https://api.yyng.icu".into(),
+            path: "/ycre/v1/code-review/github/completions".into(),
+            ..Default::default()
+        };
+        let plan = plan_from_target_profile(&profile);
+        assert_eq!(
+            plan.summary,
+            "Target profile plan for https://api.yyng.icu/ycre/v1/code-review/github/completions: 6 categories"
+        );
     }
 }
