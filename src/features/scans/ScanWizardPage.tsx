@@ -63,10 +63,17 @@ import {
   type WizardStepId,
 } from "./wizardSteps";
 import {
+  mergeWizardSessions,
   parsePersistedWizard,
   sessionFromPersistedWizard,
   wizardStateToPersisted,
 } from "./wizardPersistence";
+import {
+  findWizardDraftScan,
+  peekStoredDraftScanId,
+  resolveOrCreateDraftScanId,
+  storeDraftScanId,
+} from "./wizardDraftScan";
 
 export function ScanWizardPage() {
   const navigate = useNavigate();
@@ -75,7 +82,7 @@ export function ScanWizardPage() {
   const lockedTargetId = searchParams.get("targetId")?.trim() ?? "";
   const requestedStep = searchParams.get("step")?.trim() ?? "";
   const lockedScanId = searchParams.get("scanId")?.trim() ?? "";
-  const { projects, targets, loading, error, dispatch, actions } = useAppStore();
+  const { projects, targets, scans, loading, error, dispatch, actions } = useAppStore();
   const { notify } = useToast();
   const deepLinkApplied = useRef(false);
   const deepLinkTargetId = useRef<string | null>(null);
@@ -98,6 +105,10 @@ export function ScanWizardPage() {
   const [importApiOpen, setImportApiOpen] = useState(false);
   const plannerRunRef = useRef<string | null>(null);
   const wizardDbBootstrap = useRef(false);
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const wizardSaveTimerRef = useRef<number | null>(null);
+  const authHydratedKeyRef = useRef<string | null>(null);
 
   const store = useMemo(
     () => buildWizardStore(session, targets),
@@ -140,6 +151,23 @@ export function ScanWizardPage() {
     });
   }, []);
 
+  const applyDraftScanId = useCallback(
+    (scanId: string, projectId: string, patch: Partial<ScanWizardSession> = {}) => {
+      storeDraftScanId(projectId, scanId);
+      setSession((prev) => {
+        const next = {
+          ...prev,
+          ...patch,
+          draftScanId: scanId,
+          selectedProjectId: projectId,
+        };
+        saveWizardSession(next);
+        return next;
+      });
+    },
+    [],
+  );
+
   useEffect(() => {
     if (wizardDbBootstrap.current) return;
 
@@ -147,23 +175,46 @@ export function ScanWizardPage() {
       if (lockedScanId) {
         if (session.draftScanId === lockedScanId) {
           wizardDbBootstrap.current = true;
+          if (requestedStep) {
+            const parsedStep = Number.parseInt(requestedStep, 10);
+            if (parsedStep >= 1 && parsedStep <= 6) {
+              setSession((prev) => {
+                if (prev.currentStep === parsedStep) return prev;
+                const next = { ...prev, currentStep: parsedStep as WizardStepId };
+                saveWizardSession(next);
+                return next;
+              });
+            }
+          }
           return;
         }
+        wizardDbBootstrap.current = true;
         try {
           const loaded = await loadWizardScan(lockedScanId);
           const persisted = parsePersistedWizard(loaded.wizard);
-          const next = persisted
+          const projectId = lockedProjectId || loaded.scan.project_id;
+          const remote = persisted
             ? sessionFromPersistedWizard(persisted, lockedScanId, lockedProjectId)
             : {
-                ...createInitialSession(lockedProjectId || loaded.scan.project_id),
+                ...createInitialSession(projectId),
                 draftScanId: lockedScanId,
-                selectedProjectId: loaded.scan.project_id,
+                selectedProjectId: projectId,
               };
+          const local = peekWizardSession();
+          const next =
+            local?.draftScanId === lockedScanId ? mergeWizardSessions(local, remote) : remote;
+          if (requestedStep) {
+            const parsedStep = Number.parseInt(requestedStep, 10);
+            if (parsedStep >= 1 && parsedStep <= 6) {
+              next.currentStep = parsedStep as WizardStepId;
+            }
+          }
+          storeDraftScanId(projectId, lockedScanId);
           setSession(next);
           saveWizardSession(next);
-          wizardDbBootstrap.current = true;
           await actions.refresh();
         } catch (err) {
+          wizardDbBootstrap.current = false;
           const message = err instanceof Error ? err.message : "Failed to load wizard scan";
           notify(message, "error");
         }
@@ -171,33 +222,52 @@ export function ScanWizardPage() {
       }
 
       const projectId = lockedProjectId || session.selectedProjectId;
-      if (!projectId || session.draftScanId) {
-        if (session.draftScanId) wizardDbBootstrap.current = true;
+      if (!projectId) return;
+
+      if (session.draftScanId) {
+        storeDraftScanId(projectId, session.draftScanId);
+        wizardDbBootstrap.current = true;
+        if (!lockedScanId) {
+          const params = new URLSearchParams({ projectId, scanId: session.draftScanId });
+          if (lockedTargetId) params.set("targetId", lockedTargetId);
+          navigate(`/scans/new?${params.toString()}`, { replace: true });
+        }
         return;
       }
 
-      try {
-        const created = await createWizardScan({
-          projectId,
-          targetId: session.savedTargetId,
-          wizard: wizardStateToPersisted({
-            ...session,
-            selectedProjectId: projectId,
-          }),
-        });
-        const next = {
-          ...session,
-          draftScanId: created.id,
-          selectedProjectId: projectId,
-        };
-        setSession(next);
-        saveWizardSession(next);
-        const params = new URLSearchParams({ projectId, scanId: created.id });
+      const remembered = peekStoredDraftScanId(projectId);
+      const existingDraft =
+        findWizardDraftScan(scans, projectId, session.savedTargetId) ??
+        (remembered ? scans.find((scan) => scan.id === remembered) ?? null : null);
+      if (existingDraft) {
+        wizardDbBootstrap.current = true;
+        applyDraftScanId(existingDraft.id, projectId);
+        const params = new URLSearchParams({ projectId, scanId: existingDraft.id });
         if (lockedTargetId) params.set("targetId", lockedTargetId);
         navigate(`/scans/new?${params.toString()}`, { replace: true });
-        wizardDbBootstrap.current = true;
+        return;
+      }
+
+      wizardDbBootstrap.current = true;
+      try {
+        const scanId = await resolveOrCreateDraftScanId(projectId, async () => {
+          const created = await createWizardScan({
+            projectId,
+            targetId: session.savedTargetId,
+            wizard: wizardStateToPersisted({
+              ...session,
+              selectedProjectId: projectId,
+            }),
+          });
+          return created.id;
+        });
+        applyDraftScanId(scanId, projectId);
+        const params = new URLSearchParams({ projectId, scanId });
+        if (lockedTargetId) params.set("targetId", lockedTargetId);
+        navigate(`/scans/new?${params.toString()}`, { replace: true });
         await actions.refresh();
       } catch (err) {
+        wizardDbBootstrap.current = false;
         const message = err instanceof Error ? err.message : "Failed to create wizard scan";
         notify(message, "error");
       }
@@ -208,17 +278,23 @@ export function ScanWizardPage() {
     lockedScanId,
     lockedProjectId,
     lockedTargetId,
+    requestedStep,
     session.draftScanId,
     session.selectedProjectId,
-    session,
+    session.savedTargetId,
+    scans,
     actions,
     notify,
     navigate,
+    applyDraftScanId,
   ]);
 
   useEffect(() => {
     if (!session.draftScanId || !session.selectedProjectId) return;
-    const timer = window.setTimeout(() => {
+    if (wizardSaveTimerRef.current) {
+      window.clearTimeout(wizardSaveTimerRef.current);
+    }
+    wizardSaveTimerRef.current = window.setTimeout(() => {
       void saveWizardScan({
         scanId: session.draftScanId!,
         projectId: session.selectedProjectId,
@@ -226,8 +302,53 @@ export function ScanWizardPage() {
         wizard: wizardStateToPersisted(session),
       }).then(() => actions.refresh());
     }, 600);
-    return () => window.clearTimeout(timer);
+    return () => {
+      if (wizardSaveTimerRef.current) {
+        window.clearTimeout(wizardSaveTimerRef.current);
+        wizardSaveTimerRef.current = null;
+      }
+      const snapshot = sessionRef.current;
+      if (!snapshot.draftScanId || !snapshot.selectedProjectId) return;
+      void saveWizardScan({
+        scanId: snapshot.draftScanId,
+        projectId: snapshot.selectedProjectId,
+        targetId: snapshot.savedTargetId,
+        wizard: wizardStateToPersisted(snapshot),
+      });
+    };
   }, [session, actions]);
+
+  useEffect(() => {
+    if (session.currentStep < 3 || !session.savedTargetId) return;
+    const hydrationKey = `${session.savedTargetId}:${session.draftScanId ?? ""}:${session.currentStep}`;
+    if (authHydratedKeyRef.current === hydrationKey) return;
+
+    let cancelled = false;
+    void prepareAuthFormForStep3(
+      session.targetProfile,
+      session.targetForm,
+      session.savedTargetId,
+    ).then((targetForm) => {
+      if (cancelled) return;
+      authHydratedKeyRef.current = hydrationKey;
+      setSession((prev) => {
+        if (targetFormFingerprint(prev.targetForm) === targetFormFingerprint(targetForm)) {
+          return prev;
+        }
+        const next = {
+          ...prev,
+          targetForm,
+          savedTargetFingerprint: targetFormFingerprint(targetForm),
+        };
+        saveWizardSession(next);
+        return next;
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session.currentStep, session.savedTargetId, session.draftScanId]);
 
   const runAttackPlanner = useCallback(
     async (targetId: string, options?: { autoAdvance?: boolean }) => {
@@ -341,6 +462,7 @@ export function ScanWizardPage() {
   }, [lockedProjectId, storeProject, loading, dispatch]);
 
   useEffect(() => {
+    if (lockedScanId) return;
     if (deepLinkTargetId.current !== lockedTargetId) {
       deepLinkTargetId.current = lockedTargetId || null;
       deepLinkApplied.current = false;
@@ -374,7 +496,9 @@ export function ScanWizardPage() {
             : sessionMatches
               ? existing!.targetProfile
               : session.targetProfile;
-        const targetForm = targetFormFromDescriptor(dto.descriptor, fullProfileUrl(profileState));
+        const profileUrl = fullProfileUrl(profileState);
+        const descriptorForm = targetFormFromDescriptor(dto.descriptor, profileUrl);
+        const targetForm = sessionMatches ? existing!.targetForm : descriptorForm;
 
         const draftScanId = lockedScanId || session.draftScanId || null;
 
@@ -385,6 +509,7 @@ export function ScanWizardPage() {
               selectedProjectId: lockedProjectId || existing!.selectedProjectId || target.projectId,
               currentStep: requestedStep ? resumeStep : existing!.currentStep,
               submittedScanId: existing!.submittedScanId,
+              targetProfile: profileState,
               targetForm,
               savedTargetFingerprint: targetFormFingerprint(targetForm),
             }
@@ -404,6 +529,23 @@ export function ScanWizardPage() {
         setSession(next);
         saveWizardSession(next);
         dispatch({ type: "SET_SELECTED_PROJECT", projectId: next.selectedProjectId });
+
+        if (resumeStep >= 3) {
+          void prepareAuthFormForStep3(profileState, targetForm, lockedTargetId).then(
+            (hydrated) => {
+              if (targetFormFingerprint(hydrated) === targetFormFingerprint(targetForm)) return;
+              setSession((prev) => {
+                const merged = {
+                  ...prev,
+                  targetForm: hydrated,
+                  savedTargetFingerprint: targetFormFingerprint(hydrated),
+                };
+                saveWizardSession(merged);
+                return merged;
+              });
+            },
+          );
+        }
       })
       .catch((err) => {
         if (!cancelled) {

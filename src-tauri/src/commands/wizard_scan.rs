@@ -78,6 +78,28 @@ pub async fn scan_wizard_create_op(
         None
     };
 
+    let scans = repos
+        .scans()
+        .list_by_project(&request.project_id)
+        .await
+        .map_err(CommandError::from)?;
+
+    if let Some(existing) = scans
+        .into_iter()
+        .filter(|scan| scan.status == WIZARD_SCAN_STATUS)
+        .filter(|scan| {
+            request
+                .target_id
+                .as_ref()
+                .map(|tid| scan.target_id.as_deref() == Some(tid.as_str()))
+                .unwrap_or(true)
+        })
+        .max_by_key(|scan| scan.created_at)
+    {
+        info!(scan_id = %existing.id, "reusing existing wizard draft scan");
+        return Ok(existing.into());
+    }
+
     let scan = repos
         .scans()
         .create(CreateScan {

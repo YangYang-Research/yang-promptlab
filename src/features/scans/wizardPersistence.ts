@@ -2,7 +2,11 @@ import type { AttackPlanConfig } from "./attackPlan";
 import { attackPlanFromDto, type WizardAttackPlanDto } from "./attackPlan";
 import type { AttackPlanUiState, ScanWizardSession } from "./wizardState";
 import { createInitialAttackPlanUi } from "./wizardState";
-import { createInitialTargetForm, migrateTargetForm } from "./targetDescriptor";
+import {
+  createInitialTargetForm,
+  migrateTargetForm,
+  targetFormNeedsSecretHydration,
+} from "./targetDescriptor";
 import {
   createInitialTargetProfile,
   normalizeVerification,
@@ -93,4 +97,40 @@ export function parsePersistedWizard(raw: unknown): WizardPersistedState | null 
 
 export function attackPlanFromPersistedDto(dto: WizardAttackPlanDto): AttackPlanConfig {
   return attackPlanFromDto(dto);
+}
+
+/** Prefer the session copy that still has auth secrets filled in. */
+export function mergeWizardSessions(
+  local: ScanWizardSession,
+  remote: ScanWizardSession,
+): ScanWizardSession {
+  const localHasSecrets =
+    local.targetForm.authKind !== "none" && !targetFormNeedsSecretHydration(local.targetForm);
+  const remoteHasSecrets =
+    remote.targetForm.authKind !== "none" && !targetFormNeedsSecretHydration(remote.targetForm);
+
+  let targetForm = remote.targetForm;
+  if (localHasSecrets && !remoteHasSecrets) {
+    targetForm = local.targetForm;
+  } else if (local.targetForm.authKind !== "none" && remote.targetForm.authKind === "none") {
+    targetForm = local.targetForm;
+  } else if (local.targetForm.authKind !== "none") {
+    targetForm = { ...remote.targetForm, ...local.targetForm };
+  }
+
+  const targetProfile =
+    local.targetProfile.verification.verified && !remote.targetProfile.verification.verified
+      ? local.targetProfile
+      : remote.targetProfile;
+
+  return {
+    ...remote,
+    currentStep: Math.max(local.currentStep, remote.currentStep) as WizardStepId,
+    targetForm,
+    targetProfile,
+    verificationConsole: local.verificationConsole ?? remote.verificationConsole,
+    attackPlan: remote.attackPlan ?? local.attackPlan,
+    attackPlanUi: remote.attackPlan ? remote.attackPlanUi : local.attackPlanUi,
+    submittedScanId: remote.submittedScanId ?? local.submittedScanId,
+  };
 }

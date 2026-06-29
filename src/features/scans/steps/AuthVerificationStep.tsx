@@ -10,6 +10,7 @@ import {
   AUTH_METHOD_OPTIONS,
   buildTargetDescriptor,
   inferAuthFromProfileHeaders,
+  targetFormNeedsSecretHydration,
   type TargetFormState,
 } from "../targetDescriptor";
 import {
@@ -63,11 +64,27 @@ export function AuthVerificationStep({
   onAuthChangeRef.current = onAuthChange;
 
   useEffect(() => {
-    const inferred = inferAuthFromProfileHeaders(profile, authFormRef.current);
-    if (inferred.authKind && inferred.authKind !== "none") {
-      setAuthDetectedFromProfile(true);
+    const current = authFormRef.current;
+    const inferred = inferAuthFromProfileHeaders(profile, current);
+
+    if (current.authKind === "none") {
+      if (inferred.authKind && inferred.authKind !== "none") {
+        setAuthDetectedFromProfile(true);
+        onAuthChangeRef.current(inferred);
+      } else if (inferred.url && inferred.url !== current.url) {
+        onAuthChangeRef.current({ url: inferred.url });
+      }
+      return;
     }
-    onAuthChangeRef.current(inferred);
+
+    if (targetFormNeedsSecretHydration(current)) {
+      onAuthChangeRef.current(inferred);
+      return;
+    }
+
+    if (inferred.url && inferred.url !== current.url) {
+      onAuthChangeRef.current({ url: inferred.url });
+    }
   }, [profile.headersJson, profile.baseUrl, profile.path, targetId]);
 
   function mergeConsoleWithPreview(
