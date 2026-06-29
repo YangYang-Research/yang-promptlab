@@ -225,11 +225,10 @@ export function buildScanWizardUrl(
   if (targetId) {
     params.set("targetId", targetId);
   }
-  if (options?.step) {
-    params.set("step", String(options.step));
-  }
   if (options?.scanId) {
     params.set("scanId", options.scanId);
+  } else if (options?.step) {
+    params.set("step", String(options.step));
   }
   return `/scans/new?${params.toString()}`;
 }

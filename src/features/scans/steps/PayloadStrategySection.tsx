@@ -2,11 +2,70 @@ import { Badge } from "@/shared/components";
 
 import {
   ADVANCED_OPTIONS,
+  clampPayloadBudget,
+  clampVariantsPerTest,
   GENERATION_STRATEGIES,
   MUTATION_LEVELS,
+  PAYLOAD_BUDGET_MAX,
+  PAYLOAD_BUDGET_MIN,
+  PAYLOAD_BUDGET_STEP,
   payloadStrategyMatchesRecommendation,
+  sliderPercent,
+  VARIANTS_PER_TEST_MAX,
+  VARIANTS_PER_TEST_MIN,
   type PayloadStrategyConfig,
 } from "../payloadStrategy";
+
+type PayloadStrategySliderProps = {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  formatValue: (value: number) => string;
+  title?: string;
+  onChange: (value: number) => void;
+};
+
+function PayloadStrategySlider({
+  label,
+  value,
+  min,
+  max,
+  step = 1,
+  formatValue,
+  title,
+  onChange,
+}: PayloadStrategySliderProps) {
+  const fillPct = sliderPercent(value, min, max);
+
+  return (
+    <div className="wizard-payload-slider" title={title}>
+      <div className="wizard-payload-slider__header">
+        <span className="wizard-payload-slider__label">{label}</span>
+        <span className="wizard-payload-slider__value">{formatValue(value)}</span>
+      </div>
+      <div className="wizard-payload-slider__track-wrap">
+        <div className="progress__track" aria-hidden>
+          <div className="progress__fill" style={{ width: `${fillPct}%` }} />
+        </div>
+        <input
+          type="range"
+          className="wizard-payload-slider__input"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(event) => onChange(Number(event.target.value))}
+          aria-valuemin={min}
+          aria-valuemax={max}
+          aria-valuenow={value}
+          aria-label={label}
+        />
+      </div>
+    </div>
+  );
+}
 
 type PayloadStrategySectionProps = {
   strategy: PayloadStrategyConfig;
@@ -77,43 +136,31 @@ export function PayloadStrategySection({
             title={item.tooltip}
           >
             <span className="wizard-attack-profile__label">{item.label}</span>
+            <span className="wizard-attack-profile__description text-sm">{item.description}</span>
           </button>
         ))}
       </div>
 
-      <div className="wizard-agent-options" style={{ marginTop: "1rem" }}>
-        <label className="text-sm" title="Maximum payload candidates per test (not HTTP requests).">
-          Variants per test
-          <input
-            type="number"
-            min={1}
-            max={20}
-            value={strategy.variantsPerTest}
-            onChange={(event) =>
-              onChange({
-                variantsPerTest: Math.min(20, Math.max(1, Number(event.target.value) || 5)),
-              })
-            }
-          />
-        </label>
-        <label
-          className="text-sm"
+      <div className="wizard-payload-sliders">
+        <PayloadStrategySlider
+          label="Variants per test"
+          value={strategy.variantsPerTest}
+          min={VARIANTS_PER_TEST_MIN}
+          max={VARIANTS_PER_TEST_MAX}
+          formatValue={(value) => `${value}`}
+          title="Maximum payload candidates per test (not HTTP requests)."
+          onChange={(value) => onChange({ variantsPerTest: clampVariantsPerTest(value) })}
+        />
+        <PayloadStrategySlider
+          label="Maximum payload budget"
+          value={strategy.maxTotalPayloads}
+          min={PAYLOAD_BUDGET_MIN}
+          max={PAYLOAD_BUDGET_MAX}
+          step={PAYLOAD_BUDGET_STEP}
+          formatValue={(value) => value.toLocaleString()}
           title="Upper bound on generated payloads. Execution may stop earlier."
-        >
-          Maximum payload budget
-          <input
-            type="number"
-            min={50}
-            max={5000}
-            step={50}
-            value={strategy.maxTotalPayloads}
-            onChange={(event) =>
-              onChange({
-                maxTotalPayloads: Math.min(5000, Math.max(50, Number(event.target.value) || 500)),
-              })
-            }
-          />
-        </label>
+          onChange={(value) => onChange({ maxTotalPayloads: clampPayloadBudget(value) })}
+        />
       </div>
 
       <details className="wizard-fingerprint-summary" style={{ marginTop: "1rem" }}>

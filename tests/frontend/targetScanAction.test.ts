@@ -38,7 +38,7 @@ describe("inferWizardResumeStep", () => {
       inferWizardResumeStep(
         wizardInput({
           profileVerified: true,
-          currentStep: 3,
+          currentStep: 4,
         }),
       ),
     ).toBe(4);
@@ -50,10 +50,34 @@ describe("inferWizardResumeStep", () => {
         wizardInput({
           profileVerified: true,
           attackPlanGenerated: true,
-          currentStep: 4,
+          currentStep: 5,
         }),
       ),
     ).toBe(5);
+  });
+
+  it("stays on step 4 when attack plan exists but user is still reviewing", () => {
+    expect(
+      inferWizardResumeStep(
+        wizardInput({
+          profileVerified: true,
+          attackPlanGenerated: true,
+          currentStep: 4,
+        }),
+      ),
+    ).toBe(4);
+  });
+
+  it("clamps ahead-of-prerequisites progress back to the reachable step", () => {
+    expect(
+      inferWizardResumeStep(
+        wizardInput({
+          profileVerified: false,
+          attackPlanGenerated: false,
+          currentStep: 5,
+        }),
+      ),
+    ).toBe(3);
   });
 });
 
@@ -82,7 +106,7 @@ describe("resolveTargetScanAction", () => {
       wizardInput({ currentStep: 4, profileVerified: true, attackPlanGenerated: true }),
     );
 
-    expect(action).toEqual({ kind: "setup", step: 5, scanId: undefined });
+    expect(action).toEqual({ kind: "setup", step: 4, scanId: undefined });
   });
 
   it("detects incomplete setup on step 3", () => {

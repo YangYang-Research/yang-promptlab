@@ -3,12 +3,15 @@ import type {
   AttackProfileId,
   ExecutionStrategy,
 } from "./attackProfiles";
+import { getProfile } from "./attackProfiles";
 import {
+  payloadStrategyForAttackProfile,
   payloadStrategyFromDto,
   payloadStrategyToDto,
   type PayloadStrategyConfig,
   type PayloadStrategyDto,
 } from "./payloadStrategy";
+import type { AttackPlanUiState } from "./wizardState";
 
 export type AttackGraphNode = {
   category: AttackCategoryId;
@@ -129,6 +132,24 @@ function asProfileId(value: string): AttackProfileId {
   return "standard";
 }
 
+/** Categories payload for `attack_planner_adjust` — avoids empty custom selection. */
+export function resolveCategoriesForAdjust(
+  profileId: AttackProfileId,
+  planUi: Pick<AttackPlanUiState, "customCategories" | "disabledGraphNodes">,
+  attackPlan: Pick<AttackPlanConfig, "suggestedCategories" | "categories">,
+): AttackCategoryId[] {
+  if (profileId !== "custom") {
+    return attackPlan.suggestedCategories;
+  }
+  if (planUi.customCategories.length > 0) {
+    return planUi.customCategories;
+  }
+  if (attackPlan.categories.length > 0) {
+    return attackPlan.categories;
+  }
+  return attackPlan.suggestedCategories.filter((id) => !planUi.disabledGraphNodes.includes(id));
+}
+
 export function attackPlanFromDto(dto: WizardAttackPlanDto): AttackPlanConfig {
   const mapCategories = (values: string[]) =>
     values.map(asCategoryId).filter((id): id is AttackCategoryId => id !== null);
@@ -216,4 +237,165 @@ export function formatRiskLevel(level: string): string {
   if (level === "medium") return "Medium";
   if (level === "low") return "Low";
   return level;
+}
+
+const WIZARD_PAYLOADS_PER_CATEGORY = 3;
+const WIZARD_TESTS_PER_CATEGORY = 3;
+const WIZARD_SECONDS_PER_REQUEST = 2.5;
+const WIZARD_TOKENS_PER_REQUEST = 480;
+const WIZARD_CATALOG_SIZE = 9;
+
+function testPrefixForCategory(category: AttackCategoryId): string {
+  switch (category) {
+    case "prompt_injection":
+      return "pi-";
+    case "system_prompt_extraction":
+      return "spe-";
+    case "jailbreak":
+      return "jb-";
+    case "rag_leakage":
+      return "rag-";
+    case "memory_poisoning":
+      return "mp-";
+    case "cross_user_leakage":
+      return "cul-";
+    case "agent_goal_hijacking":
+      return "agh-";
+    case "tool_abuse":
+      return "ta-";
+    case "mcp_abuse":
+      return "mcp-";
+    default:
+      return "";
+  }
+}
+
+function categoryRisk(category: AttackCategoryId): number {
+  switch (category) {
+    case "prompt_injection":
+    case "tool_abuse":
+    case "mcp_abuse":
+      return 90;
+    case "jailbreak":
+    case "agent_goal_hijacking":
+      return 80;
+    case "system_prompt_extraction":
+    case "memory_poisoning":
+      return 70;
+    default:
+      return 60;
+  }
+}
+
+export function extractPlannerEndpoint(summary: string): string {
+  const match = summary.match(/^Plan for (.+?):/);
+  return match?.[1] ?? "target";
+}
+
+export function buildPlannerSummaryPreview(plan: AttackPlanConfig, endpoint: string): string {
+  const execution =
+    plan.executionStrategy === "agentic"
+      ? `agentic execution (max ${plan.maxAttempts} attempts/category${
+          plan.reflectionEnabled ? ", reflection on" : ""
+        }${plan.adaptivePlanning ? ", adaptive planning" : ""})`
+      : "sequential execution";
+  const payloadStrategy =
+    plan.payloadStrategy.strategy === "deterministic"
+      ? "deterministic payloads"
+      : plan.payloadStrategy.strategy === "adaptive"
+        ? "adaptive payloads"
+        : "mutation payloads";
+  const mutation = `${plan.payloadStrategy.mutationLevel} mutation`;
+  const disabledSuffix =
+    plan.disabledTests.length > 0 ? `, ${plan.disabledTests.length} tests disabled` : "";
+
+  return `Plan for ${endpoint}: ${plan.categories.length} categories, ${plan.totalTestcases} active tests${disabledSuffix}, ~${plan.estimatedRequests} requests, ~${plan.estimatedRuntimeSeconds}s runtime — ${execution}; ${payloadStrategy}, ${mutation}, ${plan.payloadStrategy.variantsPerTest} variants/test, budget ${plan.payloadStrategy.maxTotalPayloads}`;
+}
+
+export function computeWizardPlanMetrics(
+  plan: AttackPlanConfig,
+): Pick<
+  AttackPlanConfig,
+  | "totalTestcases"
+  | "estimatedRequests"
+  | "estimatedRuntimeSeconds"
+  | "estimatedTokens"
+  | "coverageScore"
+  | "riskCoverage"
+> {
+  let requests = 0;
+  let totalTestcases = 0;
+
+  for (const category of plan.categories) {
+    const prefix = testPrefixForCategory(category);
+    const disabledInCategory = plan.disabledTests.filter((id) => id.startsWith(prefix)).length;
+    const enabledTests = Math.max(0, WIZARD_TESTS_PER_CATEGORY - disabledInCategory);
+    if (enabledTests === 0) continue;
+    totalTestcases += enabledTests;
+    const ratio = enabledTests / WIZARD_TESTS_PER_CATEGORY;
+    requests += Math.round(
+      WIZARD_PAYLOADS_PER_CATEGORY * plan.payloadStrategy.variantsPerTest * ratio,
+    );
+  }
+
+  const executionMultiplier = plan.executionStrategy === "agentic" ? Math.max(1, plan.maxAttempts) : 1;
+  const estimatedRequests = requests * executionMultiplier;
+  const enabledRisk = plan.attackGraph
+    .filter((node) => plan.categories.includes(node.category))
+    .reduce((sum, node) => sum + categoryRisk(node.category), 0);
+  const totalRisk = plan.attackGraph.reduce((sum, node) => sum + categoryRisk(node.category), 0) || 1;
+
+  return {
+    totalTestcases,
+    estimatedRequests,
+    estimatedRuntimeSeconds: Math.ceil(estimatedRequests * WIZARD_SECONDS_PER_REQUEST),
+    estimatedTokens: estimatedRequests * WIZARD_TOKENS_PER_REQUEST,
+    coverageScore: plan.categories.length / WIZARD_CATALOG_SIZE,
+    riskCoverage: enabledRisk / totalRisk,
+  };
+}
+
+export function recomputePlanPreview(plan: AttackPlanConfig): AttackPlanConfig {
+  const endpoint = extractPlannerEndpoint(plan.summary);
+  const metrics = computeWizardPlanMetrics(plan);
+  const next = { ...plan, ...metrics };
+  return { ...next, summary: buildPlannerSummaryPreview(next, endpoint) };
+}
+
+export function previewPlanForProfile(
+  plan: AttackPlanConfig,
+  profileId: AttackProfileId,
+  disabledTests: string[],
+): AttackPlanConfig {
+  if (profileId === "custom") {
+    return recomputePlanPreview({ ...plan, profileId, disabledTests });
+  }
+
+  const preset = getProfile(profileId);
+  const categories = plan.suggestedCategories.filter((id) => preset.categories.includes(id));
+  const attackGraph = plan.attackGraph.map((node) => ({
+    ...node,
+    enabled: categories.includes(node.category),
+  }));
+
+  return recomputePlanPreview({
+    ...plan,
+    profileId,
+    categories,
+    attackGraph,
+    disabledTests,
+    disabledGraphNodes: [],
+    payloadStrategy: payloadStrategyForAttackProfile(profileId, plan.recommendedPayloadStrategy),
+  });
+}
+
+export function resolveCategoriesForProfile(
+  plan: AttackPlanConfig,
+  profileId: AttackProfileId,
+): AttackCategoryId[] {
+  if (profileId === "custom") {
+    return plan.categories;
+  }
+  const preset = getProfile(profileId);
+  return plan.suggestedCategories.filter((id) => preset.categories.includes(id));
 }

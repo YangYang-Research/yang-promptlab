@@ -27,6 +27,30 @@ export type PayloadStrategyDto = {
   enableCrossCategoryMutation: boolean;
 };
 
+/** Matches `PayloadStrategy::clamp` in `aisec-target-profile`. */
+export const VARIANTS_PER_TEST_MIN = 1;
+export const VARIANTS_PER_TEST_MAX = 20;
+export const PAYLOAD_BUDGET_MIN = 1;
+export const PAYLOAD_BUDGET_MAX = 100;
+export const PAYLOAD_BUDGET_DEFAULT = 20;
+export const PAYLOAD_BUDGET_STEP = 1;
+
+export function clampVariantsPerTest(value: number): number {
+  return Math.min(VARIANTS_PER_TEST_MAX, Math.max(VARIANTS_PER_TEST_MIN, value));
+}
+
+export function clampPayloadBudget(value: number): number {
+  return Math.min(
+    PAYLOAD_BUDGET_MAX,
+    Math.max(PAYLOAD_BUDGET_MIN, Math.round(value)),
+  );
+}
+
+export function sliderPercent(value: number, min: number, max: number): number {
+  if (max <= min) return 0;
+  return Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
+}
+
 export const GENERATION_STRATEGIES: Array<{
   id: PayloadGenerationStrategy;
   label: string;
@@ -58,26 +82,31 @@ export const GENERATION_STRATEGIES: Array<{
 export const MUTATION_LEVELS: Array<{
   id: MutationLevel;
   label: string;
+  description: string;
   tooltip: string;
 }> = [
   {
     id: "low",
     label: "Low",
+    description: "Minimal wording changes — mostly original templates.",
     tooltip: "Minimal wording changes. High template reuse.",
   },
   {
     id: "medium",
     label: "Medium",
+    description: "Moderate paraphrasing and encoding variants.",
     tooltip: "Moderate paraphrasing and encoding variants.",
   },
   {
     id: "high",
     label: "High",
+    description: "Aggressive mutations across templates and encodings.",
     tooltip: "Aggressive mutations across templates and encodings.",
   },
   {
     id: "extreme",
     label: "Extreme",
+    description: "Maximum diversity — best for deep red team scans.",
     tooltip: "Maximum diversity — useful for red team profiles.",
   },
 ];
@@ -179,4 +208,51 @@ export function payloadStrategyMatchesRecommendation(
 
 export function profileAppliesPayloadPreset(profileId: AttackProfileId): boolean {
   return profileId !== "custom";
+}
+
+/** Mirrors `payload_strategy_for_attack_profile` in `aisec-target-profile`. */
+export function payloadStrategyForAttackProfile(
+  profileId: AttackProfileId,
+  recommended: PayloadStrategyConfig,
+): PayloadStrategyConfig {
+  switch (profileId) {
+    case "quick":
+      return {
+        strategy: "deterministic",
+        mutationLevel: "low",
+        variantsPerTest: 2,
+        maxTotalPayloads: 10,
+        enableContextAwareness: false,
+        enableConversationMemory: false,
+        enableResponseAdaptation: false,
+        enablePayloadDeduplication: true,
+        enableCrossCategoryMutation: false,
+      };
+    case "deep":
+      return {
+        strategy: "adaptive",
+        mutationLevel: "extreme",
+        variantsPerTest: 10,
+        maxTotalPayloads: PAYLOAD_BUDGET_MAX,
+        enableContextAwareness: true,
+        enableConversationMemory: true,
+        enableResponseAdaptation: true,
+        enablePayloadDeduplication: true,
+        enableCrossCategoryMutation: true,
+      };
+    case "custom":
+      return { ...recommended };
+    default:
+      return {
+        strategy: "mutation",
+        mutationLevel: "medium",
+        variantsPerTest: 5,
+        maxTotalPayloads: recommended.maxTotalPayloads || PAYLOAD_BUDGET_DEFAULT,
+        enableContextAwareness: recommended.enableContextAwareness,
+        enableConversationMemory: recommended.enableConversationMemory,
+        enableResponseAdaptation: false,
+        enablePayloadDeduplication: true,
+        enableCrossCategoryMutation: false,
+      };
+  }
 }

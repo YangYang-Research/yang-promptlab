@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::{TargetCapabilities, TargetProfile};
 
+const PAYLOAD_BUDGET_MIN: u32 = 1;
+const PAYLOAD_BUDGET_MAX: u32 = 100;
+const PAYLOAD_BUDGET_DEFAULT: u32 = 20;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PayloadGenerationStrategy {
@@ -39,7 +43,7 @@ impl Default for PayloadStrategy {
             strategy: PayloadGenerationStrategy::Mutation,
             mutation_level: MutationLevel::Medium,
             variants_per_test: 5,
-            max_total_payloads: 500,
+            max_total_payloads: PAYLOAD_BUDGET_DEFAULT,
             enable_context_awareness: false,
             enable_conversation_memory: false,
             enable_response_adaptation: false,
@@ -87,7 +91,7 @@ pub fn payload_strategy_for_attack_profile(
             strategy: PayloadGenerationStrategy::Deterministic,
             mutation_level: MutationLevel::Low,
             variants_per_test: 2,
-            max_total_payloads: 200,
+            max_total_payloads: 10,
             enable_context_awareness: false,
             enable_conversation_memory: false,
             enable_response_adaptation: false,
@@ -98,7 +102,7 @@ pub fn payload_strategy_for_attack_profile(
             strategy: PayloadGenerationStrategy::Adaptive,
             mutation_level: MutationLevel::Extreme,
             variants_per_test: 10,
-            max_total_payloads: recommended.max_total_payloads.max(500),
+            max_total_payloads: recommended.max_total_payloads.max(PAYLOAD_BUDGET_MAX),
             enable_context_awareness: true,
             enable_conversation_memory: true,
             enable_response_adaptation: true,
@@ -123,7 +127,7 @@ pub fn payload_strategy_for_attack_profile(
 impl PayloadStrategy {
     pub fn clamp(mut self) -> Self {
         self.variants_per_test = self.variants_per_test.clamp(1, 20);
-        self.max_total_payloads = self.max_total_payloads.clamp(50, 5000);
+        self.max_total_payloads = self.max_total_payloads.clamp(PAYLOAD_BUDGET_MIN, PAYLOAD_BUDGET_MAX);
         self
     }
 

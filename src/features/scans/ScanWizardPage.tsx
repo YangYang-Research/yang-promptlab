@@ -175,17 +175,6 @@ export function ScanWizardPage() {
       if (lockedScanId) {
         if (session.draftScanId === lockedScanId) {
           wizardDbBootstrap.current = true;
-          if (requestedStep) {
-            const parsedStep = Number.parseInt(requestedStep, 10);
-            if (parsedStep >= 1 && parsedStep <= 6) {
-              setSession((prev) => {
-                if (prev.currentStep === parsedStep) return prev;
-                const next = { ...prev, currentStep: parsedStep as WizardStepId };
-                saveWizardSession(next);
-                return next;
-              });
-            }
-          }
           return;
         }
         wizardDbBootstrap.current = true;
@@ -203,12 +192,6 @@ export function ScanWizardPage() {
           const local = peekWizardSession();
           const next =
             local?.draftScanId === lockedScanId ? mergeWizardSessions(local, remote) : remote;
-          if (requestedStep) {
-            const parsedStep = Number.parseInt(requestedStep, 10);
-            if (parsedStep >= 1 && parsedStep <= 6) {
-              next.currentStep = parsedStep as WizardStepId;
-            }
-          }
           storeDraftScanId(projectId, lockedScanId);
           setSession(next);
           saveWizardSession(next);

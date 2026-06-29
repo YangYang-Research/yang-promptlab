@@ -23,8 +23,8 @@ pub use payload_strategy::{
 };
 pub use planner::{plan_from_target_profile, summary_for_api_endpoint};
 pub use wizard_plan::{
-    adjust_wizard_attack_plan, build_wizard_attack_plan, active_categories_for_profile,
-    ExecutionStrategy, WizardAttackPlan,
+    adjust_wizard_attack_plan, active_categories_for_profile, build_wizard_attack_plan,
+    build_wizard_plan_summary, ExecutionStrategy, WizardAttackPlan,
 };
 pub use prompt::{contains_prompt_placeholder, replace_prompt, PROMPT_PLACEHOLDER};
 pub use templates::{list_provider_templates, template_for_provider};

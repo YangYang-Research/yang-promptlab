@@ -53,8 +53,25 @@ export function inferWizardResumeStep(input: WizardResumeInput): WizardStepId {
   if (input.submittedScanId) {
     return input.currentStep >= 6 ? 6 : 5;
   }
+
+  const maxReachable = inferMaxReachableWizardStep(input);
+  if (input.currentStep >= 1 && input.currentStep <= 5) {
+    return input.currentStep <= maxReachable ? input.currentStep : maxReachable;
+  }
+
+  return maxReachable;
+}
+
+/** Furthest step allowed without skipping required wizard work. */
+export function inferMaxReachableWizardStep(input: WizardResumeInput): WizardStepId {
+  if (!input.savedTargetId && !input.selectedProjectId) {
+    return 1;
+  }
+  if (!input.savedTargetId) {
+    return 2;
+  }
   if (!input.profileVerified) {
-    return input.savedTargetId ? 3 : 2;
+    return 3;
   }
   if (!input.attackPlanGenerated) {
     return 4;

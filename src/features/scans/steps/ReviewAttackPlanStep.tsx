@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 
 import { Badge } from "@/shared/components";
 import { adjustAttackPlan } from "@/shared/ipc/attackPlanner";
@@ -9,6 +9,9 @@ import {
   formatCoverageScore,
   formatEstimatedRuntime,
   payloadStrategyToDto,
+  previewPlanForProfile,
+  recomputePlanPreview,
+  resolveCategoriesForAdjust,
   type AttackPlanConfig,
 } from "../attackPlan";
 import {
@@ -19,8 +22,8 @@ import {
   type AttackProfileId,
   type ExecutionStrategy,
 } from "../attackProfiles";
-import type { AttackPlanUiState } from "../wizardState";
 import type { PayloadStrategyConfig } from "../payloadStrategy";
+import { attackPlanUiFromPlan, type AttackPlanUiState } from "../wizardState";
 import { PayloadStrategySection } from "./PayloadStrategySection";
 
 type ReviewAttackPlanStepProps = {
@@ -44,6 +47,8 @@ export function ReviewAttackPlanStep({
     planUi;
   const disabledTestSet = useMemo(() => new Set(disabledTests), [disabledTests]);
   const disabledGraphSet = useMemo(() => new Set(disabledGraphNodes), [disabledGraphNodes]);
+  const payloadAdjustTimerRef = useRef<number | null>(null);
+  const adjustRequestRef = useRef(0);
 
   const activeCategories = attackPlan.categories;
 
@@ -58,22 +63,22 @@ export function ReviewAttackPlanStep({
     payloadStrategy?: PayloadStrategyConfig,
   ) {
     const nextUi = { ...planUi, ...patch };
-    onPlanUiChange(patch);
+    if (Object.keys(patch).length > 0) {
+      onPlanUiChange(patch);
+    }
     onAdjustingChange?.(true);
     const profileChanged =
       patch.profileId !== undefined && patch.profileId !== planUi.profileId;
     const strategyForRequest = profileChanged
       ? undefined
       : payloadStrategyToDto(payloadStrategy ?? attackPlan.payloadStrategy);
+    const requestId = ++adjustRequestRef.current;
 
     try {
       const dto = await adjustAttackPlan({
         targetId,
         profileId: nextUi.profileId,
-        categories:
-          nextUi.profileId === "custom"
-            ? nextUi.customCategories
-            : attackPlan.suggestedCategories,
+        categories: resolveCategoriesForAdjust(nextUi.profileId, nextUi, attackPlan),
         disabledTests: nextUi.disabledTests,
         disabledGraphNodes: nextUi.disabledGraphNodes,
         executionStrategy: execution?.executionStrategy ?? attackPlan.executionStrategy,
@@ -82,35 +87,61 @@ export function ReviewAttackPlanStep({
         adaptivePlanning: execution?.adaptivePlanning ?? attackPlan.adaptivePlanning,
         ...(strategyForRequest ? { payloadStrategy: strategyForRequest } : {}),
       });
-      onPlanChange(attackPlanFromDto(dto));
+      if (requestId !== adjustRequestRef.current) return;
+
+      const plan = attackPlanFromDto(dto);
+      onPlanChange(plan);
+      onPlanUiChange({
+        ...attackPlanUiFromPlan(plan),
+        expandedCategory: nextUi.expandedCategory,
+      });
     } catch (err) {
       console.error(toAppError(err).message);
     } finally {
-      onAdjustingChange?.(false);
+      if (requestId === adjustRequestRef.current) {
+        onAdjustingChange?.(false);
+      }
     }
   }
 
   function selectProfile(next: AttackProfileId) {
-    const custom =
-      next === "custom"
-        ? attackPlan.suggestedCategories.filter((id) => !disabledGraphSet.has(id))
-        : customCategories;
-    void applyAdjust({
+    const patch: Partial<AttackPlanUiState> = {
       profileId: next,
-      customCategories: custom,
       disabledTests: next !== "custom" ? [] : disabledTests,
-    });
+      disabledGraphNodes: next !== "custom" ? [] : disabledGraphNodes,
+      customCategories:
+        next === "custom"
+          ? attackPlan.suggestedCategories.filter((id) => !disabledGraphSet.has(id))
+          : customCategories,
+    };
+    onPlanChange(
+      previewPlanForProfile(attackPlan, next, patch.disabledTests ?? disabledTests),
+    );
+    onPlanUiChange(patch);
+    void applyAdjust(patch);
   }
 
   function toggleGraphNode(category: AttackCategoryId, enabled: boolean) {
     const nextDisabled = new Set(disabledGraphNodes);
     if (enabled) nextDisabled.delete(category);
     else nextDisabled.add(category);
-    void applyAdjust({
-      profileId: "custom",
+    const patch = {
+      profileId: "custom" as const,
       disabledGraphNodes: [...nextDisabled],
       customCategories: attackPlan.suggestedCategories.filter((id) => !nextDisabled.has(id)),
-    });
+    };
+    onPlanChange(
+      recomputePlanPreview({
+        ...attackPlan,
+        profileId: "custom",
+        categories: patch.customCategories,
+        attackGraph: attackPlan.attackGraph.map((node) => ({
+          ...node,
+          enabled: patch.customCategories.includes(node.category),
+        })),
+      }),
+    );
+    void applyAdjust(patch);
   }
 
   function toggleCustomCategory(id: AttackCategoryId, enabled: boolean) {
@@ -131,6 +162,7 @@ export function ReviewAttackPlanStep({
     else next.add(testId);
     void applyAdjust({
       profileId: profileId !== "custom" ? "custom" : profileId,
+      customCategories: attackPlan.categories,
       disabledTests: [...next],
     });
   }
@@ -141,11 +173,19 @@ export function ReviewAttackPlanStep({
     reflectionEnabled?: boolean;
     adaptivePlanning?: boolean;
   }) {
+    onPlanChange(recomputePlanPreview({ ...attackPlan, ...patch }));
     void applyAdjust({}, patch);
   }
 
   function updatePayloadStrategy(patch: Partial<PayloadStrategyConfig>) {
-    void applyAdjust({}, undefined, { ...attackPlan.payloadStrategy, ...patch });
+    const nextStrategy = { ...attackPlan.payloadStrategy, ...patch };
+    onPlanChange(recomputePlanPreview({ ...attackPlan, payloadStrategy: nextStrategy }));
+    if (payloadAdjustTimerRef.current) {
+      window.clearTimeout(payloadAdjustTimerRef.current);
+    }
+    payloadAdjustTimerRef.current = window.setTimeout(() => {
+      void applyAdjust({}, undefined, nextStrategy);
+    }, 300);
   }
 
   function acceptRecommendedPayloadStrategy() {
@@ -217,7 +257,7 @@ export function ReviewAttackPlanStep({
         </p>
         <ol className="wizard-attack-graph">
           {attackPlan.attackGraph.map((node, index) => {
-            const included = !disabledGraphSet.has(node.category) && activeCategories.includes(node.category);
+            const included = activeCategories.includes(node.category);
             return (
               <li key={node.category} className={`wizard-attack-graph__node${included ? "" : " wizard-attack-graph__node--off"}`}>
                 <div className="wizard-attack-graph__row">

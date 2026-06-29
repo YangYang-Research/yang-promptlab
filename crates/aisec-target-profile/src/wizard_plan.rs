@@ -7,7 +7,8 @@ use aisec_planner::types::{AttackPlan, CategoryRationale, PlannerMode};
 use serde::{Deserialize, Serialize};
 
 use crate::payload_strategy::{
-    payload_strategy_for_attack_profile, recommend_payload_strategy, PayloadStrategy,
+    payload_strategy_for_attack_profile, recommend_payload_strategy, MutationLevel,
+    PayloadGenerationStrategy, PayloadStrategy,
 };
 use crate::types::{TargetCapabilities, TargetProfile};
 
@@ -121,6 +122,7 @@ pub fn build_wizard_attack_plan(profile: &TargetProfile) -> WizardAttackPlan {
         recommended_payload_strategy: recommended,
     };
     recompute_estimates(&mut plan);
+    plan.summary = build_wizard_plan_summary(&plan, &profile.full_url());
     plan
 }
 
@@ -161,6 +163,52 @@ pub fn adjust_wizard_attack_plan(
 
     recompute_estimates(&mut plan);
     plan
+}
+
+/// Human-readable planner summary for wizard Step 4 — reflects live plan configuration.
+pub fn build_wizard_plan_summary(plan: &WizardAttackPlan, api_endpoint: &str) -> String {
+    let execution = match plan.execution_strategy {
+        ExecutionStrategy::Sequential => "sequential execution".to_string(),
+        ExecutionStrategy::Agentic => {
+            let mut label = format!("agentic execution (max {} attempts/category)", plan.max_attempts);
+            if plan.reflection_enabled {
+                label.push_str(", reflection on");
+            }
+            if plan.adaptive_planning {
+                label.push_str(", adaptive planning");
+            }
+            label
+        }
+    };
+
+    let payload_strategy = match plan.payload_strategy.strategy {
+        PayloadGenerationStrategy::Deterministic => "deterministic payloads",
+        PayloadGenerationStrategy::Mutation => "mutation payloads",
+        PayloadGenerationStrategy::Adaptive => "adaptive payloads",
+    };
+    let mutation = match plan.payload_strategy.mutation_level {
+        MutationLevel::Low => "low mutation",
+        MutationLevel::Medium => "medium mutation",
+        MutationLevel::High => "high mutation",
+        MutationLevel::Extreme => "extreme mutation",
+    };
+
+    let disabled_tests = plan.disabled_tests.len();
+    let disabled_suffix = if disabled_tests > 0 {
+        format!(", {disabled_tests} tests disabled")
+    } else {
+        String::new()
+    };
+
+    format!(
+        "Plan for {api_endpoint}: {} categories, {} active tests{disabled_suffix}, ~{} requests, ~{}s runtime — {execution}; {payload_strategy}, {mutation}, {} variants/test, budget {}",
+        plan.categories.len(),
+        plan.total_testcases,
+        plan.estimated_requests,
+        plan.estimated_runtime_seconds,
+        plan.payload_strategy.variants_per_test,
+        plan.payload_strategy.max_total_payloads,
+    )
 }
 
 pub fn active_categories_for_profile(
@@ -296,9 +344,16 @@ pub fn recompute_estimates(plan: &mut WizardAttackPlan) {
     }
 
     plan.total_testcases = total_testcases;
-    plan.estimated_requests = requests;
-    plan.estimated_runtime_seconds = (requests as f32 * SECONDS_PER_REQUEST).ceil() as u32;
-    plan.estimated_tokens = requests * TOKENS_PER_REQUEST;
+    let execution_multiplier = match plan.execution_strategy {
+        ExecutionStrategy::Sequential => 1_u32,
+        ExecutionStrategy::Agentic => plan.max_attempts.max(1) as u32,
+    };
+    let adjusted_requests = requests.saturating_mul(execution_multiplier);
+
+    plan.estimated_requests = adjusted_requests;
+    plan.estimated_runtime_seconds =
+        (adjusted_requests as f32 * SECONDS_PER_REQUEST).ceil() as u32;
+    plan.estimated_tokens = adjusted_requests * TOKENS_PER_REQUEST;
     plan.coverage_score = if CATALOG_SIZE == 0 {
         0.0
     } else {
@@ -386,5 +441,24 @@ mod tests {
         assert_eq!(adjusted.categories.len(), 3);
         assert_eq!(adjusted.total_testcases, 9);
         assert!(adjusted.estimated_requests < full_requests);
+    }
+
+    #[test]
+    fn agentic_execution_increases_request_estimate() {
+        let mut plan = build_wizard_attack_plan(&sample_profile());
+        let sequential = plan.estimated_requests;
+        plan.execution_strategy = ExecutionStrategy::Agentic;
+        plan.max_attempts = 5;
+        recompute_estimates(&mut plan);
+        assert_eq!(plan.estimated_requests, sequential * 5);
+    }
+
+    #[test]
+    fn summary_reflects_configuration() {
+        let plan = build_wizard_attack_plan(&sample_profile());
+        let summary = build_wizard_plan_summary(&plan, "https://api.example.com/v1/chat");
+        assert!(summary.contains("categories"));
+        assert!(summary.contains("sequential execution"));
+        assert!(summary.contains("mutation payloads"));
     }
 }

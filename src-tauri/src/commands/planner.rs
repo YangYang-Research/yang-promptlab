@@ -7,7 +7,10 @@ use aisec_planner::{
     generate_attack_plan, FingerprintEndpoint, FingerprintResult, PlannerMode,
 };
 use aisec_storage::TargetRepository;
-use aisec_target_profile::{adjust_wizard_attack_plan, build_wizard_attack_plan, summary_for_api_endpoint, ExecutionStrategy, PayloadStrategy, WizardAttackPlan};
+use aisec_target_profile::{
+    adjust_wizard_attack_plan, build_wizard_attack_plan, build_wizard_plan_summary,
+    ExecutionStrategy, PayloadStrategy, WizardAttackPlan,
+};
 use aisec_storage::EndpointRepository;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -290,7 +293,7 @@ pub async fn planner_adjust_wizard_plan_op(
     if let Some(enabled) = request.adaptive_planning {
         plan.adaptive_planning = enabled;
     }
-    plan.summary = summary_for_api_endpoint(&profile.full_url(), plan.categories.len());
+    plan.summary = build_wizard_plan_summary(&plan, &profile.full_url());
     Ok(wizard_plan_to_dto(plan))
 }
 
