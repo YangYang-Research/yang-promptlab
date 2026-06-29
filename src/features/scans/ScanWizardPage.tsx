@@ -5,6 +5,7 @@ import { useAppStore } from "@/app/store/AppStore";
 import { mapProjects, mapTargets } from "@/app/store/mappers";
 import { Button, Card, PageHeader, Badge } from "@/shared/components";
 import { getProject, startScan, updateTargetDescriptor } from "@/shared/ipc";
+import { createWizardScan, loadWizardScan, saveWizardScan } from "@/shared/ipc/scanWizard";
 import { generateAttackPlanForTarget } from "@/shared/ipc/attackPlanner";
 import { getTargetProfile, saveTargetProfile } from "@/shared/ipc/targetProfile";
 import { toAppError } from "@/shared/errors";
@@ -37,16 +38,18 @@ import {
   type TargetFormState,
 } from "./targetDescriptor";
 import { WizardStepper } from "./WizardStepper";
-import { attackPlanFromDto } from "./attackPlan";
+import { attackPlanFromDto, payloadStrategyToDto } from "./attackPlan";
 import {
   buildWizardStore,
   clearWizardSession,
+  createInitialSession,
   createSessionForTargetScan,
   attackPlanUiFromPlan,
   createInitialAttackPlanUi,
   fetchTargetFormForWizard,
   loadTargetDtoForWizard,
   loadWizardSession,
+  peekWizardSession,
   prepareAuthFormForStep3,
   saveWizardSession,
   type ScanWizardSession,
@@ -59,6 +62,11 @@ import {
   type WizardDraft,
   type WizardStepId,
 } from "./wizardSteps";
+import {
+  parsePersistedWizard,
+  sessionFromPersistedWizard,
+  wizardStateToPersisted,
+} from "./wizardPersistence";
 
 export function ScanWizardPage() {
   const navigate = useNavigate();
@@ -66,6 +74,7 @@ export function ScanWizardPage() {
   const lockedProjectId = searchParams.get("projectId")?.trim() ?? "";
   const lockedTargetId = searchParams.get("targetId")?.trim() ?? "";
   const requestedStep = searchParams.get("step")?.trim() ?? "";
+  const lockedScanId = searchParams.get("scanId")?.trim() ?? "";
   const { projects, targets, loading, error, dispatch, actions } = useAppStore();
   const { notify } = useToast();
   const deepLinkApplied = useRef(false);
@@ -88,6 +97,7 @@ export function ScanWizardPage() {
   const [dbVerificationLoading, setDbVerificationLoading] = useState(false);
   const [importApiOpen, setImportApiOpen] = useState(false);
   const plannerRunRef = useRef<string | null>(null);
+  const wizardDbBootstrap = useRef(false);
 
   const store = useMemo(
     () => buildWizardStore(session, targets),
@@ -129,6 +139,95 @@ export function ScanWizardPage() {
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    if (wizardDbBootstrap.current) return;
+
+    async function ensureDraftScan() {
+      if (lockedScanId) {
+        if (session.draftScanId === lockedScanId) {
+          wizardDbBootstrap.current = true;
+          return;
+        }
+        try {
+          const loaded = await loadWizardScan(lockedScanId);
+          const persisted = parsePersistedWizard(loaded.wizard);
+          const next = persisted
+            ? sessionFromPersistedWizard(persisted, lockedScanId, lockedProjectId)
+            : {
+                ...createInitialSession(lockedProjectId || loaded.scan.project_id),
+                draftScanId: lockedScanId,
+                selectedProjectId: loaded.scan.project_id,
+              };
+          setSession(next);
+          saveWizardSession(next);
+          wizardDbBootstrap.current = true;
+          await actions.refresh();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Failed to load wizard scan";
+          notify(message, "error");
+        }
+        return;
+      }
+
+      const projectId = lockedProjectId || session.selectedProjectId;
+      if (!projectId || session.draftScanId) {
+        if (session.draftScanId) wizardDbBootstrap.current = true;
+        return;
+      }
+
+      try {
+        const created = await createWizardScan({
+          projectId,
+          targetId: session.savedTargetId,
+          wizard: wizardStateToPersisted({
+            ...session,
+            selectedProjectId: projectId,
+          }),
+        });
+        const next = {
+          ...session,
+          draftScanId: created.id,
+          selectedProjectId: projectId,
+        };
+        setSession(next);
+        saveWizardSession(next);
+        const params = new URLSearchParams({ projectId, scanId: created.id });
+        if (lockedTargetId) params.set("targetId", lockedTargetId);
+        navigate(`/scans/new?${params.toString()}`, { replace: true });
+        wizardDbBootstrap.current = true;
+        await actions.refresh();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to create wizard scan";
+        notify(message, "error");
+      }
+    }
+
+    void ensureDraftScan();
+  }, [
+    lockedScanId,
+    lockedProjectId,
+    lockedTargetId,
+    session.draftScanId,
+    session.selectedProjectId,
+    session,
+    actions,
+    notify,
+    navigate,
+  ]);
+
+  useEffect(() => {
+    if (!session.draftScanId || !session.selectedProjectId) return;
+    const timer = window.setTimeout(() => {
+      void saveWizardScan({
+        scanId: session.draftScanId!,
+        projectId: session.selectedProjectId,
+        targetId: session.savedTargetId,
+        wizard: wizardStateToPersisted(session),
+      }).then(() => actions.refresh());
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [session, actions]);
 
   const runAttackPlanner = useCallback(
     async (targetId: string, options?: { autoAdvance?: boolean }) => {
@@ -249,7 +348,9 @@ export function ScanWizardPage() {
     if (!lockedTargetId || deepLinkApplied.current) return;
 
     let cancelled = false;
-    const step: WizardStepId = 3;
+    const parsedStep = Number.parseInt(requestedStep, 10);
+    const resumeStep: WizardStepId =
+      parsedStep >= 1 && parsedStep <= 6 ? (parsedStep as WizardStepId) : 3;
 
     void loadTargetDtoForWizard(lockedTargetId)
       .then((dto) => {
@@ -260,22 +361,45 @@ export function ScanWizardPage() {
           return;
         }
 
+        const existing = peekWizardSession();
+        const sessionMatches =
+          existing?.savedTargetId === lockedTargetId &&
+          (!lockedProjectId ||
+            !existing.selectedProjectId ||
+            existing.selectedProjectId === lockedProjectId);
+
         const profileState =
           dto.profile && typeof dto.profile === "object"
             ? profileFromDto(dto.profile as Parameters<typeof profileFromDto>[0])
-            : session.targetProfile;
+            : sessionMatches
+              ? existing!.targetProfile
+              : session.targetProfile;
         const targetForm = targetFormFromDescriptor(dto.descriptor, fullProfileUrl(profileState));
-        const next = {
-          ...createSessionForTargetScan(
-            lockedProjectId || target.projectId,
-            target,
-            dto.descriptor,
-            dto.profile,
-            step,
-          ),
-          targetForm,
-          savedTargetFingerprint: targetFormFingerprint(targetForm),
-        };
+
+        const draftScanId = lockedScanId || session.draftScanId || null;
+
+        const next = sessionMatches
+          ? {
+              ...existing!,
+              draftScanId: draftScanId ?? existing!.draftScanId,
+              selectedProjectId: lockedProjectId || existing!.selectedProjectId || target.projectId,
+              currentStep: requestedStep ? resumeStep : existing!.currentStep,
+              submittedScanId: existing!.submittedScanId,
+              targetForm,
+              savedTargetFingerprint: targetFormFingerprint(targetForm),
+            }
+          : {
+              ...createSessionForTargetScan(
+                lockedProjectId || target.projectId,
+                target,
+                dto.descriptor,
+                dto.profile,
+                resumeStep,
+              ),
+              draftScanId,
+              targetForm,
+              savedTargetFingerprint: targetFormFingerprint(targetForm),
+            };
         deepLinkApplied.current = true;
         setSession(next);
         saveWizardSession(next);
@@ -291,7 +415,7 @@ export function ScanWizardPage() {
     return () => {
       cancelled = true;
     };
-  }, [lockedTargetId, lockedProjectId, requestedStep, dispatch, notify]);
+  }, [lockedTargetId, lockedProjectId, lockedScanId, requestedStep, dispatch, notify, session.targetProfile]);
 
   useEffect(() => {
     if (!session.submittedScanId || session.currentStep < 5) return;
@@ -530,8 +654,10 @@ export function ScanWizardPage() {
         categories: session.attackPlan.categories,
         profile: session.attackPlan.profileId,
         disabledTests: session.attackPlan.disabledTests,
+        payloadStrategy: payloadStrategyToDto(session.attackPlan.payloadStrategy),
         agentMode: session.attackPlan.executionStrategy === "agentic",
         maxAgentAttempts: session.attackPlan.maxAttempts,
+        draftScanId: session.draftScanId ?? undefined,
       });
       await actions.refresh();
       updateSession({ submittedScanId: result.scan_id });

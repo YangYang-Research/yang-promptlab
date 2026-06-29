@@ -6,10 +6,12 @@ use aisec_attack::AttackCategory;
 use aisec_planner::types::{AttackPlan, CategoryRationale, PlannerMode};
 use serde::{Deserialize, Serialize};
 
+use crate::payload_strategy::{
+    payload_strategy_for_attack_profile, recommend_payload_strategy, PayloadStrategy,
+};
 use crate::types::{TargetCapabilities, TargetProfile};
 
 const PAYLOADS_PER_CATEGORY: u32 = 3;
-const VARIANTS_PER_PAYLOAD: u32 = 4;
 const TESTS_PER_CATEGORY: u32 = 3;
 const SECONDS_PER_REQUEST: f32 = 2.5;
 const TOKENS_PER_REQUEST: u32 = 480;
@@ -57,6 +59,8 @@ pub struct WizardAttackPlan {
     pub coverage_score: f32,
     pub risk_coverage: f32,
     pub total_testcases: u32,
+    pub payload_strategy: PayloadStrategy,
+    pub recommended_payload_strategy: PayloadStrategy,
 }
 
 pub fn profile_categories_for_id(profile_id: &str) -> Vec<AttackCategory> {
@@ -87,6 +91,10 @@ pub fn build_wizard_attack_plan(profile: &TargetProfile) -> WizardAttackPlan {
     let risk_score = compute_risk_score(&profile.default_capabilities, suggested.len());
     let risk_level = risk_level_label(risk_score).to_string();
 
+    let recommended = recommend_payload_strategy(profile);
+    let payload_strategy =
+        payload_strategy_for_attack_profile("standard", &recommended).clamp();
+
     let mut plan = WizardAttackPlan {
         profile_id: "standard".into(),
         suggested_categories: suggested.clone(),
@@ -109,6 +117,8 @@ pub fn build_wizard_attack_plan(profile: &TargetProfile) -> WizardAttackPlan {
         coverage_score: 0.0,
         risk_coverage: 0.0,
         total_testcases: 0,
+        payload_strategy: payload_strategy.clone(),
+        recommended_payload_strategy: recommended,
     };
     recompute_estimates(&mut plan);
     plan
@@ -120,9 +130,18 @@ pub fn adjust_wizard_attack_plan(
     categories: Option<Vec<AttackCategory>>,
     disabled_tests: &[String],
     disabled_graph_nodes: &[String],
+    payload_strategy: Option<PayloadStrategy>,
 ) -> WizardAttackPlan {
     plan.profile_id = profile_id.to_string();
     plan.disabled_tests = disabled_tests.to_vec();
+
+    if let Some(strategy) = payload_strategy {
+        plan.payload_strategy = strategy.clamp();
+    } else {
+        plan.payload_strategy =
+            payload_strategy_for_attack_profile(profile_id, &plan.recommended_payload_strategy)
+                .clamp();
+    }
 
     let disabled_cats: HashSet<String> = disabled_graph_nodes
         .iter()
@@ -272,7 +291,8 @@ pub fn recompute_estimates(plan: &mut WizardAttackPlan) {
         }
         total_testcases += enabled_tests;
         let ratio = enabled_tests as f32 / TESTS_PER_CATEGORY as f32;
-        requests += ((PAYLOADS_PER_CATEGORY * VARIANTS_PER_PAYLOAD) as f32 * ratio).round() as u32;
+        let variants = plan.payload_strategy.variants_per_test;
+        requests += ((PAYLOADS_PER_CATEGORY * variants) as f32 * ratio).round() as u32;
     }
 
     plan.total_testcases = total_testcases;
@@ -362,7 +382,7 @@ mod tests {
     fn profile_quick_reduces_categories() {
         let plan = build_wizard_attack_plan(&sample_profile());
         let full_requests = plan.estimated_requests;
-        let adjusted = adjust_wizard_attack_plan(plan, "quick", None, &[], &[]);
+        let adjusted = adjust_wizard_attack_plan(plan, "quick", None, &[], &[], None);
         assert_eq!(adjusted.categories.len(), 3);
         assert_eq!(adjusted.total_testcases, 9);
         assert!(adjusted.estimated_requests < full_requests);

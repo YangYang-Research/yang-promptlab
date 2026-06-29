@@ -2,8 +2,9 @@
 
 use aisec_attack::AttackCategory;
 use aisec_core::AisecError;
-use aisec_generator::{generate_from_plan, GeneratorMode, PromptPayloads};
+use aisec_generator::{generate_from_plan, GeneratePayloadsInput, GeneratorMode, PromptPayloads};
 use aisec_planner::{AttackPlan, PlannerMode};
+use aisec_target_profile::{PayloadGenerationStrategy, PayloadStrategy};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -56,8 +57,43 @@ fn parse_generator_mode(raw: &str) -> GeneratorMode {
     match raw.trim().to_ascii_lowercase().as_str() {
         "template_mutation" | "mutation" | "template" => GeneratorMode::TemplateMutation,
         "local_llm" | "local" | "llm" => GeneratorMode::LocalLlm,
+        "deterministic" | "static_pack" | "static" => GeneratorMode::StaticPack,
+        "adaptive" => GeneratorMode::TemplateMutation,
         _ => GeneratorMode::StaticPack,
     }
+}
+
+pub fn generator_mode_from_payload_strategy(strategy: &PayloadStrategy) -> GeneratorMode {
+    match strategy.strategy {
+        PayloadGenerationStrategy::Deterministic => GeneratorMode::StaticPack,
+        PayloadGenerationStrategy::Mutation => GeneratorMode::TemplateMutation,
+        PayloadGenerationStrategy::Adaptive => GeneratorMode::TemplateMutation,
+    }
+}
+
+fn cap_prompt_payloads(mut pack: PromptPayloads, max_total: u32) -> PromptPayloads {
+    let limit = max_total as usize;
+    if limit == 0 {
+        return pack;
+    }
+    let mut kept = 0usize;
+    let mut capped_map = HashMap::new();
+    for (category, items) in pack.by_category {
+        let mut capped = Vec::new();
+        for item in items {
+            if kept >= limit {
+                break;
+            }
+            capped.push(item);
+            kept += 1;
+        }
+        if !capped.is_empty() {
+            capped_map.insert(category, capped);
+        }
+    }
+    pack.by_category = capped_map;
+    pack.stats.payload_count = kept;
+    pack
 }
 
 fn parse_categories(raw: &[String]) -> Vec<AttackCategory> {
@@ -161,7 +197,38 @@ pub async fn generate_payloads_for_scan_job(
     plan: &AttackPlan,
     mode: GeneratorMode,
 ) -> CommandResult<PromptPayloads> {
-    if mode == GeneratorMode::LocalLlm {
+    generate_payloads_for_scan_job_with_options(
+        data_dir,
+        inference_manager,
+        model_manager,
+        model_provider,
+        runtime_manager,
+        plan,
+        mode,
+        None,
+        None,
+    )
+    .await
+}
+
+pub async fn generate_payloads_for_scan_job_with_options(
+    data_dir: &std::path::Path,
+    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
+    model_provider: aisec_runtime::SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
+    plan: &AttackPlan,
+    mode: GeneratorMode,
+    max_variants_per_payload: Option<usize>,
+    max_total_payloads: Option<u32>,
+) -> CommandResult<PromptPayloads> {
+    let input = GeneratePayloadsInput {
+        plan,
+        mode,
+        max_variants_per_payload,
+    };
+
+    let pack = if mode == GeneratorMode::LocalLlm {
         let inference = inference_manager.lock().await;
         if !is_inference_ready(&inference) {
             return Err(CommandError::invalid_input(
@@ -178,12 +245,42 @@ pub async fn generate_payloads_for_scan_job(
         ));
         generate_from_plan(plan, mode, Some(llm.as_ref()))
             .await
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
+            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?
     } else {
-        generate_from_plan(plan, mode, None)
+        aisec_generator::generate_prompt_payloads(&input)
             .await
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
-    }
+            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?
+    };
+
+    Ok(if let Some(max_total) = max_total_payloads {
+        cap_prompt_payloads(pack, max_total)
+    } else {
+        pack
+    })
+}
+
+pub async fn generate_payloads_for_scan_job_with_strategy(
+    data_dir: &std::path::Path,
+    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
+    model_provider: aisec_runtime::SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
+    plan: &AttackPlan,
+    strategy: &PayloadStrategy,
+) -> CommandResult<PromptPayloads> {
+    let mode = generator_mode_from_payload_strategy(strategy);
+    generate_payloads_for_scan_job_with_options(
+        data_dir,
+        inference_manager,
+        model_manager,
+        model_provider,
+        runtime_manager,
+        plan,
+        mode,
+        Some(strategy.max_variants_per_payload()),
+        Some(strategy.max_total_payloads),
+    )
+    .await
 }
 
 pub async fn generate_payloads_for_plan(

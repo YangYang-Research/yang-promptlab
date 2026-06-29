@@ -22,7 +22,7 @@ import type { WizardStepId } from "./wizardSteps";
 import type { Target } from "@/shared/types";
 
 const STORAGE_KEY = "promptlab:scan-wizard";
-const STORAGE_VERSION = 4;
+const STORAGE_VERSION = 6;
 
 export type AttackPlanUiState = {
   profileId: AttackProfileId;
@@ -34,6 +34,7 @@ export type AttackPlanUiState = {
 
 export type ScanWizardSession = {
   version: typeof STORAGE_VERSION;
+  draftScanId: string | null;
   currentStep: WizardStepId;
   selectedProjectId: string;
   targetProfile: TargetProfileFormState;
@@ -74,6 +75,7 @@ export function createInitialAttackPlanUi(): AttackPlanUiState {
 export function createInitialSession(lockedProjectId = ""): ScanWizardSession {
   return {
     version: STORAGE_VERSION,
+    draftScanId: null,
     currentStep: 1,
     selectedProjectId: lockedProjectId,
     targetProfile: createInitialTargetProfile(),
@@ -99,26 +101,19 @@ export function buildWizardStore(session: ScanWizardSession, targets: Target[]):
   };
 }
 
-export function loadWizardSession(lockedProjectId: string): ScanWizardSession {
-  if (typeof window === "undefined") {
-    return createInitialSession(lockedProjectId);
-  }
+export function peekWizardSession(): ScanWizardSession | null {
+  if (typeof window === "undefined") return null;
 
   try {
     const raw = window.sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return createInitialSession(lockedProjectId);
-    }
+    if (!raw) return null;
 
     const parsed = JSON.parse(raw) as ScanWizardSession;
-    if (parsed.version !== STORAGE_VERSION) {
-      return createInitialSession(lockedProjectId);
-    }
+    if (parsed.version !== STORAGE_VERSION) return null;
 
     return {
-      ...createInitialSession(lockedProjectId),
+      ...createInitialSession(),
       ...parsed,
-      selectedProjectId: lockedProjectId || parsed.selectedProjectId,
       targetProfile: {
         ...createInitialTargetProfile(),
         ...parsed.targetProfile,
@@ -128,8 +123,38 @@ export function loadWizardSession(lockedProjectId: string): ScanWizardSession {
       attackPlanUi: { ...createInitialAttackPlanUi(), ...parsed.attackPlanUi },
     };
   } catch {
-    return createInitialSession(lockedProjectId);
+    return null;
   }
+}
+
+export function wizardResumeInputFromSession(session: ScanWizardSession): {
+  savedTargetId: string | null;
+  selectedProjectId: string;
+  currentStep: WizardStepId;
+  profileVerified: boolean;
+  attackPlanGenerated: boolean;
+  submittedScanId: string | null;
+} {
+  return {
+    savedTargetId: session.savedTargetId,
+    selectedProjectId: session.selectedProjectId,
+    currentStep: session.currentStep,
+    profileVerified: session.targetProfile.verification.verified,
+    attackPlanGenerated: session.attackPlan !== null,
+    submittedScanId: session.submittedScanId,
+  };
+}
+
+export function loadWizardSession(lockedProjectId: string): ScanWizardSession {
+  const peeked = peekWizardSession();
+  if (peeked) {
+    return {
+      ...peeked,
+      selectedProjectId: lockedProjectId || peeked.selectedProjectId,
+    };
+  }
+
+  return createInitialSession(lockedProjectId);
 }
 
 export function saveWizardSession(session: ScanWizardSession): void {
@@ -181,6 +206,7 @@ export function createSessionForTargetScan(
 
   return {
     ...createInitialSession(projectId),
+    draftScanId: null,
     selectedProjectId: projectId,
     currentStep: step,
     savedTargetId: target.id,
@@ -190,8 +216,21 @@ export function createSessionForTargetScan(
   };
 }
 
-export function buildScanWizardUrl(projectId: string, targetId: string): string {
-  const params = new URLSearchParams({ projectId, targetId });
+export function buildScanWizardUrl(
+  projectId: string,
+  targetId?: string,
+  options?: { step?: WizardStepId; scanId?: string },
+): string {
+  const params = new URLSearchParams({ projectId });
+  if (targetId) {
+    params.set("targetId", targetId);
+  }
+  if (options?.step) {
+    params.set("step", String(options.step));
+  }
+  if (options?.scanId) {
+    params.set("scanId", options.scanId);
+  }
   return `/scans/new?${params.toString()}`;
 }
 

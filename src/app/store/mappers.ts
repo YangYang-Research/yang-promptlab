@@ -49,6 +49,7 @@ function coerceReportFormat(value: string): ReportFormat {
 function coerceJobStatus(value: string, fallback: JobStatus = "completed"): JobStatus {
   switch (value.toLowerCase()) {
     case "pending":
+    case "draft":
     case "running":
     case "paused":
     case "completed":

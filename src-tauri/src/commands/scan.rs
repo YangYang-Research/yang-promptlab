@@ -21,9 +21,10 @@ use tracing::{info, instrument, warn};
 use crate::commands::attack::{run_category_on_target_profile, run_category_on_endpoint};
 use crate::agent_service::{agent_config_from_scan, run_agent_endpoint, ScanAgentHost};
 use crate::commands::generator::{
-    attack_plan_from_scan, generate_payloads_for_scan_job, parse_generator_mode_optional,
-    prompt_payloads_map,
+    attack_plan_from_scan, generate_payloads_for_scan_job, generate_payloads_for_scan_job_with_strategy,
+    parse_generator_mode_optional, prompt_payloads_map,
 };
+use aisec_target_profile::PayloadStrategy;
 use crate::events::{emit_app_data_changed, ScanProgressEmitter};
 use crate::session_auth::{build_attack_runtime_parts, fallback_attack_runtime, seed_url_from_descriptor, AttackRuntime};
 use crate::commands::target_profile::parse_target_profile;
@@ -115,6 +116,7 @@ async fn run_scan_job(
     disabled_tests: Vec<String>,
     profile: String,
     generator_mode: Option<String>,
+    payload_strategy: Option<PayloadStrategy>,
     cancel: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
     progress: Arc<Mutex<ScanProgress>>,
@@ -169,7 +171,38 @@ async fn run_scan_job(
     };
 
     let generated_payloads: Option<HashMap<AttackCategory, Vec<AttackPayload>>> =
-        if let Some(mode) = parse_generator_mode_optional(generator_mode.as_deref()) {
+        if let Some(ref strategy) = payload_strategy {
+            let plan = attack_plan_from_scan(profile.clone(), categories.clone(), disabled_tests.clone());
+            match generate_payloads_for_scan_job_with_strategy(
+                &data_dir,
+                Arc::clone(&inference_manager),
+                Arc::clone(&model_manager),
+                model_provider.clone(),
+                Arc::clone(&runtime_manager),
+                &plan,
+                strategy,
+            )
+            .await
+            {
+                Ok(pack) => {
+                    info!(
+                        scan_id = %scan_id,
+                        strategy = ?strategy.strategy,
+                        payloads = pack.stats.payload_count,
+                        "generated attack payloads from payload strategy"
+                    );
+                    Some(prompt_payloads_map(&pack))
+                }
+                Err(err) => {
+                    warn!(
+                        scan_id = %scan_id,
+                        error = %err,
+                        "payload generation failed; falling back to attack builtins"
+                    );
+                    None
+                }
+            }
+        } else if let Some(mode) = parse_generator_mode_optional(generator_mode.as_deref()) {
             let plan = attack_plan_from_scan(profile.clone(), categories.clone(), disabled_tests);
             match generate_payloads_for_scan_job(
                 &data_dir,
@@ -528,8 +561,10 @@ pub async fn scan_start_op(
     categories: Vec<String>,
     disabled_tests: Vec<String>,
     generator_mode: Option<String>,
+    payload_strategy: Option<PayloadStrategy>,
     agent_mode: Option<bool>,
     max_agent_attempts: Option<usize>,
+    draft_scan_id: Option<String>,
 ) -> CommandResult<ScanStartDto> {
     let parsed_categories: Vec<AttackCategory> = categories
         .iter()
@@ -562,43 +597,121 @@ pub async fn scan_start_op(
     }
 
     let agentic = agent_mode.unwrap_or(false);
-    let config = agent_config_from_scan(generator_mode.as_deref(), max_agent_attempts);
+    let effective_generator_mode = payload_strategy
+        .as_ref()
+        .map(|s| s.generator_mode_str().to_string())
+        .or(generator_mode.clone());
+    let config = agent_config_from_scan(effective_generator_mode.as_deref(), max_agent_attempts);
     let scan_name = if agentic {
         format!("Agent Scan ({profile})")
     } else {
         format!("Scan ({profile})")
     };
 
-    let scan = repos
-        .scans()
-        .create(CreateScan {
-            project_id: project_id.clone(),
-            target_id: Some(target_id.clone()),
-            name: scan_name,
-            status: Some("running".into()),
-            playbook_json: Some(serde_json::json!({
-                "profile": profile,
-                "categories": categories,
-                "disabled_tests": disabled_tests,
-                "target_profile": true,
-                "generator_mode": generator_mode,
-                "agent_mode": agentic,
-                "max_agent_attempts": config.max_attempts_per_category,
-            })),
-        })
-        .await
-        .map_err(CommandError::from)?;
+    let mut execution_playbook = {
+        let mut playbook = serde_json::json!({
+            "profile": profile,
+            "categories": categories,
+            "disabled_tests": disabled_tests,
+            "target_profile": true,
+            "generator_mode": effective_generator_mode,
+            "agent_mode": agentic,
+            "max_agent_attempts": config.max_attempts_per_category,
+        });
+        if let Some(ref strategy) = payload_strategy {
+            playbook["payload_strategy"] = serde_json::to_value(strategy).unwrap_or_default();
+            playbook["scan_metadata"] = serde_json::json!({
+                "generation_strategy": match strategy.strategy {
+                    aisec_target_profile::PayloadGenerationStrategy::Deterministic => "deterministic",
+                    aisec_target_profile::PayloadGenerationStrategy::Mutation => "mutation",
+                    aisec_target_profile::PayloadGenerationStrategy::Adaptive => "adaptive",
+                },
+                "mutation_level": match strategy.mutation_level {
+                    aisec_target_profile::MutationLevel::Low => "low",
+                    aisec_target_profile::MutationLevel::Medium => "medium",
+                    aisec_target_profile::MutationLevel::High => "high",
+                    aisec_target_profile::MutationLevel::Extreme => "extreme",
+                },
+                "variant_count": strategy.variants_per_test,
+                "adaptive_enabled": strategy.enable_response_adaptation,
+                "context_enabled": strategy.enable_context_awareness,
+                "conversation_enabled": strategy.enable_conversation_memory,
+                "payload_budget": strategy.max_total_payloads,
+            });
+        }
+        playbook
+    };
 
-    let _ = repos
-        .scans()
-        .update(
-            &scan.id,
-            UpdateScan {
-                started_at: Some(Some(OffsetDateTime::now_utc())),
-                ..Default::default()
-            },
-        )
-        .await;
+    let scan = if let Some(draft_id) = draft_scan_id.filter(|id| !id.trim().is_empty()) {
+        let existing = repos
+            .scans()
+            .get(&draft_id)
+            .await
+            .map_err(CommandError::from)?;
+        if existing.project_id != project_id {
+            return Err(CommandError::invalid_input("draft scan project mismatch"));
+        }
+        if existing.status != crate::commands::wizard_scan::WIZARD_SCAN_STATUS {
+            return Err(CommandError::invalid_input(
+                "draft scan is no longer in setup state",
+            ));
+        }
+        let mut playbook = existing
+            .playbook_json
+            .as_deref()
+            .and_then(|raw| serde_json::from_str(raw).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let Some(wizard) = playbook.get("wizard").cloned() {
+            execution_playbook["wizard_snapshot"] = wizard;
+        }
+        for (key, value) in execution_playbook
+            .as_object()
+            .cloned()
+            .unwrap_or_default()
+        {
+            playbook[key] = value;
+        }
+        repos
+            .scans()
+            .update(
+                &draft_id,
+                UpdateScan {
+                    target_id: Some(Some(target_id.clone())),
+                    name: Some(scan_name.clone()),
+                    status: Some("running".into()),
+                    playbook_json: Some(playbook),
+                    started_at: Some(Some(OffsetDateTime::now_utc())),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(CommandError::from)?
+    } else {
+        repos
+            .scans()
+            .create(CreateScan {
+                project_id: project_id.clone(),
+                target_id: Some(target_id.clone()),
+                name: scan_name.clone(),
+                status: Some("running".into()),
+                playbook_json: Some(execution_playbook),
+            })
+            .await
+            .map_err(CommandError::from)?
+    };
+
+    if scan.started_at.is_none() {
+        let _ = repos
+            .scans()
+            .update(
+                &scan.id,
+                UpdateScan {
+                    started_at: Some(Some(OffsetDateTime::now_utc())),
+                    ..Default::default()
+                },
+            )
+            .await;
+    }
 
     let total = if agentic {
         (parsed_categories.len() as u64) * config.max_attempts_per_category as u64
@@ -631,7 +744,8 @@ pub async fn scan_start_op(
 
     let disabled_for_job = disabled_tests.clone();
     let profile_for_job = profile.clone();
-    let generator_mode_for_job = generator_mode.clone();
+    let generator_mode_for_job = effective_generator_mode.clone();
+    let payload_strategy_for_job = payload_strategy.clone();
     let max_attempts_for_job = max_agent_attempts;
     let app_for_job = app.clone();
 
@@ -656,6 +770,7 @@ pub async fn scan_start_op(
             disabled_for_job,
             profile_for_job,
             generator_mode_for_job,
+            payload_strategy_for_job,
             cancel,
             paused,
             progress,
@@ -827,9 +942,15 @@ pub async fn scan_start(
     categories: Vec<String>,
     disabled_tests: Vec<String>,
     generator_mode: Option<String>,
+    payload_strategy: Option<serde_json::Value>,
     agent_mode: Option<bool>,
     max_agent_attempts: Option<usize>,
+    draft_scan_id: Option<String>,
 ) -> CommandResult<ScanStartDto> {
+    let parsed_strategy = payload_strategy
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| CommandError::invalid_input(format!("invalid payload strategy: {e}")))?;
     scan_start_op(
         state.inner(),
         &app,
@@ -839,8 +960,10 @@ pub async fn scan_start(
         categories,
         disabled_tests,
         generator_mode,
+        parsed_strategy,
         agent_mode,
         max_agent_attempts,
+        draft_scan_id,
     )
     .await
 }

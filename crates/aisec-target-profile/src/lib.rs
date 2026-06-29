@@ -6,6 +6,7 @@
 
 pub mod capabilities;
 pub mod harness;
+pub mod payload_strategy;
 pub mod planner;
 pub mod wizard_plan;
 pub mod prompt;
@@ -16,6 +17,10 @@ pub mod verification;
 
 pub use capabilities::default_capabilities_for_provider;
 pub use harness::harness_kind_for_profile;
+pub use payload_strategy::{
+    capability_influences_strategy, payload_strategy_for_attack_profile,
+    recommend_payload_strategy, MutationLevel, PayloadGenerationStrategy, PayloadStrategy,
+};
 pub use planner::{plan_from_target_profile, summary_for_api_endpoint};
 pub use wizard_plan::{
     adjust_wizard_attack_plan, build_wizard_attack_plan, active_categories_for_profile,

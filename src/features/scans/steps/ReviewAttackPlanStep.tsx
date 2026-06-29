@@ -8,6 +8,7 @@ import {
   attackPlanFromDto,
   formatCoverageScore,
   formatEstimatedRuntime,
+  payloadStrategyToDto,
   type AttackPlanConfig,
 } from "../attackPlan";
 import {
@@ -19,6 +20,8 @@ import {
   type ExecutionStrategy,
 } from "../attackProfiles";
 import type { AttackPlanUiState } from "../wizardState";
+import type { PayloadStrategyConfig } from "../payloadStrategy";
+import { PayloadStrategySection } from "./PayloadStrategySection";
 
 type ReviewAttackPlanStepProps = {
   targetId: string;
@@ -44,15 +47,25 @@ export function ReviewAttackPlanStep({
 
   const activeCategories = attackPlan.categories;
 
-  async function applyAdjust(patch: Partial<AttackPlanUiState>, execution?: {
-    executionStrategy?: ExecutionStrategy;
-    maxAttempts?: number;
-    reflectionEnabled?: boolean;
-    adaptivePlanning?: boolean;
-  }) {
+  async function applyAdjust(
+    patch: Partial<AttackPlanUiState>,
+    execution?: {
+      executionStrategy?: ExecutionStrategy;
+      maxAttempts?: number;
+      reflectionEnabled?: boolean;
+      adaptivePlanning?: boolean;
+    },
+    payloadStrategy?: PayloadStrategyConfig,
+  ) {
     const nextUi = { ...planUi, ...patch };
     onPlanUiChange(patch);
     onAdjustingChange?.(true);
+    const profileChanged =
+      patch.profileId !== undefined && patch.profileId !== planUi.profileId;
+    const strategyForRequest = profileChanged
+      ? undefined
+      : payloadStrategyToDto(payloadStrategy ?? attackPlan.payloadStrategy);
+
     try {
       const dto = await adjustAttackPlan({
         targetId,
@@ -67,6 +80,7 @@ export function ReviewAttackPlanStep({
         maxAttempts: execution?.maxAttempts ?? attackPlan.maxAttempts,
         reflectionEnabled: execution?.reflectionEnabled ?? attackPlan.reflectionEnabled,
         adaptivePlanning: execution?.adaptivePlanning ?? attackPlan.adaptivePlanning,
+        ...(strategyForRequest ? { payloadStrategy: strategyForRequest } : {}),
       });
       onPlanChange(attackPlanFromDto(dto));
     } catch (err) {
@@ -128,6 +142,14 @@ export function ReviewAttackPlanStep({
     adaptivePlanning?: boolean;
   }) {
     void applyAdjust({}, patch);
+  }
+
+  function updatePayloadStrategy(patch: Partial<PayloadStrategyConfig>) {
+    void applyAdjust({}, undefined, { ...attackPlan.payloadStrategy, ...patch });
+  }
+
+  function acceptRecommendedPayloadStrategy() {
+    void applyAdjust({}, undefined, attackPlan.recommendedPayloadStrategy);
   }
 
   const enabledGraph = attackPlan.attackGraph.filter((node) => node.enabled);
@@ -395,6 +417,13 @@ export function ReviewAttackPlanStep({
           </div>
         )}
       </section>
+
+      <PayloadStrategySection
+        strategy={attackPlan.payloadStrategy}
+        recommendedStrategy={attackPlan.recommendedPayloadStrategy}
+        onChange={updatePayloadStrategy}
+        onAcceptRecommended={acceptRecommendedPayloadStrategy}
+      />
 
       <section className="wizard-attack-estimates">
         <div className="wizard-attack-estimate">

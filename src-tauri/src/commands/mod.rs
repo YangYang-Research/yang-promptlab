@@ -21,6 +21,7 @@ pub mod runtime;
 pub mod scan;
 pub mod security;
 pub mod target_profile;
+pub mod wizard_scan;
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {

@@ -19,6 +19,7 @@ import { useViewPreference } from "@/shared/hooks/useViewPreference";
 import { pauseScan, resumeScan, stopScan } from "@/shared/ipc";
 import { useToast } from "@/shared/notifications";
 import { formatDurationMs, formatTimestamp } from "@/features/scans/scanDetailsHelpers";
+import { buildScanWizardUrl } from "@/features/scans/wizardState";
 import type { ScanRun } from "@/shared/types";
 
 import { ScanHistoryCard, ScanMonitorCard } from "./ScanMonitorCard";
@@ -26,6 +27,10 @@ import { mergeScanStatus, useScanStatuses } from "./useScanStatuses";
 
 function isAttackScan(scan: ScanRun): boolean {
   return scan.name.startsWith("Scan (") || scan.name.startsWith("Agent Scan (");
+}
+
+function isListedScan(scan: ScanRun): boolean {
+  return scan.status === "draft" || isAttackScan(scan);
 }
 
 function scanDuration(scan: ScanRun): string {
@@ -56,7 +61,7 @@ export function ScansPage() {
   const attackScans = useMemo(
     () =>
       scans
-        .filter(isAttackScan)
+        .filter(isListedScan)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [scans],
   );
@@ -108,6 +113,19 @@ export function ScansPage() {
       }
     },
     [actions, notify],
+  );
+
+  const openScan = useCallback(
+    (scan: ScanRun) => {
+      if (scan.status === "draft") {
+        navigate(
+          buildScanWizardUrl(scan.projectId, scan.targetId ?? undefined, { scanId: scan.id }),
+        );
+        return;
+      }
+      navigate(`/scans/${scan.id}`);
+    },
+    [navigate],
   );
 
   const tableColumns = [
@@ -198,7 +216,7 @@ export function ScansPage() {
                 columns={tableColumns}
                 rows={pagination.items}
                 keyField="id"
-                onRowClick={(scan) => navigate(`/scans/${scan.id}`)}
+                onRowClick={openScan}
                 emptyMessage={loading ? "Loading scans…" : "No scans found"}
               />
             </Card>
@@ -218,7 +236,16 @@ export function ScansPage() {
                   scan.status === "pending";
 
                 return (
-                  <Link key={scan.id} to={`/scans/${scan.id}`} className="scan-card-link">
+                  <div
+                    key={scan.id}
+                    className="scan-card-link"
+                    onClick={() => openScan(scan)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") openScan(scan);
+                    }}
+                    role="link"
+                    tabIndex={0}
+                  >
                     <Card className="scan-monitor-card-wrap">
                       {isActive ? (
                         <ScanMonitorCard
@@ -240,7 +267,7 @@ export function ScansPage() {
                         />
                       )}
                     </Card>
-                  </Link>
+                  </div>
                 );
               })}
             </div>

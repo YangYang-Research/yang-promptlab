@@ -6,6 +6,7 @@ import {
   formatEstimatedRuntime,
   type AttackPlanConfig,
 } from "@/features/scans/attackPlan";
+import { formatPayloadStrategySummary } from "@/features/scans/payloadStrategy";
 import { ATTACK_PROFILES } from "@/features/scans/attackProfiles";
 import type { TargetProfileFormState } from "@/features/scans/targetProfile";
 import { fullProfileUrl, PROVIDER_OPTIONS } from "@/features/scans/targetProfile";
@@ -54,6 +55,10 @@ export function SubmitStep({
           attackPlan.executionStrategy === "agentic"
             ? `Agentic (max ${attackPlan.maxAttempts} attempts/category)`
             : "Sequential",
+      },
+      {
+        label: "Payload strategy",
+        value: formatPayloadStrategySummary(attackPlan.payloadStrategy),
       },
       {
         label: "Est. requests",

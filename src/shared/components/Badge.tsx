@@ -33,7 +33,7 @@ export function StatusBadge({ status }: { status: string }) {
   const variant =
     status === "running"
       ? "info"
-      : status === "paused"
+      : status === "paused" || status === "draft"
         ? "warning"
       : status === "completed" || status === "installed" || status === "registered"
         ? "success"

@@ -3,6 +3,12 @@ import type {
   AttackProfileId,
   ExecutionStrategy,
 } from "./attackProfiles";
+import {
+  payloadStrategyFromDto,
+  payloadStrategyToDto,
+  type PayloadStrategyConfig,
+  type PayloadStrategyDto,
+} from "./payloadStrategy";
 
 export type AttackGraphNode = {
   category: AttackCategoryId;
@@ -45,6 +51,8 @@ export type AttackPlanConfig = {
   coverageScore: number;
   riskCoverage: number;
   totalTestcases: number;
+  payloadStrategy: PayloadStrategyConfig;
+  recommendedPayloadStrategy: PayloadStrategyConfig;
 };
 
 export type WizardAttackPlanDto = {
@@ -81,6 +89,8 @@ export type WizardAttackPlanDto = {
   coverageScore: number;
   riskCoverage: number;
   totalTestcases: number;
+  payloadStrategy: PayloadStrategyDto;
+  recommendedPayloadStrategy: PayloadStrategyDto;
 };
 
 export type PlannerAdjustRequest = {
@@ -93,6 +103,7 @@ export type PlannerAdjustRequest = {
   maxAttempts?: number;
   reflectionEnabled?: boolean;
   adaptivePlanning?: boolean;
+  payloadStrategy?: PayloadStrategyDto;
 };
 
 const ALL_CATEGORY_IDS = new Set<string>([
@@ -173,8 +184,13 @@ export function attackPlanFromDto(dto: WizardAttackPlanDto): AttackPlanConfig {
     coverageScore: dto.coverageScore,
     riskCoverage: dto.riskCoverage,
     totalTestcases: dto.totalTestcases,
+    payloadStrategy: payloadStrategyFromDto(dto.payloadStrategy),
+    recommendedPayloadStrategy: payloadStrategyFromDto(dto.recommendedPayloadStrategy),
   };
 }
+
+export { payloadStrategyToDto };
+export type { PayloadStrategyConfig, PayloadStrategyDto };
 
 export function formatEstimatedRuntime(totalSeconds: number): string {
   if (totalSeconds <= 0) return "—";

@@ -284,8 +284,10 @@ export type ScanStartRequest = {
   categories: string[];
   disabledTests?: string[];
   generatorMode?: string;
+  payloadStrategy?: import("@/features/scans/payloadStrategy").PayloadStrategyDto;
   agentMode?: boolean;
   maxAgentAttempts?: number;
+  draftScanId?: string;
 };
 
 export type ScanStatusDto = {
@@ -432,9 +434,11 @@ export const startScan = (request: ScanStartRequest) =>
     profile: request.profile,
     categories: request.categories,
     disabledTests: request.disabledTests ?? [],
-    generatorMode: request.generatorMode ?? "static_pack",
+    generatorMode: request.generatorMode,
+    payloadStrategy: request.payloadStrategy,
     agentMode: request.agentMode ?? false,
     maxAgentAttempts: request.maxAgentAttempts ?? 5,
+    draftScanId: request.draftScanId,
   });
 
 export const getScanStatus = (scanId: string) =>

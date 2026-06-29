@@ -13,10 +13,15 @@ import {
   SeverityBadge,
 } from "@/shared/components";
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
-import { buildScanWizardUrl } from "@/features/scans/wizardState";
+import {
+  buildScanWizardUrl,
+  peekWizardSession,
+  wizardResumeInputFromSession,
+} from "@/features/scans/wizardState";
 import { buildTargetScanContext } from "@/shared/targetScanContext";
+import { resolveTargetScanAction } from "@/shared/targetScanAction";
 import { useToast } from "@/shared/notifications";
-import type { Severity, Target } from "@/shared/types";
+import type { Severity, ScanRun, Target } from "@/shared/types";
 
 import { EditProjectModal } from "./EditProjectModal";
 
@@ -82,6 +87,8 @@ export function ProjectDetailsPage() {
     };
   }, [projectTargets, projectScans]);
 
+  const wizardSession = useMemo(() => peekWizardSession(), []);
+
   const recentTargets = useMemo(
     () => [...projectTargets].slice(0, 5),
     [projectTargets],
@@ -130,21 +137,21 @@ export function ProjectDetailsPage() {
       {
         key: "actions",
         header: "",
-        width: "90px",
+        width: "130px",
         render: (target: Target) => (
           <span onClick={(event) => event.stopPropagation()}>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => navigate(buildScanWizardUrl(projectId, target.id))}
-            >
-              Scan
-            </Button>
+            <TargetScanActionButton
+              target={target}
+              projectId={projectId}
+              scans={projectScans}
+              wizardSession={wizardSession}
+              onNavigate={navigate}
+            />
           </span>
         ),
       },
     ],
-    [projectScans, projectId, navigate],
+    [projectScans, projectId, navigate, wizardSession],
   );
 
   async function handleDelete() {
@@ -304,5 +311,74 @@ function SummaryStat({ label, value }: { label: string; value: number }) {
       <span className="summary-stat__label">{label}</span>
       <span className="summary-stat__value">{value}</span>
     </div>
+  );
+}
+
+function TargetScanActionButton({
+  target,
+  projectId,
+  scans,
+  wizardSession,
+  onNavigate,
+}: {
+  target: Target;
+  projectId: string;
+  scans: ScanRun[];
+  wizardSession: ReturnType<typeof peekWizardSession>;
+  onNavigate: (path: string) => void;
+}) {
+  const action = useMemo(
+    () =>
+      resolveTargetScanAction(
+        target.id,
+        projectId,
+        scans,
+        wizardSession ? wizardResumeInputFromSession(wizardSession) : null,
+      ),
+    [target.id, projectId, scans, wizardSession],
+  );
+
+  if (action.kind === "view_report") {
+    return (
+      <Button variant="primary" size="sm" onClick={() => onNavigate(`/scans/${action.scanId}`)}>
+        View Report
+      </Button>
+    );
+  }
+
+  if (action.kind === "retry") {
+    return (
+      <Button
+        variant="primary"
+        size="sm"
+        onClick={() =>
+          onNavigate(
+            buildScanWizardUrl(projectId, target.id, {
+              step: action.step,
+              scanId: action.scanId,
+            }),
+          )
+        }
+      >
+        Retry Scan
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      variant="primary"
+      size="sm"
+      onClick={() =>
+        onNavigate(
+          buildScanWizardUrl(projectId, target.id, {
+            step: action.step,
+            scanId: action.scanId,
+          }),
+        )
+      }
+    >
+      Setup Scan
+    </Button>
   );
 }

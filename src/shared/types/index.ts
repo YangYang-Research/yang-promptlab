@@ -1,6 +1,6 @@
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
 
-export type JobStatus = "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
+export type JobStatus = "pending" | "draft" | "running" | "paused" | "completed" | "failed" | "cancelled";
 
 export type ProjectStatus = "active" | "archived" | "draft";
 
