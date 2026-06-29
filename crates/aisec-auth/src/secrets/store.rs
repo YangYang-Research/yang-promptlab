@@ -51,7 +51,7 @@ impl SecretScope {
     }
 }
 
-const SERVICE_NAME: &str = "com.aisec.app";
+const SERVICE_NAME: &str = "com.promptlab.app";
 
 fn storage_key(scope: SecretScope, id: &str) -> String {
     format!("{}:{}", scope.as_str(), id)

@@ -12,7 +12,7 @@ pub fn plugins_dir(data_dir: &Path) -> PathBuf {
 }
 
 fn bundled_samples_dir() -> Option<PathBuf> {
-    if let Ok(dir) = std::env::var("AISEC_PLUGINS_SAMPLES") {
+    if let Ok(dir) = std::env::var("PROMPTLAB_PLUGINS_SAMPLES") {
         let path = PathBuf::from(dir);
         if path.is_dir() {
             return Some(path);

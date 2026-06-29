@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "AISec",
+  "productName": "PromptLab",
   "version": "0.1.0",
-  "identifier": "yangyang.aisec.app",
+  "identifier": "com.promptlab.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "AISec",
+        "title": "PromptLab",
         "width": 1280,
         "height": 800,
         "minWidth": 960,

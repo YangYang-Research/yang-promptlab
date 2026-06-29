@@ -334,7 +334,7 @@ pub async fn report_export_op(state: &AppState, id: String) -> CommandResult<Str
 
     let downloads = std::env::var_os("HOME")
         .map(|home| std::path::PathBuf::from(home).join("Downloads"))
-        .unwrap_or_else(|| state.data_dir().join("downloads"));
+        .unwrap_or_else(|| state.workspaces_dir().join("downloads"));
     std::fs::create_dir_all(&downloads).map_err(|err| CommandError::from(AisecError::from(err)))?;
 
     let file_name = std::path::Path::new(&src)

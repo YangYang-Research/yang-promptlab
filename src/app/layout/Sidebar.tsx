@@ -64,7 +64,7 @@ export function Sidebar() {
         </div>
         {!collapsed && (
           <div className="sidebar__brand-text">
-            <span className="sidebar__name">AISec</span>
+            <span className="sidebar__name">PromptLab</span>
             <span className="sidebar__tagline">AI Security Platform</span>
           </div>
         )}

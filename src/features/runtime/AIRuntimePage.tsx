@@ -130,7 +130,7 @@ const RUNTIME_MODE_OPTIONS: RuntimeModeOption[] = [
     highlights: [
       "OpenAI, Anthropic, AWS Bedrock, Google, Azure, and custom endpoints",
       "API keys stored on this device (OS keychain when available)",
-      "Traffic goes directly to the provider — not through AISec servers",
+      "Traffic goes directly to the provider — not through PromptLab servers",
     ],
     notes: [
       {
@@ -156,7 +156,7 @@ const RUNTIME_MODE_OPTIONS: RuntimeModeOption[] = [
     notes: [
       {
         label: "Data privacy",
-        body: "All inference stays on-device. AISec does not send prompts or model outputs to third-party services in this mode.",
+        body: "All inference stays on-device. PromptLab does not send prompts or model outputs to third-party services in this mode.",
       },
       {
         label: "Hardware",
@@ -177,7 +177,7 @@ function RuntimeModePicker({
     <div className="runtime-mode-picker">
       <h2 className="runtime-mode-picker__title">Choose AI Runtime Mode</h2>
       <p className="runtime-mode-picker__lead">
-        Pick how AISec runs AI features. You can change this later after configuration.
+        Pick how PromptLab runs AI features. You can change this later after configuration.
       </p>
       <div className="runtime-mode-picker__grid">
         {RUNTIME_MODE_OPTIONS.map((option) => (
@@ -617,7 +617,7 @@ export function AIRuntimePage() {
         title="AI Runtime"
         description={
           showModePicker
-            ? "Set up how AISec interacts with AI models."
+            ? "Set up how PromptLab interacts with AI models."
             : "Configure third-party cloud providers or manage the embedded local llama.cpp runtime"
         }
         actions={

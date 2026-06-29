@@ -86,7 +86,7 @@ impl ReportFormatter for SarifFormatter {
             runs: vec![SarifRun {
                 tool: SarifTool {
                     driver: SarifDriver {
-                        name: "AISec",
+                        name: "PromptLab",
                         version: env!("CARGO_PKG_VERSION"),
                         information_uri: "https://github.com/yangyang/aisec",
                     },

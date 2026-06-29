@@ -6,11 +6,12 @@ use aisec_storage::ProjectRepository;
 use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
 
+pub mod app;
 pub mod attack;
 pub mod auth;
-pub mod app;
 pub mod discovery;
 pub mod domain;
+pub mod environment;
 pub mod generator;
 pub mod models;
 pub mod planner;
@@ -47,9 +48,9 @@ pub fn health() -> CommandResult<HealthResponse> {
 #[tauri::command]
 pub fn app_info() -> CommandResult<AppInfoResponse> {
     Ok(AppInfoResponse {
-        name: env!("CARGO_PKG_NAME"),
+        name: "PromptLab",
         version: env!("CARGO_PKG_VERSION"),
-        identifier: "yangyang.aisec.app",
+        identifier: "com.promptlab.desktop",
     })
 }
 

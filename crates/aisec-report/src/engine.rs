@@ -91,7 +91,7 @@ mod tests {
     fn sample_input() -> ReportInput {
         ReportDataBuilder::build(
             "scan-test",
-            "AISec Demo",
+            "PromptLab Demo",
             Some("LLM API".into()),
             vec![
                 ReportFinding {

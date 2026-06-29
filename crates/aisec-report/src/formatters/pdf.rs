@@ -29,7 +29,7 @@ impl ReportFormatter for PdfFormatter {
 
 fn render_pdf(kind: ReportKind, input: &ReportInput) -> ReportResult<Vec<u8>> {
     let (doc, page1, layer1) =
-        PdfDocument::new(&format!("AISec {}", kind.title()), Mm(210.0), Mm(297.0), "Layer 1");
+        PdfDocument::new(&format!("PromptLab {}", kind.title()), Mm(210.0), Mm(297.0), "Layer 1");
     let font = doc
         .add_builtin_font(BuiltinFont::Helvetica)
         .map_err(|e| ReportError::render(e.to_string()))?;

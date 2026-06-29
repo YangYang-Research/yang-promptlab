@@ -23,13 +23,18 @@ impl LogOptions {
         Self {
             app_name: app_name.into(),
             log_dir: None,
-            default_filter: "info,aisec_core=debug,aisec_desktop=debug".into(),
+            default_filter: "info,promptlab_desktop=debug,promptlab_core=debug".into(),
             json_file: false,
         }
     }
 
     pub fn with_log_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.log_dir = Some(dir.into());
+        self
+    }
+
+    pub fn with_default_filter(mut self, filter: impl Into<String>) -> Self {
+        self.default_filter = filter.into();
         self
     }
 }
@@ -53,7 +58,7 @@ pub fn init_logging(options: LogOptions) -> AisecResult<LogGuard> {
     let init_result = if let Some(log_dir) = options.log_dir.as_deref() {
         std::fs::create_dir_all(log_dir).map_err(AisecError::from)?;
 
-        let file_appender = tracing_appender::rolling::daily(log_dir, "aisec.log");
+        let file_appender = tracing_appender::rolling::daily(log_dir, "promptlab-trace.log");
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
         file_guard = Some(guard);
 

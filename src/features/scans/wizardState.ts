@@ -20,7 +20,7 @@ import {
 import type { WizardStepId } from "./wizardSteps";
 import type { Target } from "@/shared/types";
 
-const STORAGE_KEY = "aisec:scan-wizard";
+const STORAGE_KEY = "promptlab:scan-wizard";
 const STORAGE_VERSION = 3;
 
 export type AttackPlanUiState = {

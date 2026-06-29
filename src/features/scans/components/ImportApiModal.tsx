@@ -62,7 +62,7 @@ export function ImportApiModal({ open, onClose, onImport }: ImportApiModalProps)
     >
       <div className="project-form import-api-modal">
         <p className="text-muted text-sm import-api-modal__lead">
-          Paste a cURL command from your browser or API client. AISec will fill endpoint, method,
+          Paste a cURL command from your browser or API client. PromptLab will fill endpoint, method,
           headers, and body template automatically.
         </p>
         <label className="field">

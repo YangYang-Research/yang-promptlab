@@ -74,7 +74,7 @@ pub async fn plugins_refresh_op(state: &AppState) -> CommandResult<Vec<PluginRec
     manager
         .discover()
         .map_err(CommandError::from)?;
-    aisec_plugin_host::restore_enabled(&mut manager, state.data_dir())
+    aisec_plugin_host::restore_enabled(&mut manager, state.config_dir())
         .map_err(CommandError::from)?;
     Ok(manager.list().into_iter().map(record_to_dto).collect())
 }
@@ -84,7 +84,7 @@ pub async fn plugins_enable_op(state: &AppState, plugin_id: String) -> CommandRe
     manager
         .enable(&plugin_id)
         .map_err(CommandError::from)?;
-    save_plugin_state(&manager, state.data_dir()).map_err(CommandError::from)?;
+    save_plugin_state(&manager, state.config_dir()).map_err(CommandError::from)?;
     manager
         .get(&plugin_id)
         .map(record_to_dto)
@@ -96,7 +96,7 @@ pub async fn plugins_disable_op(state: &AppState, plugin_id: String) -> CommandR
     manager
         .disable(&plugin_id)
         .map_err(CommandError::from)?;
-    save_plugin_state(&manager, state.data_dir()).map_err(CommandError::from)?;
+    save_plugin_state(&manager, state.config_dir()).map_err(CommandError::from)?;
     manager
         .get(&plugin_id)
         .map(record_to_dto)

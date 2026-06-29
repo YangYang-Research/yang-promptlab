@@ -7,22 +7,23 @@ import { Button, Card, PageHeader, Select } from "@/shared/components";
 import type { AppSettings } from "@/app/store/types";
 import { toAppError } from "@/shared/errors";
 import { clearAllAppData } from "@/shared/ipc/app";
-import { getModelsRegistryDiagnostics, type ModelRegistryDiagnosticsDto } from "@/shared/ipc/models";
+import { getLogsFolderPath } from "@/shared/ipc/environment";
 import {
   securityAudit,
   securityMigrateSecrets,
   type SecretMigrationAudit,
 } from "@/shared/ipc/security";
 
-import { RegistryDiagnosticsPanel } from "./RegistryDiagnosticsPanel";
+import { EnvironmentsPanel } from "./EnvironmentsPanel";
+import { TroubleshootingPanel } from "./TroubleshootingPanel";
 
-type SettingsTab = "general" | "troubleshooting" | "security" | "paths" | "about";
+type SettingsTab = "general" | "troubleshooting" | "security" | "environments" | "about";
 
 const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "troubleshooting", label: "Troubleshooting" },
   { id: "security", label: "Security" },
-  { id: "paths", label: "Paths" },
+  { id: "environments", label: "Environments" },
   { id: "about", label: "About" },
 ];
 
@@ -31,12 +32,12 @@ function clearBrowserAppStorage() {
   const keysToRemove: string[] = [];
   for (let i = 0; i < window.localStorage.length; i += 1) {
     const key = window.localStorage.key(i);
-    if (key?.startsWith("aisec:")) keysToRemove.push(key);
+    if (key?.startsWith("promptlab:")) keysToRemove.push(key);
   }
   for (const key of keysToRemove) {
     window.localStorage.removeItem(key);
   }
-  window.sessionStorage.removeItem("aisec:scan-wizard");
+  window.sessionStorage.removeItem("promptlab:scan-wizard");
 }
 
 function ClearAllDataCard({ backendConnected }: { backendConnected: boolean }) {
@@ -47,7 +48,7 @@ function ClearAllDataCard({ backendConnected }: { backendConnected: boolean }) {
     if (!backendConnected || busy) return;
 
     const confirmed = await ask(
-      "This permanently deletes all AISec data on this device — projects, targets, scans, findings, reports, models, runtime state, and cached wizard sessions — then restarts the app.\n\nThis cannot be undone.",
+      "This permanently deletes all PromptLab data on this device — projects, targets, scans, findings, reports, models, runtime state, and cached wizard sessions — then restarts the app.\n\nThis cannot be undone.",
       {
         title: "Clear All Data",
         kind: "warning",
@@ -72,7 +73,7 @@ function ClearAllDataCard({ backendConnected }: { backendConnected: boolean }) {
     <Card className="settings-danger-card">
       <h3 className="card__title">Data</h3>
       <p className="text-muted text-sm">
-        Remove all application data from this device and restart AISec with a fresh workspace.
+        Remove all application data from this device and restart PromptLab with a fresh workspace.
       </p>
       {error ? <p className="text-danger text-sm">{error}</p> : null}
       <Button
@@ -172,39 +173,7 @@ function SecuritySecretsCard({ backendConnected }: { backendConnected: boolean }
 }
 
 function TroubleshootingTab({ backendConnected }: { backendConnected: boolean }) {
-  const [diagnostics, setDiagnostics] = useState<ModelRegistryDiagnosticsDto | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!backendConnected) {
-      setDiagnostics(null);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    void getModelsRegistryDiagnostics()
-      .then(setDiagnostics)
-      .catch((err) => setError(toAppError(err).message))
-      .finally(() => setLoading(false));
-  }, [backendConnected]);
-
-  return (
-    <div className="settings-tab-panel">
-      <Card>
-        <h3 className="card__title">Registry Diagnostics</h3>
-        {!backendConnected ? (
-          <p className="text-muted text-sm">Connect to the Tauri backend to run registry diagnostics.</p>
-        ) : loading ? (
-          <p className="text-muted text-sm">Loading diagnostics…</p>
-        ) : error ? (
-          <p className="text-danger text-sm">{error}</p>
-        ) : diagnostics ? (
-          <RegistryDiagnosticsPanel diagnostics={diagnostics} />
-        ) : null}
-      </Card>
-    </div>
-  );
+  return <TroubleshootingPanel backendConnected={backendConnected} />;
 }
 
 export function SettingsPage() {
@@ -316,43 +285,19 @@ export function SettingsPage() {
         </div>
       )}
 
-      {activeTab === "paths" && (
-        <div className="settings-tab-panel">
-          <div className="settings-grid">
-            <Card>
-              <h3 className="card__title">Workspace Paths</h3>
-              <div className="settings-field">
-                <label htmlFor="pluginsDir">Plugins directory</label>
-                <input
-                  id="pluginsDir"
-                  className="input mono"
-                  value={settings.pluginsDir}
-                  onChange={(e) => update("pluginsDir", e.target.value)}
-                />
-              </div>
-              <div className="settings-field">
-                <label htmlFor="modelsDir">Models directory</label>
-                <input
-                  id="modelsDir"
-                  className="input mono"
-                  value={settings.modelsDir}
-                  onChange={(e) => update("modelsDir", e.target.value)}
-                />
-              </div>
-            </Card>
-          </div>
-        </div>
+      {activeTab === "environments" && (
+        <EnvironmentsPanel backendConnected={backendConnected} />
       )}
 
       {activeTab === "about" && (
         <div className="settings-tab-panel">
           <div className="settings-grid">
             <Card>
-              <h3 className="card__title">About AISec</h3>
+              <h3 className="card__title">About PromptLab</h3>
               <dl className="about-list">
                 <div>
                   <dt>Application</dt>
-                  <dd>AISec Desktop v0.1.0</dd>
+                  <dd>PromptLab Desktop v0.1.0</dd>
                 </div>
                 <div>
                   <dt>Backend</dt>
@@ -364,10 +309,15 @@ export function SettingsPage() {
                 </div>
                 <div>
                   <dt>Platform</dt>
-                  <dd>Offline-first AI Security Testing</dd>
+                  <dd>Offline-first AI Security Testing Platform</dd>
                 </div>
               </dl>
-              <Button variant="ghost">View Logs</Button>
+              <Button
+                variant="ghost"
+                onClick={() => void getLogsFolderPath().then((path) => navigator.clipboard.writeText(path))}
+              >
+                View Logs
+              </Button>
             </Card>
           </div>
         </div>

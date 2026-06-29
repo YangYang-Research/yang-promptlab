@@ -2,7 +2,7 @@
 
 ## Cursor Cloud specific instructions
 
-AISec is a Tauri 2 desktop app: React + TypeScript + Vite frontend (`src/`) in a Rust
+PromptLab is a Tauri 2 desktop app: React + TypeScript + Vite frontend (`src/`) in a Rust
 backend shell (`src-tauri/`), plus a Rust workspace of library crates (`crates/`).
 Standard commands live in `package.json` and `docs/PROJECT_STRUCTURE.md`.
 
@@ -18,6 +18,7 @@ Standard commands live in `package.json` and `docs/PROJECT_STRUCTURE.md`.
 - Desktop app (real backend): `npm run tauri dev` — launches the native window on `DISPLAY=:1`
   and auto-starts Vite. The top-right indicator shows **"Connected"** when the Rust IPC backend
   (`health` / `app_info`) is reachable.
+- Application data root: `~/.promptlab/` (not Tauri app_data_dir).
 - Browser-only UI: `npm run dev` (serves `http://localhost:5173`). With no Tauri IPC the UI
   falls back to mock data and shows **"Mock mode"**.
 

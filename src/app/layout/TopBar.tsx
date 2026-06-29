@@ -18,7 +18,7 @@ export function TopBar() {
           ? "Scan Details"
           : location.pathname.startsWith("/discovery/")
             ? "Discovery Details"
-            : "AISec");
+            : "PromptLab");
 
   return (
     <header className="topbar">

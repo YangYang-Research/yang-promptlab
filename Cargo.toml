@@ -28,7 +28,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "Proprietary"
-authors = ["AISec"]
+authors = ["PromptLab"]
 rust-version = "1.77"
 
 [workspace.dependencies]

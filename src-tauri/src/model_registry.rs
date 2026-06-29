@@ -8,7 +8,7 @@ use aisec_runtime::{EmbeddedModelProvider, SharedModelProvider};
 use tauri::{AppHandle, Manager};
 use tracing::info;
 
-const REMOTE_REGISTRY_ENV: &str = "AISEC_MODEL_REGISTRY_URL";
+const REMOTE_REGISTRY_ENV: &str = "PROMPTLAB_MODEL_REGISTRY_URL";
 
 pub fn resolve_models_json_path(app: &AppHandle) -> PathBuf {
     if let Ok(resource_dir) = app.path().resource_dir() {

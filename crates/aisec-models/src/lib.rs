@@ -33,7 +33,7 @@ pub use verify::VerificationEngine;
 
 /// Create a model manager with default vault at `~/.aisec/models` or `./data/models`.
 pub fn default_manager() -> ModelResult<LocalModelManager> {
-    let vault = std::env::var("AISEC_MODEL_VAULT")
+    let vault = std::env::var("PROMPTLAB_MODEL_VAULT")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::PathBuf::from("./data/models"));
     LocalModelManager::new(vault)

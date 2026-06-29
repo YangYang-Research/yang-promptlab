@@ -83,7 +83,7 @@ export async function assertAiRuntimeReady(
       ready: false,
       configuration: null,
       message:
-        "AISec backend is not connected. Run the desktop app to configure AI Runtime before creating a project.",
+        "PromptLab backend is not connected. Run the desktop app to configure AI Runtime before creating a project.",
     };
   }
   return checkAiRuntimeReadiness();

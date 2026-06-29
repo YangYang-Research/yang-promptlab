@@ -88,8 +88,8 @@ const initialState: AppDataState = {
   activity: [],
   settings: {
     theme: "dark",
-    pluginsDir: "~/.aisec/plugins",
-    modelsDir: "~/.aisec/models",
+    pluginsDir: "~/.promptlab/plugins",
+    modelsDir: "~/.promptlab/models",
     offlineMode: true,
     autoJudge: true,
     telemetry: false,

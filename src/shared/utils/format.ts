@@ -1,5 +1,17 @@
 const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
 
+/** Display absolute PromptLab paths using `~/.promptlab` when under the app root. */
+export function shortenPromptLabPath(absolutePath: string, root: string): string {
+  const trimmed = absolutePath.trim();
+  const rootTrimmed = root.trim();
+  if (!trimmed || !rootTrimmed) return trimmed;
+  if (trimmed === rootTrimmed) return "~/.promptlab";
+  if (trimmed.startsWith(`${rootTrimmed}/`)) {
+    return `~/.promptlab${trimmed.slice(rootTrimmed.length)}`;
+  }
+  return trimmed;
+}
+
 /** Human-readable byte size (base 1024). */
 export function formatBytes(bytes: number, digits = 1): string {
   if (!Number.isFinite(bytes) || bytes < 0) {

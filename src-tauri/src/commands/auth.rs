@@ -29,7 +29,7 @@ impl AuthRecordingState {
 
     async fn ensure_engine(&mut self, state: &AppState) -> Result<(), CommandError> {
         if self.engine.is_none() {
-            let vault_dir = auth_sessions_dir(state.data_dir());
+            let vault_dir = state.environment().auth_sessions_dir();
             let config = state.auth_engine_config().clone().with_vault_dir(vault_dir);
             let store = SessionStore::new(state.database().clone(), config.vault_dir.clone())
                 .await

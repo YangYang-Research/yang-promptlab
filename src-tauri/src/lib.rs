@@ -1,8 +1,4 @@
-//! AISec desktop application library.
-//!
-//! Backend integration layer: initializes logging, opens the SQLite database
-//! (running migrations) on startup, stores the database + repository manager in
-//! shared [`AppState`], and closes the pool gracefully on shutdown.
+//! PromptLab desktop application library.
 
 pub mod commands;
 pub mod db;
@@ -35,7 +31,7 @@ pub fn run() {
     let app = match build_app() {
         Ok(app) => app,
         Err(err) => {
-            eprintln!("fatal: failed to start AISec backend: {err}");
+            eprintln!("fatal: failed to start PromptLab backend: {err}");
             std::process::exit(1);
         }
     };
@@ -63,21 +59,30 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            // 5. Logging.
-            let log_guard = logging::init_app_logging(app)?;
-
-            // 1-2. Resolve the database path and open SQLite (migrations applied).
-            let data_dir = app
-                .path()
-                .app_data_dir()
-                .map_err(|err| aisec_core::AisecError::config(err.to_string()))
+            let environment = aisec_core::bootstrap_environment()
                 .map_err(crate::error::CommandError::from)?;
-            let db_path = db::resolve_db_path(&data_dir);
+
+            let (event_bus, event_ring, event_log_guard) =
+                aisec_core::spawn_event_logger(environment.logs.clone());
+            let event_bus = std::sync::Arc::new(event_bus);
+
+            let log_guard = logging::init_app_logging(&environment)?;
+
+            event_bus.info(
+                aisec_core::LogCategory::Application,
+                "Application Started",
+                "promptlab-desktop",
+                "startup",
+                "PromptLab backend starting",
+            );
+
+            let root = environment.root.clone();
+            let db_path = db::resolve_db_path(&environment.workspaces);
 
             let database = tauri::async_runtime::block_on(db::open_database(&db_path))
                 .map_err(crate::error::CommandError::from)?;
 
-            let vault_dir = aisec_auth::auth_sessions_dir(&data_dir);
+            let vault_dir = environment.auth_sessions_dir();
             let auth_engine_config =
                 playwright_runtime::resolve_auth_engine_config(app.handle())
                     .map_err(crate::error::CommandError::from)?
@@ -95,7 +100,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                     .map_err(crate::error::CommandError::from)?;
                 aisec_auth::migrate_legacy_storage_artifacts(
                     &database,
-                    &data_dir,
+                    &root,
                     &store.encrypted_vault(),
                 )
                 .await
@@ -104,17 +109,17 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             })?;
 
             let (mut model_manager, model_catalog_meta) = tauri::async_runtime::block_on(
-                model_registry::open_model_manager_with_registry(app.handle(), &data_dir),
+                model_registry::open_model_manager_with_registry(app.handle(), &root),
             )
             .map_err(crate::error::CommandError::from)?;
 
-            let model_list: Vec<ModelEntry> =
+            let _model_list: Vec<ModelEntry> =
                 model_manager.list_models().into_iter().cloned().collect();
 
             let (mut runtime_manager, _started) =
                 tauri::async_runtime::block_on(embedded_runtime::bootstrap_runtime_manager(
                     app.handle(),
-                    &data_dir,
+                    &root,
                 ))
                 .map_err(crate::error::CommandError::from)?;
 
@@ -130,15 +135,17 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             let harness_factory = aisec_harness::HarnessFactory::new()
                 .map_err(crate::error::CommandError::from)?;
             let plugin_manager = std::sync::Arc::new(AsyncMutex::new(
-                crate::plugin_service::bootstrap_plugin_manager(&data_dir)
+                crate::plugin_service::bootstrap_plugin_manager(&root)
                     .map_err(crate::error::CommandError::from)?,
             ));
 
-            let data_dir_for_inference = data_dir.clone();
             app.manage(AppState::new(
                 database,
-                data_dir,
+                environment,
+                event_bus.clone(),
+                event_ring,
                 log_guard,
+                event_log_guard,
                 auth_engine_config,
                 harness_factory,
                 plugin_manager,
@@ -158,13 +165,27 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 embedded_runtime::resume_local_runtime_on_startup(&app_handle, state.inner()).await;
             });
 
-            tracing::info!("AISec backend integration ready (database + repositories + runtime)");
+            event_bus.info(
+                aisec_core::LogCategory::Application,
+                "Application Ready",
+                "promptlab-desktop",
+                "startup",
+                "PromptLab backend integration ready",
+            );
+            tracing::info!("PromptLab backend integration ready");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::health,
             commands::app_info,
             commands::app::app_clear_all_data,
+            commands::environment::environment_get,
+            commands::environment::environment_open_root,
+            commands::environment::environment_update,
+            commands::environment::logs_list_files,
+            commands::environment::logs_tail,
+            commands::environment::logs_recent_events,
+            commands::environment::logs_open_folder,
             commands::db_health,
             commands::projects::project_create,
             commands::projects::project_list,

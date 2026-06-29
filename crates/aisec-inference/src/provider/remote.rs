@@ -149,7 +149,7 @@ impl RemoteProviderAdapter {
         req = req.header("Authorization", format!("Bearer {}", self.settings.api_key));
         if self.settings.provider == InferenceProvider::OpenRouter {
             req = req.header("HTTP-Referer", "https://aisec.local");
-            req = req.header("X-Title", "AISec");
+            req = req.header("X-Title", "PromptLab");
         }
 
         let response = req

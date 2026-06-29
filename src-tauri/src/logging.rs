@@ -1,18 +1,16 @@
-use aisec_core::{init_logging, LogGuard, LogOptions};
-use tauri::{App, Manager};
+use aisec_core::{init_logging, EnvironmentPaths, LogGuard, LogOptions};
+use tauri::App;
 
 use crate::error::CommandResult;
 
-/// Resolve log directory under the Tauri app data path and initialize tracing.
-pub fn init_app_logging(app: &App) -> CommandResult<LogGuard> {
-    let log_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|err| aisec_core::AisecError::config(err.to_string()))?
-        .join("logs");
-
+/// Initialize tracing (console) under PromptLab logs directory.
+pub fn init_app_logging(environment: &EnvironmentPaths) -> CommandResult<LogGuard> {
     init_logging(
-        LogOptions::bootstrap("aisec-desktop").with_log_dir(log_dir),
+        LogOptions::bootstrap("promptlab-desktop")
+            .with_log_dir(environment.logs.clone())
+            .with_default_filter(
+                "info,promptlab_desktop=debug,promptlab_core=debug,aisec_desktop=debug,aisec_core=debug",
+            ),
     )
     .map_err(crate::error::CommandError::from)
 }

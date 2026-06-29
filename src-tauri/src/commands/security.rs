@@ -33,7 +33,7 @@ pub async fn security_audit_op(state: &AppState) -> CommandResult<SecretMigratio
 pub async fn security_migrate_secrets_op(state: &AppState) -> CommandResult<SecretMigrationReport> {
     let audit_before = full_audit(state).await?;
 
-    let vault_dir = aisec_auth::auth_sessions_dir(state.data_dir());
+    let vault_dir = state.environment().auth_sessions_dir();
     let store = SessionStore::new(state.database().clone(), vault_dir)
         .await
         .map_err(crate::error::CommandError::from)?;

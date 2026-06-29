@@ -25,7 +25,7 @@ pub use types::*;
 
 /// Default plugin manager using `./plugins` directory.
 pub fn default_manager() -> PluginResult<PluginManager> {
-    let dir = std::env::var("AISEC_PLUGINS_DIR")
+    let dir = std::env::var("PROMPTLAB_PLUGINS_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::PathBuf::from("./plugins"));
     PluginManager::new(dir)

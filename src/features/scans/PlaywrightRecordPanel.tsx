@@ -26,14 +26,14 @@ const USER_PASS_STEPS = [
   "Launch Browser",
   "User login manually",
   "Click Finish Recording",
-  "AISec saves storageState",
+  "PromptLab saves storageState",
   "Authentication Verified",
 ] as const;
 
 const SSO_STEPS = [
   "Launch Browser",
   "User signs in",
-  "AISec records session",
+  "PromptLab records session",
   "Save browser state",
 ] as const;
 

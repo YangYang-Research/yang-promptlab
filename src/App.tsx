@@ -62,7 +62,7 @@ function AppBootstrap() {
             <path d="M12 30l6-12 6 7 6-14 6 19" stroke="#fff" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
-        <h1 className="boot-screen__title">AISec</h1>
+        <h1 className="boot-screen__title">PromptLab</h1>
         <div className="page-loader__spinner" />
         <p className="boot-screen__subtitle">Starting security workspace…</p>
       </div>

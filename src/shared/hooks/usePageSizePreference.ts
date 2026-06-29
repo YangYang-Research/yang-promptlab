@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 export const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100] as const;
 export type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 
-const PREFIX = "aisec:page-size:";
+const PREFIX = "promptlab:page-size:";
 
 function loadPageSize(key: string, fallback: PageSize): PageSize {
   if (typeof window === "undefined") return fallback;

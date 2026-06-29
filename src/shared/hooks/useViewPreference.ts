@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 export type ViewMode = "table" | "list";
 
-const PREFIX = "aisec:view:";
+const PREFIX = "promptlab:view:";
 
 function loadViewMode(key: string, fallback: ViewMode): ViewMode {
   if (typeof window === "undefined") return fallback;

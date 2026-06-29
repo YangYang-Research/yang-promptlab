@@ -17,8 +17,8 @@ fn remove_sqlite_sidecars(db_path: &std::path::Path) {
 }
 
 pub async fn app_clear_all_data_op(state: &AppState, app: &AppHandle) -> CommandResult<()> {
-    let data_dir = state.data_dir().to_path_buf();
-    let db_path = db::resolve_db_path(&data_dir);
+    let root = state.root_dir().to_path_buf();
+    let db_path = db::resolve_db_path(state.workspaces_dir());
 
     {
         let mut runtime = state.runtime_manager().lock().await;
@@ -27,17 +27,16 @@ pub async fn app_clear_all_data_op(state: &AppState, app: &AppHandle) -> Command
 
     state.database().close().await;
 
-    if data_dir.exists() {
-        std::fs::remove_dir_all(&data_dir).map_err(|err| {
+    if root.exists() {
+        std::fs::remove_dir_all(&root).map_err(|err| {
             CommandError::from(aisec_core::AisecError::internal(format!(
-                "failed to remove application data directory: {err}"
+                "failed to remove PromptLab root directory: {err}"
             )))
         })?;
-        info!(path = %data_dir.display(), "application data directory removed");
+        info!(path = %root.display(), "PromptLab root directory removed");
     }
 
-    let default_db = data_dir.join(db::DB_FILENAME);
-    if db_path != default_db {
+    if db_path != state.environment().database_path() {
         if db_path.is_file() {
             let _ = std::fs::remove_file(&db_path);
             remove_sqlite_sidecars(&db_path);
@@ -46,6 +45,13 @@ pub async fn app_clear_all_data_op(state: &AppState, app: &AppHandle) -> Command
         }
     }
 
+    state.event_bus().info(
+        aisec_core::LogCategory::Application,
+        "Application Data Cleared",
+        "app",
+        "clear_all_data",
+        "All PromptLab data removed; relaunching",
+    );
     info!("clear all data complete; relaunching application");
     app.restart();
     Ok(())
