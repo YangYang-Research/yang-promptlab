@@ -4,10 +4,11 @@ import { Badge, Button } from "@/shared/components";
 import {
   formatCoverageScore,
   formatEstimatedRuntime,
+  formatExecutionStrategySummary,
   type AttackPlanConfig,
 } from "@/features/scans/attackPlan";
 import { formatPayloadStrategySummary } from "@/features/scans/payloadStrategy";
-import { ATTACK_PROFILES } from "@/features/scans/attackProfiles";
+import { ATTACK_PROFILES, getCategory } from "@/features/scans/attackProfiles";
 import type { TargetProfileFormState } from "@/features/scans/targetProfile";
 import { fullProfileUrl, PROVIDER_OPTIONS } from "@/features/scans/targetProfile";
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
@@ -38,42 +39,18 @@ export function SubmitStep({
     ? mergeScanStatus(submittedScanId, "running", liveStatus, 0)
     : null;
 
-  const summaryRows = useMemo(() => {
-    const profileLabel =
-      ATTACK_PROFILES.find((profile) => profile.id === attackPlan.profileId)?.label ??
-      attackPlan.profileId;
-    const providerLabel =
-      PROVIDER_OPTIONS.find((p) => p.id === targetProfile.provider)?.label ?? targetProfile.provider;
-    return [
-      { label: "Target", value: fullProfileUrl(targetProfile) || target.url },
-      { label: "AI Platform", value: providerLabel },
-      { label: "Profile", value: profileLabel },
-      { label: "Categories", value: attackPlan.categories.join(", ") },
-      {
-        label: "Execution",
-        value:
-          attackPlan.executionStrategy === "agentic"
-            ? `Agentic (max ${attackPlan.maxAttempts} attempts/category)`
-            : "Sequential",
-      },
-      {
-        label: "Payload strategy",
-        value: formatPayloadStrategySummary(attackPlan.payloadStrategy),
-      },
-      {
-        label: "Est. requests",
-        value: attackPlan.estimatedRequests.toLocaleString(),
-      },
-      {
-        label: "Est. runtime",
-        value: formatEstimatedRuntime(attackPlan.estimatedRuntimeSeconds),
-      },
-      {
-        label: "Coverage",
-        value: formatCoverageScore(attackPlan.coverageScore),
-      },
-    ];
-  }, [attackPlan, target.url, targetProfile]);
+  const profileLabel =
+    ATTACK_PROFILES.find((profile) => profile.id === attackPlan.profileId)?.label ??
+    attackPlan.profileId;
+  const providerLabel =
+    PROVIDER_OPTIONS.find((p) => p.id === targetProfile.provider)?.label ?? targetProfile.provider;
+  const targetUrl = fullProfileUrl(targetProfile) || target.url;
+  const executionLabel = useMemo(() => {
+    if (attackPlan.executionStrategy === "agentic") {
+      return `Agentic · up to ${attackPlan.maxAttempts} attempts/category`;
+    }
+    return formatExecutionStrategySummary(attackPlan);
+  }, [attackPlan]);
 
   if (submittedScanId && status) {
     const isRunning = ["running", "paused", "pending"].includes(status.status);
@@ -82,101 +59,152 @@ export function SubmitStep({
       status.status === "failed" ||
       status.status === "stopped" ||
       status.status === "cancelled";
+    const statusTitle = isSuccess
+      ? "Scan complete"
+      : isFailed
+        ? "Scan stopped"
+        : status.status === "paused"
+          ? "Scan paused"
+          : "Scan in progress";
 
     return (
-      <div className="wizard-submitted">
-        <div className="wizard-submitted__hero">
-          <h3 className="wizard-submitted__title">Scan progress</h3>
-          <p className="text-muted">
-            Payloads are generated during execution. Monitor live output from the attack engine
-            below.
-          </p>
-        </div>
+      <div className="wizard-step wizard-submitted">
+        <section className="wizard-fingerprint-summary">
+          <div className="wizard-planner-summary-header">
+            <h4 className="wizard-endpoints__title">{statusTitle}</h4>
+            <Badge variant={statusBadgeVariant(status.status)}>{status.status}</Badge>
+          </div>
 
-        <dl className="wizard-submitted__meta">
-          <div>
-            <dt>Scan ID</dt>
-            <dd>
-              <code>{submittedScanId}</code>
-            </dd>
+          <div className="wizard-submitted__progress">
+            <div
+              className="wizard-submitted__progress-bar"
+              style={{ width: `${Math.min(100, status.progress_percent)}%` }}
+            />
           </div>
-          <div>
-            <dt>Status</dt>
-            <dd>
-              <Badge variant={statusBadgeVariant(status.status)}>{status.status}</Badge>
-            </dd>
-          </div>
-          <div>
-            <dt>Progress</dt>
-            <dd>
-              {status.progress_percent}% ({status.completed}/{status.total || "—"} tests)
-            </dd>
-          </div>
-          {status.current_endpoint && (
-            <div>
-              <dt>Current endpoint</dt>
-              <dd className="text-muted">{status.current_endpoint}</dd>
+
+          <dl className="wizard-attack-estimates wizard-attack-estimates--compact">
+            <div className="wizard-attack-estimate">
+              <span className="wizard-attack-estimate__label">Progress</span>
+              <span className="wizard-attack-estimate__value">{status.progress_percent}%</span>
             </div>
-          )}
-          {status.current_test && (
-            <div>
-              <dt>Current test</dt>
-              <dd className="text-muted">{status.current_test}</dd>
+            <div className="wizard-attack-estimate">
+              <span className="wizard-attack-estimate__label">Tests</span>
+              <span className="wizard-attack-estimate__value">
+                {status.completed}/{status.total || "—"}
+              </span>
             </div>
+            <div className="wizard-attack-estimate">
+              <span className="wizard-attack-estimate__label">Findings</span>
+              <span className="wizard-attack-estimate__value">{status.findings_count}</span>
+            </div>
+            <div className="wizard-attack-estimate">
+              <span className="wizard-attack-estimate__label">Scan ID</span>
+              <span className="wizard-attack-estimate__value wizard-attack-estimate__value--mono">
+                {submittedScanId.slice(0, 8)}
+              </span>
+            </div>
+          </dl>
+
+          {(status.current_test || status.current_endpoint) && (
+            <p className="wizard-submitted__current text-sm text-muted">
+              {status.current_test && <span>{status.current_test}</span>}
+              {status.current_test && status.current_endpoint && " · "}
+              {status.current_endpoint && (
+                <span className="mono">{shortEndpoint(status.current_endpoint)}</span>
+              )}
+            </p>
           )}
-          <div>
-            <dt>Findings</dt>
-            <dd>{status.findings_count}</dd>
-          </div>
-        </dl>
+        </section>
 
-        <div className="wizard-submitted__progress">
-          <div
-            className="wizard-submitted__progress-bar"
-            style={{ width: `${Math.min(100, status.progress_percent)}%` }}
-          />
-        </div>
-
-        <hr className="wizard-submitted__divider" />
-
-        <ScanConsole scanId={submittedScanId} />
+        <section className="wizard-fingerprint-summary">
+          <h4 className="wizard-endpoints__title">Live log</h4>
+          <ScanConsole scanId={submittedScanId} />
+        </section>
 
         <div className="wizard-submitted__actions">
           {isSuccess && (
             <Button variant="primary" onClick={onViewResult}>
-              View Result
+              View results
             </Button>
           )}
           {isFailed && (
             <Button variant="primary" onClick={onRetryScan}>
-              Retry Scan
+              Retry scan
             </Button>
           )}
-          {isRunning && (
-            <span className="text-muted text-sm">Scan running…</span>
-          )}
+          {isRunning && <span className="text-muted text-sm">Running in background…</span>}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="wizard-submit-review">
-      <p className="text-muted">
-        Review your approved attack plan, then click <strong>Start Scan</strong> below. Payload
-        generation runs lazily during execution — probes are built per category at scan time.
+    <div className="wizard-step wizard-submit-review">
+      <p className="wizard-submit-review__lead text-sm text-muted">
+        Everything below is what will run. Press <strong>Start Scan</strong> in the footer to
+        launch.
       </p>
 
-      <dl className="wizard-submit-review__grid">
-        {summaryRows.map((row) => (
-          <div key={row.label}>
-            <dt>{row.label}</dt>
-            <dd>{row.value}</dd>
-          </div>
-        ))}
+      <section className="wizard-fingerprint-summary">
+        <h4 className="wizard-endpoints__title">Target</h4>
+        <p className="wizard-submit-review__url mono text-sm">{targetUrl}</p>
+        <p className="text-sm text-muted">{providerLabel}</p>
+      </section>
+
+      <section className="wizard-fingerprint-summary">
+        <div className="wizard-planner-summary-header">
+          <h4 className="wizard-endpoints__title">Attack plan</h4>
+          <Badge variant="info">{profileLabel}</Badge>
+        </div>
+        <div className="tag-list wizard-submit-review__categories">
+          {attackPlan.categories.map((category) => (
+            <span key={category} className="chip">
+              {getCategory(category).label}
+            </span>
+          ))}
+        </div>
+        <p className="wizard-submit-review__plan-meta text-sm text-muted">
+          {executionLabel} · {formatPayloadStrategySummary(attackPlan.payloadStrategy)}
+        </p>
+      </section>
+
+      <dl className="wizard-attack-estimates">
+        <div className="wizard-attack-estimate">
+          <span className="wizard-attack-estimate__label">Active tests</span>
+          <span className="wizard-attack-estimate__value">
+            {attackPlan.totalTestcases.toLocaleString()}
+          </span>
+        </div>
+        <div className="wizard-attack-estimate">
+          <span className="wizard-attack-estimate__label">Est. runtime</span>
+          <span className="wizard-attack-estimate__value">
+            {formatEstimatedRuntime(attackPlan.estimatedRuntimeSeconds)}
+          </span>
+        </div>
+        <div className="wizard-attack-estimate">
+          <span className="wizard-attack-estimate__label">Est. requests</span>
+          <span className="wizard-attack-estimate__value">
+            {attackPlan.estimatedRequests.toLocaleString()}
+          </span>
+        </div>
+        <div className="wizard-attack-estimate">
+          <span className="wizard-attack-estimate__label">Coverage</span>
+          <span className="wizard-attack-estimate__value">
+            {formatCoverageScore(attackPlan.coverageScore)}
+          </span>
+        </div>
       </dl>
     </div>
   );
+}
+
+function shortEndpoint(endpoint: string): string {
+  try {
+    const url = new URL(endpoint);
+    return url.pathname || endpoint;
+  } catch {
+    return endpoint.length > 48 ? `${endpoint.slice(0, 45)}…` : endpoint;
+  }
 }
 
 function statusBadgeVariant(status: string): "success" | "warning" | "danger" | "info" | "muted" {

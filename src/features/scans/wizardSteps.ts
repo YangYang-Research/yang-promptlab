@@ -40,8 +40,8 @@ export const WIZARD_STEPS: WizardStepDefinition[] = [
   {
     id: 5,
     label: "Scan",
-    title: "Scan submission",
-    hint: "Review configuration and start the background scan job",
+    title: "Start scan",
+    hint: "Confirm the plan and launch the run",
   },
   {
     id: 6,

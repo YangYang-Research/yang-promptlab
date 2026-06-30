@@ -40,6 +40,34 @@ fn parse_category(value: &str) -> Option<AttackCategory> {
         .find(|cat| cat.as_str() == value)
 }
 
+fn is_restartable_scan_status(status: &str) -> bool {
+    matches!(status, "failed" | "cancelled" | "stopped" | "completed")
+}
+
+fn merge_scan_execution_playbook(
+    existing_playbook_json: Option<&str>,
+    execution_playbook: &mut serde_json::Value,
+    clear_progress: bool,
+) -> serde_json::Value {
+    let mut playbook = existing_playbook_json
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let Some(wizard) = playbook.get("wizard").cloned() {
+        execution_playbook["wizard_snapshot"] = wizard;
+    }
+    if let Some(obj) = playbook.as_object_mut() {
+        if clear_progress {
+            obj.remove("progress");
+        }
+        if let Some(execution) = execution_playbook.as_object() {
+            for (key, value) in execution {
+                obj.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    playbook
+}
+
 fn progress_to_dto(scan_id: &str, progress: &ScanProgress) -> ScanStatusDto {
     ScanStatusDto {
         scan_id: scan_id.to_string(),
@@ -651,39 +679,49 @@ pub async fn scan_start_op(
         if existing.project_id != project_id {
             return Err(CommandError::invalid_input("draft scan project mismatch"));
         }
-        if existing.status != crate::commands::wizard_scan::WIZARD_SCAN_STATUS {
-            return Err(CommandError::invalid_input(
-                "draft scan is no longer in setup state",
-            ));
+
+        let is_draft = existing.status == crate::commands::wizard_scan::WIZARD_SCAN_STATUS;
+        let is_restart = is_restartable_scan_status(&existing.status);
+
+        if !is_draft && !is_restart {
+            if existing.status == "running" && state.jobs().contains(&draft_id) {
+                return Err(CommandError::invalid_input("scan is already running"));
+            }
+            if existing.status == "paused" {
+                return Err(CommandError::invalid_input(
+                    "scan is paused; resume it instead of starting a new run",
+                ));
+            }
+            if existing.status != "running" {
+                return Err(CommandError::invalid_input(format!(
+                    "scan cannot be restarted from status '{}'",
+                    existing.status
+                )));
+            }
+            warn!(scan_id = %draft_id, "restarting scan marked running without active job");
         }
-        let mut playbook = existing
-            .playbook_json
-            .as_deref()
-            .and_then(|raw| serde_json::from_str(raw).ok())
-            .unwrap_or_else(|| serde_json::json!({}));
-        if let Some(wizard) = playbook.get("wizard").cloned() {
-            execution_playbook["wizard_snapshot"] = wizard;
+
+        let playbook = merge_scan_execution_playbook(
+            existing.playbook_json.as_deref(),
+            &mut execution_playbook,
+            is_restart,
+        );
+
+        let mut update = UpdateScan {
+            target_id: Some(Some(target_id.clone())),
+            name: Some(scan_name.clone()),
+            status: Some("running".into()),
+            playbook_json: Some(playbook),
+            started_at: Some(Some(OffsetDateTime::now_utc())),
+            ..Default::default()
+        };
+        if is_restart {
+            update.completed_at = Some(None);
         }
-        for (key, value) in execution_playbook
-            .as_object()
-            .cloned()
-            .unwrap_or_default()
-        {
-            playbook[key] = value;
-        }
+
         repos
             .scans()
-            .update(
-                &draft_id,
-                UpdateScan {
-                    target_id: Some(Some(target_id.clone())),
-                    name: Some(scan_name.clone()),
-                    status: Some("running".into()),
-                    playbook_json: Some(playbook),
-                    started_at: Some(Some(OffsetDateTime::now_utc())),
-                    ..Default::default()
-                },
-            )
+            .update(&draft_id, update)
             .await
             .map_err(CommandError::from)?
     } else {
@@ -995,4 +1033,45 @@ pub async fn scan_resume(
 #[tauri::command]
 pub async fn scan_stop(state: State<'_, AppState>, scan_id: String) -> CommandResult<ScanStatusDto> {
     scan_stop_op(state.inner(), scan_id).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restartable_scan_statuses_include_terminal_states() {
+        assert!(is_restartable_scan_status("failed"));
+        assert!(is_restartable_scan_status("cancelled"));
+        assert!(is_restartable_scan_status("stopped"));
+        assert!(is_restartable_scan_status("completed"));
+        assert!(!is_restartable_scan_status("draft"));
+        assert!(!is_restartable_scan_status("running"));
+    }
+
+    #[test]
+    fn merge_scan_execution_playbook_preserves_wizard_and_clears_progress_on_restart() {
+        let existing = serde_json::json!({
+            "wizard": { "step": 4 },
+            "progress": { "completed": 3, "total": 5 }
+        });
+        let mut execution = serde_json::json!({
+            "profile": "standard",
+            "categories": ["prompt_injection"]
+        });
+
+        let merged = merge_scan_execution_playbook(
+            Some(&existing.to_string()),
+            &mut execution,
+            true,
+        );
+
+        assert_eq!(merged["wizard"], serde_json::json!({ "step": 4 }));
+        assert_eq!(merged["profile"], "standard");
+        assert!(merged.get("progress").is_none());
+        assert_eq!(
+            execution["wizard_snapshot"],
+            serde_json::json!({ "step": 4 })
+        );
+    }
 }

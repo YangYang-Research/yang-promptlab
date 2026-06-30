@@ -776,8 +776,10 @@ export function ScanWizardPage() {
     await submitScanJob();
   }
 
-  async function submitScanJob() {
+  async function submitScanJob(options?: { restart?: boolean }) {
     if (!store.savedTarget || !session.attackPlan) return;
+
+    const scanIdToReuse = session.submittedScanId ?? session.draftScanId ?? undefined;
 
     setStartingScan(true);
     setScanSubmitError(null);
@@ -791,13 +793,13 @@ export function ScanWizardPage() {
         payloadStrategy: payloadStrategyToDto(session.attackPlan.payloadStrategy),
         agentMode: session.attackPlan.executionStrategy === "agentic",
         maxAgentAttempts: session.attackPlan.maxAttempts,
-        draftScanId: session.draftScanId ?? undefined,
+        draftScanId: scanIdToReuse,
       });
       await actions.refresh();
       updateSession({ submittedScanId: result.scan_id });
-      notify("Scan started in the background", "success");
+      notify(options?.restart ? "Scan restarted" : "Scan started in the background", "success");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to start scan";
+      const message = toAppError(err).message || "Failed to start scan";
       setScanSubmitError(message);
       notify(message, "error");
     } finally {
@@ -807,7 +809,7 @@ export function ScanWizardPage() {
 
   async function handleRetryScan() {
     if (!store.savedTarget || !session.attackPlan) return;
-    await submitScanJob();
+    await submitScanJob({ restart: true });
   }
 
   function renderStepBody() {
