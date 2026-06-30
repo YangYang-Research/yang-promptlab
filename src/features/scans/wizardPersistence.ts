@@ -1,5 +1,5 @@
 import type { AttackPlanConfig } from "./attackPlan";
-import { attackPlanFromDto, type WizardAttackPlanDto } from "./attackPlan";
+import { attackPlanFromDto, normalizeAttackPlan, type WizardAttackPlanDto } from "./attackPlan";
 import type { AttackPlanUiState, ScanWizardSession } from "./wizardState";
 import { createInitialAttackPlanUi } from "./wizardState";
 import {
@@ -65,7 +65,7 @@ export function sessionFromPersistedWizard(
     savedTargetFingerprint: persisted.savedTargetFingerprint,
     verificationConsole: persisted.verificationConsole,
     attackPlanUi: { ...createInitialAttackPlanUi(), ...persisted.attackPlanUi },
-    attackPlan: persisted.attackPlan,
+    attackPlan: persisted.attackPlan ? normalizeAttackPlan(persisted.attackPlan) : null,
     submittedScanId: persisted.submittedScanId,
   };
 }
@@ -84,7 +84,7 @@ export function parsePersistedWizard(raw: unknown): WizardPersistedState | null 
       typeof value.savedTargetFingerprint === "string" ? value.savedTargetFingerprint : null,
     verificationConsole: value.verificationConsole ?? null,
     attackPlanUi: { ...createInitialAttackPlanUi(), ...(value.attackPlanUi ?? {}) },
-    attackPlan: value.attackPlan ?? null,
+    attackPlan: value.attackPlan ? normalizeAttackPlan(value.attackPlan as AttackPlanConfig) : null,
     submittedScanId: typeof value.submittedScanId === "string" ? value.submittedScanId : null,
     targetProfile: {
       ...createInitialTargetProfile(),
@@ -129,7 +129,10 @@ export function mergeWizardSessions(
     targetForm,
     targetProfile,
     verificationConsole: local.verificationConsole ?? remote.verificationConsole,
-    attackPlan: remote.attackPlan ?? local.attackPlan,
+    attackPlan:
+      remote.attackPlan || local.attackPlan
+        ? normalizeAttackPlan((remote.attackPlan ?? local.attackPlan)!)
+        : null,
     attackPlanUi: remote.attackPlan ? remote.attackPlanUi : local.attackPlanUi,
     submittedScanId: remote.submittedScanId ?? local.submittedScanId,
   };

@@ -209,7 +209,7 @@ export function ReviewAttackPlanStep({
   function profileModeMeta(id: AttackProfileId): string {
     if (id === "custom") return "Manual selection";
     const mode = getProfileMode(attackPlan, id);
-    if (!mode) return "AI plan pending";
+    if (!mode) return "Re-plan with AI Runtime";
     return `${mode.categories.length} categories · ${formatExecutionStrategySummary(mode)} · ${formatPayloadGenerationStrategy(mode.payloadStrategy)}`;
   }
 
@@ -296,7 +296,7 @@ export function ReviewAttackPlanStep({
               <span className="wizard-attack-profile__label">
                 {profile.label}
                 {recommended && profile.id !== "custom" ? (
-                  <Badge variant="info">AI recommended</Badge>
+                  <Badge variant="info">AI Recommended</Badge>
                 ) : null}
               </span>
               <span className="wizard-attack-profile__meta text-muted text-sm">

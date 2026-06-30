@@ -75,6 +75,8 @@ pub struct WizardAttackPlan {
     pub total_testcases: u32,
     pub payload_strategy: PayloadStrategy,
     pub recommended_payload_strategy: PayloadStrategy,
+    /// `ai_runtime` when all preset modes were produced by AI Runtime; otherwise `target_profile`.
+    pub planner_source: String,
 }
 
 pub fn profile_categories_for_id(profile_id: &str) -> Vec<AttackCategory> {
@@ -204,6 +206,7 @@ pub fn build_wizard_attack_plan(profile: &TargetProfile) -> WizardAttackPlan {
         total_testcases: 0,
         payload_strategy: recommended.clone(),
         recommended_payload_strategy: recommended,
+        planner_source: "target_profile".into(),
     };
     if let Some(mode) = find_profile_mode(&plan.profile_modes, "standard").cloned() {
         apply_profile_mode_settings(&mut plan, &mode);

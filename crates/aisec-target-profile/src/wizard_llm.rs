@@ -2,27 +2,153 @@
 
 use aisec_attack::AttackCategory;
 use aisec_planner::types::CategoryRationale;
-use aisec_planner::{parse_attack_category, PlannerLlm, PlannerResult};
+use aisec_planner::{parse_attack_category, PlannerError, PlannerLlm, PlannerResult};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use tracing::warn;
 
 use crate::capabilities::{effective_capabilities, merge_capabilities_into};
 use crate::payload_strategy::{
-    payload_strategy_for_attack_profile, recommend_payload_strategy, MutationLevel,
-    PayloadGenerationStrategy, PayloadStrategy,
+    recommend_payload_strategy, MutationLevel, PayloadGenerationStrategy, PayloadStrategy,
 };
 use crate::planner::plan_from_target_profile;
 use crate::prompt::replace_prompt;
 use crate::types::{TargetCapabilities, TargetProfile};
 use crate::verification::VERIFY_PROBE;
 use crate::wizard_plan::{
-    build_deterministic_profile_modes, build_wizard_attack_plan, find_profile_mode,
-    rebuild_wizard_plan_from_analysis, union_mode_categories, AttackProfileMode,
-    ExecutionStrategy, WizardAttackPlan,
+    build_wizard_attack_plan, find_profile_mode, rebuild_wizard_plan_from_analysis,
+    union_mode_categories, AttackProfileMode, ExecutionStrategy, WizardAttackPlan,
 };
 
 const MAX_PROMPT_CHARS: usize = 6_000;
+const MAX_REPAIR_JSON_CHARS: usize = 3_000;
+const MAX_LLM_ATTEMPTS: u32 = 3;
 const PRESET_PROFILE_IDS: [&str; 3] = ["quick", "standard", "deep"];
+
+mod flex {
+    use serde::de::{self, Deserializer};
+    use serde::Deserialize;
+    use serde_json::Value;
+
+    pub fn string<'de, D>(deserializer: D) -> Result<String, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match Value::deserialize(deserializer)? {
+            Value::String(s) => Ok(s),
+            Value::Number(n) => Ok(n.to_string()),
+            Value::Bool(b) => Ok(b.to_string()),
+            Value::Null => Ok(String::new()),
+            other => Err(de::Error::custom(format!(
+                "expected string-like value, got {other}"
+            ))),
+        }
+    }
+
+    pub fn optional_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match Value::deserialize(deserializer)? {
+            Value::Null => Ok(None),
+            Value::String(s) => Ok(Some(s)),
+            Value::Number(n) => Ok(Some(n.to_string())),
+            Value::Bool(b) => Ok(Some(b.to_string())),
+            other => Err(de::Error::custom(format!(
+                "expected string-like value, got {other}"
+            ))),
+        }
+    }
+
+    pub fn optional_string_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match Value::deserialize(deserializer)? {
+            Value::Null => Ok(None),
+            Value::Array(values) => Ok(Some(
+                values
+                    .into_iter()
+                    .map(|value| match value {
+                        Value::String(s) => Ok(s),
+                        Value::Number(n) => Ok(n.to_string()),
+                        other => Err(de::Error::custom(format!(
+                            "expected string-like value, got {other}"
+                        ))),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            other => Err(de::Error::custom(format!("expected array, got {other}"))),
+        }
+    }
+
+    pub fn string_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let values = Vec::<Value>::deserialize(deserializer)?;
+        values
+            .into_iter()
+            .map(|value| match value {
+                Value::String(s) => Ok(s),
+                Value::Number(n) => Ok(n.to_string()),
+                Value::Bool(b) => Ok(b.to_string()),
+                other => Err(de::Error::custom(format!(
+                    "expected string-like category, got {other}"
+                ))),
+            })
+            .collect()
+    }
+
+    pub fn u32_field<'de, D>(deserializer: D) -> Result<u32, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match Value::deserialize(deserializer)? {
+            Value::Number(n) => n
+                .as_u64()
+                .and_then(|v| u32::try_from(v).ok())
+                .ok_or_else(|| de::Error::custom("invalid u32")),
+            Value::String(s) => s.parse().map_err(|_| de::Error::custom("invalid u32 string")),
+            Value::Null => Ok(0),
+            other => Err(de::Error::custom(format!("expected number, got {other}"))),
+        }
+    }
+
+    pub fn u8_field<'de, D>(deserializer: D) -> Result<u8, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match Value::deserialize(deserializer)? {
+            Value::Number(n) => n
+                .as_u64()
+                .and_then(|v| u8::try_from(v).ok())
+                .ok_or_else(|| de::Error::custom("invalid u8")),
+            Value::String(s) => s.parse().map_err(|_| de::Error::custom("invalid u8 string")),
+            Value::Null => Ok(2),
+            other => Err(de::Error::custom(format!("expected number, got {other}"))),
+        }
+    }
+
+    pub fn optional_u8<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match Value::deserialize(deserializer)? {
+            Value::Null => Ok(None),
+            Value::Number(n) => n
+                .as_u64()
+                .and_then(|v| u8::try_from(v).ok())
+                .map(Some)
+                .ok_or_else(|| de::Error::custom("invalid u8")),
+            Value::String(s) => s
+                .parse()
+                .map(Some)
+                .map_err(|_| de::Error::custom("invalid u8 string")),
+            other => Err(de::Error::custom(format!("expected number, got {other}"))),
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct LlmWizardCapabilities {
@@ -42,21 +168,23 @@ struct LlmWizardCapabilities {
 
 #[derive(Debug, Deserialize)]
 struct LlmWizardRationale {
+    #[serde(default, deserialize_with = "flex::string")]
     category: String,
+    #[serde(default, deserialize_with = "flex::string")]
     reason: String,
-    #[serde(default = "default_priority")]
+    #[serde(default = "default_priority", deserialize_with = "flex::u8_field")]
     priority: u8,
 }
 
 #[derive(Debug, Deserialize, Default)]
 struct LlmWizardPayloadStrategy {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "flex::string")]
     strategy: String,
-    #[serde(default, rename = "mutationLevel")]
+    #[serde(default, rename = "mutationLevel", deserialize_with = "flex::string")]
     mutation_level: String,
-    #[serde(default, rename = "variantsPerTest")]
+    #[serde(default, rename = "variantsPerTest", deserialize_with = "flex::u32_field")]
     variants_per_test: u32,
-    #[serde(default, rename = "maxTotalPayloads")]
+    #[serde(default, rename = "maxTotalPayloads", deserialize_with = "flex::u32_field")]
     max_total_payloads: u32,
     #[serde(default, rename = "enableContextAwareness")]
     enable_context_awareness: bool,
@@ -72,11 +200,11 @@ struct LlmWizardPayloadStrategy {
 
 #[derive(Debug, Deserialize)]
 struct LlmWizardMode {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "flex::string_vec")]
     categories: Vec<String>,
-    #[serde(default, rename = "executionStrategy")]
+    #[serde(default, rename = "executionStrategy", deserialize_with = "flex::string")]
     execution_strategy: String,
-    #[serde(default, rename = "maxAttempts")]
+    #[serde(default, rename = "maxAttempts", deserialize_with = "flex::optional_u8")]
     max_attempts: Option<u8>,
     #[serde(default, rename = "reflectionEnabled")]
     reflection_enabled: Option<bool>,
@@ -90,13 +218,17 @@ struct LlmWizardMode {
 
 #[derive(Debug, Deserialize)]
 struct LlmWizardPlanResponse {
-    #[serde(default, rename = "recommendedProfileId")]
+    #[serde(
+        default,
+        rename = "recommendedProfileId",
+        deserialize_with = "flex::optional_string"
+    )]
     recommended_profile_id: Option<String>,
-    profile_id: Option<String>,
-    categories: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "flex::optional_string_vec")]
     disabled_tests: Option<Vec<String>>,
     capabilities: Option<LlmWizardCapabilities>,
     rationales: Option<Vec<LlmWizardRationale>>,
+    #[serde(default, deserialize_with = "flex::optional_string")]
     rationale: Option<String>,
     #[serde(default)]
     modes: HashMap<String, LlmWizardMode>,
@@ -115,17 +247,16 @@ fn default_priority() -> u8 {
     2
 }
 
-/// Builds a wizard attack plan, optionally refined by AI Runtime analysis of verify traffic.
+/// Builds a wizard attack plan from AI Runtime analysis of verify traffic.
+/// All three preset modes (quick/standard/deep) MUST come from the LLM response.
 pub async fn build_wizard_attack_plan_with_llm(
     profile: &TargetProfile,
-    llm: Option<&dyn PlannerLlm>,
-) -> WizardAttackPlan {
-    let baseline = build_wizard_attack_plan(profile);
-    let Some(llm) = llm else {
-        return baseline;
-    };
+    llm: &dyn PlannerLlm,
+) -> PlannerResult<WizardAttackPlan> {
     if !profile.is_verified() {
-        return baseline;
+        return Err(PlannerError::Llm(
+            "target profile must be verified before AI attack planning".into(),
+        ));
     }
 
     let response_preview = profile
@@ -135,9 +266,12 @@ pub async fn build_wizard_attack_plan_with_llm(
         .unwrap_or("")
         .trim();
     if response_preview.is_empty() {
-        return baseline;
+        return Err(PlannerError::Llm(
+            "verified response preview is required for AI attack planning".into(),
+        ));
     }
 
+    let baseline = build_wizard_attack_plan(profile);
     let request_body = replace_prompt(
         &profile.request_template,
         &profile.prompt_placeholder,
@@ -156,7 +290,7 @@ pub async fn build_wizard_attack_plan_with_llm(
         .as_deref()
         .unwrap_or("unknown");
 
-    let prompt = aisec_inference::PromptRegistry::wizard_profile_user(
+    let initial_prompt = aisec_inference::PromptRegistry::wizard_profile_user(
         profile.provider.as_str(),
         &profile.framework,
         &profile.full_url(),
@@ -167,13 +301,64 @@ pub async fn build_wizard_attack_plan_with_llm(
         detected_model,
     );
 
-    match llm.complete(&prompt).await {
-        Ok(raw) => match parse_wizard_llm_plan(&raw, profile, &baseline) {
-            Ok(refinement) => apply_wizard_llm_refinement(profile, baseline, refinement),
-            Err(_) => baseline,
-        },
-        Err(_) => baseline,
+    let mut last_raw = String::new();
+    let mut last_errors = String::new();
+
+    for attempt in 0..MAX_LLM_ATTEMPTS {
+        let prompt = if attempt == 0 {
+            initial_prompt.clone()
+        } else {
+            aisec_inference::PromptRegistry::wizard_profile_repair(
+                &format!("{allowed:?}"),
+                &truncate_for_repair(&last_raw),
+                &last_errors,
+            )
+        };
+
+        let raw = llm.complete(&prompt).await?;
+        last_raw = match extract_json_object(&raw) {
+            Ok(json) => json,
+            Err(err) => {
+                last_errors = err.to_string();
+                warn!(
+                    attempt = attempt + 1,
+                    max_attempts = MAX_LLM_ATTEMPTS,
+                    error = %last_errors,
+                    response_chars = raw.len(),
+                    "wizard attack plan: LLM response is not valid JSON"
+                );
+                continue;
+            }
+        };
+
+        match parse_wizard_llm_plan(&last_raw, profile) {
+            Ok(refinement) => {
+                let mut plan = apply_wizard_llm_refinement(profile, baseline, refinement);
+                plan.planner_source = "ai_runtime".into();
+                return Ok(plan);
+            }
+            Err(err) => {
+                last_errors = enrich_validation_error(&last_raw, &err);
+                warn!(
+                    attempt = attempt + 1,
+                    max_attempts = MAX_LLM_ATTEMPTS,
+                    error = %last_errors,
+                    json_chars = last_raw.len(),
+                    "wizard attack plan: LLM JSON failed validation"
+                );
+            }
+        }
     }
+
+    warn!(
+        max_attempts = MAX_LLM_ATTEMPTS,
+        last_error = %last_errors,
+        "wizard attack plan: all LLM attempts exhausted"
+    );
+
+    Err(PlannerError::Llm(format!(
+        "AI Runtime failed to produce a valid attack plan after {MAX_LLM_ATTEMPTS} attempts: {last_errors}"
+    )))
 }
 
 fn truncate_for_prompt(text: &str) -> String {
@@ -183,14 +368,42 @@ fn truncate_for_prompt(text: &str) -> String {
     format!("{}… [truncated]", &text[..MAX_PROMPT_CHARS])
 }
 
-fn parse_wizard_llm_plan(
-    raw: &str,
-    profile: &TargetProfile,
-    baseline: &WizardAttackPlan,
-) -> PlannerResult<WizardLlmRefinement> {
+fn truncate_for_repair(text: &str) -> String {
+    if text.len() <= MAX_REPAIR_JSON_CHARS {
+        return text.to_string();
+    }
+    format!("{}… [truncated for repair]", &text[..MAX_REPAIR_JSON_CHARS])
+}
+
+fn enrich_validation_error(raw: &str, err: &PlannerError) -> String {
+    let mut msg = err.to_string();
+    if looks_like_truncated_json(raw, &msg) {
+        msg.push_str("; response appears truncated — return compact complete JSON with all three modes");
+    }
+    msg
+}
+
+fn looks_like_truncated_json(raw: &str, err_msg: &str) -> bool {
+    let lower = err_msg.to_ascii_lowercase();
+    if lower.contains("eof while parsing")
+        || lower.contains("unterminated json")
+        || lower.contains("truncated or unterminated")
+    {
+        return true;
+    }
+    let trimmed = raw.trim();
+    if !trimmed.starts_with('{') {
+        return false;
+    }
+    let open = trimmed.chars().filter(|c| *c == '{').count();
+    let close = trimmed.chars().filter(|c| *c == '}').count();
+    open > close
+}
+
+fn parse_wizard_llm_plan(raw: &str, profile: &TargetProfile) -> PlannerResult<WizardLlmRefinement> {
     let json_str = extract_json_object(raw)?;
     let parsed: LlmWizardPlanResponse = serde_json::from_str(&json_str)
-        .map_err(|e| aisec_planner::PlannerError::Llm(format!("invalid JSON: {e}")))?;
+        .map_err(|e| PlannerError::Llm(format!("invalid JSON: {e}")))?;
 
     let mut enhanced = profile.clone();
     if let Some(ref llm_caps) = parsed.capabilities {
@@ -207,31 +420,32 @@ fn parse_wizard_llm_plan(
 
     let deterministic = plan_from_target_profile(&enhanced);
     let applicable = deterministic.categories.clone();
-    let applicable_set: std::collections::HashSet<_> = applicable.iter().copied().collect();
-    let fallback_modes = build_deterministic_profile_modes(&applicable, profile);
+    let applicable_set: HashSet<_> = applicable.iter().copied().collect();
 
-    let mut profile_modes = if parsed.modes.is_empty() {
-        build_legacy_profile_modes(&parsed, &fallback_modes, &applicable_set)?
-    } else {
-        build_modes_from_llm(&parsed.modes, &fallback_modes, &applicable_set)
-    };
-
-    if profile_modes.is_empty() {
-        profile_modes = fallback_modes;
-    }
+    let profile_modes = build_modes_from_llm_strict(&parsed.modes, &applicable_set)?;
+    validate_profile_modes(&profile_modes, &applicable_set)?;
 
     let recommended_profile_id = parsed
         .recommended_profile_id
-        .or(parsed.profile_id)
-        .map(|value| normalize_profile_id(&value))
-        .unwrap_or_else(|| baseline.recommended_profile_id.clone());
+        .as_deref()
+        .map(normalize_profile_id)
+        .filter(|id| PRESET_PROFILE_IDS.contains(&id.as_str()))
+        .ok_or_else(|| {
+            PlannerError::Llm("recommendedProfileId must be quick, standard, or deep".into())
+        })?;
+
+    if find_profile_mode(&profile_modes, &recommended_profile_id).is_none() {
+        return Err(PlannerError::Llm(format!(
+            "recommendedProfileId {recommended_profile_id} missing from modes"
+        )));
+    }
 
     let suggested_categories = union_mode_categories(&profile_modes);
-    let suggested_categories = if suggested_categories.is_empty() {
-        applicable
-    } else {
-        suggested_categories
-    };
+    if suggested_categories.is_empty() {
+        return Err(PlannerError::Llm(
+            "modes must include at least one applicable category".into(),
+        ));
+    }
 
     let mut rationales = parsed
         .rationales
@@ -286,180 +500,239 @@ fn parse_wizard_llm_plan(
     })
 }
 
-fn build_legacy_profile_modes(
-    parsed: &LlmWizardPlanResponse,
-    fallback_modes: &[AttackProfileMode],
-    applicable_set: &std::collections::HashSet<AttackCategory>,
+fn build_modes_from_llm_strict(
+    modes: &HashMap<String, LlmWizardMode>,
+    applicable_set: &HashSet<AttackCategory>,
 ) -> PlannerResult<Vec<AttackProfileMode>> {
-    let profile_id = normalize_profile_id(
-        parsed
-            .recommended_profile_id
-            .as_deref()
-            .or(parsed.profile_id.as_deref())
-            .unwrap_or("standard"),
-    );
-    let categories = parsed
-        .categories
-        .clone()
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|raw| parse_attack_category(&raw))
-        .filter(|category| applicable_set.contains(category))
-        .collect::<Vec<_>>();
+    let mut out = Vec::with_capacity(PRESET_PROFILE_IDS.len());
+    for profile_id in PRESET_PROFILE_IDS {
+        let llm_mode = modes.get(profile_id).ok_or_else(|| {
+            PlannerError::Llm(format!("missing required modes.{profile_id} object"))
+        })?;
 
-    let mut modes = fallback_modes.to_vec();
-    if let Some(mode) = find_profile_mode_mut(&mut modes, &profile_id) {
-        if !categories.is_empty() {
-            mode.categories = categories;
+        let categories = llm_mode
+            .categories
+            .iter()
+            .filter_map(|raw| parse_attack_category(raw))
+            .filter(|category| applicable_set.contains(category))
+            .collect::<Vec<_>>();
+        if categories.is_empty() {
+            return Err(PlannerError::Llm(format!(
+                "modes.{profile_id}.categories must contain at least one applicable category"
+            )));
+        }
+
+        let execution_strategy = parse_execution_strategy(&llm_mode.execution_strategy).ok_or_else(
+            || {
+                PlannerError::Llm(format!(
+                    "modes.{profile_id}.executionStrategy must be sequential or agentic"
+                ))
+            },
+        )?;
+
+        let payload_raw = llm_mode.payload_strategy.as_ref().ok_or_else(|| {
+            PlannerError::Llm(format!("missing modes.{profile_id}.payloadStrategy"))
+        })?;
+        let payload_strategy = parse_payload_strategy_strict(payload_raw)?;
+
+        out.push(AttackProfileMode {
+            profile_id: (*profile_id).into(),
+            categories,
+            execution_strategy,
+            max_attempts: llm_mode.max_attempts.unwrap_or(5).clamp(1, 20),
+            reflection_enabled: llm_mode.reflection_enabled.unwrap_or(false),
+            adaptive_planning: llm_mode.adaptive_planning.unwrap_or(false),
+            payload_strategy: payload_strategy.clamp(),
+        });
+    }
+    Ok(out)
+}
+
+fn validate_profile_modes(
+    modes: &[AttackProfileMode],
+    applicable_set: &HashSet<AttackCategory>,
+) -> PlannerResult<()> {
+    let mut errors = Vec::new();
+    if modes.len() != PRESET_PROFILE_IDS.len() {
+        errors.push(format!(
+            "expected {} preset modes, got {}",
+            PRESET_PROFILE_IDS.len(),
+            modes.len()
+        ));
+    }
+    for profile_id in PRESET_PROFILE_IDS {
+        let Some(mode) = find_profile_mode(modes, profile_id) else {
+            errors.push(format!("missing modes.{profile_id}"));
+            continue;
+        };
+        if mode.categories.is_empty() {
+            errors.push(format!("modes.{profile_id}.categories is empty"));
+        }
+        if !mode.categories.iter().all(|c| applicable_set.contains(c)) {
+            errors.push(format!(
+                "modes.{profile_id}.categories contains non-applicable categories"
+            ));
+        }
+        if mode.payload_strategy.max_total_payloads == 0 {
+            errors.push(format!(
+                "modes.{profile_id}.payloadStrategy.maxTotalPayloads must be >= 1"
+            ));
         }
     }
-    Ok(modes)
-}
-
-fn build_modes_from_llm(
-    modes: &HashMap<String, LlmWizardMode>,
-    fallback_modes: &[AttackProfileMode],
-    applicable_set: &std::collections::HashSet<AttackCategory>,
-) -> Vec<AttackProfileMode> {
-    PRESET_PROFILE_IDS
-        .iter()
-        .filter_map(|profile_id| {
-            let fallback = find_profile_mode(fallback_modes, profile_id)?;
-            let llm_mode = modes.get(*profile_id);
-            Some(merge_profile_mode(profile_id, fallback, llm_mode, applicable_set))
-        })
-        .collect()
-}
-
-fn merge_profile_mode(
-    profile_id: &str,
-    fallback: &AttackProfileMode,
-    llm_mode: Option<&LlmWizardMode>,
-    applicable_set: &std::collections::HashSet<AttackCategory>,
-) -> AttackProfileMode {
-    let Some(llm_mode) = llm_mode else {
-        return fallback.clone();
-    };
-
-    let categories = llm_mode
-        .categories
-        .iter()
-        .filter_map(|raw| parse_attack_category(raw))
-        .filter(|category| applicable_set.contains(category))
-        .collect::<Vec<_>>();
-
-    AttackProfileMode {
-        profile_id: profile_id.into(),
-        categories: if categories.is_empty() {
-            fallback.categories.clone()
-        } else {
-            categories
-        },
-        execution_strategy: parse_execution_strategy(&llm_mode.execution_strategy)
-            .unwrap_or(fallback.execution_strategy),
-        max_attempts: llm_mode
-            .max_attempts
-            .unwrap_or(fallback.max_attempts)
-            .clamp(1, 20),
-        reflection_enabled: llm_mode
-            .reflection_enabled
-            .unwrap_or(fallback.reflection_enabled),
-        adaptive_planning: llm_mode
-            .adaptive_planning
-            .unwrap_or(fallback.adaptive_planning),
-        payload_strategy: llm_mode
-            .payload_strategy
-            .as_ref()
-            .map(|value| parse_payload_strategy(value, &fallback.payload_strategy))
-            .unwrap_or_else(|| fallback.payload_strategy.clone())
-            .clamp(),
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(PlannerError::Llm(errors.join("; ")))
     }
 }
 
 fn parse_execution_strategy(raw: &str) -> Option<ExecutionStrategy> {
     match raw.trim().to_ascii_lowercase().as_str() {
-        "agentic" => Some(ExecutionStrategy::Agentic),
-        "sequential" => Some(ExecutionStrategy::Sequential),
+        "agentic" | "2" => Some(ExecutionStrategy::Agentic),
+        "sequential" | "1" | "0" => Some(ExecutionStrategy::Sequential),
         _ => None,
     }
 }
 
-fn parse_payload_strategy(
-    raw: &LlmWizardPayloadStrategy,
-    fallback: &PayloadStrategy,
-) -> PayloadStrategy {
-    let strategy = match raw.strategy.trim().to_ascii_lowercase().as_str() {
+fn parse_payload_strategy_name(raw: &str) -> Option<&'static str> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "deterministic" | "1" | "0" => Some("deterministic"),
+        "mutation" | "2" => Some("mutation"),
+        "adaptive" | "3" => Some("adaptive"),
+        _ => None,
+    }
+}
+
+fn parse_mutation_level_name(raw: &str) -> Option<&'static str> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "low" | "1" | "0" => Some("low"),
+        "medium" | "2" => Some("medium"),
+        "high" | "3" => Some("high"),
+        "extreme" | "4" => Some("extreme"),
+        _ if raw.is_empty() => Some("medium"),
+        _ => None,
+    }
+}
+
+fn parse_payload_strategy_strict(raw: &LlmWizardPayloadStrategy) -> PlannerResult<PayloadStrategy> {
+    let strategy_name = parse_payload_strategy_name(&raw.strategy).ok_or_else(|| {
+        PlannerError::Llm(format!(
+            "invalid payloadStrategy.strategy: {}",
+            raw.strategy
+        ))
+    })?;
+    let strategy = match strategy_name {
         "deterministic" => PayloadGenerationStrategy::Deterministic,
         "adaptive" => PayloadGenerationStrategy::Adaptive,
         "mutation" => PayloadGenerationStrategy::Mutation,
-        _ => fallback.strategy,
+        _ => unreachable!("validated strategy name"),
     };
-    let mutation_level = match raw.mutation_level.trim().to_ascii_lowercase().as_str() {
+    let mutation_name = parse_mutation_level_name(&raw.mutation_level).ok_or_else(|| {
+        PlannerError::Llm(format!(
+            "invalid payloadStrategy.mutationLevel: {}",
+            raw.mutation_level
+        ))
+    })?;
+    let mutation_level = match mutation_name {
         "low" => MutationLevel::Low,
         "high" => MutationLevel::High,
         "extreme" => MutationLevel::Extreme,
         "medium" => MutationLevel::Medium,
-        _ => fallback.mutation_level,
+        other => {
+            return Err(PlannerError::Llm(format!(
+                "invalid payloadStrategy.mutationLevel: {other}"
+            )));
+        }
     };
     let variants_per_test = if raw.variants_per_test == 0 {
-        fallback.variants_per_test
+        default_variants_per_test(strategy)
     } else {
         raw.variants_per_test
     };
     let max_total_payloads = if raw.max_total_payloads == 0 {
-        fallback.max_total_payloads
+        default_max_total_payloads(strategy)
     } else {
         raw.max_total_payloads
     };
 
-    PayloadStrategy {
+    Ok(PayloadStrategy {
         strategy,
         mutation_level,
         variants_per_test,
         max_total_payloads,
-        enable_context_awareness: raw.enable_context_awareness || fallback.enable_context_awareness,
-        enable_conversation_memory: raw.enable_conversation_memory
-            || fallback.enable_conversation_memory,
-        enable_response_adaptation: raw.enable_response_adaptation
-            || fallback.enable_response_adaptation,
-        enable_payload_deduplication: if raw.enable_payload_deduplication {
-            true
-        } else {
-            fallback.enable_payload_deduplication
-        },
-        enable_cross_category_mutation: raw.enable_cross_category_mutation
-            || fallback.enable_cross_category_mutation,
+        enable_context_awareness: raw.enable_context_awareness,
+        enable_conversation_memory: raw.enable_conversation_memory,
+        enable_response_adaptation: raw.enable_response_adaptation,
+        enable_payload_deduplication: raw.enable_payload_deduplication,
+        enable_cross_category_mutation: raw.enable_cross_category_mutation,
+    })
+}
+
+fn default_max_total_payloads(strategy: PayloadGenerationStrategy) -> u32 {
+    match strategy {
+        PayloadGenerationStrategy::Deterministic => 10,
+        PayloadGenerationStrategy::Mutation => 20,
+        PayloadGenerationStrategy::Adaptive => 100,
     }
 }
 
-fn find_profile_mode_mut<'a>(
-    modes: &'a mut [AttackProfileMode],
-    profile_id: &str,
-) -> Option<&'a mut AttackProfileMode> {
-    let key = profile_id.trim().to_ascii_lowercase();
-    modes
-        .iter_mut()
-        .find(|mode| mode.profile_id.eq_ignore_ascii_case(&key))
+fn default_variants_per_test(strategy: PayloadGenerationStrategy) -> u32 {
+    match strategy {
+        PayloadGenerationStrategy::Deterministic => 2,
+        PayloadGenerationStrategy::Mutation => 5,
+        PayloadGenerationStrategy::Adaptive => 10,
+    }
 }
 
 fn extract_json_object(raw: &str) -> PlannerResult<String> {
     let trimmed = raw.trim();
-    if trimmed.starts_with('{') {
-        return Ok(trimmed.to_string());
-    }
     let start = trimmed
         .find('{')
-        .ok_or_else(|| aisec_planner::PlannerError::Llm("no JSON object in LLM response".into()))?;
-    let end = trimmed
-        .rfind('}')
-        .ok_or_else(|| aisec_planner::PlannerError::Llm("unterminated JSON in LLM response".into()))?;
-    Ok(trimmed[start..=end].to_string())
+        .ok_or_else(|| PlannerError::Llm("no JSON object in LLM response".into()))?;
+    let slice = &trimmed[start..];
+
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+
+    for (idx, ch) in slice.char_indices() {
+        if in_string {
+            if escape {
+                escape = false;
+                continue;
+            }
+            if ch == '\\' {
+                escape = true;
+                continue;
+            }
+            if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Ok(slice[..=idx].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Err(PlannerError::Llm(
+        "truncated or unterminated JSON in LLM response".into(),
+    ))
 }
 
 fn apply_wizard_llm_refinement(
     profile: &TargetProfile,
     mut plan: WizardAttackPlan,
-    mut refinement: WizardLlmRefinement,
+    refinement: WizardLlmRefinement,
 ) -> WizardAttackPlan {
     let mut enhanced = profile.clone();
     if let Some(llm_caps) = refinement.capabilities {
@@ -470,18 +743,6 @@ fn apply_wizard_llm_refinement(
     let caps = effective_capabilities(&enhanced);
     plan.disabled_tests = refinement.disabled_tests;
     plan.recommended_payload_strategy = recommend_payload_strategy(&enhanced);
-
-    for mode in &mut refinement.profile_modes {
-        if mode.payload_strategy.strategy == PayloadGenerationStrategy::Mutation
-            && mode.payload_strategy.max_total_payloads == 0
-        {
-            mode.payload_strategy = payload_strategy_for_attack_profile(
-                &mode.profile_id,
-                &plan.recommended_payload_strategy,
-            )
-            .clamp();
-        }
-    }
 
     rebuild_wizard_plan_from_analysis(
         profile,
@@ -508,13 +769,31 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
-    struct MockLlm(&'static str);
+    struct MockLlm {
+        responses: Vec<String>,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl MockLlm {
+        fn new(responses: Vec<&str>) -> Self {
+            Self {
+                responses: responses.into_iter().map(String::from).collect(),
+                calls: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+    }
 
     #[async_trait]
     impl PlannerLlm for MockLlm {
         async fn complete(&self, _prompt: &str) -> PlannerResult<String> {
-            Ok(self.0.to_string())
+            let idx = self.calls.fetch_add(1, Ordering::SeqCst);
+            self.responses
+                .get(idx)
+                .cloned()
+                .ok_or_else(|| PlannerError::Llm("no mock response".into()))
         }
     }
 
@@ -553,16 +832,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn llm_refines_modes_when_runtime_available() {
-        let llm_json = r#"{
+    fn valid_modes_json() -> String {
+        r#"{
           "recommendedProfileId": "standard",
-          "capabilities": {
-            "supportsTools": true,
-            "supportsConversation": true,
-            "supportsMemory": true,
-            "supportsAgent": true
-          },
           "modes": {
             "quick": {
               "categories": ["prompt_injection", "jailbreak"],
@@ -583,42 +855,91 @@ mod tests {
                 "mutationLevel": "medium",
                 "variantsPerTest": 5,
                 "maxTotalPayloads": 20
-              },
-              "rationales": [
-                { "category": "tool_abuse", "reason": "tools in request schema", "priority": 1 }
-              ]
+              }
             },
             "deep": {
-              "categories": ["prompt_injection", "jailbreak", "tool_abuse", "agent_goal_hijacking"],
+              "categories": ["prompt_injection", "jailbreak", "tool_abuse"],
               "executionStrategy": "agentic",
               "maxAttempts": 5,
-              "reflectionEnabled": true,
-              "adaptivePlanning": true,
               "payloadStrategy": {
                 "strategy": "adaptive",
                 "mutationLevel": "extreme",
                 "variantsPerTest": 10,
-                "maxTotalPayloads": 100,
-                "enableResponseAdaptation": true,
-                "enableCrossCategoryMutation": true
+                "maxTotalPayloads": 100
               }
             }
           }
-        }"#;
+        }"#
+        .into()
+    }
 
-        let plan =
-            build_wizard_attack_plan_with_llm(&sample_profile(), Some(&MockLlm(llm_json))).await;
+    #[tokio::test]
+    async fn llm_refines_modes_when_runtime_available() {
+        let llm = MockLlm::new(vec![valid_modes_json().as_str()]);
+        let plan = build_wizard_attack_plan_with_llm(&sample_profile(), &llm)
+            .await
+            .expect("valid AI plan");
         assert_eq!(plan.profile_modes.len(), 3);
+        assert_eq!(plan.planner_source, "ai_runtime");
         assert!(plan.suggested_categories.contains(&AttackCategory::ToolAbuse));
-        assert!(plan.rationales.iter().any(|r| r.source == "ai_runtime"));
         let standard = find_profile_mode(&plan.profile_modes, "standard").expect("standard mode");
         assert!(standard.categories.contains(&AttackCategory::ToolAbuse));
-        let deep = find_profile_mode(&plan.profile_modes, "deep").expect("deep mode");
-        assert_eq!(deep.execution_strategy, ExecutionStrategy::Agentic);
-        assert_eq!(
-            deep.payload_strategy.strategy,
-            PayloadGenerationStrategy::Adaptive
-        );
+    }
+
+    #[tokio::test]
+    async fn harness_retries_until_modes_are_complete() {
+        let incomplete = r#"{"recommendedProfileId":"standard","modes":{"quick":{"categories":["prompt_injection"],"executionStrategy":"sequential","payloadStrategy":{"strategy":"deterministic","mutationLevel":"low","variantsPerTest":2,"maxTotalPayloads":10}}}}"#.to_string();
+        let llm = MockLlm::new(vec![incomplete.as_str(), valid_modes_json().as_str()]);
+        let plan = build_wizard_attack_plan_with_llm(&sample_profile(), &llm)
+            .await
+            .expect("repaired AI plan");
+        assert_eq!(plan.planner_source, "ai_runtime");
+        assert_eq!(plan.profile_modes.len(), 3);
+    }
+
+    #[test]
+    fn parse_wizard_llm_plan_accepts_numeric_enum_fields() {
+        let raw = r#"{
+          "recommendedProfileId": "standard",
+          "modes": {
+            "quick": {
+              "categories": ["prompt_injection"],
+              "executionStrategy": 1,
+              "payloadStrategy": { "strategy": 1 }
+            },
+            "standard": {
+              "categories": ["prompt_injection", "jailbreak"],
+              "executionStrategy": "sequential",
+              "payloadStrategy": { "strategy": "mutation", "mutationLevel": 2 }
+            },
+            "deep": {
+              "categories": ["prompt_injection", "jailbreak"],
+              "executionStrategy": 2,
+              "payloadStrategy": { "strategy": 3, "maxTotalPayloads": 100 }
+            }
+          }
+        }"#;
+        let profile = sample_profile();
+        let refinement = parse_wizard_llm_plan(raw, &profile).expect("numeric enums coerced");
+        assert_eq!(refinement.recommended_profile_id, "standard");
+        assert_eq!(refinement.profile_modes.len(), 3);
+    }
+
+    #[test]
+    fn extract_json_object_rejects_truncated_response() {
+        let truncated = r#"{"recommendedProfileId":"standard","modes":{"quick":{"categories":["prompt_injection"]"#;
+        let err = extract_json_object(truncated).expect_err("truncated JSON");
+        assert!(err.to_string().contains("truncated"));
+    }
+
+    #[test]
+    fn extract_json_object_extracts_balanced_object_from_prose() {
+        let raw = r#"Here is the plan:
+        {"recommendedProfileId":"standard","modes":{}}
+        Thanks."#;
+        let json = extract_json_object(raw).expect("balanced JSON");
+        assert!(json.starts_with('{'));
+        assert!(json.ends_with('}'));
     }
 
     #[test]

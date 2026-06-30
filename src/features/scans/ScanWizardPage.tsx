@@ -38,7 +38,7 @@ import {
   type TargetFormState,
 } from "./targetDescriptor";
 import { WizardStepper } from "./WizardStepper";
-import { attackPlanFromDto, attackPlanUiBaselineFromPlan, payloadStrategyToDto } from "./attackPlan";
+import { attackPlanFromDto, attackPlanUiBaselineFromPlan, normalizeAttackPlan, payloadStrategyToDto } from "./attackPlan";
 import {
   buildWizardStore,
   clearWizardSession,
@@ -74,6 +74,11 @@ import {
   storeDraftScanId,
 } from "./wizardDraftScan";
 
+function withNormalizedAttackPlan(session: ScanWizardSession): ScanWizardSession {
+  if (!session.attackPlan) return session;
+  return { ...session, attackPlan: normalizeAttackPlan(session.attackPlan) };
+}
+
 export function ScanWizardPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -87,7 +92,7 @@ export function ScanWizardPage() {
   const deepLinkTargetId = useRef<string | null>(null);
 
   const [session, setSession] = useState<ScanWizardSession>(() =>
-    loadWizardSession(lockedProjectId),
+    withNormalizedAttackPlan(loadWizardSession(lockedProjectId)),
   );
   const [resolvedProject, setResolvedProject] = useState<Project | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
@@ -144,7 +149,11 @@ export function ScanWizardPage() {
 
   const updateSession = useCallback((patch: Partial<ScanWizardSession>) => {
     setSession((prev) => {
-      const next = { ...prev, ...patch };
+      const normalizedPatch =
+        patch.attackPlan !== undefined
+          ? { ...patch, attackPlan: patch.attackPlan ? normalizeAttackPlan(patch.attackPlan) : null }
+          : patch;
+      const next = withNormalizedAttackPlan({ ...prev, ...normalizedPatch });
       saveWizardSession(next);
       return next;
     });
@@ -189,8 +198,9 @@ export function ScanWizardPage() {
                 selectedProjectId: projectId,
               };
           const local = peekWizardSession();
-          const next =
-            local?.draftScanId === lockedScanId ? mergeWizardSessions(local, remote) : remote;
+          const next = withNormalizedAttackPlan(
+            local?.draftScanId === lockedScanId ? mergeWizardSessions(local, remote) : remote,
+          );
           storeDraftScanId(projectId, lockedScanId);
           setSession(next);
           saveWizardSession(next);

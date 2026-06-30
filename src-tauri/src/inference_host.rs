@@ -8,7 +8,7 @@ use aisec_core::AisecError;
 use aisec_inference::{
     CompleteRequest, ConnectivityTestResult, DefaultAiInferenceGateway, GatewaySession,
     InferenceMode, InferenceProvider, InferenceRuntimeManager, InferenceSession,
-    RemoteAdapterSettings,
+    PromptRegistry, RemoteAdapterSettings,
 };
 use aisec_judge::{build_judge_engine_with_adapter, deterministic_engine, JudgeEngine, JudgeProviderConfig};
 use aisec_models::{BuiltinCatalog, LocalModelManager, ModelEntry, ModelProvider};
@@ -129,6 +129,7 @@ pub async fn gateway_complete(
     model_manager: &LocalModelManager,
     model_provider: SharedModelProvider,
     runtime_manager: &mut RuntimeManager,
+    system: Option<&str>,
     prompt: &str,
     max_tokens: u32,
     temperature: f32,
@@ -144,7 +145,7 @@ pub async fn gateway_complete(
     session
         .complete(CompleteRequest {
             prompt: prompt.to_string(),
-            system: None,
+            system: system.map(String::from),
             max_tokens: Some(max_tokens),
             temperature: Some(temperature),
         })
@@ -191,9 +192,59 @@ impl PlannerLlm for HostPlannerLlm {
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
+            None,
             prompt,
-            1024,
+            2048,
             0.15,
+        )
+        .await
+        .map_err(|e| aisec_planner::PlannerError::Llm(e.to_string()))
+    }
+}
+
+/// Wizard attack-plan LLM — higher token budget and JSON-focused system prompt.
+pub struct HostWizardPlannerLlm {
+    data_dir: PathBuf,
+    inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<LocalModelManager>>,
+    model_provider: SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+}
+
+impl HostWizardPlannerLlm {
+    pub fn new(
+        data_dir: PathBuf,
+        inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
+        model_manager: Arc<AsyncMutex<LocalModelManager>>,
+        model_provider: SharedModelProvider,
+        runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+    ) -> Self {
+        Self {
+            data_dir,
+            inference,
+            model_manager,
+            model_provider,
+            runtime_manager,
+        }
+    }
+}
+
+#[async_trait]
+impl PlannerLlm for HostWizardPlannerLlm {
+    async fn complete(&self, prompt: &str) -> aisec_planner::PlannerResult<String> {
+        let inference = self.inference.lock().await;
+        let manager = self.model_manager.lock().await;
+        let mut runtime_mgr = self.runtime_manager.lock().await;
+        gateway_complete(
+            &self.data_dir,
+            &inference,
+            &manager,
+            self.model_provider.clone(),
+            &mut runtime_mgr,
+            Some(PromptRegistry::wizard_profile_system()),
+            prompt,
+            8192,
+            0.1,
         )
         .await
         .map_err(|e| aisec_planner::PlannerError::Llm(e.to_string()))
@@ -239,6 +290,7 @@ impl GeneratorLlm for HostGeneratorLlm {
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
+            None,
             prompt,
             1536,
             0.2,

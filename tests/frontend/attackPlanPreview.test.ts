@@ -147,6 +147,7 @@ function samplePlan(): AttackPlanConfig {
     totalTestcases: 12,
     payloadStrategy: payload,
     recommendedPayloadStrategy: payload,
+    plannerSource: "ai_runtime" as const,
   };
 }
 
@@ -210,7 +211,7 @@ describe("attack plan preview", () => {
         plannerSource: "ai_runtime",
         suggestedPlanKey: baseline,
       }),
-    ).toEqual({ label: "AI suggested", variant: "info" });
+    ).toEqual({ label: "AI Planned", variant: "info" });
 
     const customized = { ...plan, executionStrategy: "agentic" as const };
     expect(

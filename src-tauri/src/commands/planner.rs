@@ -77,7 +77,8 @@ pub struct WizardAttackPlanDto {
     pub risk_coverage: f32,
     pub total_testcases: u32,
     pub payload_strategy: PayloadStrategyDto,
-    pub recommended_payload_strategy: PayloadStrategyDto,
+    pub         recommended_payload_strategy: PayloadStrategyDto,
+    pub planner_source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -261,6 +262,7 @@ pub fn wizard_plan_to_dto(plan: WizardAttackPlan) -> WizardAttackPlanDto {
         total_testcases: plan.total_testcases,
         payload_strategy: payload_strategy_to_dto(plan.payload_strategy),
         recommended_payload_strategy: payload_strategy_to_dto(plan.recommended_payload_strategy),
+        planner_source: plan.planner_source,
     }
 }
 

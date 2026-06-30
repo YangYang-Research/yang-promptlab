@@ -1,17 +1,18 @@
 //! Target Profile IPC — templates, verification, persistence.
 
 use aisec_auth::{resolve_descriptor_for_wizard, SecretStore};
-use aisec_core::AisecError;
+use aisec_core::{AisecError, LogCategory};
 use aisec_storage::TargetRepository;
 use aisec_target_profile::{
     build_wizard_attack_plan_with_llm, list_provider_templates, verify_target_profile, TargetProfile,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use tracing::{info, warn};
 
 use crate::dto::{TargetDto, TargetProfileDto, VerificationConsoleEntryDto};
 use crate::error::{CommandError, CommandResult};
-use crate::inference_host::{is_inference_ready, HostPlannerLlm};
+use crate::inference_host::{is_inference_ready, HostWizardPlannerLlm};
 use crate::state::AppState;
 
 fn profile_from_json(raw: &str) -> CommandResult<TargetProfile> {
@@ -386,27 +387,60 @@ pub async fn planner_generate_from_profile_op(
         ));
     }
 
-    let llm_host = {
-        let inference = state.inference_manager().lock().await;
-        if !is_inference_ready(&inference) {
-            None
-        } else {
-            drop(inference);
-            Some(HostPlannerLlm::new(
-                state.data_dir().to_path_buf(),
-                state.inference_manager().clone(),
-                state.model_manager().clone(),
-                state.model_provider().clone(),
-                state.runtime_manager().clone(),
-            ))
+    let inference = state.inference_manager().lock().await;
+    if !is_inference_ready(&inference) {
+        return Err(CommandError::invalid_input(
+            "AI Runtime must be ready before generating an attack plan. Configure and load a model in AI Runtime settings.",
+        ));
+    }
+    drop(inference);
+
+    let llm_host = HostWizardPlannerLlm::new(
+        state.data_dir().to_path_buf(),
+        state.inference_manager().clone(),
+        state.model_manager().clone(),
+        state.model_provider().clone(),
+        state.runtime_manager().clone(),
+    );
+
+    info!(
+        target_id = %target_id,
+        endpoint = %profile.full_url(),
+        "wizard attack plan: starting AI Runtime planning"
+    );
+
+    let plan = match build_wizard_attack_plan_with_llm(&profile, &llm_host).await {
+        Ok(plan) => plan,
+        Err(err) => {
+            let message = err.to_string();
+            warn!(
+                target_id = %target_id,
+                endpoint = %profile.full_url(),
+                error = %message,
+                "wizard attack plan failed"
+            );
+            state.event_bus().error(
+                LogCategory::Planner,
+                "wizard_plan_generate",
+                "promptlab-desktop",
+                "target_profile",
+                &message,
+            );
+            return Err(CommandError::invalid_input(message));
         }
     };
 
-    let plan = build_wizard_attack_plan_with_llm(
-        &profile,
-        llm_host.as_ref().map(|host| host as &dyn aisec_planner::PlannerLlm),
-    )
-    .await;
+    state.event_bus().info(
+        LogCategory::Planner,
+        "wizard_plan_generate",
+        "promptlab-desktop",
+        "target_profile",
+        format!(
+            "AI attack plan generated for {} ({} modes)",
+            profile.full_url(),
+            plan.profile_modes.len()
+        ),
+    );
 
     Ok(crate::commands::planner::wizard_plan_to_dto(plan))
 }

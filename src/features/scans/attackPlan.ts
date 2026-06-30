@@ -67,6 +67,7 @@ export type AttackPlanConfig = {
   totalTestcases: number;
   payloadStrategy: PayloadStrategyConfig;
   recommendedPayloadStrategy: PayloadStrategyConfig;
+  plannerSource: PlannerSource;
 };
 
 export type AttackProfileModeDto = {
@@ -117,6 +118,7 @@ export type WizardAttackPlanDto = {
   totalTestcases: number;
   payloadStrategy: PayloadStrategyDto;
   recommendedPayloadStrategy: PayloadStrategyDto;
+  plannerSource: string;
 };
 
 export type PlannerAdjustRequest = {
@@ -140,6 +142,24 @@ export type PlannerAdjustRequest = {
   }>;
   capabilityGraph?: string[];
 };
+
+export function normalizeAttackPlan(plan: AttackPlanConfig): AttackPlanConfig {
+  const recommendedProfileId = asProfileId(plan.recommendedProfileId ?? plan.profileId);
+  const plannerSource =
+    plan.plannerSource ??
+    (plan.rationales?.some((item) => item.source === "ai_runtime")
+      ? "ai_runtime"
+      : "target_profile");
+
+  return {
+    ...plan,
+    recommendedProfileId,
+    plannerSource,
+    profileModes: plan.profileModes ?? [],
+    suggestedCategories: plan.suggestedCategories ?? [],
+    rationales: plan.rationales ?? [],
+  };
+}
 
 const ALL_CATEGORY_IDS = new Set<string>([
   "prompt_injection",
@@ -225,7 +245,7 @@ export function getProfileMode(
   plan: Pick<AttackPlanConfig, "profileModes">,
   profileId: AttackProfileId,
 ): AttackProfileMode | null {
-  return plan.profileModes.find((mode) => mode.profileId === profileId) ?? null;
+  return (plan.profileModes ?? []).find((mode) => mode.profileId === profileId) ?? null;
 }
 
 /** Categories payload for `attack_planner_adjust` — avoids empty custom selection. */
@@ -254,11 +274,11 @@ export function attackPlanFromDto(dto: WizardAttackPlanDto): AttackPlanConfig {
   const mapCategories = (values: string[]) =>
     values.map(asCategoryId).filter((id): id is AttackCategoryId => id !== null);
 
-  return {
+  return normalizeAttackPlan({
     profileId: asProfileId(dto.profileId),
     recommendedProfileId: asProfileId(dto.recommendedProfileId ?? dto.profileId),
-    suggestedCategories: mapCategories(dto.suggestedCategories),
-    profileModes: dto.profileModes
+    suggestedCategories: mapCategories(dto.suggestedCategories ?? []),
+    profileModes: (dto.profileModes ?? [])
       .map(profileModeFromDto)
       .filter((mode): mode is AttackProfileMode => mode !== null),
     customCategories: mapCategories(dto.categories),
@@ -300,7 +320,9 @@ export function attackPlanFromDto(dto: WizardAttackPlanDto): AttackPlanConfig {
     totalTestcases: dto.totalTestcases,
     payloadStrategy: payloadStrategyFromDto(dto.payloadStrategy),
     recommendedPayloadStrategy: payloadStrategyFromDto(dto.recommendedPayloadStrategy),
-  };
+    plannerSource:
+      dto.plannerSource === "ai_runtime" ? "ai_runtime" : "target_profile",
+  });
 }
 
 export { payloadStrategyToDto };
@@ -460,8 +482,8 @@ export function plannerAdjustContext(
   "suggestedCategories" | "profileModes" | "rationales" | "capabilityGraph"
 > {
   return {
-    suggestedCategories: plan.suggestedCategories,
-    profileModes: plan.profileModes.map(profileModeToDto),
+    suggestedCategories: plan.suggestedCategories ?? [],
+    profileModes: (plan.profileModes ?? []).map(profileModeToDto),
     rationales: plan.rationales.map((item) => ({
       category: item.category,
       reason: item.reason,
@@ -518,6 +540,7 @@ export function resolveCategoriesForProfile(
 }
 
 export function plannerSourceFromPlan(plan: AttackPlanConfig): PlannerSource {
+  if (plan.plannerSource === "ai_runtime") return "ai_runtime";
   return plan.rationales.some((item) => item.source === "ai_runtime")
     ? "ai_runtime"
     : "target_profile";
@@ -554,7 +577,7 @@ export function resolvePlannerSummaryBadge(
   if (source === "ai_runtime") {
     return customized
       ? { label: "Customized", variant: "warning" }
-      : { label: "AI suggested", variant: "info" };
+      : { label: "AI Planned", variant: "info" };
   }
 
   return customized
