@@ -19,6 +19,8 @@ import {
   recomputePlanPreview,
   resolveCategoriesForAdjust,
   resolvePlannerSummaryBadge,
+  resolveProfileModeBadge,
+  resolveActivePlannerRationales,
   syncAttackPlanUiAfterAdjust,
   type AttackPlanConfig,
 } from "../attackPlan";
@@ -34,6 +36,10 @@ import type { PayloadStrategyConfig } from "../payloadStrategy";
 import { formatPayloadGenerationStrategy } from "../payloadStrategy";
 import type { AttackPlanUiState } from "../wizardState";
 import { PayloadStrategySection } from "./PayloadStrategySection";
+import { WizardRangeSlider } from "./WizardRangeSlider";
+
+const MAX_ATTEMPTS_MIN = 1;
+const MAX_ATTEMPTS_MAX = 20;
 
 type ReviewAttackPlanStepProps = {
   targetId: string;
@@ -61,18 +67,15 @@ export function ReviewAttackPlanStep({
 
   const activeCategories = attackPlan.categories;
   const isCustomProfile = profileId === "custom";
-  const activeMode = getProfileMode(attackPlan, profileId);
+  const executionEditable = isCustomProfile;
   const suggestedSet = useMemo(
     () => new Set(attackPlan.suggestedCategories),
     [attackPlan.suggestedCategories],
   );
   const notApplicableCount = ATTACK_CATALOG.length - attackPlan.suggestedCategories.length;
   const activeRationales = useMemo(
-    () =>
-      attackPlan.rationales
-        .filter((item) => activeCategories.includes(item.category))
-        .sort((a, b) => a.priority - b.priority),
-    [attackPlan.rationales, activeCategories],
+    () => resolveActivePlannerRationales(attackPlan, activeCategories),
+    [attackPlan, activeCategories],
   );
 
   const plannerBadge = useMemo(
@@ -265,7 +268,7 @@ export function ReviewAttackPlanStep({
           </div>
         </dl>
         <p className="text-sm wizard-planner-summary">
-          <strong>Summary:</strong> Plan for{" "}
+          <strong>Plan for:</strong>{" "}
           <span className="wizard-planner-summary__url mono">
             {extractPlannerEndpoint(attackPlan.summary)}
           </span>
@@ -284,7 +287,7 @@ export function ReviewAttackPlanStep({
       <section className="wizard-attack-profiles">
         {ATTACK_PROFILES.map((profile) => {
           const selected = profileId === profile.id;
-          const recommended = attackPlan.recommendedProfileId === profile.id;
+          const modeBadge = resolveProfileModeBadge(attackPlan, profile.id);
           return (
             <button
               key={profile.id}
@@ -293,12 +296,17 @@ export function ReviewAttackPlanStep({
               onClick={() => selectProfile(profile.id)}
               aria-pressed={selected}
             >
-              <span className="wizard-attack-profile__label">
-                {profile.label}
-                {recommended && profile.id !== "custom" ? (
-                  <Badge variant="info">AI Recommended</Badge>
+              <div className="wizard-attack-profile__top">
+                {modeBadge ? (
+                  <Badge
+                    className={modeBadge.className}
+                    variant={modeBadge.variant}
+                  >
+                    {modeBadge.label}
+                  </Badge>
                 ) : null}
-              </span>
+                <span className="wizard-attack-profile__label">{profile.label}</span>
+              </div>
               <span className="wizard-attack-profile__meta text-muted text-sm">
                 {profileModeMeta(profile.id)}
               </span>
@@ -409,77 +417,86 @@ export function ReviewAttackPlanStep({
 
       <section className="wizard-fingerprint-summary">
         <h4 className="wizard-endpoints__title">Execution strategy</h4>
-        {isCustomProfile ? (
-          <>
-            <div className="wizard-attack-profiles">
-              <button
-                type="button"
-                className={`wizard-attack-profile${attackPlan.executionStrategy === "sequential" ? " wizard-attack-profile--selected" : ""}`}
-                onClick={() => updateExecution({ executionStrategy: "sequential" })}
-                aria-pressed={attackPlan.executionStrategy === "sequential"}
-              >
-                <span className="wizard-attack-profile__label">Sequential</span>
-                <span className="wizard-attack-profile__description text-sm">
-                  One execution pass through the selected attack categories.
-                </span>
-              </button>
-              <button
-                type="button"
-                className={`wizard-attack-profile${attackPlan.executionStrategy === "agentic" ? " wizard-attack-profile--selected" : ""}`}
-                onClick={() => updateExecution({ executionStrategy: "agentic" })}
-                aria-pressed={attackPlan.executionStrategy === "agentic"}
-              >
-                <span className="wizard-attack-profile__label">Agentic</span>
-                <span className="wizard-attack-profile__description text-sm">
-                  Planner → Attack → Judge → Reflection → Retry until stop condition.
-                </span>
-              </button>
+        <div className="wizard-attack-profiles">
+          <button
+            type="button"
+            className={`wizard-attack-profile${attackPlan.executionStrategy === "sequential" ? " wizard-attack-profile--selected" : ""}`}
+            onClick={() => {
+              if (!executionEditable) return;
+              updateExecution({ executionStrategy: "sequential" });
+            }}
+            aria-pressed={attackPlan.executionStrategy === "sequential"}
+            aria-disabled={!executionEditable}
+            data-readonly={!executionEditable || undefined}
+          >
+            <span className="wizard-attack-profile__label">Sequential</span>
+            <span className="wizard-attack-profile__description text-sm">
+              One execution pass through the selected attack categories.
+            </span>
+          </button>
+          <button
+            type="button"
+            className={`wizard-attack-profile${attackPlan.executionStrategy === "agentic" ? " wizard-attack-profile--selected" : ""}`}
+            onClick={() => {
+              if (!executionEditable) return;
+              updateExecution({ executionStrategy: "agentic" });
+            }}
+            aria-pressed={attackPlan.executionStrategy === "agentic"}
+            aria-disabled={!executionEditable}
+            data-readonly={!executionEditable || undefined}
+          >
+            <span className="wizard-attack-profile__label">Agentic</span>
+            <span className="wizard-attack-profile__description text-sm">
+              Planner → Attack → Judge → Reflection → Retry until stop condition.
+            </span>
+          </button>
+        </div>
+        {attackPlan.executionStrategy === "agentic" && (
+          <div className="wizard-agent-options">
+            <div className="wizard-payload-sliders">
+              <WizardRangeSlider
+                label="Maximum attempts per category"
+                value={attackPlan.maxAttempts}
+                min={MAX_ATTEMPTS_MIN}
+                max={MAX_ATTEMPTS_MAX}
+                formatValue={(value) => `${value}`}
+                title="Maximum agentic retry attempts per attack category."
+                disabled={!executionEditable}
+                onChange={(value) =>
+                  updateExecution({
+                    maxAttempts: Math.min(
+                      MAX_ATTEMPTS_MAX,
+                      Math.max(MAX_ATTEMPTS_MIN, value),
+                    ),
+                  })
+                }
+              />
             </div>
-            {attackPlan.executionStrategy === "agentic" && (
-              <div className="wizard-agent-options">
-                <label className="text-sm">
-                  Maximum attempts per category
-                  <input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={attackPlan.maxAttempts}
-                    onChange={(event) =>
-                      updateExecution({
-                        maxAttempts: Math.min(20, Math.max(1, Number(event.target.value) || 5)),
-                      })
-                    }
-                  />
-                </label>
-                <label className="wizard-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={attackPlan.reflectionEnabled}
-                    onChange={(event) =>
-                      updateExecution({ reflectionEnabled: event.target.checked })
-                    }
-                  />
-                  Reflection enabled
-                </label>
-                <label className="wizard-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={attackPlan.adaptivePlanning}
-                    onChange={(event) =>
-                      updateExecution({ adaptivePlanning: event.target.checked })
-                    }
-                  />
-                  Adaptive planning
-                </label>
-              </div>
-            )}
-          </>
-        ) : (
-          <p className="text-sm text-muted">
-            {activeMode
-              ? `${formatExecutionStrategySummary(activeMode)} — selected by AI Runtime for ${ATTACK_PROFILES.find((profile) => profile.id === profileId)?.label ?? profileId}. Switch to Custom to override.`
-              : "AI Runtime will define execution strategy for this mode."}
-          </p>
+            <div className="wizard-agent-options__checks">
+              <label className="wizard-checkbox">
+                <input
+                  type="checkbox"
+                  checked={attackPlan.reflectionEnabled}
+                  disabled={!executionEditable}
+                  onChange={(event) =>
+                    updateExecution({ reflectionEnabled: event.target.checked })
+                  }
+                />
+                <span>Reflection enabled</span>
+              </label>
+              <label className="wizard-checkbox">
+                <input
+                  type="checkbox"
+                  checked={attackPlan.adaptivePlanning}
+                  disabled={!executionEditable}
+                  onChange={(event) =>
+                    updateExecution({ adaptivePlanning: event.target.checked })
+                  }
+                />
+                <span>Adaptive planning</span>
+              </label>
+            </div>
+          </div>
         )}
       </section>
 
@@ -488,46 +505,8 @@ export function ReviewAttackPlanStep({
         recommendedStrategy={attackPlan.recommendedPayloadStrategy}
         onChange={updatePayloadStrategy}
         onAcceptRecommended={acceptRecommendedPayloadStrategy}
-        readOnly={!isCustomProfile}
-        readOnlyHint={
-          activeMode
-            ? `AI Runtime selected ${formatPayloadGenerationStrategy(activeMode.payloadStrategy)} for ${ATTACK_PROFILES.find((profile) => profile.id === profileId)?.label ?? profileId}. Switch to Custom to override.`
-            : undefined
-        }
+        readOnly={!executionEditable}
       />
-
-      <section className="wizard-attack-estimates">
-        <div className="wizard-attack-estimate">
-          <span className="wizard-attack-estimate__label">Risk coverage</span>
-          <span className="wizard-attack-estimate__value">
-            {formatCoverageScore(attackPlan.riskCoverage)}
-          </span>
-        </div>
-        <div className="wizard-attack-estimate">
-          <span className="wizard-attack-estimate__label">Est. requests</span>
-          <span className="wizard-attack-estimate__value">
-            {attackPlan.estimatedRequests.toLocaleString()}
-          </span>
-        </div>
-        <div className="wizard-attack-estimate">
-          <span className="wizard-attack-estimate__label">Est. runtime</span>
-          <span className="wizard-attack-estimate__value">
-            {formatEstimatedRuntime(attackPlan.estimatedRuntimeSeconds)}
-          </span>
-        </div>
-        <div className="wizard-attack-estimate">
-          <span className="wizard-attack-estimate__label">Est. tokens</span>
-          <span className="wizard-attack-estimate__value">
-            {attackPlan.estimatedTokens.toLocaleString()}
-          </span>
-        </div>
-        <div className="wizard-attack-estimate">
-          <span className="wizard-attack-estimate__label">Coverage score</span>
-          <span className="wizard-attack-estimate__value">
-            {formatCoverageScore(attackPlan.coverageScore)}
-          </span>
-        </div>
-      </section>
     </div>
   );
 }

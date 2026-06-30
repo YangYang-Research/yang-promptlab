@@ -194,6 +194,14 @@ function rationalesForActiveCategories(
     .sort((a, b) => a.priority - b.priority);
 }
 
+/** Rationales for the active profile categories without mutating the stored plan catalog. */
+export function resolveActivePlannerRationales(
+  plan: Pick<AttackPlanConfig, "rationales">,
+  categories: AttackCategoryId[],
+): CategoryRationale[] {
+  return rationalesForActiveCategories(plan.rationales, categories);
+}
+
 function mapCategoryRationales(
   values: WizardAttackPlanDto["rationales"],
 ): CategoryRationale[] {
@@ -470,8 +478,7 @@ export function computeWizardPlanMetrics(
 export function recomputePlanPreview(plan: AttackPlanConfig): AttackPlanConfig {
   const endpoint = extractPlannerEndpoint(plan.summary);
   const metrics = computeWizardPlanMetrics(plan);
-  const rationales = rationalesForActiveCategories(plan.rationales, plan.categories);
-  const next = { ...plan, ...metrics, rationales };
+  const next = { ...plan, ...metrics };
   return { ...next, summary: buildPlannerSummaryPreview(next, endpoint) };
 }
 
@@ -568,21 +575,48 @@ export type PlannerSummaryBadge = {
 
 export function resolvePlannerSummaryBadge(
   plan: AttackPlanConfig,
-  planUi: Pick<AttackPlanUiState, "plannerSource" | "suggestedPlanKey">,
+  planUi: Pick<AttackPlanUiState, "plannerSource" | "profileId">,
 ): PlannerSummaryBadge {
   const source = planUi.plannerSource ?? plannerSourceFromPlan(plan);
-  const baselineKey = planUi.suggestedPlanKey ?? planCustomizationKey(plan);
-  const customized = planCustomizationKey(plan) !== baselineKey;
+  const profileId = planUi.profileId ?? plan.profileId;
 
-  if (source === "ai_runtime") {
-    return customized
-      ? { label: "Customized", variant: "warning" }
-      : { label: "AI Planned", variant: "info" };
+  if (profileId === "custom") {
+    return { label: "Customized", variant: "warning" };
   }
 
-  return customized
-    ? { label: "Customized", variant: "warning" }
-    : { label: "Suggested", variant: "muted" };
+  if (source === "ai_runtime") {
+    return { label: "AI Planned", variant: "info" };
+  }
+
+  return { label: "Suggested", variant: "muted" };
+}
+
+export type ProfileModeBadge = {
+  label: string;
+  variant: "info";
+  className: string;
+};
+
+export function resolveProfileModeBadge(
+  plan: AttackPlanConfig,
+  profileId: AttackProfileId,
+): ProfileModeBadge | null {
+  if (profileId === "custom") {
+    return null;
+  }
+  if (plan.recommendedProfileId === profileId) {
+    return {
+      label: "AI Recommended",
+      variant: "info",
+      className:
+        "wizard-attack-profile__badge wizard-attack-profile__badge--recommended",
+    };
+  }
+  return {
+    label: "AI",
+    variant: "info",
+    className: "wizard-attack-profile__badge",
+  };
 }
 
 export function attackPlanUiBaselineFromPlan(plan: AttackPlanConfig): AttackPlanUiState {

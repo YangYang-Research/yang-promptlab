@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   extractPlannerEndpoint,
   formatExecutionStrategySummary,
-  planCustomizationKey,
   plannerSourceFromPlan,
   previewPlanForProfile,
   recomputePlanPreview,
+  resolveActivePlannerRationales,
   resolvePlannerSummaryBadge,
   type AttackPlanConfig,
 } from "@/features/scans/attackPlan";
@@ -134,7 +134,32 @@ function samplePlan(): AttackPlanConfig {
     maxAttempts: 5,
     reflectionEnabled: false,
     adaptivePlanning: false,
-    rationales: [],
+    rationales: [
+      {
+        category: "prompt_injection" as const,
+        reason: "AI endpoint (generic_http) — test prompt injection",
+        priority: 1,
+        source: "target_profile",
+      },
+      {
+        category: "jailbreak" as const,
+        reason: "LLM deployment — test safety guardrail bypass",
+        priority: 2,
+        source: "target_profile",
+      },
+      {
+        category: "system_prompt_extraction" as const,
+        reason: "Model API exposed — probe hidden instructions",
+        priority: 3,
+        source: "target_profile",
+      },
+      {
+        category: "tool_abuse" as const,
+        reason: "Tool-capable endpoint — test function abuse",
+        priority: 4,
+        source: "target_profile",
+      },
+    ],
     confidence: 0.85,
     summary: "Plan for https://api.example.com/v1/chat",
     riskScore: 50,
@@ -191,9 +216,21 @@ describe("attack plan preview", () => {
     expect(preview.categories).toContain("tool_abuse");
   });
 
+  it("preserves full rationale catalog when previewing a narrower profile", () => {
+    const plan = samplePlan();
+    const catalogLen = plan.rationales.length;
+    const preview = previewPlanForProfile(plan, "standard", []);
+    expect(preview.rationales).toHaveLength(catalogLen);
+    expect(resolveActivePlannerRationales(preview, preview.categories).length).toBeLessThanOrEqual(
+      catalogLen,
+    );
+    expect(resolveActivePlannerRationales(preview, preview.categories).length).toBeGreaterThan(0);
+  });
+
   it("labels AI plans and detects customization", () => {
     const plan = {
       ...samplePlan(),
+      profileId: "standard" as const,
       rationales: [
         {
           category: "prompt_injection" as const,
@@ -203,21 +240,26 @@ describe("attack plan preview", () => {
         },
       ],
     };
-    const baseline = planCustomizationKey(plan);
 
     expect(plannerSourceFromPlan(plan)).toBe("ai_runtime");
     expect(
       resolvePlannerSummaryBadge(plan, {
         plannerSource: "ai_runtime",
-        suggestedPlanKey: baseline,
+        profileId: "standard",
       }),
     ).toEqual({ label: "AI Planned", variant: "info" });
 
-    const customized = { ...plan, executionStrategy: "agentic" as const };
     expect(
-      resolvePlannerSummaryBadge(customized, {
+      resolvePlannerSummaryBadge(
+        { ...plan, executionStrategy: "agentic" as const, profileId: "deep" },
+        { plannerSource: "ai_runtime", profileId: "deep" },
+      ),
+    ).toEqual({ label: "AI Planned", variant: "info" });
+
+    expect(
+      resolvePlannerSummaryBadge(plan, {
         plannerSource: "ai_runtime",
-        suggestedPlanKey: baseline,
+        profileId: "custom",
       }),
     ).toEqual({ label: "Customized", variant: "warning" });
   });

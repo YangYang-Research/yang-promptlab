@@ -10,62 +10,11 @@ import {
   PAYLOAD_BUDGET_MIN,
   PAYLOAD_BUDGET_STEP,
   payloadStrategyMatchesRecommendation,
-  sliderPercent,
   VARIANTS_PER_TEST_MAX,
   VARIANTS_PER_TEST_MIN,
   type PayloadStrategyConfig,
 } from "../payloadStrategy";
-
-type PayloadStrategySliderProps = {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  formatValue: (value: number) => string;
-  title?: string;
-  onChange: (value: number) => void;
-};
-
-function PayloadStrategySlider({
-  label,
-  value,
-  min,
-  max,
-  step = 1,
-  formatValue,
-  title,
-  onChange,
-}: PayloadStrategySliderProps) {
-  const fillPct = sliderPercent(value, min, max);
-
-  return (
-    <div className="wizard-payload-slider" title={title}>
-      <div className="wizard-payload-slider__header">
-        <span className="wizard-payload-slider__label">{label}</span>
-        <span className="wizard-payload-slider__value">{formatValue(value)}</span>
-      </div>
-      <div className="wizard-payload-slider__track-wrap">
-        <div className="progress__track" aria-hidden>
-          <div className="progress__fill" style={{ width: `${fillPct}%` }} />
-        </div>
-        <input
-          type="range"
-          className="wizard-payload-slider__input"
-          min={min}
-          max={max}
-          step={step}
-          value={value}
-          onChange={(event) => onChange(Number(event.target.value))}
-          aria-valuemin={min}
-          aria-valuemax={max}
-          aria-valuenow={value}
-          aria-label={label}
-        />
-      </div>
-    </div>
-  );
-}
+import { WizardRangeSlider } from "./WizardRangeSlider";
 
 type PayloadStrategySectionProps = {
   strategy: PayloadStrategyConfig;
@@ -73,7 +22,6 @@ type PayloadStrategySectionProps = {
   onChange: (patch: Partial<PayloadStrategyConfig>) => void;
   onAcceptRecommended: () => void;
   readOnly?: boolean;
-  readOnlyHint?: string;
 };
 
 export function PayloadStrategySection({
@@ -82,27 +30,19 @@ export function PayloadStrategySection({
   onChange,
   onAcceptRecommended,
   readOnly = false,
-  readOnlyHint,
 }: PayloadStrategySectionProps) {
   const matchesRecommendation = payloadStrategyMatchesRecommendation(strategy, recommendedStrategy);
 
-  if (readOnly) {
-    return (
-      <section className="wizard-fingerprint-summary">
-        <h4 className="wizard-endpoints__title">Payload strategy</h4>
-        <p className="text-sm text-muted">
-          {readOnlyHint ??
-            `${GENERATION_STRATEGIES.find((s) => s.id === strategy.strategy)?.label ?? strategy.strategy} · ${MUTATION_LEVELS.find((m) => m.id === strategy.mutationLevel)?.label ?? strategy.mutationLevel} · ${strategy.variantsPerTest} variants · budget ${strategy.maxTotalPayloads}`}
-        </p>
-      </section>
-    );
-  }
+  const applyChange = (patch: Partial<PayloadStrategyConfig>) => {
+    if (readOnly) return;
+    onChange(patch);
+  };
 
   return (
     <section className="wizard-fingerprint-summary">
       <div className="wizard-attack-categories__header">
         <h4 className="wizard-endpoints__title">Payload strategy</h4>
-        {!matchesRecommendation && (
+        {!readOnly && !matchesRecommendation && (
           <button
             type="button"
             className="wizard-attack-category__expand text-sm"
@@ -116,7 +56,7 @@ export function PayloadStrategySection({
       <p className="text-muted text-sm">
         Configures how payloads are generated during Step 5 execution. No probes are built here.
       </p>
-      {!matchesRecommendation && (
+      {!readOnly && !matchesRecommendation && (
         <p className="text-sm wizard-planner-summary">
           <Badge variant="info">Planner recommendation</Badge>{" "}
           {GENERATION_STRATEGIES.find((s) => s.id === recommendedStrategy.strategy)?.label} ·{" "}
@@ -131,8 +71,10 @@ export function PayloadStrategySection({
             key={item.id}
             type="button"
             className={`wizard-attack-profile${strategy.strategy === item.id ? " wizard-attack-profile--selected" : ""}`}
-            onClick={() => onChange({ strategy: item.id })}
+            onClick={() => applyChange({ strategy: item.id })}
             aria-pressed={strategy.strategy === item.id}
+            aria-disabled={readOnly}
+            data-readonly={readOnly || undefined}
             title={item.tooltip}
           >
             <span className="wizard-attack-profile__label">{item.label}</span>
@@ -147,8 +89,10 @@ export function PayloadStrategySection({
             key={item.id}
             type="button"
             className={`wizard-attack-profile${strategy.mutationLevel === item.id ? " wizard-attack-profile--selected" : ""}`}
-            onClick={() => onChange({ mutationLevel: item.id })}
+            onClick={() => applyChange({ mutationLevel: item.id })}
             aria-pressed={strategy.mutationLevel === item.id}
+            aria-disabled={readOnly}
+            data-readonly={readOnly || undefined}
             title={item.tooltip}
           >
             <span className="wizard-attack-profile__label">{item.label}</span>
@@ -158,16 +102,17 @@ export function PayloadStrategySection({
       </div>
 
       <div className="wizard-payload-sliders">
-        <PayloadStrategySlider
+        <WizardRangeSlider
           label="Variants per test"
           value={strategy.variantsPerTest}
           min={VARIANTS_PER_TEST_MIN}
           max={VARIANTS_PER_TEST_MAX}
           formatValue={(value) => `${value}`}
           title="Maximum payload candidates per test (not HTTP requests)."
-          onChange={(value) => onChange({ variantsPerTest: clampVariantsPerTest(value) })}
+          onChange={(value) => applyChange({ variantsPerTest: clampVariantsPerTest(value) })}
+          disabled={readOnly}
         />
-        <PayloadStrategySlider
+        <WizardRangeSlider
           label="Maximum payload budget"
           value={strategy.maxTotalPayloads}
           min={PAYLOAD_BUDGET_MIN}
@@ -175,21 +120,23 @@ export function PayloadStrategySection({
           step={PAYLOAD_BUDGET_STEP}
           formatValue={(value) => value.toLocaleString()}
           title="Upper bound on generated payloads. Execution may stop earlier."
-          onChange={(value) => onChange({ maxTotalPayloads: clampPayloadBudget(value) })}
+          onChange={(value) => applyChange({ maxTotalPayloads: clampPayloadBudget(value) })}
+          disabled={readOnly}
         />
       </div>
 
-      <details className="wizard-fingerprint-summary" style={{ marginTop: "1rem" }}>
+      <details className="wizard-fingerprint-summary wizard-advanced-options" open={readOnly}>
         <summary className="wizard-endpoints__title text-sm">Advanced options</summary>
-        <div className="wizard-agent-options">
+        <div className="wizard-advanced-options__list">
           {ADVANCED_OPTIONS.map((option) => (
             <label key={option.key} className="wizard-checkbox" title={option.tooltip}>
               <input
                 type="checkbox"
                 checked={strategy[option.key]}
-                onChange={(event) => onChange({ [option.key]: event.target.checked })}
+                disabled={readOnly}
+                onChange={(event) => applyChange({ [option.key]: event.target.checked })}
               />
-              {option.label}
+              <span>{option.label}</span>
             </label>
           ))}
         </div>

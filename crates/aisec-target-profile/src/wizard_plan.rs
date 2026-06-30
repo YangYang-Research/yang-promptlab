@@ -295,8 +295,6 @@ pub fn adjust_wizard_attack_plan(
 
     recompute_estimates(&mut plan);
 
-    let active: HashSet<_> = plan.categories.iter().copied().collect();
-    plan.rationales.retain(|r| active.contains(&r.category));
     plan.rationales.sort_by_key(|r| r.priority);
 
     plan
@@ -559,6 +557,17 @@ mod tests {
         assert!(find_profile_mode(&plan.profile_modes, "quick").is_some());
         assert!(find_profile_mode(&plan.profile_modes, "standard").is_some());
         assert!(find_profile_mode(&plan.profile_modes, "deep").is_some());
+    }
+
+    #[test]
+    fn adjust_preserves_rationale_catalog_when_switching_profile() {
+        let plan = build_wizard_attack_plan(&sample_profile());
+        let catalog_len = plan.rationales.len();
+        let adjusted = adjust_wizard_attack_plan(plan, "deep", None, &[], &[], None);
+        assert_eq!(adjusted.rationales.len(), catalog_len);
+        assert!(adjusted.categories.len() >= find_profile_mode(&adjusted.profile_modes, "deep")
+            .map(|mode| mode.categories.len())
+            .unwrap_or(0));
     }
 
     #[test]

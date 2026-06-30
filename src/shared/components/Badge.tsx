@@ -3,10 +3,12 @@ import type { Severity } from "@/shared/types";
 type BadgeProps = {
   children: string;
   variant?: "default" | "success" | "warning" | "danger" | "info" | "muted";
+  className?: string;
 };
 
-export function Badge({ children, variant = "default" }: BadgeProps) {
-  return <span className={`badge badge--${variant}`}>{children}</span>;
+export function Badge({ children, variant = "default", className }: BadgeProps) {
+  const classes = ["badge", `badge--${variant}`, className].filter(Boolean).join(" ");
+  return <span className={classes}>{children}</span>;
 }
 
 const severityVariant: Record<Severity, BadgeProps["variant"]> = {

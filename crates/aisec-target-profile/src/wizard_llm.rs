@@ -490,6 +490,8 @@ fn parse_wizard_llm_plan(raw: &str, profile: &TargetProfile) -> PlannerResult<Wi
         }
     }
 
+    rationales = enrich_rationales_from_profile(profile, &suggested_categories, rationales);
+
     Ok(WizardLlmRefinement {
         recommended_profile_id,
         profile_modes,
@@ -498,6 +500,24 @@ fn parse_wizard_llm_plan(raw: &str, profile: &TargetProfile) -> PlannerResult<Wi
         rationales,
         capabilities: Some(effective_capabilities(&enhanced)),
     })
+}
+
+fn enrich_rationales_from_profile(
+    profile: &TargetProfile,
+    suggested: &[AttackCategory],
+    mut rationales: Vec<CategoryRationale>,
+) -> Vec<CategoryRationale> {
+    let baseline = plan_from_target_profile(profile).rationales;
+    for category in suggested {
+        if rationales.iter().any(|r| r.category == *category) {
+            continue;
+        }
+        if let Some(item) = baseline.iter().find(|r| r.category == *category) {
+            rationales.push(item.clone());
+        }
+    }
+    rationales.sort_by_key(|r| r.priority);
+    rationales
 }
 
 fn build_modes_from_llm_strict(
@@ -533,15 +553,22 @@ fn build_modes_from_llm_strict(
         let payload_raw = llm_mode.payload_strategy.as_ref().ok_or_else(|| {
             PlannerError::Llm(format!("missing modes.{profile_id}.payloadStrategy"))
         })?;
-        let payload_strategy = parse_payload_strategy_strict(payload_raw)?;
+        if payload_raw.mutation_level.trim().is_empty() {
+            return Err(PlannerError::Llm(format!(
+                "modes.{profile_id}.payloadStrategy.mutationLevel is required (low|medium|high|extreme)"
+            )));
+        }
+        let payload_strategy = parse_payload_strategy_strict(payload_raw, profile_id)?;
+        let (max_attempts, reflection_enabled, adaptive_planning) =
+            resolve_execution_options(llm_mode, profile_id, execution_strategy)?;
 
         out.push(AttackProfileMode {
             profile_id: (*profile_id).into(),
             categories,
             execution_strategy,
-            max_attempts: llm_mode.max_attempts.unwrap_or(5).clamp(1, 20),
-            reflection_enabled: llm_mode.reflection_enabled.unwrap_or(false),
-            adaptive_planning: llm_mode.adaptive_planning.unwrap_or(false),
+            max_attempts,
+            reflection_enabled,
+            adaptive_planning,
             payload_strategy: payload_strategy.clamp(),
         });
     }
@@ -594,6 +621,42 @@ fn parse_execution_strategy(raw: &str) -> Option<ExecutionStrategy> {
     }
 }
 
+fn resolve_execution_options(
+    llm_mode: &LlmWizardMode,
+    profile_id: &str,
+    execution_strategy: ExecutionStrategy,
+) -> PlannerResult<(u8, bool, bool)> {
+    match execution_strategy {
+        ExecutionStrategy::Sequential => Ok((
+            llm_mode.max_attempts.unwrap_or(3).clamp(1, 20),
+            llm_mode.reflection_enabled.unwrap_or(false),
+            llm_mode.adaptive_planning.unwrap_or(false),
+        )),
+        ExecutionStrategy::Agentic => {
+            let max_attempts = llm_mode.max_attempts.ok_or_else(|| {
+                PlannerError::Llm(format!(
+                    "modes.{profile_id}.maxAttempts is required when executionStrategy is agentic"
+                ))
+            })?;
+            let reflection_enabled = llm_mode.reflection_enabled.ok_or_else(|| {
+                PlannerError::Llm(format!(
+                    "modes.{profile_id}.reflectionEnabled is required when executionStrategy is agentic"
+                ))
+            })?;
+            let adaptive_planning = llm_mode.adaptive_planning.ok_or_else(|| {
+                PlannerError::Llm(format!(
+                    "modes.{profile_id}.adaptivePlanning is required when executionStrategy is agentic"
+                ))
+            })?;
+            Ok((
+                max_attempts.clamp(1, 20),
+                reflection_enabled,
+                adaptive_planning,
+            ))
+        }
+    }
+}
+
 fn parse_payload_strategy_name(raw: &str) -> Option<&'static str> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "deterministic" | "1" | "0" => Some("deterministic"),
@@ -609,12 +672,30 @@ fn parse_mutation_level_name(raw: &str) -> Option<&'static str> {
         "medium" | "2" => Some("medium"),
         "high" | "3" => Some("high"),
         "extreme" | "4" => Some("extreme"),
-        _ if raw.is_empty() => Some("medium"),
         _ => None,
     }
 }
 
-fn parse_payload_strategy_strict(raw: &LlmWizardPayloadStrategy) -> PlannerResult<PayloadStrategy> {
+fn default_mutation_level_for_profile(
+    strategy: PayloadGenerationStrategy,
+    profile_id: &str,
+) -> MutationLevel {
+    match profile_id {
+        "quick" => MutationLevel::Low,
+        "deep" => MutationLevel::Extreme,
+        "standard" => MutationLevel::Medium,
+        _ => match strategy {
+            PayloadGenerationStrategy::Deterministic => MutationLevel::Low,
+            PayloadGenerationStrategy::Mutation => MutationLevel::Medium,
+            PayloadGenerationStrategy::Adaptive => MutationLevel::Extreme,
+        },
+    }
+}
+
+fn parse_payload_strategy_strict(
+    raw: &LlmWizardPayloadStrategy,
+    profile_id: &str,
+) -> PlannerResult<PayloadStrategy> {
     let strategy_name = parse_payload_strategy_name(&raw.strategy).ok_or_else(|| {
         PlannerError::Llm(format!(
             "invalid payloadStrategy.strategy: {}",
@@ -627,21 +708,25 @@ fn parse_payload_strategy_strict(raw: &LlmWizardPayloadStrategy) -> PlannerResul
         "mutation" => PayloadGenerationStrategy::Mutation,
         _ => unreachable!("validated strategy name"),
     };
-    let mutation_name = parse_mutation_level_name(&raw.mutation_level).ok_or_else(|| {
-        PlannerError::Llm(format!(
-            "invalid payloadStrategy.mutationLevel: {}",
-            raw.mutation_level
-        ))
-    })?;
-    let mutation_level = match mutation_name {
-        "low" => MutationLevel::Low,
-        "high" => MutationLevel::High,
-        "extreme" => MutationLevel::Extreme,
-        "medium" => MutationLevel::Medium,
-        other => {
-            return Err(PlannerError::Llm(format!(
-                "invalid payloadStrategy.mutationLevel: {other}"
-            )));
+    let mutation_level = if raw.mutation_level.trim().is_empty() {
+        default_mutation_level_for_profile(strategy, profile_id)
+    } else {
+        let mutation_name = parse_mutation_level_name(&raw.mutation_level).ok_or_else(|| {
+            PlannerError::Llm(format!(
+                "invalid payloadStrategy.mutationLevel: {}",
+                raw.mutation_level
+            ))
+        })?;
+        match mutation_name {
+            "low" => MutationLevel::Low,
+            "high" => MutationLevel::High,
+            "extreme" => MutationLevel::Extreme,
+            "medium" => MutationLevel::Medium,
+            other => {
+                return Err(PlannerError::Llm(format!(
+                    "invalid payloadStrategy.mutationLevel: {other}"
+                )));
+            }
         }
     };
     let variants_per_test = if raw.variants_per_test == 0 {
@@ -844,7 +929,8 @@ mod tests {
                 "strategy": "deterministic",
                 "mutationLevel": "low",
                 "variantsPerTest": 2,
-                "maxTotalPayloads": 10
+                "maxTotalPayloads": 10,
+                "enablePayloadDeduplication": true
               }
             },
             "standard": {
@@ -854,18 +940,27 @@ mod tests {
                 "strategy": "mutation",
                 "mutationLevel": "medium",
                 "variantsPerTest": 5,
-                "maxTotalPayloads": 20
+                "maxTotalPayloads": 20,
+                "enableContextAwareness": true,
+                "enablePayloadDeduplication": true
               }
             },
             "deep": {
               "categories": ["prompt_injection", "jailbreak", "tool_abuse"],
               "executionStrategy": "agentic",
               "maxAttempts": 5,
+              "reflectionEnabled": true,
+              "adaptivePlanning": true,
               "payloadStrategy": {
                 "strategy": "adaptive",
                 "mutationLevel": "extreme",
                 "variantsPerTest": 10,
-                "maxTotalPayloads": 100
+                "maxTotalPayloads": 100,
+                "enableContextAwareness": true,
+                "enableConversationMemory": true,
+                "enableResponseAdaptation": true,
+                "enablePayloadDeduplication": true,
+                "enableCrossCategoryMutation": true
               }
             }
           }
@@ -884,6 +979,17 @@ mod tests {
         assert!(plan.suggested_categories.contains(&AttackCategory::ToolAbuse));
         let standard = find_profile_mode(&plan.profile_modes, "standard").expect("standard mode");
         assert!(standard.categories.contains(&AttackCategory::ToolAbuse));
+        let quick = find_profile_mode(&plan.profile_modes, "quick").expect("quick mode");
+        let deep = find_profile_mode(&plan.profile_modes, "deep").expect("deep mode");
+        assert_eq!(quick.payload_strategy.mutation_level, MutationLevel::Low);
+        assert_eq!(standard.payload_strategy.mutation_level, MutationLevel::Medium);
+        assert_eq!(deep.payload_strategy.mutation_level, MutationLevel::Extreme);
+        assert_eq!(deep.execution_strategy, ExecutionStrategy::Agentic);
+        assert_eq!(deep.max_attempts, 5);
+        assert!(deep.reflection_enabled);
+        assert!(deep.adaptive_planning);
+        assert!(deep.payload_strategy.enable_response_adaptation);
+        assert!(deep.payload_strategy.enable_cross_category_mutation);
     }
 
     #[tokio::test]
@@ -897,6 +1003,29 @@ mod tests {
         assert_eq!(plan.profile_modes.len(), 3);
     }
 
+    #[tokio::test]
+    async fn harness_retries_when_mutation_level_missing() {
+        let missing_mutation = r#"{"recommendedProfileId":"standard","modes":{"quick":{"categories":["prompt_injection"],"executionStrategy":"sequential","payloadStrategy":{"strategy":"deterministic"}},"standard":{"categories":["prompt_injection"],"executionStrategy":"sequential","payloadStrategy":{"strategy":"mutation","mutationLevel":"medium"}},"deep":{"categories":["prompt_injection"],"executionStrategy":"agentic","payloadStrategy":{"strategy":"adaptive","mutationLevel":"extreme"}}}}"#.to_string();
+        let llm = MockLlm::new(vec![missing_mutation.as_str(), valid_modes_json().as_str()]);
+        let plan = build_wizard_attack_plan_with_llm(&sample_profile(), &llm)
+            .await
+            .expect("repaired mutation level");
+        let quick = find_profile_mode(&plan.profile_modes, "quick").expect("quick mode");
+        assert_eq!(quick.payload_strategy.mutation_level, MutationLevel::Low);
+    }
+
+    #[tokio::test]
+    async fn harness_retries_when_agentic_options_missing() {
+        let missing_agentic = r#"{"recommendedProfileId":"standard","modes":{"quick":{"categories":["prompt_injection"],"executionStrategy":"sequential","payloadStrategy":{"strategy":"deterministic","mutationLevel":"low"}},"standard":{"categories":["prompt_injection"],"executionStrategy":"sequential","payloadStrategy":{"strategy":"mutation","mutationLevel":"medium"}},"deep":{"categories":["prompt_injection"],"executionStrategy":"agentic","maxAttempts":5,"payloadStrategy":{"strategy":"adaptive","mutationLevel":"extreme"}}}}"#.to_string();
+        let llm = MockLlm::new(vec![missing_agentic.as_str(), valid_modes_json().as_str()]);
+        let plan = build_wizard_attack_plan_with_llm(&sample_profile(), &llm)
+            .await
+            .expect("repaired agentic options");
+        let deep = find_profile_mode(&plan.profile_modes, "deep").expect("deep mode");
+        assert!(deep.reflection_enabled);
+        assert!(deep.adaptive_planning);
+    }
+
     #[test]
     fn parse_wizard_llm_plan_accepts_numeric_enum_fields() {
         let raw = r#"{
@@ -905,7 +1034,7 @@ mod tests {
             "quick": {
               "categories": ["prompt_injection"],
               "executionStrategy": 1,
-              "payloadStrategy": { "strategy": 1 }
+              "payloadStrategy": { "strategy": 1, "mutationLevel": 1 }
             },
             "standard": {
               "categories": ["prompt_injection", "jailbreak"],
@@ -915,7 +1044,10 @@ mod tests {
             "deep": {
               "categories": ["prompt_injection", "jailbreak"],
               "executionStrategy": 2,
-              "payloadStrategy": { "strategy": 3, "maxTotalPayloads": 100 }
+              "maxAttempts": 5,
+              "reflectionEnabled": true,
+              "adaptivePlanning": true,
+              "payloadStrategy": { "strategy": 3, "mutationLevel": 4, "maxTotalPayloads": 100 }
             }
           }
         }"#;
