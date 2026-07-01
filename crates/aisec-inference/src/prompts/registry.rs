@@ -178,6 +178,44 @@ Example shape:
         )
     }
 
+    pub fn endpoint_verify_system() -> &'static str {
+        "You are an AI API endpoint classifier for authorized security testing. Reply with a single compact JSON object only — no markdown, no prose."
+    }
+
+    pub fn endpoint_verify_user(
+        provider: &str,
+        framework: &str,
+        endpoint: &str,
+        method: &str,
+        request_body: &str,
+        status_code: u16,
+        response_body: &str,
+    ) -> String {
+        format!(
+            r#"Analyze whether the HTTP response below came from a generative AI / LLM API endpoint (chat completion, agent orchestration, or similar).
+
+Provider hint: {provider}
+Framework hint: {framework}
+Endpoint: {endpoint}
+HTTP method: {method}
+Status code: {status_code}
+
+Request body sent:
+{request_body}
+
+Response body:
+{response_body}
+
+Respond ONLY with JSON on one line:
+{{"isAiEndpoint": true|false, "confidence": 0.0-1.0}}
+
+Optional: add "rationale" only when needed — max 120 characters, plain text, no quotes or backslashes.
+
+Set isAiEndpoint to true only when the response clearly contains AI-generated assistant text, completion choices, model output, or an equivalent generative AI payload.
+Set false for validation errors, auth failures rendered as JSON, static REST/CRUD payloads, HTML, or non-AI backends."#
+        )
+    }
+
     pub fn wizard_profile_repair(
         allowed: &str,
         previous_json: &str,

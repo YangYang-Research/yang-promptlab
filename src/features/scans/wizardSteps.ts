@@ -29,7 +29,7 @@ export const WIZARD_STEPS: WizardStepDefinition[] = [
     id: 3,
     label: "Authentication",
     title: "Authentication & verification",
-    hint: "Configure credentials and verify the target responds to a real AI request",
+    hint: "Configure credentials, then verify the AI API endpoint with AI Runtime",
   },
   {
     id: 4,

@@ -15,6 +15,7 @@ pub mod serde_verified_at;
 pub mod templates;
 pub mod types;
 pub mod verification;
+pub mod verification_llm;
 
 pub use capabilities::default_capabilities_for_provider;
 pub use harness::harness_kind_for_profile;
@@ -36,3 +37,4 @@ pub use types::*;
 pub use verification::{
     verify_target_profile, VerificationAttempt, VerificationConsoleEntry, VerificationError,
 };
+pub use verification_llm::verify_target_profile_with_llm;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/shared/components";
+import { IconAi } from "@/shared/components/Icons";
 import { verifyTargetProfile } from "@/shared/ipc/targetProfile";
 import { useToast } from "@/shared/notifications";
 
@@ -159,7 +160,6 @@ export function AuthVerificationStep({
   return (
     <div className="auth-verification-step">
       <section>
-        <h3 className="wizard-section-title">Authentication</h3>
         {authDetectedFromProfile && authForm.authKind !== "none" && (
           <p className="text-muted text-sm auth-verification-step__detected">
             Detected <strong>{authMethodLabel(authForm.authKind)}</strong> from Step 2 headers.
@@ -180,13 +180,15 @@ export function AuthVerificationStep({
       </section>
 
       <section>
-        <h3 className="wizard-section-title">Verify API</h3>
-        <p className="text-muted">
-          Sends a real AI request (<code>Hello</code>) using your Target Profile to confirm the
-          endpoint responds correctly.
+        <p className="text-muted text-sm">
+          Sends a real AI request (<code>Hello</code>) to your endpoint, then uses AI Runtime to
+          confirm the response is from a generative AI system.
         </p>
         <Button variant="primary" disabled={verifying} onClick={() => void handleVerify()}>
-          {verifying ? "Verifying…" : "Verify API"}
+          <span className="btn__content">
+            <IconAi className="btn__icon" aria-hidden />
+            {verifying ? "Verifying…" : "Verify AI API Endpoint"}
+          </span>
         </Button>
         {error && <p className="text-danger">{error}</p>}
       </section>

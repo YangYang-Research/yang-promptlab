@@ -115,9 +115,6 @@ export function TargetProfileStep({
           />
         </label>
       </div>
-      <span className="text-muted text-sm wizard-target-form__hint">
-        Full URL including path and query string if needed.
-      </span>
 
       <label className="field">
         <span className="field__label">Headers (JSON)</span>
@@ -145,8 +142,10 @@ export function TargetProfileStep({
           spellCheck={false}
         />
         <span className="text-muted text-sm">
-          Payload Generator replaces only <code>{PROMPT_PLACEHOLDER}</code> — other JSON fields are
-          never modified.
+          <em>
+            Note: Payload Generator replaces only <code>{PROMPT_PLACEHOLDER}</code> — other JSON
+            fields are never modified.
+          </em>
         </span>
       </div>
 

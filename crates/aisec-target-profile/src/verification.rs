@@ -35,6 +35,10 @@ pub enum VerificationError {
     HttpError(u16),
     #[error("response did not contain AI content")]
     NoAiResponse,
+    #[error("AI Runtime rejected endpoint: {0}")]
+    NotAiEndpoint(String),
+    #[error("AI Runtime validation failed: {0}")]
+    LlmValidationFailed(String),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -163,7 +167,16 @@ fn reqwest_method(method: HttpMethod) -> Method {
     }
 }
 
-fn extract_model_from_response(body: &str) -> Option<String> {
+#[derive(Debug, Clone)]
+pub(crate) struct VerifyHttpSuccess {
+    pub console: VerificationConsoleEntry,
+    pub response_text: String,
+    pub request_body: String,
+    pub response_time_ms: u64,
+    pub status_code: u16,
+}
+
+pub(crate) fn extract_model_from_response(body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
     value
         .pointer("/model")
@@ -257,29 +270,28 @@ fn map_status_error(status: StatusCode) -> VerificationError {
     }
 }
 
-/// Execute a real AI request against the target profile for verification.
-/// Does NOT use AI Runtime — only validates the target endpoint.
-pub async fn verify_target_profile(
+/// Execute the real HTTP verify probe (connectivity only).
+pub(crate) async fn execute_verify_http(
     profile: &TargetProfile,
     auth_headers: HashMap<String, String>,
-) -> VerificationAttempt {
+) -> Result<VerifyHttpSuccess, VerificationAttempt> {
     if !profile.request_template.contains(&profile.prompt_placeholder) {
-        return attempt_failure(
+        return Err(attempt_failure(
             profile,
             &profile.headers,
             "",
             VerificationError::MissingPromptPlaceholder,
-        );
+        ));
     }
 
     let url = profile.full_url();
     if url::Url::parse(&url).is_err() {
-        return attempt_failure(
+        return Err(attempt_failure(
             profile,
             &profile.headers,
             "",
             VerificationError::InvalidUrl(url.clone()),
-        );
+        ));
     }
 
     let body = replace_prompt(
@@ -306,18 +318,18 @@ pub async fn verify_target_profile(
     {
         Ok(client) => client,
         Err(e) => {
-            return attempt_failure(
+            return Err(attempt_failure(
                 profile,
                 &headers,
                 &body,
                 VerificationError::ConnectionFailed(e.to_string()),
-            );
+            ));
         }
     };
 
     let header_map = match build_header_map(&headers) {
         Ok(map) => map,
-        Err(error) => return attempt_failure(profile, &headers, &body, error),
+        Err(error) => return Err(attempt_failure(profile, &headers, &body, error)),
     };
 
     let started = Instant::now();
@@ -337,7 +349,7 @@ pub async fn verify_target_profile(
             } else {
                 VerificationError::ConnectionFailed(e.to_string())
             };
-            return attempt_failure(profile, &headers, &body, error);
+            return Err(attempt_failure(profile, &headers, &body, error));
         }
     };
 
@@ -352,15 +364,6 @@ pub async fn verify_target_profile(
         Some(response_text.clone())
     };
 
-    let success = status.is_success() && has_ai_response(&response_text, status);
-    let message = if success {
-        "Verification succeeded — target responded with AI content".into()
-    } else if status.is_success() {
-        VerificationError::NoAiResponse.to_string()
-    } else {
-        map_status_error(status).to_string()
-    };
-
     let console = VerificationConsoleEntry {
         method: profile.method.as_str().into(),
         url: url.clone(),
@@ -368,29 +371,85 @@ pub async fn verify_target_profile(
         body: body.clone(),
         status_code: status.as_u16(),
         response_time_ms: elapsed,
-        response_preview: preview.clone(),
-        success,
-        message: message.clone(),
+        response_preview: preview,
+        success: false,
+        message: String::new(),
     };
 
     if !status.is_success() {
-        return VerificationAttempt {
-            console,
+        let message = map_status_error(status).to_string();
+        return Err(VerificationAttempt {
+            console: VerificationConsoleEntry {
+                message,
+                ..console
+            },
             result: Err(map_status_error(status)),
-        };
+        });
     }
-    if !has_ai_response(&response_text, status) {
+
+    if response_text.trim().is_empty() {
+        let message = VerificationError::NoAiResponse.to_string();
+        return Err(VerificationAttempt {
+            console: VerificationConsoleEntry {
+                message: message.clone(),
+                ..console
+            },
+            result: Err(VerificationError::NoAiResponse),
+        });
+    }
+
+    Ok(VerifyHttpSuccess {
+        console: VerificationConsoleEntry {
+            message: "Connectivity check passed — validating response with AI Runtime".into(),
+            ..console
+        },
+        response_text,
+        request_body: body,
+        response_time_ms: elapsed,
+        status_code: status.as_u16(),
+    })
+}
+
+/// Heuristic-only verification (no AI Runtime). Used by integration tests.
+pub async fn verify_target_profile(
+    profile: &TargetProfile,
+    auth_headers: HashMap<String, String>,
+) -> VerificationAttempt {
+    let http = match execute_verify_http(profile, auth_headers).await {
+        Ok(success) => success,
+        Err(attempt) => return attempt,
+    };
+
+    let status = StatusCode::from_u16(http.status_code).unwrap_or(StatusCode::OK);
+    let success = has_ai_response(&http.response_text, status);
+    let message = if success {
+        "Verification succeeded — target responded with AI content".into()
+    } else {
+        VerificationError::NoAiResponse.to_string()
+    };
+
+    let mut console = http.console;
+    console.success = success;
+    console.message = message;
+
+    if !success {
         return VerificationAttempt {
             console,
             result: Err(VerificationError::NoAiResponse),
         };
     }
 
-    let model = extract_model_from_response(&response_text);
+    let model = extract_model_from_response(&http.response_text);
     let mut capabilities = profile.default_capabilities.clone();
     if model.is_some() {
         capabilities.supports_conversation = true;
     }
+
+    let preview = if http.response_text.len() > 8000 {
+        Some(format!("{}…", &http.response_text[..8000]))
+    } else {
+        Some(http.response_text.clone())
+    };
 
     let result = VerificationResult {
         verified: true,
@@ -398,8 +457,8 @@ pub async fn verify_target_profile(
         provider: profile.provider.as_str().into(),
         model,
         capabilities,
-        response_time_ms: elapsed,
-        status_code: status.as_u16(),
+        response_time_ms: http.response_time_ms,
+        status_code: http.status_code,
         status: "verified".into(),
         response_preview: preview,
         error_message: None,

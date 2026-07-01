@@ -1,8 +1,14 @@
+import { IconAi } from "@/shared/components/Icons";
+
 type NavIconProps = {
   name: string;
 };
 
 export function NavIcon({ name }: NavIconProps) {
+  if (name === "runtime") {
+    return <IconAi className="nav-icon" />;
+  }
+
   const paths: Record<string, string> = {
     dashboard:
       "M3 10.5L10 4l7 6.5V18a1 1 0 01-1 1h-5v-5H9v5H4a1 1 0 01-1-1v-7.5z",
@@ -26,8 +32,6 @@ export function NavIcon({ name }: NavIconProps) {
       "M12 8a4 4 0 100 8 4 4 0 000-8zm8.94 4a7.96 7.96 0 00-.17-1l2.03-1.58-.75-1.3-2.4.96a8.07 8.07 0 00-1.73-1l-.36-2.54h-1.5l-.36 2.54a8.07 8.07 0 00-1.73 1l-2.4-.96-.75 1.3L3.23 11a7.96 7.96 0 000 2l-2.03 1.58.75 1.3 2.4-.96c.52.43 1.1.77 1.73 1l.36 2.54h1.5l.36-2.54c.63-.23 1.21-.57 1.73-1l2.4.96.75-1.3L20.77 13c.06-.33.1-.66.17-1z",
     judge:
       "M9 3l2 2 4-4 2 2-6 6-4-4 2-2zm-5 9h12v2H4v-2zm0 4h8v2H4v-2z",
-    runtime:
-      "M9 3v2H7v2h2v2h2V5h2V3H9zm8 8h-2v2h2v-2zm-4 0h-2v2h2v-2zm-4 0H7v2h2v-2zm8 4h-2v2h2v-2zm-4 0h-2v2h2v-2zm-4 0H7v2h2v-2zM5 7H3v12h12v-2h-2v2H5V7z",
   };
 
   return (

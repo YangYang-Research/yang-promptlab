@@ -145,24 +145,31 @@ export function IconCloud({ className }: IconProps) {
   );
 }
 
-/** Sparkle mark for AI-planned attack modes. */
+/** Bold dual-sparkle mark for AI-planned modes. */
 export function IconAi({ className, "aria-label": ariaLabel }: IconProps) {
   return (
     <svg
       className={className}
-      width="18"
-      height="18"
-      viewBox="0 0 18 18"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
       aria-hidden={ariaLabel ? undefined : true}
       aria-label={ariaLabel}
       role={ariaLabel ? "img" : undefined}
     >
       <path
-        d="M9 3.25 9.9 6.35 13 7.25 9.9 8.15 9 11.25 8.1 8.15 5 7.25 8.1 6.35 9 3.25Z"
+        d="M12 2.75 14.1 10.15 21.5 12.25 14.1 14.35 12 21.75 9.9 14.35 2.5 12.25 9.9 10.15Z"
+        fill="currentColor"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M18.25 4.25 18.85 6.05 20.65 6.65 18.85 7.25 18.25 9.05 17.65 7.25 15.85 6.65 17.65 6.05Z"
         fill="currentColor"
       />
       <path
-        d="M13.75 2.75 14.2 4.05 15.5 4.5 14.2 4.95 13.75 6.25 13.3 4.95 12 4.5 13.3 4.05 13.75 2.75Z"
+        d="M6.15 15.9 6.55 17.1 7.75 17.5 6.55 17.9 6.15 19.1 5.75 17.9 4.55 17.5 5.75 17.1Z"
         fill="currentColor"
       />
     </svg>

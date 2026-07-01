@@ -4,7 +4,8 @@ use aisec_auth::{resolve_descriptor_for_wizard, SecretStore};
 use aisec_core::{AisecError, LogCategory};
 use aisec_storage::TargetRepository;
 use aisec_target_profile::{
-    build_wizard_attack_plan_with_llm, list_provider_templates, verify_target_profile, TargetProfile,
+    build_wizard_attack_plan_with_llm, list_provider_templates, verify_target_profile_with_llm,
+    TargetProfile,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -12,7 +13,7 @@ use tracing::{info, warn};
 
 use crate::dto::{TargetDto, TargetProfileDto, VerificationConsoleEntryDto};
 use crate::error::{CommandError, CommandResult};
-use crate::inference_host::{is_inference_ready, HostWizardPlannerLlm};
+use crate::inference_host::{is_inference_ready, HostEndpointVerifyLlm, HostWizardPlannerLlm};
 use crate::state::AppState;
 
 fn profile_from_json(raw: &str) -> CommandResult<TargetProfile> {
@@ -305,7 +306,23 @@ pub async fn target_profile_verify_op(
         CommandError::invalid_input(format!("invalid target profile: {err}"))
     })?;
 
-    let attempt = verify_target_profile(&profile, auth_headers).await;
+    let inference = state.inference_manager().lock().await;
+    if !is_inference_ready(&inference) {
+        return Err(CommandError::invalid_input(
+            "AI Runtime must be ready before verifying the endpoint. Configure and load a model in AI Runtime.",
+        ));
+    }
+    drop(inference);
+
+    let llm_host = HostEndpointVerifyLlm::new(
+        state.data_dir().to_path_buf(),
+        state.inference_manager().clone(),
+        state.model_manager().clone(),
+        state.model_provider().clone(),
+        state.runtime_manager().clone(),
+    );
+
+    let attempt = verify_target_profile_with_llm(&profile, auth_headers, &llm_host).await;
     match attempt.result {
         Ok(verification) => {
             profile.verification = verification;
@@ -320,8 +337,8 @@ pub async fn target_profile_verify_op(
             Ok(TargetProfileVerifyResponse {
                 verified: true,
                 profile: TargetProfileDto::from(profile),
-                console: VerificationConsoleEntryDto::from(attempt.console),
-                message: "Verification succeeded — target responded with AI content".into(),
+                console: VerificationConsoleEntryDto::from(attempt.console.clone()),
+                message: attempt.console.message,
             })
         }
         Err(err) => {

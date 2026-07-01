@@ -6,7 +6,7 @@ export { ConnectivityStatus, connectivityStatusVariant } from "./ConnectivitySta
 export { ContentToolbar, PageSizeSelect, Pagination } from "./Pagination";
 export { DataTable } from "./DataTable";
 export { EmptyState } from "./EmptyState";
-export { IconArrowRight, IconBack, IconCloud, IconDiscovery, IconList, IconMore, IconOnDevice, IconRefresh, IconTable, IconWarning } from "./Icons";
+export { IconAi, IconArrowRight, IconBack, IconCloud, IconDiscovery, IconList, IconMore, IconOnDevice, IconRefresh, IconTable, IconWarning } from "./Icons";
 export { IconButton } from "./IconButton";
 export { RefreshButton } from "./RefreshButton";
 export { ListCard } from "./ListCard";
