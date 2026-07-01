@@ -197,13 +197,32 @@ describe("attack plan preview", () => {
   });
 
   it("updates summary when execution strategy changes", () => {
+    const base = recomputePlanPreview(samplePlan());
     const preview = recomputePlanPreview({
       ...samplePlan(),
       executionStrategy: "agentic",
       maxAttempts: 3,
     });
-    expect(preview.estimatedRequests).toBe(samplePlan().estimatedRequests * 3);
+    expect(preview.estimatedRequests).toBe(base.estimatedRequests * 3);
     expect(formatExecutionStrategySummary(preview)).toBe("Agentic");
+  });
+
+  it("scales request estimate with maximum payload budget", () => {
+    const base = recomputePlanPreview({
+      ...samplePlan(),
+      payloadStrategy: {
+        ...samplePlan().payloadStrategy,
+        maxTotalPayloads: 10,
+      },
+    });
+    const doubled = recomputePlanPreview({
+      ...samplePlan(),
+      payloadStrategy: {
+        ...samplePlan().payloadStrategy,
+        maxTotalPayloads: 20,
+      },
+    });
+    expect(doubled.estimatedRequests).toBe(base.estimatedRequests * 2);
   });
 
   it("ignores stale attack plan ui state", () => {
