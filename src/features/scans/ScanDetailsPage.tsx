@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
@@ -36,13 +36,23 @@ import {
   profileLabel,
 } from "@/features/scans/scanPlaybook";
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
+import { buildScanWizardUrl } from "@/features/scans/wizardState";
 import { getScan, getTarget, type ScanDetailDto, type TargetDto } from "@/shared/ipc";
-import type { DiscoveredEndpoint, Finding, Severity } from "@/shared/types";
+import type { DiscoveredEndpoint, Finding, ScanRun, Severity } from "@/shared/types";
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
 
+function isLiveScanStatus(status: string | undefined): boolean {
+  return status === "running" || status === "paused" || status === "pending";
+}
+
+function isMonitorableAttackScan(scan: Pick<ScanRun, "name">): boolean {
+  return scan.name.startsWith("Scan (") || scan.name.startsWith("Agent Scan (");
+}
+
 export function ScanDetailsPage() {
   const { scanId = "" } = useParams();
+  const navigate = useNavigate();
   const { scans, projects, targets, endpoints, findings, reports, actions } = useAppStore();
   const [detail, setDetail] = useState<ScanDetailDto | null>(null);
   const [targetDto, setTargetDto] = useState<TargetDto | null>(null);
@@ -168,6 +178,11 @@ export function ScanDetailsPage() {
 
   const descriptor = targetDto?.descriptor ?? null;
   const targetUrl = target?.url ?? extractTargetUrl(descriptor);
+  const showViewScan =
+    scan &&
+    scan.targetId &&
+    isMonitorableAttackScan(scan) &&
+    isLiveScanStatus(status?.status ?? scan.status);
 
   return (
     <div className="page">
@@ -175,6 +190,23 @@ export function ScanDetailsPage() {
         backTo="/scans"
         backOnly
         title={scan?.name ?? "Scan Details"}
+        actions={
+          showViewScan ? (
+            <Button
+              variant="primary"
+              onClick={() =>
+                navigate(
+                  buildScanWizardUrl(scan.projectId, scan.targetId ?? undefined, {
+                    scanId: scan.id,
+                    step: 5,
+                  }),
+                )
+              }
+            >
+              View Scan
+            </Button>
+          ) : undefined
+        }
       />
 
       {error && (

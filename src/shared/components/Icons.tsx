@@ -1,5 +1,6 @@
 type IconProps = {
   className?: string;
+  "aria-label"?: string;
 };
 
 export function IconBack({ className }: IconProps) {
@@ -139,6 +140,54 @@ export function IconCloud({ className }: IconProps) {
         stroke="currentColor"
         strokeWidth="1.5"
         strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Sparkle mark for AI-planned attack modes. */
+export function IconAi({ className, "aria-label": ariaLabel }: IconProps) {
+  return (
+    <svg
+      className={className}
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      aria-hidden={ariaLabel ? undefined : true}
+      aria-label={ariaLabel}
+      role={ariaLabel ? "img" : undefined}
+    >
+      <path
+        d="M9 3.25 9.9 6.35 13 7.25 9.9 8.15 9 11.25 8.1 8.15 5 7.25 8.1 6.35 9 3.25Z"
+        fill="currentColor"
+      />
+      <path
+        d="M13.75 2.75 14.2 4.05 15.5 4.5 14.2 4.95 13.75 6.25 13.3 4.95 12 4.5 13.3 4.05 13.75 2.75Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+/** Person mark for manual custom attack mode. */
+export function IconHuman({ className, "aria-label": ariaLabel }: IconProps) {
+  return (
+    <svg
+      className={className}
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      aria-hidden={ariaLabel ? undefined : true}
+      aria-label={ariaLabel}
+      role={ariaLabel ? "img" : undefined}
+    >
+      <circle cx="9" cy="6" r="2.75" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M4.75 14.75c.85-2.45 2.55-3.75 4.25-3.75s3.4 1.3 4.25 3.75"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
       />
     </svg>
   );

@@ -270,6 +270,7 @@ export type ScanStartRequest = {
   payloadStrategy?: import("@/features/scans/payloadStrategy").PayloadStrategyDto;
   agentMode?: boolean;
   maxAgentAttempts?: number;
+  reflectionEnabled?: boolean;
   draftScanId?: string;
 };
 
@@ -415,6 +416,7 @@ export const startScan = (request: ScanStartRequest) =>
     payloadStrategy: request.payloadStrategy,
     agentMode: request.agentMode ?? false,
     maxAgentAttempts: request.maxAgentAttempts ?? 5,
+    reflectionEnabled: request.reflectionEnabled ?? false,
     draftScanId: request.draftScanId,
   });
 

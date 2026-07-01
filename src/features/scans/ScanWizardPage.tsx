@@ -46,6 +46,7 @@ import {
   createSessionForTargetScan,
   applyWizardEntryStep,
   parseWizardEntryStep,
+  isFreshWizardEntry,
   createInitialAttackPlanUi,
   fetchTargetFormForWizard,
   loadTargetDtoForWizard,
@@ -70,8 +71,6 @@ import {
   wizardStateToPersisted,
 } from "./wizardPersistence";
 import {
-  findWizardDraftScan,
-  peekStoredDraftScanId,
   resolveOrCreateDraftScanId,
   storeDraftScanId,
 } from "./wizardDraftScan";
@@ -88,14 +87,24 @@ export function ScanWizardPage() {
   const lockedTargetId = searchParams.get("targetId")?.trim() ?? "";
   const requestedStep = searchParams.get("step")?.trim() ?? "";
   const lockedScanId = searchParams.get("scanId")?.trim() ?? "";
+  const entryStep = parseWizardEntryStep(requestedStep);
+  const isFreshWizard = isFreshWizardEntry({
+    scanId: lockedScanId,
+    targetId: lockedTargetId,
+    step: requestedStep,
+  });
   const { projects, targets, scans, loading, error, dispatch, actions } = useAppStore();
   const { notify } = useToast();
   const deepLinkApplied = useRef(false);
   const deepLinkTargetId = useRef<string | null>(null);
 
-  const [session, setSession] = useState<ScanWizardSession>(() =>
-    withNormalizedAttackPlan(loadWizardSession(lockedProjectId)),
-  );
+  const [session, setSession] = useState<ScanWizardSession>(() => {
+    if (isFreshWizard) {
+      clearWizardSession();
+      return createInitialSession(lockedProjectId);
+    }
+    return withNormalizedAttackPlan(loadWizardSession(lockedProjectId));
+  });
   const [resolvedProject, setResolvedProject] = useState<Project | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
   const [profileStepError, setProfileStepError] = useState<string | null>(null);
@@ -115,8 +124,7 @@ export function ScanWizardPage() {
   sessionRef.current = session;
   const wizardSaveTimerRef = useRef<number | null>(null);
   const authHydratedKeyRef = useRef<string | null>(null);
-
-  const entryStep = parseWizardEntryStep(requestedStep);
+  const freshWizardKeyRef = useRef<string | null>(null);
 
   function appendWizardUrlParams(params: URLSearchParams) {
     if (lockedTargetId) params.set("targetId", lockedTargetId);
@@ -186,6 +194,26 @@ export function ScanWizardPage() {
   );
 
   useEffect(() => {
+    if (!isFreshWizard) return;
+
+    const freshKey = `${lockedProjectId}|${lockedTargetId}|${requestedStep}|${lockedScanId}`;
+    if (freshWizardKeyRef.current === freshKey) return;
+    freshWizardKeyRef.current = freshKey;
+
+    wizardDbBootstrap.current = false;
+    deepLinkApplied.current = false;
+    authHydratedKeyRef.current = null;
+    plannerRunRef.current = null;
+    clearWizardSession();
+    setPlannerError(null);
+    setPlannerGenerating(false);
+    setProfileStepError(null);
+    setVerificationError(null);
+    setScanSubmitError(null);
+    setSession(createInitialSession(lockedProjectId));
+  }, [isFreshWizard, lockedProjectId, lockedTargetId, requestedStep, lockedScanId]);
+
+  useEffect(() => {
     if (wizardDbBootstrap.current) return;
 
     async function ensureDraftScan() {
@@ -233,27 +261,10 @@ export function ScanWizardPage() {
       const projectId = lockedProjectId || session.selectedProjectId;
       if (!projectId) return;
 
-      if (session.draftScanId && entryStep !== 2) {
+      if (session.draftScanId) {
         storeDraftScanId(projectId, session.draftScanId);
         wizardDbBootstrap.current = true;
-        if (!lockedScanId) {
-          const params = new URLSearchParams({ projectId, scanId: session.draftScanId });
-          appendWizardUrlParams(params);
-          navigate(`/scans/new?${params.toString()}`, { replace: true });
-        }
-        return;
-      }
-
-      const remembered = peekStoredDraftScanId(projectId);
-      const existingDraft =
-        entryStep === 2
-          ? null
-          : findWizardDraftScan(scans, projectId, session.savedTargetId) ??
-            (remembered ? scans.find((scan) => scan.id === remembered) ?? null : null);
-      if (existingDraft) {
-        wizardDbBootstrap.current = true;
-        applyDraftScanId(existingDraft.id, projectId);
-        const params = new URLSearchParams({ projectId, scanId: existingDraft.id });
+        const params = new URLSearchParams({ projectId, scanId: session.draftScanId });
         appendWizardUrlParams(params);
         navigate(`/scans/new?${params.toString()}`, { replace: true });
         return;
@@ -266,8 +277,9 @@ export function ScanWizardPage() {
             projectId,
             targetId: session.savedTargetId,
             wizard: wizardStateToPersisted({
-              ...session,
+              ...createInitialSession(projectId),
               selectedProjectId: projectId,
+              draftScanId: null,
             }),
           });
           return created.id;
@@ -362,7 +374,7 @@ export function ScanWizardPage() {
   }, [session.currentStep, session.savedTargetId, session.draftScanId]);
 
   const runAttackPlanner = useCallback(
-    async (targetId: string, options?: { autoAdvance?: boolean }) => {
+    async (targetId: string) => {
       setPlannerGenerating(true);
       setPlannerError(null);
       try {
@@ -374,7 +386,6 @@ export function ScanWizardPage() {
             ...prev,
             attackPlan: plan,
             attackPlanUi: attackPlanUiBaselineFromPlan(plan),
-            currentStep: options?.autoAdvance ? (4 as WizardStepId) : prev.currentStep,
           };
           saveWizardSession(next);
           return next;
@@ -414,18 +425,16 @@ export function ScanWizardPage() {
   }, [session.currentStep, session.savedTargetId, refreshDbVerification]);
 
   useEffect(() => {
-    if (
-      !store.savedTarget ||
-      !session.targetProfile.verification.verified ||
-      session.attackPlan
-    ) {
-      return;
-    }
+    if (session.currentStep !== 4 || !store.savedTarget) return;
+    if (!session.targetProfile.verification.verified) return;
+    if (session.attackPlan || plannerGenerating) return;
     void runAttackPlanner(store.savedTarget.id);
   }, [
+    session.currentStep,
     store.savedTarget,
     session.targetProfile.verification.verified,
     session.attackPlan,
+    plannerGenerating,
     runAttackPlanner,
   ]);
 
@@ -588,10 +597,28 @@ export function ScanWizardPage() {
     : null;
 
   const stepDef = getWizardStep(session.currentStep);
+  const activeScanId = session.submittedScanId ?? session.draftScanId;
+  const targetEndpointUrl =
+    fullProfileUrl(session.targetProfile) || store.savedTarget?.url || "";
+  const pageHeaderTitle =
+    session.currentStep === 5 && activeScanId ? `Scan ID: ${activeScanId}` : "New Scan";
+  const pageHeaderDescription =
+    session.currentStep === 5 ? (
+      targetEndpointUrl ? (
+        <span className="wizard-planner-summary page-header__endpoint-summary">
+          <strong>AI API Endpoint:</strong>{" "}
+          <span className="wizard-planner-summary__url mono">{targetEndpointUrl}</span>
+        </span>
+      ) : (
+        "AI API Endpoint"
+      )
+    ) : (
+      "Configure a new security scan"
+    );
   const showFooterNext =
     session.currentStep < 5 &&
-    (session.currentStep !== 3 ||
-      (draft.profileVerified && draft.attackPlanGenerated && !plannerGenerating));
+    (session.currentStep !== 4 ||
+      (draft.attackPlanGenerated && !plannerGenerating));
   const showStartScan = session.currentStep === 5 && session.submittedScanId === null;
   const showFooterDone = session.currentStep === 6;
   const showViewResult =
@@ -768,10 +795,6 @@ export function ScanWizardPage() {
       }
       const saved = await persistAuthDescriptor();
       if (!saved || !store.savedTarget) return;
-      if (!session.attackPlan) {
-        const plan = await runAttackPlanner(store.savedTarget.id);
-        if (!plan) return;
-      }
       updateSession({ currentStep: 4 });
       return;
     }
@@ -809,6 +832,18 @@ export function ScanWizardPage() {
 
     const scanIdToReuse = session.submittedScanId ?? session.draftScanId ?? undefined;
 
+    if (!options?.restart) {
+      updateSession({
+        currentStep: 5,
+        submittedScanId: scanIdToReuse ?? session.submittedScanId,
+      });
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => resolve());
+        });
+      });
+    }
+
     setStartingScan(true);
     setScanSubmitError(null);
     try {
@@ -821,10 +856,11 @@ export function ScanWizardPage() {
         payloadStrategy: payloadStrategyToDto(session.attackPlan.payloadStrategy),
         agentMode: session.attackPlan.executionStrategy === "agentic",
         maxAgentAttempts: session.attackPlan.maxAttempts,
+        reflectionEnabled: session.attackPlan.reflectionEnabled,
         draftScanId: scanIdToReuse,
       });
       await actions.refresh();
-      updateSession({ submittedScanId: result.scan_id });
+      updateSession({ submittedScanId: result.scan_id, currentStep: 5 });
       notify(options?.restart ? "Attack restarted" : "Attack started in the background", "success");
     } catch (err) {
       const message = toAppError(err).message || "Failed to start scan";
@@ -889,15 +925,8 @@ export function ScanWizardPage() {
               if (!store.savedTarget) return;
               updateSession({ attackPlan: null, attackPlanUi: createInitialAttackPlanUi() });
               plannerRunRef.current = null;
-              void runAttackPlanner(store.savedTarget.id, { autoAdvance: true });
             }}
           />
-            {plannerGenerating && (
-              <p className="text-muted text-sm">Analyzing API with AI Runtime…</p>
-            )}
-            {plannerError && !plannerGenerating && (
-              <p className="text-danger text-sm">{plannerError}</p>
-            )}
           </>
         ) : (
           <p className="text-muted">Complete step 2 to configure authentication.</p>
@@ -987,8 +1016,8 @@ export function ScanWizardPage() {
   return (
     <div className="page">
       <PageHeader
-        title="New Scan"
-        description="Configure a new security scan"
+        title={pageHeaderTitle}
+        description={pageHeaderDescription}
         actions={
           <Button variant="danger" onClick={handleCancel}>
             Cancel
@@ -1094,7 +1123,7 @@ export function ScanWizardPage() {
                 {session.currentStep === 4
                   ? startingScan
                     ? "Starting attack…"
-                    : "Run Attack"
+                    : "Start Attack"
                   : persistingTarget
                     ? "Saving target…"
                     : "Next"}

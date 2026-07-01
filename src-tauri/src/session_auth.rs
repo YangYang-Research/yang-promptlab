@@ -195,6 +195,19 @@ pub fn attack_executor(transport: PluginAwareTransport) -> AttackExecutor<Plugin
     AttackExecutor::new(AttackRegistry::with_builtins(), transport)
 }
 
+pub fn attack_executor_with_variants(
+    transport: PluginAwareTransport,
+    variants_per_test: usize,
+) -> AttackExecutor<PluginAwareTransport> {
+    use aisec_attack::{MutatorConfig, MutatorKind, PayloadMutator};
+    let max_per_payload = variants_per_test.saturating_sub(1);
+    let mutator = PayloadMutator::new(MutatorConfig {
+        enabled: MutatorKind::all().to_vec(),
+        max_per_payload,
+    });
+    attack_executor(transport).with_mutator(mutator)
+}
+
 pub fn session_status_dto(ctx: &SessionAuthContext) -> AuthSessionStatusDto {
     AuthSessionStatusDto {
         session_id: ctx.session_id.clone(),

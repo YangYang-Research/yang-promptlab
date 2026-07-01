@@ -35,7 +35,7 @@ export const WIZARD_STEPS: WizardStepDefinition[] = [
     id: 4,
     label: "Review Attack Plan",
     title: "Review Attack Plan",
-    hint: "Review and adjust categories, execution, and payloads.",
+    hint: "AI Runtime analyzes your API and builds an attack plan — review and adjust before running.",
   },
   {
     id: 5,

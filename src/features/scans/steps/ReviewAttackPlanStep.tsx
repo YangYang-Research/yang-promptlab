@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 
 import { Badge } from "@/shared/components";
+import { IconAi, IconHuman } from "@/shared/components/Icons";
 import { adjustAttackPlan } from "@/shared/ipc/attackPlanner";
 import { toAppError } from "@/shared/errors";
 
@@ -19,15 +20,16 @@ import {
   recomputePlanPreview,
   resolveCategoriesForAdjust,
   resolvePlannerSummaryBadge,
-  resolveProfileModeBadge,
   resolveActivePlannerRationales,
   syncAttackPlanUiAfterAdjust,
   type AttackPlanConfig,
 } from "../attackPlan";
 import {
+  ALL_ATTACK_CATEGORY_IDS,
   ATTACK_CATALOG,
   ATTACK_PROFILES,
   getCategory,
+  getProfile,
   type AttackCategoryId,
   type AttackProfileId,
   type ExecutionStrategy,
@@ -148,7 +150,7 @@ export function ReviewAttackPlanStep({
       disabledGraphNodes: next !== "custom" ? [] : disabledGraphNodes,
       customCategories:
         next === "custom"
-          ? attackPlan.suggestedCategories.filter((id) => !disabledGraphSet.has(id))
+          ? ALL_ATTACK_CATEGORY_IDS.filter((id) => !disabledGraphSet.has(id))
           : customCategories,
     };
     onPlanChange(
@@ -162,7 +164,7 @@ export function ReviewAttackPlanStep({
     const nextDisabled = new Set(disabledGraphNodes);
     if (enabled) nextDisabled.delete(id);
     else nextDisabled.add(id);
-    const custom = attackPlan.suggestedCategories.filter((cat) => !nextDisabled.has(cat));
+    const custom = ALL_ATTACK_CATEGORY_IDS.filter((cat) => !nextDisabled.has(cat));
     void applyAdjust({
       profileId: "custom",
       customCategories: custom,
@@ -204,9 +206,42 @@ export function ReviewAttackPlanStep({
     }, 300);
   }
 
-  function acceptRecommendedPayloadStrategy() {
-    if (!isCustomProfile) return;
-    void applyAdjust({}, undefined, attackPlan.recommendedPayloadStrategy);
+  function profileModeBadge(profile: AttackProfileId) {
+    if (profile === "custom") {
+      return (
+        <IconHuman
+          className="wizard-attack-profile__mode-icon wizard-attack-profile__mode-icon--human"
+          aria-label="Manual selection"
+        />
+      );
+    }
+    const recommended = attackPlan.recommendedProfileId === profile;
+    if (recommended) {
+      return (
+        <span className="badge badge--info wizard-planner-summary-badge">
+          <IconAi className="wizard-planner-summary-badge__icon" aria-hidden />
+          AI Recommended
+        </span>
+      );
+    }
+    return (
+      <IconAi
+        className="wizard-attack-profile__mode-icon"
+        aria-label="AI planned"
+      />
+    );
+  }
+
+  function plannerSummaryBadge() {
+    if (plannerBadge.label === "AI Planned") {
+      return (
+        <span className={`badge badge--${plannerBadge.variant} wizard-planner-summary-badge`}>
+          <IconAi className="wizard-planner-summary-badge__icon" aria-hidden />
+          {plannerBadge.label}
+        </span>
+      );
+    }
+    return <Badge variant={plannerBadge.variant}>{plannerBadge.label}</Badge>;
   }
 
   function profileModeMeta(id: AttackProfileId): string {
@@ -221,9 +256,13 @@ export function ReviewAttackPlanStep({
       <section className="wizard-fingerprint-summary">
         <div className="wizard-planner-summary-header">
           <h4 className="wizard-endpoints__title">Planner summary</h4>
-          <Badge variant={plannerBadge.variant}>{plannerBadge.label}</Badge>
+          {plannerSummaryBadge()}
         </div>
         <dl className="wizard-attack-estimates">
+          <div className="wizard-attack-estimate">
+            <span className="wizard-attack-estimate__label">Attack mode</span>
+            <span className="wizard-attack-estimate__value">{getProfile(profileId).label}</span>
+          </div>
           <div className="wizard-attack-estimate">
             <span className="wizard-attack-estimate__label">Active tests</span>
             <span className="wizard-attack-estimate__value">
@@ -231,21 +270,9 @@ export function ReviewAttackPlanStep({
             </span>
           </div>
           <div className="wizard-attack-estimate">
-            <span className="wizard-attack-estimate__label">Execution strategy</span>
-            <span className="wizard-attack-estimate__value">
-              {formatExecutionStrategySummary(attackPlan)}
-            </span>
-          </div>
-          <div className="wizard-attack-estimate">
             <span className="wizard-attack-estimate__label">Payload strategy</span>
             <span className="wizard-attack-estimate__value">
               {formatPayloadGenerationStrategy(attackPlan.payloadStrategy)}
-            </span>
-          </div>
-          <div className="wizard-attack-estimate">
-            <span className="wizard-attack-estimate__label">Est. runtime</span>
-            <span className="wizard-attack-estimate__value">
-              {formatEstimatedRuntime(attackPlan.estimatedRuntimeSeconds)}
             </span>
           </div>
           <div className="wizard-attack-estimate">
@@ -258,6 +285,18 @@ export function ReviewAttackPlanStep({
             <span className="wizard-attack-estimate__label">Est. tokens</span>
             <span className="wizard-attack-estimate__value">
               {attackPlan.estimatedTokens.toLocaleString()}
+            </span>
+          </div>
+          <div className="wizard-attack-estimate">
+            <span className="wizard-attack-estimate__label">Execution strategy</span>
+            <span className="wizard-attack-estimate__value">
+              {formatExecutionStrategySummary(attackPlan)}
+            </span>
+          </div>
+          <div className="wizard-attack-estimate">
+            <span className="wizard-attack-estimate__label">Est. runtime</span>
+            <span className="wizard-attack-estimate__value">
+              {formatEstimatedRuntime(attackPlan.estimatedRuntimeSeconds)}
             </span>
           </div>
           <div className="wizard-attack-estimate">
@@ -284,10 +323,11 @@ export function ReviewAttackPlanStep({
         )}
       </section>
 
-      <section className="wizard-attack-profiles">
+      <section className="wizard-fingerprint-summary">
+        <h4 className="wizard-endpoints__title">Attack Mode</h4>
+        <div className="wizard-attack-profiles">
         {ATTACK_PROFILES.map((profile) => {
           const selected = profileId === profile.id;
-          const modeBadge = resolveProfileModeBadge(attackPlan, profile.id);
           return (
             <button
               key={profile.id}
@@ -297,15 +337,8 @@ export function ReviewAttackPlanStep({
               aria-pressed={selected}
             >
               <div className="wizard-attack-profile__top">
-                {modeBadge ? (
-                  <Badge
-                    className={modeBadge.className}
-                    variant={modeBadge.variant}
-                  >
-                    {modeBadge.label}
-                  </Badge>
-                ) : null}
                 <span className="wizard-attack-profile__label">{profile.label}</span>
+                {profileModeBadge(profile.id)}
               </div>
               <span className="wizard-attack-profile__meta text-muted text-sm">
                 {profileModeMeta(profile.id)}
@@ -316,19 +349,24 @@ export function ReviewAttackPlanStep({
             </button>
           );
         })}
+        </div>
       </section>
 
       <section className="wizard-attack-categories">
         <div className="wizard-attack-categories__header">
           <h4 className="wizard-endpoints__title">Attack categories</h4>
           <span className="text-muted text-sm">
-            {activeCategories.length} of {attackPlan.suggestedCategories.length} applicable selected
-            {notApplicableCount > 0 ? ` · ${notApplicableCount} not applicable` : ""}
+            {activeCategories.length} of{" "}
+            {isCustomProfile ? ATTACK_CATALOG.length : attackPlan.suggestedCategories.length}{" "}
+            {isCustomProfile ? "categories" : "applicable"} selected
+            {!isCustomProfile && notApplicableCount > 0
+              ? ` · ${notApplicableCount} not applicable`
+              : ""}
           </span>
         </div>
         <div className="wizard-attack-category-list">
           {ATTACK_CATALOG.map((category) => {
-              const applicable = suggestedSet.has(category.id);
+              const applicable = isCustomProfile || suggestedSet.has(category.id);
               if (!applicable) {
                 return (
                   <div
@@ -502,9 +540,7 @@ export function ReviewAttackPlanStep({
 
       <PayloadStrategySection
         strategy={attackPlan.payloadStrategy}
-        recommendedStrategy={attackPlan.recommendedPayloadStrategy}
         onChange={updatePayloadStrategy}
-        onAcceptRecommended={acceptRecommendedPayloadStrategy}
         readOnly={!executionEditable}
       />
     </div>

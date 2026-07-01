@@ -51,7 +51,8 @@ impl PromptPayloads {
 pub struct GeneratePayloadsInput<'a> {
     pub plan: &'a AttackPlan,
     pub mode: GeneratorMode,
-    pub max_variants_per_payload: Option<usize>,
+    /// Max generated payload objects per testcase source (wizard budget per test).
+    pub max_payloads_per_test: Option<u32>,
 }
 
 impl<'a> GeneratePayloadsInput<'a> {
@@ -59,7 +60,7 @@ impl<'a> GeneratePayloadsInput<'a> {
         Self {
             plan,
             mode,
-            max_variants_per_payload: None,
+            max_payloads_per_test: None,
         }
     }
 }

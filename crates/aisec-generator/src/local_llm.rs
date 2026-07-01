@@ -26,7 +26,7 @@ pub async fn generate_with_local_llm(
     plan: &AttackPlan,
     llm: &dyn GeneratorLlm,
 ) -> GeneratorResult<PromptPayloads> {
-    let baseline = generate_static_pack(plan)?;
+    let baseline = generate_static_pack(&GeneratePayloadsInput::new(plan, GeneratorMode::StaticPack))?;
     let mut by_category = baseline.by_category.clone();
     let mut llm_generated = 0usize;
 

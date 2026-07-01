@@ -173,9 +173,6 @@ impl AgentHost for ScanAgentHost<'_> {
         payloads: &PromptPayloads,
     ) -> AgentResult<AttackExecutionSummary> {
         let map = payload_map_for_category(payloads, category);
-        let manager = self.model_manager_arc.lock().await;
-        let mut runtime_mgr = self.runtime_manager_arc.lock().await;
-        let inference = self.inference_manager.lock().await;
         let run = run_category_on_endpoint(
             self.repos,
             &self.scan_id,
@@ -185,13 +182,15 @@ impl AgentHost for ScanAgentHost<'_> {
             category,
             self.runtime.clone(),
             self.data_dir,
-            &inference,
-            &manager,
+            Arc::clone(&self.inference_manager),
+            Arc::clone(&self.model_manager_arc),
             self.model_provider.clone(),
-            &mut runtime_mgr,
+            Arc::clone(&self.runtime_manager_arc),
             self.plugin_manager.clone(),
             Some(&map),
             self.progress_emitter.as_ref(),
+            None,
+            None,
         )
         .await
         .map_err(|err| AgentError::Attack(err.to_string()))?;

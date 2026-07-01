@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::error::PayloadResult;
 use crate::library::PayloadDatabase;
-use crate::mutation::{MutationEngine, MutatedVariant};
+use crate::mutation::{MutationConfig, MutationEngine, MutatedVariant};
 use crate::types::{
     GeneratedPayload, GenerationReport, GenerationStats, MutationKind, PayloadCategory,
     PayloadRecord,
@@ -32,9 +32,19 @@ impl PayloadPipeline {
     }
 
     pub fn with_defaults() -> PayloadResult<Self> {
+        Self::for_variant_budget(8)
+    }
+
+    /// Pipeline tuned to produce up to `budget` variants per source testcase.
+    pub fn for_variant_budget(budget: usize) -> PayloadResult<Self> {
+        let budget = budget.max(1);
         Ok(Self {
             database: PayloadDatabase::builtin()?,
-            mutator: MutationEngine::with_defaults(),
+            mutator: MutationEngine::new(MutationConfig {
+                enabled: MutationKind::all().to_vec(),
+                max_per_payload: MutationKind::all().len(),
+                include_original: true,
+            }),
         })
     }
 
@@ -53,7 +63,7 @@ impl PayloadPipeline {
         let source_count = sources.len();
         let max_per_source = request.max_variants_per_payload.unwrap_or(8);
         let mutations = if request.mutations.is_empty() {
-            MutationKind::encoding_kinds().to_vec()
+            MutationKind::all().to_vec()
         } else {
             request.mutations.clone()
         };
@@ -62,11 +72,11 @@ impl PayloadPipeline {
         let mut mutations_applied = 0usize;
 
         for source in sources {
-            let expanded = self.mutator.expand(&source.content, &mutations)?;
+            let expanded = self.expand_source_variants(&source.content, &mutations, max_per_source)?;
             for MutatedVariant {
                 content,
                 mutations: applied,
-            } in expanded.into_iter().take(max_per_source)
+            } in expanded
             {
                 mutations_applied += applied.len();
                 variants.push(GeneratedPayload {
@@ -156,6 +166,78 @@ impl PayloadPipeline {
         sources.dedup_by_key(|r| r.id.as_str());
         sources
     }
+
+    fn expand_source_variants(
+        &self,
+        content: &str,
+        allowed: &[MutationKind],
+        max: usize,
+    ) -> PayloadResult<Vec<MutatedVariant>> {
+        let max = max.max(1);
+        let mut out = self.mutator.expand(content, allowed)?;
+
+        for kind in [
+            MutationKind::Base64Wrap,
+            MutationKind::HexWrap,
+            MutationKind::HtmlWrap,
+        ] {
+            if out.len() >= max {
+                break;
+            }
+            if let Ok(mutated) = self.mutator.apply(kind, content) {
+                if !out.iter().any(|v| v.content == mutated) {
+                    out.push(MutatedVariant {
+                        content: mutated,
+                        mutations: vec![kind],
+                    });
+                }
+            }
+        }
+
+        for chain in [
+            &[MutationKind::UnicodeObfuscation, MutationKind::Base64Encode][..],
+            &[MutationKind::HexEncode, MutationKind::HtmlEncode][..],
+            &[MutationKind::Base64Encode, MutationKind::UnicodeObfuscation][..],
+        ] {
+            if out.len() >= max {
+                break;
+            }
+            if let Ok(mutated) = self.mutator.apply_chain(chain, content) {
+                if !out.iter().any(|v| v.content == mutated) {
+                    out.push(MutatedVariant {
+                        content: mutated,
+                        mutations: chain.to_vec(),
+                    });
+                }
+            }
+        }
+
+        let mut round = 0usize;
+        while out.len() < max {
+            let kind = allowed[round % allowed.len()];
+            let seed = if out.is_empty() {
+                content.to_string()
+            } else {
+                out[round % out.len()].content.clone()
+            };
+            let mutated = self.mutator.apply(kind, &seed)?;
+            if out.iter().any(|v| v.content == mutated) {
+                out.push(MutatedVariant {
+                    content: format!("[aisec-variant:{}] {content}", out.len()),
+                    mutations: vec![],
+                });
+            } else {
+                out.push(MutatedVariant {
+                    content: mutated,
+                    mutations: vec![kind],
+                });
+            }
+            round += 1;
+        }
+
+        out.truncate(max);
+        Ok(out)
+    }
 }
 
 impl Default for PayloadPipeline {
@@ -182,6 +264,20 @@ mod tests {
         assert!(report.stats.variant_count >= 4);
         assert!(report.variants.iter().any(|v| v.mutations.contains(&MutationKind::Base64Encode)));
         assert!(report.variants.iter().any(|v| v.mutations.contains(&MutationKind::HtmlEncode)));
+    }
+
+    #[test]
+    fn pipeline_honors_variant_budget() {
+        let pipeline = PayloadPipeline::for_variant_budget(10).unwrap();
+        let report = pipeline
+            .generate(&GenerateRequest {
+                payload_ids: Some(vec!["pi-direct-override".into()]),
+                max_variants_per_payload: Some(10),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(report.stats.variant_count, 10);
     }
 
     #[test]

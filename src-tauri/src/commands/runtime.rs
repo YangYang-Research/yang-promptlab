@@ -833,15 +833,22 @@ pub(crate) async fn load_model_with_loading_cache(
 }
 
 async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<RuntimeConfigurationDto> {
-    let models: Vec<ModelEntry> = {
-        let manager = state.model_manager().lock().await;
+    let loading_model_id = runtime_model_loading_id(state).await;
+    let testing_model_id = runtime_model_testing_id(state).await;
+
+    let models: Vec<ModelEntry> = if let Ok(manager) = state.model_manager().try_lock() {
         manager.list_models().into_iter().cloned().collect()
+    } else if let Some(cached) = state.runtime_config_cache().lock().await.clone() {
+        let mut response = cached;
+        apply_model_loading_overlay(&mut response, loading_model_id.as_deref());
+        apply_model_testing_overlay(&mut response, testing_model_id.as_deref());
+        return Ok(response);
+    } else {
+        Vec::new()
     };
 
     let (config, _) = reconcile_inference_config(state, &models).await?;
     let inference = config_to_dto(&config, &models);
-    let loading_model_id = runtime_model_loading_id(state).await;
-    let testing_model_id = runtime_model_testing_id(state).await;
 
     let base = if let Ok(runtime_manager) = state.runtime_manager().try_lock() {
         let dto =

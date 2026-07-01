@@ -5,6 +5,7 @@ import { buildTargetScanContext } from "./targetScanContext";
 
 export type TargetScanAction =
   | { kind: "setup"; step: WizardStepId; scanId?: string }
+  | { kind: "view_scan"; scanId: string }
   | { kind: "view_report"; scanId: string }
   | { kind: "retry"; scanId: string; step: WizardStepId };
 
@@ -114,7 +115,7 @@ export function resolveTargetScanAction(
   const running = runningAttackScan(targetId, scans);
 
   if (running) {
-    return { kind: "setup", step: 5 };
+    return { kind: "view_scan", scanId: running.id };
   }
 
   if (context.scanStatusLabel === "Completed" && latestAttack) {

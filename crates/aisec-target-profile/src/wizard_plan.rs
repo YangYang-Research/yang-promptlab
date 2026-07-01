@@ -427,32 +427,70 @@ fn risk_level_label(score: u8) -> &'static str {
     }
 }
 
+pub fn enabled_tests_for_category(category: AttackCategory, disabled_tests: &[String]) -> u32 {
+    let disabled_in_category = disabled_tests
+        .iter()
+        .filter(|id| id.starts_with(test_prefix_for_category(category)))
+        .count() as u32;
+    TESTS_PER_CATEGORY.saturating_sub(disabled_in_category)
+}
+
+pub fn expected_payload_objects(
+    categories: &[AttackCategory],
+    disabled_tests: &[String],
+    strategy: &PayloadStrategy,
+) -> u32 {
+    categories
+        .iter()
+        .map(|category| {
+            enabled_tests_for_category(*category, disabled_tests) * strategy.max_total_payloads
+        })
+        .sum()
+}
+
+pub fn estimate_scan_requests(
+    categories: &[AttackCategory],
+    disabled_tests: &[String],
+    strategy: &PayloadStrategy,
+    execution: ExecutionStrategy,
+    max_attempts: u32,
+) -> u32 {
+    let variants = strategy.variants_per_test;
+    let payloads_per_testcase = strategy.max_total_payloads;
+    let mut requests = 0u32;
+    for category in categories {
+        let enabled_tests = enabled_tests_for_category(*category, disabled_tests);
+        if enabled_tests == 0 {
+            continue;
+        }
+        requests += enabled_tests * variants * payloads_per_testcase;
+    }
+    let multiplier = match execution {
+        ExecutionStrategy::Sequential => 1,
+        ExecutionStrategy::Agentic => max_attempts.max(1),
+    };
+    requests.saturating_mul(multiplier)
+}
+
 pub fn recompute_estimates(plan: &mut WizardAttackPlan) {
     let disabled: HashSet<&str> = plan.disabled_tests.iter().map(String::as_str).collect();
-    let mut requests = 0u32;
     let mut total_testcases = 0u32;
     for category in &plan.categories {
-        let disabled_in_category = plan
-            .disabled_tests
-            .iter()
-            .filter(|id| id.starts_with(test_prefix_for_category(*category)))
-            .count() as u32;
-        let enabled_tests = TESTS_PER_CATEGORY.saturating_sub(disabled_in_category);
+        let enabled_tests = enabled_tests_for_category(*category, &plan.disabled_tests);
         if enabled_tests == 0 {
             continue;
         }
         total_testcases += enabled_tests;
-        let variants = plan.payload_strategy.variants_per_test;
-        let payloads_per_testcase = plan.payload_strategy.max_total_payloads;
-        requests += enabled_tests * variants * payloads_per_testcase;
     }
 
     plan.total_testcases = total_testcases;
-    let execution_multiplier = match plan.execution_strategy {
-        ExecutionStrategy::Sequential => 1_u32,
-        ExecutionStrategy::Agentic => plan.max_attempts.max(1) as u32,
-    };
-    let adjusted_requests = requests.saturating_mul(execution_multiplier);
+    let adjusted_requests = estimate_scan_requests(
+        &plan.categories,
+        &plan.disabled_tests,
+        &plan.payload_strategy,
+        plan.execution_strategy,
+        plan.max_attempts as u32,
+    );
 
     plan.estimated_requests = adjusted_requests;
     plan.estimated_runtime_seconds =

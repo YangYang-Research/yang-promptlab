@@ -19,7 +19,7 @@ pub async fn generate_prompt_payloads_with_llm(
     llm: Option<&dyn GeneratorLlm>,
 ) -> GeneratorResult<PromptPayloads> {
     match input.mode {
-        GeneratorMode::StaticPack => generate_static_pack(input.plan),
+        GeneratorMode::StaticPack => generate_static_pack(input),
         GeneratorMode::TemplateMutation => generate_template_mutation(input.plan, input),
         GeneratorMode::LocalLlm => {
             let backend = llm.ok_or_else(|| {

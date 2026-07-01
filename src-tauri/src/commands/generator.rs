@@ -1,6 +1,6 @@
 //! Payload generator IPC — build probes from attack plans.
 
-use aisec_attack::AttackCategory;
+use aisec_attack::{AttackCategory, AttackPayload};
 use aisec_core::AisecError;
 use aisec_generator::{generate_from_plan, GeneratePayloadsInput, GeneratorMode, PromptPayloads};
 use aisec_planner::{AttackPlan, PlannerMode};
@@ -71,29 +71,119 @@ pub fn generator_mode_from_payload_strategy(strategy: &PayloadStrategy) -> Gener
     }
 }
 
-fn cap_prompt_payloads(mut pack: PromptPayloads, max_total: u32) -> PromptPayloads {
-    let limit = max_total as usize;
+fn payload_source_key(payload: &aisec_attack::AttackPayload) -> String {
+    payload
+        .metadata
+        .get("source_id")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            payload
+                .id
+                .split(':')
+                .next()
+                .unwrap_or(payload.id.as_str())
+                .to_string()
+        })
+}
+
+/// Cap generated payloads per testcase source within each category.
+pub fn cap_payloads_per_testcase(mut pack: PromptPayloads, max_per_test: u32) -> PromptPayloads {
+    let limit = max_per_test as usize;
     if limit == 0 {
         return pack;
     }
+
     let mut kept = 0usize;
     let mut capped_map = HashMap::new();
     for (category, items) in pack.by_category {
-        let mut capped = Vec::new();
+        let mut per_source: HashMap<String, Vec<aisec_attack::AttackPayload>> = HashMap::new();
         for item in items {
-            if kept >= limit {
-                break;
+            let key = payload_source_key(&item);
+            let bucket = per_source.entry(key).or_default();
+            if bucket.len() < limit {
+                bucket.push(item);
             }
-            capped.push(item);
-            kept += 1;
         }
+        let capped: Vec<_> = per_source.into_values().flatten().collect();
+        kept += capped.len();
         if !capped.is_empty() {
             capped_map.insert(category, capped);
         }
     }
+
     pack.by_category = capped_map;
     pack.stats.payload_count = kept;
+    pack.payload_ids = pack
+        .by_category
+        .values()
+        .flat_map(|items| items.iter().map(|p| p.id.clone()))
+        .collect();
     pack
+}
+
+pub fn validate_payload_budget(
+    pack: &PromptPayloads,
+    categories: &[AttackCategory],
+    disabled_tests: &[String],
+    strategy: &PayloadStrategy,
+) -> Result<(), String> {
+    validate_payload_map_per_testcase(&pack.by_category, categories, disabled_tests, strategy)
+}
+
+pub fn validate_payload_map_budget(
+    payloads: &HashMap<AttackCategory, Vec<AttackPayload>>,
+    categories: &[AttackCategory],
+    disabled_tests: &[String],
+    strategy: &PayloadStrategy,
+) -> Result<(), String> {
+    validate_payload_map_per_testcase(payloads, categories, disabled_tests, strategy)
+}
+
+pub fn validate_payload_map_per_testcase(
+    payloads: &HashMap<AttackCategory, Vec<AttackPayload>>,
+    categories: &[AttackCategory],
+    disabled_tests: &[String],
+    strategy: &PayloadStrategy,
+) -> Result<(), String> {
+    let budget = strategy.max_total_payloads;
+    if budget == 0 {
+        return Ok(());
+    }
+
+    for category in categories {
+        let expected_tests =
+            aisec_target_profile::wizard_plan::enabled_tests_for_category(*category, disabled_tests);
+        if expected_tests == 0 {
+            continue;
+        }
+
+        let items = payloads.get(category).map(|values| values.as_slice()).unwrap_or(&[]);
+        let mut per_source: HashMap<String, u32> = HashMap::new();
+        for item in items {
+            *per_source.entry(payload_source_key(item)).or_insert(0) += 1;
+        }
+
+        if per_source.len() < expected_tests as usize {
+            return Err(format!(
+                "category {} produced {} testcase payloads but {} enabled tests require coverage",
+                category.as_str(),
+                per_source.len(),
+                expected_tests
+            ));
+        }
+
+        for (source_id, count) in &per_source {
+            if *count < budget {
+                return Err(format!(
+                    "testcase {source_id} in {} has {count} payloads but {budget} required per testcase",
+                    category.as_str()
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn parse_categories(raw: &[String]) -> Vec<AttackCategory> {
@@ -206,7 +296,6 @@ pub async fn generate_payloads_for_scan_job(
         plan,
         mode,
         None,
-        None,
     )
     .await
 }
@@ -219,13 +308,12 @@ pub async fn generate_payloads_for_scan_job_with_options(
     runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
     plan: &AttackPlan,
     mode: GeneratorMode,
-    max_variants_per_payload: Option<usize>,
-    max_total_payloads: Option<u32>,
+    max_payloads_per_test: Option<u32>,
 ) -> CommandResult<PromptPayloads> {
     let input = GeneratePayloadsInput {
         plan,
         mode,
-        max_variants_per_payload,
+        max_payloads_per_test,
     };
 
     let pack = if mode == GeneratorMode::LocalLlm {
@@ -252,8 +340,8 @@ pub async fn generate_payloads_for_scan_job_with_options(
             .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?
     };
 
-    Ok(if let Some(max_total) = max_total_payloads {
-        cap_prompt_payloads(pack, max_total)
+    Ok(if let Some(max_per_test) = max_payloads_per_test {
+        cap_payloads_per_testcase(pack, max_per_test)
     } else {
         pack
     })
@@ -277,7 +365,6 @@ pub async fn generate_payloads_for_scan_job_with_strategy(
         runtime_manager,
         plan,
         mode,
-        Some(strategy.max_variants_per_payload()),
         Some(strategy.max_total_payloads),
     )
     .await

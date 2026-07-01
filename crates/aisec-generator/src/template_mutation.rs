@@ -13,9 +13,12 @@ pub fn generate_template_mutation(
     plan: &AttackPlan,
     input: &GeneratePayloadsInput<'_>,
 ) -> GeneratorResult<PromptPayloads> {
-    let pipeline = PayloadPipeline::with_defaults()?;
     let disabled: std::collections::HashSet<_> = plan.disabled_tests.iter().cloned().collect();
-    let max_per = input.max_variants_per_payload.unwrap_or(4);
+    let max_per = input
+        .max_payloads_per_test
+        .unwrap_or(4)
+        .max(1) as usize;
+    let pipeline = PayloadPipeline::for_variant_budget(max_per)?;
     let mut by_category: HashMap<AttackCategory, Vec<AttackPayload>> = HashMap::new();
     let mut source_count = 0usize;
     let mut variant_count = 0usize;
@@ -24,7 +27,7 @@ pub fn generate_template_mutation(
         let payload_cat = attack_to_payload_category(*category);
         let report = pipeline.generate(&GenerateRequest {
             categories: Some(vec![payload_cat]),
-            mutations: MutationKind::encoding_kinds().to_vec(),
+            mutations: MutationKind::all().to_vec(),
             max_variants_per_payload: Some(max_per),
             ..Default::default()
         })?;

@@ -351,6 +351,25 @@ function TargetScanActionButton({
     [target.id, projectId, scans, wizardSession],
   );
 
+  if (action.kind === "view_scan") {
+    return (
+      <Button
+        variant="primary"
+        size="sm"
+        onClick={() =>
+          onNavigate(
+            buildScanWizardUrl(projectId, target.id, {
+              scanId: action.scanId,
+              step: 5,
+            }),
+          )
+        }
+      >
+        View Scan
+      </Button>
+    );
+  }
+
   if (action.kind === "view_report") {
     return (
       <Button variant="primary" size="sm" onClick={() => onNavigate(`/scans/${action.scanId}`)}>

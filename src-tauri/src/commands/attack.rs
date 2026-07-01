@@ -8,8 +8,8 @@
 //! responses normalized by the harness layer.
 
 use aisec_attack::{
-    apply_descriptor_auth, AttackCategory, AttackContext, AttackPayload, AttackTarget, FindingSeverity,
-    PayloadAttempt,
+    apply_descriptor_auth, AttackCategory, AttackContext, AttackPayload, AttackTarget,
+    AttackExecutor, FindingSeverity, PayloadAttempt,
 };
 use aisec_endpoint_metadata::body_template_from_metadata;
 use crate::dto::metadata_from_endpoint;
@@ -30,6 +30,7 @@ use tracing::{info, instrument, warn};
 
 use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use tauri::async_runtime::Mutex as AsyncMutex;
 
@@ -37,8 +38,72 @@ use crate::dto::{AttackRunDto, FindingDto, ScanDto};
 use crate::error::{CommandError, CommandResult};
 use crate::events::{ScanProgressEmitter, ScanProgressLevel};
 use crate::inference_host::build_judge_engine_from_gateway;
-use crate::session_auth::{attack_executor, build_attack_runtime, AttackRuntime};
+use crate::session_auth::{attack_executor, attack_executor_with_variants, build_attack_runtime, AttackRuntime};
+use crate::jobs::ScanProgress;
 use crate::state::AppState;
+
+pub struct CategoryRunOptions {
+    pub max_payloads: usize,
+    pub variants_per_test: usize,
+}
+
+impl CategoryRunOptions {
+    pub fn from_strategy(
+        category: AttackCategory,
+        disabled_tests: &[String],
+        strategy: &aisec_target_profile::PayloadStrategy,
+    ) -> Self {
+        let enabled =
+            aisec_target_profile::wizard_plan::enabled_tests_for_category(category, disabled_tests)
+                as usize;
+        let variants = strategy.variants_per_test.max(1) as usize;
+        let budget = strategy.max_total_payloads.max(1) as usize;
+        Self {
+            max_payloads: enabled.saturating_mul(variants).saturating_mul(budget),
+            variants_per_test: variants,
+        }
+    }
+}
+
+fn attack_executor_for_options(
+    transport: crate::plugin_transport::PluginAwareTransport,
+    options: &CategoryRunOptions,
+) -> AttackExecutor<crate::plugin_transport::PluginAwareTransport> {
+    if options.variants_per_test <= 1 {
+        attack_executor(transport)
+    } else {
+        attack_executor_with_variants(transport, options.variants_per_test)
+    }
+}
+
+fn update_scan_phase(
+    progress: Option<&Arc<Mutex<ScanProgress>>>,
+    phase: &str,
+    test: Option<&str>,
+    attempt: Option<u32>,
+    retry: Option<u32>,
+) {
+    let Some(progress) = progress else {
+        return;
+    };
+    if let Ok(mut state) = progress.lock() {
+        state.current_phase = Some(phase.into());
+        if let Some(label) = test {
+            state.current_test = Some(label.into());
+        }
+        state.current_attempt = attempt;
+        state.current_retry = retry;
+    }
+}
+
+fn increment_scan_progress(progress: Option<&Arc<Mutex<ScanProgress>>>, units: u64) {
+    let Some(progress) = progress else {
+        return;
+    };
+    if let Ok(mut state) = progress.lock() {
+        state.completed = state.completed.saturating_add(units).min(state.total);
+    }
+}
 
 pub struct JudgedAttemptSummary {
     pub payload_id: String,
@@ -143,6 +208,27 @@ pub fn category_id(category: AttackCategory) -> &'static str {
     category.as_str()
 }
 
+/// Build judge engine while briefly holding inference/runtime locks (released before HTTP-heavy work).
+async fn build_judge_for_category(
+    data_dir: &std::path::Path,
+    inference_manager: Arc<AsyncMutex<InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
+    model_provider: SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+) -> CommandResult<aisec_judge::JudgeEngine> {
+    let inference = inference_manager.lock().await;
+    let manager = model_manager.lock().await;
+    let mut runtime_mgr = runtime_manager.lock().await;
+    build_judge_engine_from_gateway(
+        data_dir,
+        &inference,
+        &manager,
+        model_provider,
+        &mut runtime_mgr,
+    )
+    .await
+}
+
 /// Execute one attack category against a single endpoint; persist attempts and findings.
 pub async fn run_category_on_endpoint(
     repos: &Repositories,
@@ -153,13 +239,15 @@ pub async fn run_category_on_endpoint(
     category: AttackCategory,
     runtime: AttackRuntime,
     data_dir: &std::path::Path,
-    inference: &InferenceRuntimeManager,
-    model_manager: &aisec_models::LocalModelManager,
+    inference_manager: Arc<AsyncMutex<InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
     model_provider: SharedModelProvider,
-    runtime_manager: &mut RuntimeManager,
+    runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
     plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
     generated_payloads: Option<&HashMap<AttackCategory, Vec<AttackPayload>>>,
     progress: Option<&ScanProgressEmitter>,
+    options: Option<&CategoryRunOptions>,
+    progress_state: Option<&Arc<Mutex<ScanProgress>>>,
 ) -> CommandResult<CategoryRunResult> {
     let mut target = AttackTarget::llm_api(endpoint.url.clone());
     if let Some(method) = &endpoint.method {
@@ -190,7 +278,14 @@ pub async fn run_category_on_endpoint(
     if let Some(payloads) = generated_payloads {
         ctx = ctx.with_generated_payloads(payloads.clone());
     }
-    let executor = attack_executor(runtime.transport);
+    if let Some(opts) = options {
+        ctx.budget.max_payloads = opts.max_payloads;
+    }
+    let executor = if let Some(opts) = options {
+        attack_executor_for_options(runtime.transport, opts)
+    } else {
+        attack_executor(runtime.transport)
+    };
 
     info!(
         scan_id = %scan_id,
@@ -213,14 +308,30 @@ pub async fn run_category_on_endpoint(
         emitter.info(format!("Testing {method_label} {path}"));
     }
 
+    update_scan_phase(
+        progress_state,
+        "attack",
+        Some(category.display_name()),
+        None,
+        None,
+    );
+
     let result = executor
         .execute_category(category, &ctx)
         .await
         .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
 
-    let judge = build_judge_engine_from_gateway(
+    update_scan_phase(
+        progress_state,
+        "judge",
+        Some(category.display_name()),
+        None,
+        None,
+    );
+
+    let judge = build_judge_for_category(
         data_dir,
-        inference,
+        inference_manager,
         model_manager,
         model_provider.clone(),
         runtime_manager,
@@ -378,6 +489,7 @@ pub async fn run_category_on_endpoint(
             confidence: verdict.confidence,
             summary: verdict.summary.clone(),
         });
+        increment_scan_progress(progress_state, 1);
 
         if let Some(emitter) = progress {
             let confidence_label = if verdict.confidence >= 0.8 {
@@ -415,13 +527,15 @@ pub async fn run_category_on_target_profile(
     category: AttackCategory,
     runtime: AttackRuntime,
     data_dir: &std::path::Path,
-    inference: &InferenceRuntimeManager,
-    model_manager: &aisec_models::LocalModelManager,
+    inference_manager: Arc<AsyncMutex<InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
     model_provider: SharedModelProvider,
-    runtime_manager: &mut RuntimeManager,
+    runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
     plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
     generated_payloads: Option<&HashMap<AttackCategory, Vec<AttackPayload>>>,
     progress: Option<&ScanProgressEmitter>,
+    options: Option<&CategoryRunOptions>,
+    progress_state: Option<&Arc<Mutex<ScanProgress>>>,
 ) -> CommandResult<CategoryRunResult> {
     let url = profile.full_url();
     let mut target = AttackTarget::llm_api(url.clone());
@@ -451,7 +565,14 @@ pub async fn run_category_on_target_profile(
     if let Some(payloads) = generated_payloads {
         ctx = ctx.with_generated_payloads(payloads.clone());
     }
-    let executor = attack_executor(runtime.transport);
+    if let Some(opts) = options {
+        ctx.budget.max_payloads = opts.max_payloads;
+    }
+    let executor = if let Some(opts) = options {
+        attack_executor_for_options(runtime.transport, opts)
+    } else {
+        attack_executor(runtime.transport)
+    };
 
     info!(
         scan_id = %scan_id,
@@ -471,14 +592,30 @@ pub async fn run_category_on_target_profile(
         ));
     }
 
+    update_scan_phase(
+        progress_state,
+        "attack",
+        Some(category.display_name()),
+        None,
+        None,
+    );
+
     let result = executor
         .execute_category(category, &ctx)
         .await
         .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
 
-    let judge = build_judge_engine_from_gateway(
+    update_scan_phase(
+        progress_state,
+        "judge",
+        Some(category.display_name()),
+        None,
+        None,
+    );
+
+    let judge = build_judge_for_category(
         data_dir,
-        inference,
+        inference_manager,
         model_manager,
         model_provider.clone(),
         runtime_manager,
@@ -634,6 +771,7 @@ pub async fn run_category_on_target_profile(
             confidence: verdict.confidence,
             summary: verdict.summary.clone(),
         });
+        increment_scan_progress(progress_state, 1);
 
         if let Some(emitter) = progress {
             let confidence_label = if verdict.confidence >= 0.8 {
@@ -721,9 +859,6 @@ pub async fn attack_run_prompt_injection_op(
         .await;
 
     let category = AttackCategory::PromptInjection;
-    let inference = state.inference_manager().lock().await;
-    let manager = state.model_manager().lock().await;
-    let mut runtime_mgr = state.runtime_manager().lock().await;
     let run = match run_category_on_endpoint(
         &repos,
         &scan.id,
@@ -733,11 +868,13 @@ pub async fn attack_run_prompt_injection_op(
         category,
         runtime,
         state.data_dir(),
-        &inference,
-        &manager,
+        Arc::clone(state.inference_manager()),
+        Arc::clone(state.model_manager()),
         state.model_provider().clone(),
-        &mut runtime_mgr,
+        Arc::clone(state.runtime_manager()),
         state.plugin_manager().clone(),
+        None,
+        None,
         None,
         None,
     )

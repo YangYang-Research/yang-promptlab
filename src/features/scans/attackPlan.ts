@@ -3,6 +3,7 @@ import type {
   AttackProfileId,
   ExecutionStrategy,
 } from "./attackProfiles";
+import { ALL_ATTACK_CATEGORY_IDS } from "./attackProfiles";
 import {
   payloadStrategyFromDto,
   payloadStrategyToDto,
@@ -275,7 +276,7 @@ export function resolveCategoriesForAdjust(
   if (attackPlan.categories.length > 0) {
     return attackPlan.categories;
   }
-  return attackPlan.suggestedCategories.filter((id) => !planUi.disabledGraphNodes.includes(id));
+  return ALL_ATTACK_CATEGORY_IDS.filter((id) => !planUi.disabledGraphNodes.includes(id));
 }
 
 export function attackPlanFromDto(dto: WizardAttackPlanDto): AttackPlanConfig {

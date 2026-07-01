@@ -234,6 +234,18 @@ export function parseWizardEntryStep(raw: string): WizardStepId | null {
   return null;
 }
 
+/** True when the URL requests a brand-new wizard (not resume / target / step deep link). */
+export function isFreshWizardEntry(params: {
+  scanId?: string;
+  targetId?: string;
+  step?: string;
+}): boolean {
+  const scanId = params.scanId?.trim() ?? "";
+  const targetId = params.targetId?.trim() ?? "";
+  const step = parseWizardEntryStep(params.step?.trim() ?? "");
+  return !scanId && !targetId && step === null;
+}
+
 /** Apply explicit wizard entry intent from URL deep links (new scan, retry, resume). */
 export function applyWizardEntryStep(
   session: ScanWizardSession,
@@ -262,6 +274,14 @@ export function applyWizardEntryStep(
       ...session,
       currentStep: 4,
       submittedScanId: null,
+    };
+  }
+
+  if (step === 5) {
+    return {
+      ...session,
+      currentStep: 5,
+      submittedScanId: session.submittedScanId ?? session.draftScanId,
     };
   }
 

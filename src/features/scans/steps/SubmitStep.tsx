@@ -15,6 +15,7 @@ import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatus
 import type { Target } from "@/shared/types";
 
 import { AttackGraphProgress } from "./AttackGraphProgress";
+import { ExecutionStrategyPipeline } from "./ExecutionStrategyPipeline";
 import { ScanConsole } from "./ScanConsole";
 
 type SubmitStepProps = {
@@ -123,6 +124,8 @@ export function SubmitStep({
           </dl>
         </section>
 
+        <ExecutionStrategyPipeline attackPlan={attackPlan} status={status} compact />
+
         {attackGraphSection}
 
         <section className="wizard-fingerprint-summary">
@@ -151,7 +154,7 @@ export function SubmitStep({
     <div className="wizard-step wizard-submit-review">
       <p className="wizard-submit-review__lead text-sm text-muted">
         Review the attack graph below. Press <strong>Start Attack</strong> in the footer to launch,
-        or use <strong>Run Attack</strong> from the previous step.
+        or use <strong>Start Attack</strong> from the previous step.
       </p>
 
       <section className="wizard-fingerprint-summary">
@@ -176,6 +179,8 @@ export function SubmitStep({
           {executionLabel} · {formatPayloadStrategySummary(attackPlan.payloadStrategy)}
         </p>
       </section>
+
+      <ExecutionStrategyPipeline attackPlan={attackPlan} />
 
       {attackGraphSection}
 

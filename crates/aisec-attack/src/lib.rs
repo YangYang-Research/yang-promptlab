@@ -25,7 +25,7 @@ pub use error::{AttackError, AttackResult};
 pub use executor::AttackExecutor;
 pub use lifecycle::{AttackLifecycle, AttackPhase, LifecycleEvent};
 pub use orchestrator::{AttackOrchestrator, OrchestratorConfig};
-pub use payload::{MutatorConfig, PayloadMutator, PayloadRunner};
+pub use payload::{MutatorConfig, MutatorKind, PayloadMutator, PayloadRunner};
 pub use registry::AttackRegistry;
 #[cfg(feature = "storage")]
 pub use scanner::{PromptInjectionScanner, ScanContext, ScanSummary};

@@ -3,10 +3,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::collections::HashMap;
 
 use aisec_auth::AuthEngineConfig;
-use aisec_attack::{AttackCategory, AttackPayload};
+use aisec_attack::AttackCategory;
 use aisec_models::LocalModelManager;
 use aisec_runtime::SharedModelProvider;
 use aisec_storage::{
@@ -18,11 +17,10 @@ use tauri::{AppHandle, State};
 use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
 
-use crate::commands::attack::{run_category_on_target_profile, run_category_on_endpoint};
 use crate::agent_service::{agent_config_from_scan, run_agent_endpoint, ScanAgentHost};
-use crate::commands::generator::{
-    attack_plan_from_scan, generate_payloads_for_scan_job, generate_payloads_for_scan_job_with_strategy,
-    parse_generator_mode_optional, prompt_payloads_map,
+use crate::commands::attack::run_category_on_endpoint;
+use crate::commands::scan_execution::{
+    run_target_profile_attack_scan, scan_progress_total, ScanExecutionConfig, TargetProfileScanContext,
 };
 use aisec_target_profile::PayloadStrategy;
 use crate::events::{emit_app_data_changed, ScanProgressEmitter};
@@ -155,8 +153,7 @@ async fn run_scan_job(
     categories: Vec<AttackCategory>,
     disabled_tests: Vec<String>,
     profile: String,
-    generator_mode: Option<String>,
-    payload_strategy: Option<PayloadStrategy>,
+    execution_config: ScanExecutionConfig,
     cancel: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
     progress: Arc<Mutex<ScanProgress>>,
@@ -210,74 +207,7 @@ async fn run_scan_job(
         default_runtime
     };
 
-    let generated_payloads: Option<HashMap<AttackCategory, Vec<AttackPayload>>> =
-        if let Some(ref strategy) = payload_strategy {
-            let plan = attack_plan_from_scan(profile.clone(), categories.clone(), disabled_tests.clone());
-            match generate_payloads_for_scan_job_with_strategy(
-                &data_dir,
-                Arc::clone(&inference_manager),
-                Arc::clone(&model_manager),
-                model_provider.clone(),
-                Arc::clone(&runtime_manager),
-                &plan,
-                strategy,
-            )
-            .await
-            {
-                Ok(pack) => {
-                    info!(
-                        scan_id = %scan_id,
-                        strategy = ?strategy.strategy,
-                        payloads = pack.stats.payload_count,
-                        "generated attack payloads from payload strategy"
-                    );
-                    Some(prompt_payloads_map(&pack))
-                }
-                Err(err) => {
-                    warn!(
-                        scan_id = %scan_id,
-                        error = %err,
-                        "payload generation failed; falling back to attack builtins"
-                    );
-                    None
-                }
-            }
-        } else if let Some(mode) = parse_generator_mode_optional(generator_mode.as_deref()) {
-            let plan = attack_plan_from_scan(profile.clone(), categories.clone(), disabled_tests);
-            match generate_payloads_for_scan_job(
-                &data_dir,
-                Arc::clone(&inference_manager),
-                Arc::clone(&model_manager),
-                model_provider.clone(),
-                Arc::clone(&runtime_manager),
-                &plan,
-                mode,
-            )
-            .await
-            {
-                Ok(pack) => {
-                    info!(
-                        scan_id = %scan_id,
-                        mode = ?mode,
-                        payloads = pack.stats.payload_count,
-                        "generated attack payloads for scan"
-                    );
-                    Some(prompt_payloads_map(&pack))
-                }
-                Err(err) => {
-                    warn!(
-                        scan_id = %scan_id,
-                        error = %err,
-                        "payload generation failed; falling back to attack builtins"
-                    );
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
-    let total = categories.len() as u64;
+    let total = scan_progress_total(&categories, &disabled_tests, &execution_config);
     let mut findings_total = 0u64;
     let mut had_error = false;
 
@@ -291,81 +221,37 @@ async fn run_scan_job(
     };
 
     if let Some((tid, target_profile)) = profile_ref {
-        for category in &categories {
-            if cancel.load(Ordering::Relaxed) {
-                break;
-            }
-            wait_if_paused(&paused, &cancel).await;
-            if cancel.load(Ordering::Relaxed) {
-                break;
-            }
+        let outcome = run_target_profile_attack_scan(
+            TargetProfileScanContext {
+                repos: &repos,
+                scan_id: &scan_id,
+                project_id: &project_id,
+                target_id: tid,
+                profile: target_profile,
+                categories: &categories,
+                disabled_tests: &disabled_tests,
+                profile_id: &profile,
+                attack_runtime,
+                data_dir: &data_dir,
+                inference_manager: Arc::clone(&inference_manager),
+                model_manager: Arc::clone(&model_manager),
+                model_provider: model_provider.clone(),
+                runtime_manager: Arc::clone(&runtime_manager),
+                plugin_manager: plugin_manager.clone(),
+                cancel: cancel.clone(),
+                paused: paused.clone(),
+                progress: progress.clone(),
+                emitter: progress_emitter.clone(),
+            },
+            execution_config,
+        )
+        .await;
+        findings_total = outcome.findings_total;
+        had_error = outcome.had_error;
 
-            {
-                if let Ok(mut p) = progress.lock() {
-                    p.status = if paused.load(Ordering::Relaxed) {
-                        "paused".into()
-                    } else {
-                        "running".into()
-                    };
-                    p.current_endpoint = Some(target_profile.full_url());
-                    p.current_test = Some(category.display_name().to_string());
-                }
-            }
-
-            let inference = inference_manager.lock().await;
-            let manager = model_manager.lock().await;
-            let mut runtime_mgr = runtime_manager.lock().await;
-            match run_category_on_target_profile(
-                &repos,
-                &scan_id,
-                &project_id,
-                tid,
-                target_profile,
-                *category,
-                attack_runtime.clone(),
-                &data_dir,
-                &inference,
-                &manager,
-                model_provider.clone(),
-                &mut runtime_mgr,
-                plugin_manager.clone(),
-                generated_payloads.as_ref(),
-                Some(&progress_emitter),
-            )
-            .await
-            {
-                Ok(result) => {
-                    findings_total += result.findings.len() as u64;
-                    if let Ok(mut p) = progress.lock() {
-                        p.completed += 1;
-                        p.findings = findings_total;
-                    }
-                }
-                Err(err) => {
-                    let message = err.to_string();
-                    warn!(
-                        scan_id = %scan_id,
-                        target_id = %tid,
-                        category = %category.as_str(),
-                        error = %message,
-                        "attack unit failed"
-                    );
-                    progress_emitter.error(format!(
-                        "{} failed: {}",
-                        category.display_name(),
-                        user_facing_scan_error(&message),
-                    ));
-                    had_error = true;
-                    if let Ok(mut p) = progress.lock() {
-                        p.completed += 1;
-                    }
-                }
-            }
-
-            let snapshot = progress.lock().ok().map(|guard| guard.clone());
-            if let Some(snapshot) = snapshot {
-                let _ = persist_playbook_progress(&repos, &scan_id, &snapshot).await;
-            }
+        let snapshot = progress.lock().ok().map(|guard| guard.clone());
+        if let Some(snapshot) = snapshot {
+            let _ = persist_playbook_progress(&repos, &scan_id, &snapshot).await;
         }
     }
 
@@ -610,6 +496,7 @@ pub async fn scan_start_op(
     payload_strategy: Option<PayloadStrategy>,
     agent_mode: Option<bool>,
     max_agent_attempts: Option<usize>,
+    reflection_enabled: Option<bool>,
     draft_scan_id: Option<String>,
 ) -> CommandResult<ScanStartDto> {
     let parsed_categories: Vec<AttackCategory> = categories
@@ -643,10 +530,18 @@ pub async fn scan_start_op(
     }
 
     let agentic = agent_mode.unwrap_or(false);
+    let reflection_on = reflection_enabled.unwrap_or(agentic);
     let effective_generator_mode = payload_strategy
         .as_ref()
         .map(|s| s.generator_mode_str().to_string())
         .or(generator_mode.clone());
+    let mut execution_config = ScanExecutionConfig::from_flags(
+        agentic,
+        max_agent_attempts.unwrap_or(5),
+        reflection_on,
+        payload_strategy.clone(),
+        effective_generator_mode.clone(),
+    );
     let config = agent_config_from_scan(effective_generator_mode.as_deref(), max_agent_attempts);
     let scan_name = if agentic {
         format!("Agent Scan ({profile})")
@@ -662,6 +557,7 @@ pub async fn scan_start_op(
             "target_profile": true,
             "generator_mode": effective_generator_mode,
             "agent_mode": agentic,
+            "reflection_enabled": reflection_on,
             "max_agent_attempts": config.max_attempts_per_category,
         });
         if let Some(ref strategy) = payload_strategy {
@@ -700,6 +596,9 @@ pub async fn scan_start_op(
 
         let is_draft = existing.status == crate::commands::wizard_scan::WIZARD_SCAN_STATUS;
         let is_restart = is_restartable_scan_status(&existing.status);
+        if is_restart {
+            execution_config.pipeline_warmup_secs = 0;
+        }
 
         if !is_draft && !is_restart {
             if existing.status == "running" && state.jobs().contains(&draft_id) {
@@ -769,11 +668,7 @@ pub async fn scan_start_op(
             .await;
     }
 
-    let total = if agentic {
-        (parsed_categories.len() as u64) * config.max_attempts_per_category as u64
-    } else {
-        parsed_categories.len() as u64
-    };
+    let total = scan_progress_total(&parsed_categories, &disabled_tests, &execution_config);
     let cancel = Arc::new(AtomicBool::new(false));
     let paused = Arc::new(AtomicBool::new(false));
     let mut progress_state = ScanProgress::new(total.max(1));
@@ -800,19 +695,10 @@ pub async fn scan_start_op(
 
     let disabled_for_job = disabled_tests.clone();
     let profile_for_job = profile.clone();
-    let generator_mode_for_job = effective_generator_mode.clone();
-    let payload_strategy_for_job = payload_strategy.clone();
-    let max_attempts_for_job = max_agent_attempts;
+    let execution_config_for_job = execution_config;
     let app_for_job = app.clone();
 
     emit_app_data_changed(app, "scan_created");
-
-    if agentic {
-        warn!(
-            scan_id = %scan.id,
-            "agent mode runs as target-profile batch scan until agent adapter migrates"
-        );
-    }
 
     tauri::async_runtime::spawn(async move {
         run_scan_job(
@@ -825,8 +711,7 @@ pub async fn scan_start_op(
             parsed_categories,
             disabled_for_job,
             profile_for_job,
-            generator_mode_for_job,
-            payload_strategy_for_job,
+            execution_config_for_job,
             cancel,
             paused,
             progress,
@@ -1001,6 +886,7 @@ pub async fn scan_start(
     payload_strategy: Option<serde_json::Value>,
     agent_mode: Option<bool>,
     max_agent_attempts: Option<usize>,
+    reflection_enabled: Option<bool>,
     draft_scan_id: Option<String>,
 ) -> CommandResult<ScanStartDto> {
     let parsed_strategy = payload_strategy
@@ -1019,6 +905,7 @@ pub async fn scan_start(
         parsed_strategy,
         agent_mode,
         max_agent_attempts,
+        reflection_enabled,
         draft_scan_id,
     )
     .await

@@ -182,8 +182,8 @@ export function AuthVerificationStep({
       <section>
         <h3 className="wizard-section-title">Verify API</h3>
         <p className="text-muted">
-          Sends a real AI request (<code>Hello</code>) using your Target Profile. On success, AI
-          Runtime analyzes the request and response to build your attack plan.
+          Sends a real AI request (<code>Hello</code>) using your Target Profile to confirm the
+          endpoint responds correctly.
         </p>
         <Button variant="primary" disabled={verifying} onClick={() => void handleVerify()}>
           {verifying ? "Verifying…" : "Verify API"}

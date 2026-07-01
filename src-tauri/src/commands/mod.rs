@@ -19,6 +19,7 @@ pub mod plugins;
 pub mod projects;
 pub mod runtime;
 pub mod scan;
+pub mod scan_execution;
 pub mod security;
 pub mod target_profile;
 pub mod wizard_scan;

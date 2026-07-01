@@ -12,6 +12,7 @@ pub enum AgentPhase {
     Generate,
     Attack,
     Judge,
+    Reflection,
     Retry,
     Complete,
 }
@@ -24,6 +25,7 @@ impl AgentPhase {
             Self::Generate => "generate",
             Self::Attack => "attack",
             Self::Judge => "judge",
+            Self::Reflection => "reflection",
             Self::Retry => "retry",
             Self::Complete => "complete",
         }
