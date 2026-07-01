@@ -1,28 +1,19 @@
-//! Discovery execution — enumerate endpoints then run the AI metadata pipeline.
+//! Endpoint management commands (list, create, update).
 
-use std::collections::HashSet;
-
-use aisec_discovery::{DiscoveryConfig, DiscoveryEngine};
 use aisec_endpoint_metadata::{analyze_endpoint, DiscoveryAnalysisInput};
-use aisec_plugin_host::collect_discovery_endpoints;
 use aisec_storage::{
-    CreateEndpoint, CreateScan, EndpointRepository, ScanRepository, TargetRepository, UpdateEndpoint,
-    UpdateScan,
+    CreateEndpoint, EndpointRepository, ScanRepository, TargetRepository, UpdateEndpoint,
 };
 use tauri::{AppHandle, State};
 use time::OffsetDateTime;
-use tracing::{info, instrument, warn};
+use tracing::{info, instrument};
 use url::Url;
 
-use crate::dto::{DiscoveryRunDto, DiscoveryStatsDto, EndpointDto, ScanDto};
-use crate::endpoint_pipeline::{
-    analysis_client, analysis_concurrency, build_metadata_for_discovered, target_requires_auth,
-    PipelineProgress, DISCOVERY_PIPELINE_PHASES,
-};
+use crate::dto::EndpointDto;
+use crate::endpoint_pipeline::{analysis_client, target_requires_auth};
 use crate::error::{CommandError, CommandResult};
-use crate::events::{emit_app_data_changed, emit_discovery_progress};
+use crate::events::emit_app_data_changed;
 use crate::method_heuristic::default_http_method_for_path;
-use crate::session_auth::resolve_discovery_auth;
 use crate::state::AppState;
 
 fn seed_url_from_descriptor(descriptor_json: &str) -> Option<String> {
@@ -86,22 +77,6 @@ fn normalize_http_method(method: Option<String>) -> CommandResult<String> {
         )));
     }
     Ok(upper)
-}
-
-fn plugin_to_discovered(
-    endpoint: aisec_plugin_host::PluginDiscoveryEndpoint,
-    seed_url: &str,
-) -> aisec_discovery::types::DiscoveredEndpoint {
-    use aisec_discovery::types::{DiscoveredEndpoint, EndpointKind};
-    DiscoveredEndpoint {
-        url: endpoint.url,
-        kind: EndpointKind::RestApi,
-        method: endpoint.method,
-        confidence: 0.6,
-        evidence: "Discovered by plugin".into(),
-        source_url: Some(seed_url.into()),
-        discovered_at: OffsetDateTime::now_utc(),
-    }
 }
 
 #[instrument(skip(state))]
@@ -176,230 +151,6 @@ pub async fn endpoint_create_op(
     Ok(endpoint.into())
 }
 
-#[instrument(skip(state, app))]
-pub async fn discovery_run_op(
-    state: &AppState,
-    app: &AppHandle,
-    target_id: String,
-    merge_scan_id: Option<String>,
-) -> CommandResult<DiscoveryRunDto> {
-    let repos = state.repositories();
-
-    let target = repos.targets().get(&target_id).await.map_err(CommandError::from)?;
-    let seed_url = seed_url_from_descriptor(&target.descriptor_json).ok_or_else(|| {
-        CommandError::invalid_input("Target has no URL in its descriptor; add a URL first.")
-    })?;
-
-    let scan = if let Some(existing_id) = merge_scan_id.as_deref() {
-        let existing = repos.scans().get(existing_id).await.map_err(CommandError::from)?;
-        if existing.target_id.as_deref() != Some(target.id.as_str()) {
-            return Err(CommandError::invalid_input(
-                "Discovery scan does not belong to this target",
-            ));
-        }
-        let _ = repos
-            .scans()
-            .update(
-                existing_id,
-                UpdateScan {
-                    status: Some("running".into()),
-                    started_at: Some(Some(OffsetDateTime::now_utc())),
-                    completed_at: Some(None),
-                    ..Default::default()
-                },
-            )
-            .await;
-        existing
-    } else {
-        let created = repos
-            .scans()
-            .create(CreateScan {
-                project_id: target.project_id.clone(),
-                target_id: Some(target.id.clone()),
-                name: format!("Discovery: {}", target.name),
-                status: Some("running".into()),
-                playbook_json: None,
-            })
-            .await
-            .map_err(CommandError::from)?;
-
-        let _ = repos
-            .scans()
-            .update(
-                &created.id,
-                UpdateScan {
-                    started_at: Some(Some(OffsetDateTime::now_utc())),
-                    ..Default::default()
-                },
-            )
-            .await;
-        created
-    };
-
-    emit_discovery_progress(
-        app,
-        DISCOVERY_PIPELINE_PHASES[0],
-        0,
-        0,
-        0,
-    );
-
-    let config = DiscoveryConfig {
-        max_depth: 2,
-        max_pages: 25,
-        worker_count: 1,
-        request_timeout: std::time::Duration::from_secs(10),
-        allow_private_network: true,
-        probe_static_paths: true,
-        ..Default::default()
-    };
-
-    let engine = DiscoveryEngine::new(config).map_err(CommandError::from)?;
-    let session_auth = resolve_discovery_auth(state, &target.descriptor_json, &seed_url).await?;
-    let engine = if let Some(auth) = session_auth {
-        info!(scan_id = %scan.id, "using authenticated discovery session");
-        engine.with_session_auth(auth).map_err(CommandError::from)?
-    } else {
-        engine
-    };
-
-    info!(scan_id = %scan.id, url = %seed_url, "discovery run started");
-
-    let report = match engine.discover(&seed_url).await {
-        Ok(report) => report,
-        Err(err) => {
-            warn!(scan_id = %scan.id, error = %err.client_message(), "discovery run failed");
-            let _ = repos
-                .scans()
-                .update(
-                    &scan.id,
-                    UpdateScan {
-                        status: Some("failed".into()),
-                        completed_at: Some(Some(OffsetDateTime::now_utc())),
-                        playbook_json: Some(serde_json::json!({ "error": err.client_message() })),
-                        ..Default::default()
-                    },
-                )
-                .await;
-            return Err(CommandError::from(err));
-        }
-    };
-
-    let mut discovered = report.endpoints.clone();
-  {
-        let mut plugin_manager = state.plugin_manager().lock().await;
-        if let Ok(plugin_endpoints) = collect_discovery_endpoints(&mut plugin_manager, &seed_url).await
-        {
-            for endpoint in plugin_endpoints {
-                discovered.push(plugin_to_discovered(endpoint, &seed_url));
-            }
-        }
-    }
-
-    let existing_endpoints = repos
-        .endpoints()
-        .list_by_scan(&scan.id)
-        .await
-        .map_err(CommandError::from)?;
-    let existing_urls: HashSet<String> = existing_endpoints.iter().map(|e| e.url.clone()).collect();
-    discovered.retain(|e| !existing_urls.contains(&e.url));
-
-    let auth_required = target_requires_auth(state, &target.descriptor_json, &seed_url).await;
-    let client = analysis_client();
-    let app_handle = app.clone();
-    let scan_id = scan.id.clone();
-    let target_id = target.id.clone();
-
-    let inputs = build_metadata_for_discovered(
-        &client,
-        &discovered,
-        &target_id,
-        &scan_id,
-        auth_required,
-        analysis_concurrency(),
-        |progress: PipelineProgress| {
-            emit_discovery_progress(
-                &app_handle,
-                &progress.phase,
-                progress.processed,
-                progress.total,
-                progress.elapsed_ms,
-            );
-        },
-    )
-    .await;
-
-    let newly_saved = if inputs.is_empty() {
-        Vec::new()
-    } else {
-        repos
-            .endpoints()
-            .create_many(inputs)
-            .await
-            .map_err(CommandError::from)?
-    };
-
-    let all_endpoints = repos
-        .endpoints()
-        .list_by_scan(&scan.id)
-        .await
-        .map_err(CommandError::from)?;
-
-    let stats = DiscoveryStatsDto {
-        pages_fetched: report.stats.pages_fetched as u64,
-        pages_failed: report.stats.pages_failed as u64,
-        links_extracted: report.stats.links_extracted as u64,
-        probes_sent: report.stats.probes_sent as u64,
-        duration_ms: report.stats.duration_ms,
-        endpoint_count: all_endpoints.len() as u64,
-        errors: report.errors.clone(),
-        phases: DISCOVERY_PIPELINE_PHASES
-            .iter()
-            .map(|p| (*p).to_string())
-            .collect(),
-    };
-
-    let updated = repos
-        .scans()
-        .update(
-            &scan.id,
-            UpdateScan {
-                status: Some("completed".into()),
-                completed_at: Some(Some(OffsetDateTime::now_utc())),
-                playbook_json: Some(serde_json::json!({
-                    "seed_url": seed_url,
-                    "pages_fetched": stats.pages_fetched,
-                    "pages_failed": stats.pages_failed,
-                    "links_extracted": stats.links_extracted,
-                    "probes_sent": stats.probes_sent,
-                    "duration_ms": stats.duration_ms,
-                    "endpoint_count": stats.endpoint_count,
-                    "errors": stats.errors,
-                    "pipeline": "ai_endpoint_metadata",
-                })),
-                ..Default::default()
-            },
-        )
-        .await
-        .map_err(CommandError::from)?;
-
-    info!(
-        scan_id = %scan.id,
-        new_endpoints = newly_saved.len(),
-        total_endpoints = all_endpoints.len(),
-        pages = stats.pages_fetched,
-        "discovery run completed"
-    );
-
-    emit_app_data_changed(app, "discovery_complete");
-
-    Ok(DiscoveryRunDto {
-        scan: ScanDto::from(updated),
-        endpoints: all_endpoints.into_iter().map(EndpointDto::from).collect(),
-        stats,
-    })
-}
-
 pub async fn endpoint_list_op(
     state: &AppState,
     scan_id: String,
@@ -446,16 +197,6 @@ pub async fn endpoint_create(
     path: String,
 ) -> CommandResult<EndpointDto> {
     endpoint_create_op(state.inner(), scan_id, target_id, method, path).await
-}
-
-#[tauri::command]
-pub async fn discovery_run(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    target_id: String,
-    merge_scan_id: Option<String>,
-) -> CommandResult<DiscoveryRunDto> {
-    discovery_run_op(state.inner(), &app, target_id, merge_scan_id).await
 }
 
 #[tauri::command]

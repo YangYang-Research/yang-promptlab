@@ -17,6 +17,7 @@ import {
 } from "@/shared/components";
 import type { Finding, Severity } from "@/shared/types";
 
+import { FindingDetailPanel } from "./FindingDetailPanel";
 import { filterFindings } from "./findingsFilters";
 import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
 import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
@@ -44,6 +45,7 @@ export function FindingsPage() {
   const [searchParams] = useSearchParams();
   const [scanFilter, setScanFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<Finding["status"] | "">("");
+  const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
   const [pageSize, setPageSize] = usePageSizePreference("findings");
 
   useEffect(() => {
@@ -80,6 +82,17 @@ export function FindingsPage() {
   );
 
   const { page, setPage, pagination } = usePaginatedList(filtered, pageSize);
+
+  const selectedFinding = useMemo(
+    () => filtered.find((finding) => finding.id === selectedFindingId) ?? null,
+    [filtered, selectedFindingId],
+  );
+
+  useEffect(() => {
+    if (selectedFindingId && !filtered.some((finding) => finding.id === selectedFindingId)) {
+      setSelectedFindingId(null);
+    }
+  }, [filtered, selectedFindingId]);
 
   const projectName = (projectId: string) =>
     projects.find((p) => p.id === projectId)?.name ?? "—";
@@ -309,14 +322,25 @@ export function FindingsPage() {
           description="Run a scan from the wizard to populate findings in SQLite."
         />
       ) : (
-        <Card padding="none">
-          <DataTable
-            columns={columns}
-            rows={pagination.items}
-            keyField="id"
-            emptyMessage="No findings match your filters"
-          />
-        </Card>
+        <>
+          <Card padding="none">
+            <DataTable
+              columns={columns}
+              rows={pagination.items}
+              keyField="id"
+              emptyMessage="No findings match your filters"
+              onRowClick={(finding) => setSelectedFindingId(finding.id)}
+            />
+          </Card>
+          {selectedFinding && (
+            <Card>
+              <FindingDetailPanel
+                finding={selectedFinding}
+                onClose={() => setSelectedFindingId(null)}
+              />
+            </Card>
+          )}
+        </>
       )}
 
       {filtered.length > 0 && (

@@ -22,9 +22,6 @@ const TargetDetailsPage = lazy(() =>
     default: m.TargetDetailsPage,
   })),
 );
-const DiscoveryPage = lazy(() =>
-  import("@/features/discovery/DiscoveryPage").then((m) => ({ default: m.DiscoveryPage })),
-);
 const AttacksPage = lazy(() =>
   import("@/features/attacks/AttacksPage").then((m) => ({ default: m.AttacksPage })),
 );
@@ -54,11 +51,6 @@ const ScansPage = lazy(() =>
 );
 const ScanDetailsPage = lazy(() =>
   import("@/features/scans/ScanDetailsPage").then((m) => ({ default: m.ScanDetailsPage })),
-);
-const DiscoveryDetailsPage = lazy(() =>
-  import("@/features/discovery/DiscoveryDetailsPage").then((m) => ({
-    default: m.DiscoveryDetailsPage,
-  })),
 );
 
 function PageLoader() {
@@ -136,22 +128,6 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <TargetsPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="discovery/:scanId"
-            element={
-              <Suspense fallback={<PageLoader />}>
-                <DiscoveryDetailsPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="discovery"
-            element={
-              <Suspense fallback={<PageLoader />}>
-                <DiscoveryPage />
               </Suspense>
             }
           />

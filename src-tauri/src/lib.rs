@@ -207,7 +207,6 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::domain::report_list_all,
             commands::domain::report_read,
             commands::domain::report_export,
-            commands::discovery::discovery_run,
             commands::discovery::endpoint_list,
             commands::discovery::endpoint_create,
             commands::discovery::endpoint_update,

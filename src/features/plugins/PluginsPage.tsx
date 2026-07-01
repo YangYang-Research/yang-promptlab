@@ -81,7 +81,7 @@ export function PluginsPage() {
     <div className="page plugins-page">
       <PageHeader
         title="Plugins"
-        description="Manage discovery, attack, and judge extensions"
+        description="Manage attack and judge extensions"
         actions={
           <RefreshButton
             loading={busy}

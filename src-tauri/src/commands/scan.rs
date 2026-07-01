@@ -44,6 +44,18 @@ fn is_restartable_scan_status(status: &str) -> bool {
     matches!(status, "failed" | "cancelled" | "stopped" | "completed")
 }
 
+fn user_facing_scan_error(raw: &str) -> String {
+    if raw.contains("secret not found in secure storage")
+        || raw.contains("No matching entry found in secure storage")
+    {
+        return "stored API credentials are missing from the system keychain — re-save authentication in Step 3 and verify again".into();
+    }
+    if raw.contains("transport error") {
+        return format!("could not reach target ({raw})");
+    }
+    raw.to_string()
+}
+
 fn merge_scan_execution_playbook(
     existing_playbook_json: Option<&str>,
     execution_playbook: &mut serde_json::Value,
@@ -330,13 +342,19 @@ async fn run_scan_job(
                     }
                 }
                 Err(err) => {
+                    let message = err.to_string();
                     warn!(
                         scan_id = %scan_id,
                         target_id = %tid,
                         category = %category.as_str(),
-                        error = %err,
+                        error = %message,
                         "attack unit failed"
                     );
+                    progress_emitter.error(format!(
+                        "{} failed: {}",
+                        category.display_name(),
+                        user_facing_scan_error(&message),
+                    ));
                     had_error = true;
                     if let Ok(mut p) = progress.lock() {
                         p.completed += 1;
@@ -1047,6 +1065,12 @@ mod tests {
         assert!(is_restartable_scan_status("completed"));
         assert!(!is_restartable_scan_status("draft"));
         assert!(!is_restartable_scan_status("running"));
+    }
+
+    #[test]
+    fn user_facing_scan_error_maps_missing_vault_secret() {
+        let msg = user_facing_scan_error("[NOT_FOUND] secret not found in secure storage");
+        assert!(msg.contains("Step 3"));
     }
 
     #[test]

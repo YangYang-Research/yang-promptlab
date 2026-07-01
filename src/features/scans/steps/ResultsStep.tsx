@@ -8,6 +8,7 @@ import {
   reportExportLabel,
   type ReportExportFormat,
 } from "@/features/reports/reportDownloads";
+import { FindingDetailPanel } from "@/features/findings/FindingDetailPanel";
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
 import type { Severity } from "@/shared/types";
 
@@ -32,6 +33,7 @@ export function ResultsStep({ projectId, scanId, onDone }: ResultsStepProps) {
   const [exporting, setExporting] = useState<ReportExportFormat | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportPath, setExportPath] = useState<string | null>(null);
+  const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
 
   const scan = scans.find((s) => s.id === scanId);
   const scanFindings = useMemo(
@@ -58,6 +60,11 @@ export function ResultsStep({ projectId, scanId, onDone }: ResultsStepProps) {
         .sort((a, b) => severityRank(a.severity) - severityRank(b.severity))
         .slice(0, 8),
     [scanFindings],
+  );
+
+  const selectedFinding = useMemo(
+    () => scanFindings.find((finding) => finding.id === selectedFindingId) ?? null,
+    [scanFindings, selectedFindingId],
   );
 
   async function handleExport(format: ReportExportFormat) {
@@ -139,12 +146,30 @@ export function ResultsStep({ projectId, scanId, onDone }: ResultsStepProps) {
           <ul className="wizard-results__finding-list">
             {topFindings.map((finding) => (
               <li key={finding.id} className="wizard-results__finding-row">
-                <Badge variant={severityVariant(finding.severity)}>{finding.severity}</Badge>
-                <span className="wizard-results__finding-title">{finding.title}</span>
-                <span className="text-muted">{finding.category}</span>
+                <button
+                  type="button"
+                  className={`wizard-results__finding-button${selectedFindingId === finding.id ? " wizard-results__finding-button--selected" : ""}`}
+                  onClick={() =>
+                    setSelectedFindingId((current) =>
+                      current === finding.id ? null : finding.id,
+                    )
+                  }
+                >
+                  <Badge variant={severityVariant(finding.severity)}>{finding.severity}</Badge>
+                  <span className="wizard-results__finding-title">{finding.title}</span>
+                  <span className="text-muted">{finding.category}</span>
+                </button>
               </li>
             ))}
           </ul>
+        )}
+        {selectedFinding && (
+          <div className="wizard-results__finding-detail">
+            <FindingDetailPanel
+              finding={selectedFinding}
+              onClose={() => setSelectedFindingId(null)}
+            />
+          </div>
         )}
       </section>
 

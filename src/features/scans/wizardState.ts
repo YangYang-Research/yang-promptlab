@@ -11,6 +11,7 @@ import {
   targetFormNeedsSecretHydration,
 } from "./targetDescriptor";
 import {
+  createEmptyVerification,
   createInitialTargetProfile,
   normalizeVerification,
   profileFromDto,
@@ -225,6 +226,48 @@ export function createSessionForTargetScan(
   };
 }
 
+export function parseWizardEntryStep(raw: string): WizardStepId | null {
+  const parsed = Number.parseInt(raw, 10);
+  if (parsed >= 1 && parsed <= 6) {
+    return parsed as WizardStepId;
+  }
+  return null;
+}
+
+/** Apply explicit wizard entry intent from URL deep links (new scan, retry, resume). */
+export function applyWizardEntryStep(
+  session: ScanWizardSession,
+  step: WizardStepId | null,
+): ScanWizardSession {
+  if (!step) return session;
+
+  if (step === 2) {
+    return {
+      ...session,
+      currentStep: 2,
+      draftScanId: null,
+      submittedScanId: null,
+      attackPlan: null,
+      attackPlanUi: createInitialAttackPlanUi(),
+      verificationConsole: null,
+      targetProfile: {
+        ...session.targetProfile,
+        verification: createEmptyVerification(),
+      },
+    };
+  }
+
+  if (step === 4) {
+    return {
+      ...session,
+      currentStep: 4,
+      submittedScanId: null,
+    };
+  }
+
+  return { ...session, currentStep: step };
+}
+
 export function buildScanWizardUrl(
   projectId: string,
   targetId?: string,
@@ -236,7 +279,8 @@ export function buildScanWizardUrl(
   }
   if (options?.scanId) {
     params.set("scanId", options.scanId);
-  } else if (options?.step) {
+  }
+  if (options?.step) {
     params.set("step", String(options.step));
   }
   return `/scans/new?${params.toString()}`;

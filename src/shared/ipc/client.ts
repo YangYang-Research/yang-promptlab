@@ -248,23 +248,6 @@ export type FingerprintRecommendationDto = {
   priority: number;
 };
 
-export type DiscoveryStatsDto = {
-  pages_fetched: number;
-  pages_failed: number;
-  links_extracted: number;
-  probes_sent: number;
-  duration_ms: number;
-  endpoint_count: number;
-  errors: string[];
-  phases?: string[];
-};
-
-export type DiscoveryRunDto = {
-  scan: ScanDto;
-  endpoints: EndpointDto[];
-  stats: DiscoveryStatsDto;
-};
-
 export type AttackRunDto = {
   scan: ScanDto;
   category: string;
@@ -403,12 +386,6 @@ export const readReport = (id: string) =>
 
 export const exportReport = (id: string) =>
   invokeCommand<string>("report_export", { id });
-
-export const runDiscovery = (targetId: string, mergeScanId?: string | null) =>
-  invokeCommand<DiscoveryRunDto>("discovery_run", {
-    targetId,
-    mergeScanId: mergeScanId ?? null,
-  });
 
 export const listEndpoints = (scanId: string) =>
   invokeCommand<EndpointDto[]>("endpoint_list", { scanId });

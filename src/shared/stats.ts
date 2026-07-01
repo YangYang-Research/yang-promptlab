@@ -10,8 +10,8 @@ import type {
 
 const SCANNING_STATUSES = new Set(["running", "paused", "pending"]);
 
-function isDiscoveryScan(scan: ScanRun): boolean {
-  return scan.name.toLowerCase().startsWith("discovery:");
+function isAttackScan(scan: ScanRun): boolean {
+  return scan.name.startsWith("Scan (");
 }
 
 function latestScanPerTarget(scans: ScanRun[]): Map<string, ScanRun> {
@@ -37,7 +37,7 @@ function countScanningTargets(scans: ScanRun[]): number {
   const latest = latestScanPerTarget(scans);
   let count = 0;
   for (const scan of latest.values()) {
-    if (isDiscoveryScan(scan)) continue;
+    if (!isAttackScan(scan)) continue;
     if (SCANNING_STATUSES.has(scan.status)) {
       count += 1;
     }

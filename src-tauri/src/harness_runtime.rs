@@ -3,8 +3,9 @@
 use std::path::Path;
 
 use aisec_attack::HarnessTransport;
-use aisec_auth::{resolve_descriptor_for_runtime, AuthSessionManager, SecretStore, SessionAuthContext, SessionValidationStatus};
+use aisec_auth::{resolve_descriptor_for_runtime, resolve_descriptor_for_wizard, AuthSessionManager, SecretStore, SessionAuthContext, SessionValidationStatus};
 use aisec_harness::{AuthMaterial, HarnessFactory, PlaywrightHarness, TargetDescriptor};
+use tracing::warn;
 
 use aisec_storage::Database;
 
@@ -44,8 +45,17 @@ pub async fn build_harness_attack_runtime_parts(
     probe_url: &str,
 ) -> CommandResult<HarnessAttackRuntime> {
     let secrets = SecretStore::new().map_err(crate::error::CommandError::from)?;
-    let descriptor_json =
-        resolve_descriptor_for_runtime(descriptor_json, &secrets).map_err(crate::error::CommandError::from)?;
+    let descriptor_json = match resolve_descriptor_for_runtime(descriptor_json, &secrets) {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            warn!(
+                error = %err,
+                "descriptor strict resolve failed for harness runtime; using wizard fallback"
+            );
+            resolve_descriptor_for_wizard(descriptor_json, &secrets)
+                .unwrap_or_else(|_| descriptor_json.to_string())
+        }
+    };
 
     let mut auth = AuthMaterial::default();
     let mut session: Option<SessionAuthContext> = None;

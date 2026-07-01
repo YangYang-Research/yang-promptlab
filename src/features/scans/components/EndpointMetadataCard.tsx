@@ -2,7 +2,7 @@ import { Badge } from "@/shared/components";
 import type { EndpointDto } from "@/shared/ipc";
 import { endpointPath } from "../endpointMethod";
 import { endpointPlatformLabel, endpointTypeLabel } from "../fingerprintPlan";
-import { endpointSourceLabel } from "../discoveryPhases";
+import { endpointSourceLabel } from "../endpointHelpers";
 
 type EndpointMetadataCardProps = {
   endpoint: EndpointDto;

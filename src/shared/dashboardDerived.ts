@@ -2,7 +2,6 @@ import type { ScanStatusDto } from "@/shared/ipc";
 import type {
   ActivityItem,
   AttackRun,
-  DiscoveryJob,
   Finding,
   Project,
   ScanRun,
@@ -11,36 +10,13 @@ import type {
 
 const RUNNING_STATUSES = new Set(["running", "paused", "pending"]);
 
-function isDiscoveryScan(scan: ScanRun): boolean {
-  return scan.name.toLowerCase().startsWith("discovery:");
+function isAttackScan(scan: ScanRun): boolean {
+  return scan.name.startsWith("Scan (");
 }
 
 function targetName(targets: Target[], targetId: string | null): string {
   if (!targetId) return "Unknown target";
   return targets.find((t) => t.id === targetId)?.name ?? "Unknown target";
-}
-
-export function deriveDiscoveryJobs(
-  scans: ScanRun[],
-  targets: Target[],
-  liveStatus: Map<string, ScanStatusDto>,
-): DiscoveryJob[] {
-  return scans
-    .filter((scan) => isDiscoveryScan(scan) && RUNNING_STATUSES.has(scan.status))
-    .map((scan) => {
-      const live = liveStatus.get(scan.id);
-      return {
-        id: scan.id,
-        targetId: scan.targetId ?? "",
-        targetName: targetName(targets, scan.targetId),
-        status: scan.status,
-        progress: live?.progress_percent ?? (scan.status === "running" ? 35 : 0),
-        endpointsFound: 0,
-        startedAt: scan.startedAt ?? scan.createdAt,
-        completedAt: scan.completedAt,
-        modules: ["crawler", "fingerprint"],
-      };
-    });
 }
 
 export function deriveAttackRuns(
@@ -49,7 +25,7 @@ export function deriveAttackRuns(
   liveStatus: Map<string, ScanStatusDto>,
 ): AttackRun[] {
   return scans
-    .filter((scan) => !isDiscoveryScan(scan) && RUNNING_STATUSES.has(scan.status))
+    .filter((scan) => isAttackScan(scan) && RUNNING_STATUSES.has(scan.status))
     .map((scan) => {
       const live = liveStatus.get(scan.id);
       const total = live?.total ?? 0;
@@ -88,12 +64,12 @@ export function deriveActivity(
   }
 
   for (const scan of scans) {
+    if (!isAttackScan(scan)) continue;
     if (scan.status !== "completed" && scan.status !== "failed") continue;
-    const label = isDiscoveryScan(scan) ? "Discovery" : "Scan";
     items.push({
       id: `scan-${scan.id}`,
-      type: isDiscoveryScan(scan) ? "discovery" : "attack",
-      message: `${label} ${scan.status}: ${scan.name}`,
+      type: "attack",
+      message: `Scan ${scan.status}: ${scan.name}`,
       timestamp: scan.completedAt ?? scan.startedAt ?? scan.createdAt,
     });
   }
@@ -102,7 +78,7 @@ export function deriveActivity(
     const project = projects.find((p) => p.id === target.projectId);
     items.push({
       id: `target-${target.id}`,
-      type: "discovery",
+      type: "target",
       message: `Target added: ${target.name}${project ? ` (${project.name})` : ""}`,
       timestamp: scanTimestampForTarget(target.id, scans) ?? new Date().toISOString(),
     });

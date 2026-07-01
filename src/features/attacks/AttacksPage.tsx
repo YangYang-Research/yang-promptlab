@@ -129,7 +129,7 @@ export function AttacksPage() {
               onChange={(e) => setEndpointId(e.target.value)}
               disabled={noEndpoints || running}
             >
-              {noEndpoints && <option value="">No endpoints — run Discovery first</option>}
+              {noEndpoints && <option value="">No endpoints available</option>}
               {attackable.map((e) => (
                 <option key={e.id} value={e.id}>
                   {e.kind} · {e.url}
@@ -185,7 +185,7 @@ export function AttacksPage() {
           title={loading ? "Loading…" : "No attack runs yet"}
           description={
             noEndpoints
-              ? "Run Discovery to find endpoints, then launch an attack here."
+              ? "Add endpoints to a target, then launch an attack here."
               : "Select a discovered endpoint and launch a Prompt Injection attack."
           }
         />

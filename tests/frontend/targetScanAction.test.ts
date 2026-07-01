@@ -95,7 +95,7 @@ describe("resolveTargetScanAction", () => {
       scan({ id: "scan-2", status: "failed" }),
     ], null);
 
-    expect(action).toEqual({ kind: "retry", scanId: "scan-2", step: 5 });
+    expect(action).toEqual({ kind: "retry", scanId: "scan-2", step: 4 });
   });
 
   it("resumes setup at the wizard step when session is incomplete", () => {

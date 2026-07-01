@@ -141,6 +141,7 @@ export function mapFindings(findings: FindingDto[], targets: TargetDto[]): Findi
     confidence: extractConfidence(f.evidence),
     verdict: extractVerdict(f.evidence),
     discoveredAt: f.created_at,
+    evidence: f.evidence,
   }));
 }
 

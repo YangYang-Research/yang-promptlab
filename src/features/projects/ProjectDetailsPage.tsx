@@ -24,6 +24,7 @@ import { useToast } from "@/shared/notifications";
 import type { Severity, ScanRun, Target } from "@/shared/types";
 
 import { EditProjectModal } from "./EditProjectModal";
+import { AddTargetModal } from "@/features/targets/AddTargetModal";
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
 
@@ -37,6 +38,7 @@ export function ProjectDetailsPage() {
   const { projects, targets, scans, findings, reports, loading, actions } = useAppStore();
   const { notify } = useToast();
   const [editOpen, setEditOpen] = useState(false);
+  const [addTargetOpen, setAddTargetOpen] = useState(false);
 
   const project = projects.find((item) => item.id === projectId);
 
@@ -225,7 +227,12 @@ export function ProjectDetailsPage() {
         </Card>
 
         <Card className="detail-section">
-          <h2 className="detail-section__title">Recent Targets</h2>
+          <div className="card__header-row">
+            <h2 className="detail-section__title card__title">Recent Targets</h2>
+            <Button variant="secondary" size="sm" onClick={() => setAddTargetOpen(true)}>
+              Add Target
+            </Button>
+          </div>
           {recentTargets.length === 0 ? (
             <p className="text-muted">No targets in this project yet.</p>
           ) : (
@@ -291,6 +298,12 @@ export function ProjectDetailsPage() {
         open={editOpen}
         project={project}
         onClose={() => setEditOpen(false)}
+      />
+
+      <AddTargetModal
+        open={addTargetOpen}
+        defaultProjectId={project.id}
+        onClose={() => setAddTargetOpen(false)}
       />
     </div>
   );

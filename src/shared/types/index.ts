@@ -46,18 +46,6 @@ export type Target = {
   authType: string;
 };
 
-export type DiscoveryJob = {
-  id: string;
-  targetId: string;
-  targetName: string;
-  status: JobStatus;
-  progress: number;
-  endpointsFound: number;
-  startedAt: string;
-  completedAt: string | null;
-  modules: string[];
-};
-
 export type AttackRun = {
   id: string;
   targetId: string;
@@ -85,6 +73,7 @@ export type Finding = {
   confidence: number;
   verdict: "vulnerable" | "not_vulnerable" | null;
   discoveredAt: string;
+  evidence: unknown;
 };
 
 export type ScanRun = {
@@ -199,7 +188,7 @@ export type LocalModel = {
 
 export type ActivityItem = {
   id: string;
-  type: "discovery" | "attack" | "finding" | "report";
+  type: "attack" | "finding" | "report" | "target";
   message: string;
   timestamp: string;
   severity?: Severity;

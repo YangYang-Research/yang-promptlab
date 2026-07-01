@@ -110,13 +110,6 @@ export function TargetsPage() {
       render: (target: FlatTargetRow) => formatTargetTimestamp(target.scanContext.lastScanTime),
     },
     {
-      key: "discovery",
-      header: "Latest Discovery",
-      width: "160px",
-      render: (target: FlatTargetRow) =>
-        formatTargetTimestamp(target.scanContext.latestDiscoveryTime),
-    },
-    {
       key: "result",
       header: "Latest Result",
       render: (target: FlatTargetRow) => target.scanContext.latestScanResult,
@@ -181,10 +174,6 @@ export function TargetsPage() {
                     { label: "URL", value: <span className="mono text-sm">{target.url}</span> },
                     { label: "Authentication", value: target.authType },
                     { label: "Scan Status", value: target.scanContext.scanStatusLabel },
-                    {
-                      label: "Latest Discovery",
-                      value: formatTargetTimestamp(target.scanContext.latestDiscoveryTime),
-                    },
                     { label: "Latest Result", value: target.scanContext.latestScanResult },
                   ]}
                   footerMeta={`Last scan: ${formatTargetTimestamp(target.scanContext.lastScanTime)}`}

@@ -40,6 +40,10 @@ const finding: Finding = {
   confidence: 0.82,
   verdict: "vulnerable",
   discoveredAt: "2026-01-01T00:30:00Z",
+  evidence: {
+    payload: "ignore previous instructions",
+    explanation: "Model followed injected instruction",
+  },
 };
 
 describe("filterFindings", () => {

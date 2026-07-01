@@ -14,6 +14,7 @@ import { fullProfileUrl, PROVIDER_OPTIONS } from "@/features/scans/targetProfile
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
 import type { Target } from "@/shared/types";
 
+import { AttackGraphProgress } from "./AttackGraphProgress";
 import { ScanConsole } from "./ScanConsole";
 
 type SubmitStepProps = {
@@ -52,6 +53,22 @@ export function SubmitStep({
     return formatExecutionStrategySummary(attackPlan);
   }, [attackPlan]);
 
+  const attackGraphSection = (
+    <section className="wizard-fingerprint-summary">
+      <div className="wizard-planner-summary-header">
+        <h4 className="wizard-endpoints__title">Attack graph</h4>
+        {status ? (
+          <span className="text-sm text-muted">
+            {status.completed}/{status.total || attackPlan.categories.length} categories
+          </span>
+        ) : (
+          <span className="text-sm text-muted">{attackPlan.categories.length} categories queued</span>
+        )}
+      </div>
+      <AttackGraphProgress categories={attackPlan.categories} status={status} />
+    </section>
+  );
+
   if (submittedScanId && status) {
     const isRunning = ["running", "paused", "pending"].includes(status.status);
     const isSuccess = status.status === "completed";
@@ -60,12 +77,12 @@ export function SubmitStep({
       status.status === "stopped" ||
       status.status === "cancelled";
     const statusTitle = isSuccess
-      ? "Scan complete"
+      ? "Attack complete"
       : isFailed
-        ? "Scan stopped"
+        ? "Attack stopped"
         : status.status === "paused"
-          ? "Scan paused"
-          : "Scan in progress";
+          ? "Attack paused"
+          : "Attack in progress";
 
     return (
       <div className="wizard-step wizard-submitted">
@@ -88,7 +105,7 @@ export function SubmitStep({
               <span className="wizard-attack-estimate__value">{status.progress_percent}%</span>
             </div>
             <div className="wizard-attack-estimate">
-              <span className="wizard-attack-estimate__label">Tests</span>
+              <span className="wizard-attack-estimate__label">Categories</span>
               <span className="wizard-attack-estimate__value">
                 {status.completed}/{status.total || "—"}
               </span>
@@ -98,23 +115,15 @@ export function SubmitStep({
               <span className="wizard-attack-estimate__value">{status.findings_count}</span>
             </div>
             <div className="wizard-attack-estimate">
-              <span className="wizard-attack-estimate__label">Scan ID</span>
+              <span className="wizard-attack-estimate__label">Run ID</span>
               <span className="wizard-attack-estimate__value wizard-attack-estimate__value--mono">
                 {submittedScanId.slice(0, 8)}
               </span>
             </div>
           </dl>
-
-          {(status.current_test || status.current_endpoint) && (
-            <p className="wizard-submitted__current text-sm text-muted">
-              {status.current_test && <span>{status.current_test}</span>}
-              {status.current_test && status.current_endpoint && " · "}
-              {status.current_endpoint && (
-                <span className="mono">{shortEndpoint(status.current_endpoint)}</span>
-              )}
-            </p>
-          )}
         </section>
+
+        {attackGraphSection}
 
         <section className="wizard-fingerprint-summary">
           <h4 className="wizard-endpoints__title">Live log</h4>
@@ -129,10 +138,10 @@ export function SubmitStep({
           )}
           {isFailed && (
             <Button variant="primary" onClick={onRetryScan}>
-              Retry scan
+              Retry attack
             </Button>
           )}
-          {isRunning && <span className="text-muted text-sm">Running in background…</span>}
+          {isRunning && <span className="text-muted text-sm">Attack running in background…</span>}
         </div>
       </div>
     );
@@ -141,8 +150,8 @@ export function SubmitStep({
   return (
     <div className="wizard-step wizard-submit-review">
       <p className="wizard-submit-review__lead text-sm text-muted">
-        Everything below is what will run. Press <strong>Start Scan</strong> in the footer to
-        launch.
+        Review the attack graph below. Press <strong>Start Attack</strong> in the footer to launch,
+        or use <strong>Run Attack</strong> from the previous step.
       </p>
 
       <section className="wizard-fingerprint-summary">
@@ -167,6 +176,8 @@ export function SubmitStep({
           {executionLabel} · {formatPayloadStrategySummary(attackPlan.payloadStrategy)}
         </p>
       </section>
+
+      {attackGraphSection}
 
       <dl className="wizard-attack-estimates">
         <div className="wizard-attack-estimate">
@@ -196,15 +207,6 @@ export function SubmitStep({
       </dl>
     </div>
   );
-}
-
-function shortEndpoint(endpoint: string): string {
-  try {
-    const url = new URL(endpoint);
-    return url.pathname || endpoint;
-  } catch {
-    return endpoint.length > 48 ? `${endpoint.slice(0, 45)}…` : endpoint;
-  }
 }
 
 function statusBadgeVariant(status: string): "success" | "warning" | "danger" | "info" | "muted" {

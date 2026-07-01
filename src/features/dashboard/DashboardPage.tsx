@@ -26,7 +26,7 @@ function formatRelativeTime(iso: string) {
 }
 
 export function DashboardPage() {
-  const { stats, findings, activity, discoveryJobs, attackRuns, projects, backendConnected } =
+  const { stats, findings, activity, attackRuns, projects, backendConnected } =
     useAppStore();
   const navigate = useNavigate();
   const { notify } = useToast();
@@ -148,17 +148,8 @@ export function DashboardPage() {
         <Card className="dashboard-grid__jobs">
           <div className="card__header-row">
             <h3 className="card__title">Active Jobs</h3>
-            <Link to="/discovery" className="link">View all</Link>
+            <Link to="/scans" className="link">View all</Link>
           </div>
-          {discoveryJobs
-            .filter((j) => j.status === "running")
-            .map((job) => (
-              <ProgressBar
-                key={job.id}
-                label={`Discovery: ${job.targetName}`}
-                value={job.progress}
-              />
-            ))}
           {attackRuns
             .filter((a) => a.status === "running")
             .map((a) => (
@@ -171,7 +162,7 @@ export function DashboardPage() {
             ))}
           {stats.runningScans === 0 &&
             attackRuns.every((a) => a.status !== "running") && (
-            <p className="text-muted">No active scans. Start discovery on a target.</p>
+            <p className="text-muted">No active scans. Start a scan from a target or project.</p>
           )}
         </Card>
 

@@ -3,7 +3,6 @@ import type {
   AttackRun,
   DashboardStats,
   DiscoveredEndpoint,
-  DiscoveryJob,
   Finding,
   LocalModel,
   Project,
@@ -11,7 +10,7 @@ import type {
   ScanRun,
   Target,
 } from "@/shared/types";
-import type { AttackRunDto, DiscoveryRunDto } from "@/shared/ipc";
+import type { AttackRunDto } from "@/shared/ipc";
 
 export type AppSettings = {
   theme: "dark" | "light" | "system";
@@ -34,7 +33,6 @@ export type AppDataState = {
   targets: Target[];
   scans: ScanRun[];
   endpoints: DiscoveredEndpoint[];
-  discoveryJobs: DiscoveryJob[];
   attackRuns: AttackRun[];
   findings: Finding[];
   reports: Report[];
@@ -57,7 +55,6 @@ export type LoadedData = Pick<
   | "findings"
   | "reports"
   | "models"
-  | "discoveryJobs"
   | "attackRuns"
   | "activity"
 >;
@@ -97,7 +94,6 @@ export type AppActions = {
     format?: string,
     kind?: string,
   ) => Promise<void>;
-  runDiscovery: (targetId: string, mergeScanId?: string | null) => Promise<DiscoveryRunDto>;
   runPromptInjection: (endpointId: string) => Promise<AttackRunDto>;
 };
 

@@ -24,7 +24,6 @@ import {
   listProjects,
   listScans,
   listTargets,
-  runDiscovery as runDiscoveryCmd,
   runPromptInjection as runPromptInjectionCmd,
   getScanStatus,
   listModels,
@@ -39,7 +38,6 @@ import { computeDashboardStats } from "@/shared/stats";
 import {
   deriveActivity,
   deriveAttackRuns,
-  deriveDiscoveryJobs,
 } from "@/shared/dashboardDerived";
 
 import {
@@ -80,7 +78,6 @@ const initialState: AppDataState = {
   targets: [],
   scans: [],
   endpoints: [],
-  discoveryJobs: [],
   attackRuns: [],
   findings: [],
   reports: [],
@@ -205,7 +202,6 @@ async function loadAll(): Promise<LoadedData> {
     findings,
     reports: mapReports(reportDtos, projectDtos, scanDtos),
     models: mapLocalModels(modelEntries),
-    discoveryJobs: deriveDiscoveryJobs(scans, targets, liveStatusMap),
     attackRuns: deriveAttackRuns(scans, targets, liveStatusMap),
     activity: deriveActivity(findings, scans, targets, projects),
   };
@@ -300,18 +296,6 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
         runMutation("generateReport", () =>
           generateReportCmd(projectId, scanId, format, kind),
         ),
-      runDiscovery: async (targetId, mergeScanId) => {
-        try {
-          const result = await runDiscoveryCmd(targetId, mergeScanId);
-          await refresh();
-          return result;
-        } catch (error) {
-          const appError = toAppError(error);
-          log.error("mutation failed: runDiscovery", { error: appError });
-          dispatch({ type: "SET_ERROR", error: appError.message });
-          throw appError;
-        }
-      },
       runPromptInjection: async (endpointId) => {
         try {
           const result = await runPromptInjectionCmd(endpointId);

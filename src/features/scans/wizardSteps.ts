@@ -39,9 +39,9 @@ export const WIZARD_STEPS: WizardStepDefinition[] = [
   },
   {
     id: 5,
-    label: "Scan",
-    title: "Start scan",
-    hint: "Confirm the plan and launch the run",
+    label: "Attack",
+    title: "Attack",
+    hint: "Run the attack plan and monitor progress",
   },
   {
     id: 6,

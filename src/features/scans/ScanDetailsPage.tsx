@@ -18,7 +18,7 @@ import {
   reportExportLabel,
   type ReportExportFormat,
 } from "@/features/reports/reportDownloads";
-import { endpointSourceLabel } from "@/features/scans/discoveryPhases";
+import { endpointSourceLabel } from "@/features/scans/endpointHelpers";
 import {
   extractAuthSummary,
   extractAuthType,
@@ -31,7 +31,6 @@ import {
 import {
   estimateAttackPlan,
   isAttackScanName,
-  isDiscoveryScanName,
   listSelectedTests,
   parseAttackPlaybook,
   profileLabel,
@@ -99,23 +98,6 @@ export function ScanDetailsPage() {
     const ids = new Set(playbook.endpointIds);
     return endpoints.filter((endpoint) => ids.has(endpoint.id));
   }, [endpoints, playbook]);
-
-  const discoveryRun = useMemo(() => {
-    if (!scan?.targetId) return null;
-    return scans
-      .filter(
-        (item) =>
-          isDiscoveryScanName(item.name) &&
-          item.targetId === scan.targetId &&
-          item.createdAt <= (scan.createdAt ?? item.createdAt),
-      )
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-  }, [scan, scans]);
-
-  const discoveredEndpoints = useMemo(() => {
-    if (!discoveryRun) return selectedEndpoints;
-    return endpoints.filter((endpoint) => endpoint.scanId === discoveryRun.id);
-  }, [discoveryRun, endpoints, selectedEndpoints]);
 
   const manualEndpoints = selectedEndpoints.filter((endpoint) =>
     isManualEndpoint(endpoint.kind, endpoint.sourceUrl),
@@ -219,12 +201,7 @@ export function ScanDetailsPage() {
 
         {playbook && (
           <>
-            <DetailSection title="Discovery">
-              <DetailRow
-                label="Discovery date"
-                value={formatTimestamp(discoveryRun?.completedAt ?? discoveryRun?.createdAt ?? null)}
-              />
-              <DetailRow label="Discovered endpoints" value={String(discoveredEndpoints.length)} />
+            <DetailSection title="Endpoints">
               <DetailRow label="Selected endpoints" value={String(selectedEndpoints.length)} />
               <DetailRow label="Manual endpoints" value={String(manualEndpoints.length)} />
               {selectedEndpoints.length > 0 && (

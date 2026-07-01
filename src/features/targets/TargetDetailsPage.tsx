@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
@@ -11,17 +11,19 @@ import {
 } from "@/shared/components";
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import {
+  buildScanWizardUrl,
+  peekWizardSession,
+  wizardResumeInputFromSession,
+} from "@/features/scans/wizardState";
+import {
   buildTargetScanContext,
   formatTargetTimestamp,
 } from "@/shared/targetScanContext";
+import { resolveTargetScanAction } from "@/shared/targetScanAction";
 import type { ScanRun } from "@/shared/types";
 
 function isAttackScan(scan: ScanRun): boolean {
   return scan.name.startsWith("Scan (");
-}
-
-function isDiscoveryScan(scan: ScanRun): boolean {
-  return scan.name.startsWith("Discovery:");
 }
 
 export function TargetDetailsPage() {
@@ -45,13 +47,20 @@ export function TargetDetailsPage() {
     [target, scans],
   );
 
+  const wizardSession = useMemo(() => peekWizardSession(), []);
+
+  const scanAction = useMemo(() => {
+    if (!target) return null;
+    return resolveTargetScanAction(
+      target.id,
+      target.projectId,
+      scans,
+      wizardSession ? wizardResumeInputFromSession(wizardSession) : null,
+    );
+  }, [target, scans, wizardSession]);
+
   const recentAttackScans = useMemo(
     () => targetScans.filter(isAttackScan).slice(0, 5),
-    [targetScans],
-  );
-
-  const recentDiscoveryRuns = useMemo(
-    () => targetScans.filter(isDiscoveryScan).slice(0, 5),
     [targetScans],
   );
 
@@ -80,9 +89,31 @@ export function TargetDetailsPage() {
         title={target.name}
         actions={
           <div className="page-actions">
-            <Link to={`/scans/new?projectId=${encodeURIComponent(target.projectId)}`}>
-              <Button variant="primary">New Scan</Button>
-            </Link>
+            <Button
+              variant="primary"
+              onClick={() =>
+                navigate(
+                  buildScanWizardUrl(target.projectId, target.id, { step: 2 }),
+                )
+              }
+            >
+              New Scan
+            </Button>
+            {scanAction?.kind === "retry" && (
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  navigate(
+                    buildScanWizardUrl(target.projectId, target.id, {
+                      step: scanAction.step,
+                      scanId: scanAction.scanId,
+                    }),
+                  )
+                }
+              >
+                Retry Scan
+              </Button>
+            )}
             {project && (
               <Button variant="secondary" onClick={() => navigate(`/projects/${project.id}`)}>
                 View Project
@@ -110,10 +141,6 @@ export function TargetDetailsPage() {
           <div className="detail-section__body">
             <DetailRow label="Scan Status" value={scanContext.scanStatusLabel} />
             <DetailRow label="Last Scan" value={formatTargetTimestamp(scanContext.lastScanTime)} />
-            <DetailRow
-              label="Latest Discovery"
-              value={formatTargetTimestamp(scanContext.latestDiscoveryTime)}
-            />
             <DetailRow label="Latest Result" value={scanContext.latestScanResult} />
           </div>
         </Card>
@@ -136,31 +163,6 @@ export function TargetDetailsPage() {
                   <StatusBadge status={scan.status} />
                   <span className="text-muted text-sm">
                     {formatTimestamp(scan.startedAt ?? scan.createdAt)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        <Card className="detail-section">
-          <h2 className="detail-section__title">Recent Discovery Runs</h2>
-          {recentDiscoveryRuns.length === 0 ? (
-            <p className="text-muted">No discovery runs recorded for this target.</p>
-          ) : (
-            <ul className="detail-list">
-              {recentDiscoveryRuns.map((scan) => (
-                <li key={scan.id} className="detail-list-row">
-                  <button
-                    type="button"
-                    className="detail-list-link"
-                    onClick={() => navigate(`/discovery/${scan.id}`)}
-                  >
-                    {scan.name}
-                  </button>
-                  <StatusBadge status={scan.status} />
-                  <span className="text-muted text-sm">
-                    {formatTimestamp(scan.completedAt ?? scan.createdAt)}
                   </span>
                 </li>
               ))}

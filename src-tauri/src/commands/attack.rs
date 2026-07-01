@@ -9,11 +9,12 @@
 
 use aisec_attack::{
     apply_descriptor_auth, AttackCategory, AttackContext, AttackPayload, AttackTarget, FindingSeverity,
+    PayloadAttempt,
 };
 use aisec_endpoint_metadata::body_template_from_metadata;
 use crate::dto::metadata_from_endpoint;
 use aisec_target_profile::TargetProfile;
-use aisec_auth::{resolve_descriptor_for_runtime, AuthSessionManager, SecretStore};
+use aisec_auth::{resolve_descriptor_for_runtime, resolve_descriptor_for_wizard, AuthSessionManager, SecretStore};
 use aisec_judge::{JudgeVerdict, Severity as JudgeSeverity};
 use aisec_plugin_host::evaluate_with_judge_plugins;
 use aisec_inference::InferenceRuntimeManager;
@@ -52,6 +53,70 @@ pub struct CategoryRunResult {
     pub successes: u64,
     pub findings: Vec<FindingDto>,
     pub judged: Vec<JudgedAttemptSummary>,
+}
+
+/// Apply descriptor auth without aborting the scan when keychain entries are missing.
+/// Wizard verification may use inline headers while the DB descriptor only stores credential refs.
+fn merge_descriptor_auth_target(
+    target: AttackTarget,
+    descriptor_json: &str,
+    target_id: &str,
+) -> CommandResult<AttackTarget> {
+    let secrets = SecretStore::new().map_err(CommandError::from)?;
+    let resolved = match resolve_descriptor_for_runtime(descriptor_json, &secrets) {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            warn!(
+                target_id = %target_id,
+                error = %err,
+                "descriptor credentials missing from vault; falling back to profile/session auth"
+            );
+            resolve_descriptor_for_wizard(descriptor_json, &secrets)
+                .unwrap_or_else(|_| descriptor_json.to_string())
+        }
+    };
+    Ok(apply_descriptor_auth(target, &resolved))
+}
+
+fn finding_evidence_json(
+    url: &str,
+    method: Option<&str>,
+    body_template: Option<&str>,
+    attempt: &PayloadAttempt,
+    verdict_summary: &str,
+    verdict_confidence: f32,
+    indicators: &[String],
+    judge_json: &serde_json::Value,
+    provider: Option<&str>,
+) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "payload_id": attempt.payload_id,
+        "payload": attempt.mutated_content,
+        "request": {
+            "url": url,
+            "method": method.unwrap_or("POST"),
+            "body": attempt.mutated_content,
+            "body_template": body_template,
+        },
+        "response": {
+            "status": attempt.response.status,
+            "body": attempt.response.body,
+            "duration_ms": attempt.response.duration_ms,
+            "normalized": attempt.response.normalized.content,
+        },
+        "response_excerpt": attempt.response.body.chars().take(2000).collect::<String>(),
+        "explanation": verdict_summary,
+        "verdict": "vulnerable",
+        "confidence": verdict_confidence,
+        "indicators": indicators,
+        "judge": judge_json,
+    });
+    if let Some(provider) = provider {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("provider".into(), serde_json::json!(provider));
+        }
+    }
+    value
 }
 
 fn severity_str(severity: FindingSeverity) -> &'static str {
@@ -105,10 +170,7 @@ pub async fn run_category_on_endpoint(
     }
     if let Some(tid) = &target_id {
         if let Ok(stored_target) = repos.targets().get(tid).await {
-            let secrets = SecretStore::new().map_err(CommandError::from)?;
-            let resolved = resolve_descriptor_for_runtime(&stored_target.descriptor_json, &secrets)
-                .map_err(CommandError::from)?;
-            target = apply_descriptor_auth(target, &resolved);
+            target = merge_descriptor_auth_target(target, &stored_target.descriptor_json, tid)?;
         }
     }
 
@@ -279,15 +341,19 @@ pub async fn run_category_on_endpoint(
                     severity: severity.to_string(),
                     category: Some(category_name.into()),
                     description: Some(verdict.summary.clone()),
-                    evidence_json: Some(serde_json::json!({
-                        "payload_id": attempt.payload_id,
-                        "payload": attempt.mutated_content,
-                        "verdict": "vulnerable",
-                        "confidence": verdict.confidence,
-                        "indicators": eval.indicators,
-                        "response_excerpt": attempt.response.body.chars().take(500).collect::<String>(),
-                        "judge": judge_json,
-                    })),
+                    evidence_json: Some(finding_evidence_json(
+                        &endpoint.url,
+                        endpoint.method.as_deref(),
+                        metadata_from_endpoint(endpoint)
+                            .map(|meta| body_template_from_metadata(&meta))
+                            .as_deref(),
+                        attempt,
+                        &verdict.summary,
+                        verdict.confidence,
+                        &eval.indicators,
+                        &judge_json,
+                        None,
+                    )),
                     status: None,
                 })
                 .await
@@ -366,10 +432,7 @@ pub async fn run_category_on_target_profile(
     }
 
     if let Ok(stored_target) = repos.targets().get(target_id).await {
-        let secrets = SecretStore::new().map_err(CommandError::from)?;
-        let resolved = resolve_descriptor_for_runtime(&stored_target.descriptor_json, &secrets)
-            .map_err(CommandError::from)?;
-        target = apply_descriptor_auth(target, &resolved);
+        target = merge_descriptor_auth_target(target, &stored_target.descriptor_json, target_id)?;
     }
 
     if let Some(ctx) = &runtime.session {
@@ -536,16 +599,17 @@ pub async fn run_category_on_target_profile(
                     severity: severity.to_string(),
                     category: Some(category_name.into()),
                     description: Some(verdict.summary.clone()),
-                    evidence_json: Some(serde_json::json!({
-                        "payload_id": attempt.payload_id,
-                        "payload": attempt.mutated_content,
-                        "verdict": "vulnerable",
-                        "confidence": verdict.confidence,
-                        "indicators": eval.indicators,
-                        "response_excerpt": attempt.response.body.chars().take(500).collect::<String>(),
-                        "judge": judge_json,
-                        "provider": profile.provider.as_str(),
-                    })),
+                    evidence_json: Some(finding_evidence_json(
+                        &url,
+                        Some(profile.method.as_str()),
+                        Some(profile.request_template.as_str()),
+                        attempt,
+                        &verdict.summary,
+                        verdict.confidence,
+                        &eval.indicators,
+                        &judge_json,
+                        Some(profile.provider.as_str()),
+                    )),
                     status: None,
                 })
                 .await

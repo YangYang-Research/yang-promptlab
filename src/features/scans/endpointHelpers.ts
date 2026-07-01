@@ -1,61 +1,14 @@
-export type DiscoveryPhaseId =
-  | "discovering_endpoints"
-  | "fingerprinting"
-  | "inferring_schemas"
-  | "detecting_capabilities"
-  | "classifying_endpoints"
-  | "calculating_risk"
-  | "saving_metadata";
-
-export type DiscoveryPhase = {
-  id: DiscoveryPhaseId;
-  label: string;
-};
-
-export const DISCOVERY_PHASES: DiscoveryPhase[] = [
-  { id: "discovering_endpoints", label: "Discovering Endpoints" },
-  { id: "fingerprinting", label: "Fingerprinting" },
-  { id: "inferring_schemas", label: "Inferring Schemas" },
-  { id: "detecting_capabilities", label: "Detecting Capabilities" },
-  { id: "classifying_endpoints", label: "Classifying Endpoints" },
-  { id: "calculating_risk", label: "Calculating Risk" },
-  { id: "saving_metadata", label: "Saving Metadata" },
-];
-
-export type PhaseStatus = "pending" | "active" | "complete";
-
-export function phaseIndexFromId(phaseId: string | null | undefined): number {
-  if (!phaseId) return 0;
-  const idx = DISCOVERY_PHASES.findIndex((p) => p.id === phaseId);
-  return idx >= 0 ? idx : 0;
-}
-
-export function phaseStatuses(
-  running: boolean,
-  completed: boolean,
-  activeIndex: number,
-): PhaseStatus[] {
-  if (completed) {
-    return DISCOVERY_PHASES.map(() => "complete" as const);
-  }
-  if (!running) {
-    return DISCOVERY_PHASES.map(() => "pending" as const);
-  }
-  return DISCOVERY_PHASES.map((_, index) => {
-    if (index < activeIndex) return "complete";
-    if (index === activeIndex) return "active";
-    return "pending";
-  });
-}
-
-export function endpointSourceLabel(kind: string, sourceUrl: string | null): "Manual" | "Discovery" | "Plugin" {
+export function endpointSourceLabel(
+  kind: string,
+  sourceUrl: string | null,
+): "Manual" | "Auto" | "Plugin" {
   if (kind === "manual" || sourceUrl === "manual") {
     return "Manual";
   }
   if (sourceUrl?.includes("plugin") || kind === "plugin") {
     return "Plugin";
   }
-  return "Discovery";
+  return "Auto";
 }
 
 export type EndpointFilterState = {
