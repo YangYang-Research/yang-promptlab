@@ -11,12 +11,10 @@ use crate::payload_strategy::{
 };
 use crate::types::{TargetCapabilities, TargetProfile};
 
-const PAYLOADS_PER_CATEGORY: u32 = 3;
 const TESTS_PER_CATEGORY: u32 = 3;
 const SECONDS_PER_REQUEST: f32 = 2.5;
 const TOKENS_PER_REQUEST: u32 = 480;
 const CATALOG_SIZE: u32 = 9;
-const PAYLOAD_BUDGET_BASELINE: u32 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -444,11 +442,9 @@ pub fn recompute_estimates(plan: &mut WizardAttackPlan) {
             continue;
         }
         total_testcases += enabled_tests;
-        let ratio = enabled_tests as f32 / TESTS_PER_CATEGORY as f32;
         let variants = plan.payload_strategy.variants_per_test;
-        let budget_factor =
-            plan.payload_strategy.max_total_payloads as f32 / PAYLOAD_BUDGET_BASELINE as f32;
-        requests += ((PAYLOADS_PER_CATEGORY * variants) as f32 * ratio * budget_factor).round() as u32;
+        let payloads_per_testcase = plan.payload_strategy.max_total_payloads;
+        requests += enabled_tests * variants * payloads_per_testcase;
     }
 
     plan.total_testcases = total_testcases;

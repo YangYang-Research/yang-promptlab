@@ -119,7 +119,7 @@ export function PayloadStrategySection({
           max={PAYLOAD_BUDGET_MAX}
           step={PAYLOAD_BUDGET_STEP}
           formatValue={(value) => value.toLocaleString()}
-          title="Upper bound on generated payloads. Execution may stop earlier."
+          title="Upper bound on generated payloads per testcase. Execution may stop earlier."
           onChange={(value) => applyChange({ maxTotalPayloads: clampPayloadBudget(value) })}
           disabled={readOnly}
         />

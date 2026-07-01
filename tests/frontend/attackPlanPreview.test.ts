@@ -183,13 +183,14 @@ describe("attack plan preview", () => {
   });
 
   it("reduces categories and estimates when switching to quick profile", () => {
+    const full = recomputePlanPreview(samplePlan());
     const preview = previewPlanForProfile(samplePlan(), "quick", []);
     expect(preview.categories).toEqual([
       "prompt_injection",
       "jailbreak",
       "system_prompt_extraction",
     ]);
-    expect(preview.estimatedRequests).toBeLessThan(samplePlan().estimatedRequests);
+    expect(preview.estimatedRequests).toBeLessThan(full.estimatedRequests);
     expect(preview.categories).toHaveLength(3);
     expect(preview.attackGraph.find((node) => node.category === "tool_abuse")?.enabled).toBe(
       false,
@@ -223,6 +224,23 @@ describe("attack plan preview", () => {
       },
     });
     expect(doubled.estimatedRequests).toBe(base.estimatedRequests * 2);
+  });
+
+  it("estimates requests as enabledTests × variants × payloads per testcase per category", () => {
+    const preview = recomputePlanPreview({
+      ...samplePlan(),
+      categories: ["prompt_injection", "jailbreak", "system_prompt_extraction"],
+      disabledTests: [],
+      payloadStrategy: {
+        ...samplePlan().payloadStrategy,
+        variantsPerTest: 2,
+        maxTotalPayloads: 10,
+      },
+    });
+    expect(preview.totalTestcases).toBe(9);
+    expect(preview.estimatedRequests).toBe(180);
+    expect(preview.estimatedRuntimeSeconds).toBe(450);
+    expect(preview.estimatedTokens).toBe(180 * 480);
   });
 
   it("ignores stale attack plan ui state", () => {

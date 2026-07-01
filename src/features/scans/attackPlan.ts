@@ -362,13 +362,10 @@ export function formatRiskLevel(level: string): string {
   return level;
 }
 
-const WIZARD_PAYLOADS_PER_CATEGORY = 3;
 const WIZARD_TESTS_PER_CATEGORY = 3;
 const WIZARD_SECONDS_PER_REQUEST = 2.5;
 const WIZARD_TOKENS_PER_REQUEST = 480;
 const WIZARD_CATALOG_SIZE = 9;
-/** Baseline budget for quick/deterministic profile — scales EST. REQUESTS with maxTotalPayloads. */
-const WIZARD_PAYLOAD_BUDGET_BASELINE = 10;
 
 function testPrefixForCategory(category: AttackCategoryId): string {
   switch (category) {
@@ -447,8 +444,8 @@ export function computeWizardPlanMetrics(
 > {
   let requests = 0;
   let totalTestcases = 0;
-  const budgetFactor =
-    plan.payloadStrategy.maxTotalPayloads / WIZARD_PAYLOAD_BUDGET_BASELINE;
+  const variants = plan.payloadStrategy.variantsPerTest;
+  const payloadsPerTestcase = plan.payloadStrategy.maxTotalPayloads;
 
   for (const category of plan.categories) {
     const prefix = testPrefixForCategory(category);
@@ -456,13 +453,7 @@ export function computeWizardPlanMetrics(
     const enabledTests = Math.max(0, WIZARD_TESTS_PER_CATEGORY - disabledInCategory);
     if (enabledTests === 0) continue;
     totalTestcases += enabledTests;
-    const ratio = enabledTests / WIZARD_TESTS_PER_CATEGORY;
-    requests += Math.round(
-      WIZARD_PAYLOADS_PER_CATEGORY *
-        plan.payloadStrategy.variantsPerTest *
-        ratio *
-        budgetFactor,
-    );
+    requests += enabledTests * variants * payloadsPerTestcase;
   }
 
   const executionMultiplier = plan.executionStrategy === "agentic" ? Math.max(1, plan.maxAttempts) : 1;
