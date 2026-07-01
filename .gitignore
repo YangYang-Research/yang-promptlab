@@ -19,7 +19,7 @@ logs/
 # Local model vault (downloaded GGUF files)
 /data/
 
-# Generated reports
+# Generated reports (repo-root output only; not src/features/reports/)
 /reports/
 
 # IDE
@@ -34,4 +34,3 @@ logs/
 
 # Build artifacts
 *.local
-reports/
