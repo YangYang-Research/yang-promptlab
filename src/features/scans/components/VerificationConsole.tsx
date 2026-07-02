@@ -1,68 +1,56 @@
-import { Badge } from "@/shared/components";
-import type { VerificationConsoleEntryDto } from "../targetProfile";
+import { Fragment } from "react";
+
+import {
+  formatVerificationLogTime,
+  type VerificationLogLine,
+} from "../verificationLog";
 
 type VerificationConsoleProps = {
-  entry: VerificationConsoleEntryDto | null;
+  lines: VerificationLogLine[];
   pending?: boolean;
 };
 
-export function VerificationConsole({ entry, pending = false }: VerificationConsoleProps) {
-  if (!entry) {
-    return (
-      <div className="verification-console verification-console--empty">
-        <p className="text-muted">Run verification to inspect the outgoing request and response.</p>
-      </div>
-    );
-  }
-
-  const statusLabel =
-    entry.statusCode > 0 ? `${entry.method} ${entry.statusCode}` : entry.method || "REQUEST";
-
+export function VerificationConsole({ lines, pending = false }: VerificationConsoleProps) {
   return (
-    <div className="verification-console">
-      <div className="verification-console__header">
-        <Badge variant={pending ? "warning" : entry.success ? "success" : "danger"}>
-          {pending ? "Sending…" : entry.success ? "Verified" : "Failed"}
-        </Badge>
-        <span className="text-muted">
-          {statusLabel}
-          {entry.responseTimeMs > 0 ? ` · ${entry.responseTimeMs}ms` : ""}
-        </span>
-      </div>
+    <details className="verification-console" open={pending || lines.length > 0}>
+      <summary className="verification-console__summary">
+        Verification console
+        {lines.length > 0 && (
+          <span className="verification-console__count">{lines.length} line(s)</span>
+        )}
+      </summary>
 
-      {entry.message && <p className="verification-console__message">{entry.message}</p>}
-
-      {entry.requestLog && (
-        <details open>
-          <summary>Full request (curl)</summary>
-          <pre className="verification-console__block verification-console__block--log">
-            {entry.requestLog}
-          </pre>
-        </details>
-      )}
-
-      {entry.authDebug && (
-        <details open>
-          <summary>Auth debug</summary>
-          <pre className="verification-console__block">{entry.authDebug}</pre>
-        </details>
-      )}
-
-      {entry.responsePreview && (
-        <details open>
-          <summary>Response (from target)</summary>
-          <pre className="verification-console__block verification-console__block--log">
-            {entry.responsePreview}
-          </pre>
-        </details>
-      )}
-
-      {entry.statusCode > 0 && (
-        <p className="text-muted text-sm verification-console__hint">
-          Backend returned HTTP {entry.statusCode}. Compare with the curl block above if results
-          differ.
+      {lines.length === 0 ? (
+        <p className="verification-console__empty text-muted">
+          Run verification to inspect the outgoing request and response.
         </p>
+      ) : (
+        <pre className="verification-console__stream" aria-live="polite">
+          {lines.map((line) => {
+            const parts = line.message.split("\n");
+            return (
+              <span key={line.id} className="verification-console__line">
+                <span className="verification-console__time">
+                  {formatVerificationLogTime(line.timestamp)}
+                </span>
+                <span className="verification-console__text">
+                  {parts.map((part, index) => (
+                    <Fragment key={index}>
+                      {index > 0 ? "\n" : null}
+                      {index > 0 ? (
+                        <span className="verification-console__continuation">{part}</span>
+                      ) : (
+                        part
+                      )}
+                    </Fragment>
+                  ))}
+                </span>
+                {"\n"}
+              </span>
+            );
+          })}
+        </pre>
       )}
-    </div>
+    </details>
   );
 }

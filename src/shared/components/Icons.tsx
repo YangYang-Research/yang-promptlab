@@ -145,6 +145,35 @@ export function IconCloud({ className }: IconProps) {
   );
 }
 
+export function IconCheck({ className }: IconProps) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <path
+        d="M3.25 7.25 5.75 9.75 10.75 4.75"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function IconX({ className }: IconProps) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <path
+        d="M4 4l6 6M10 4 4 10"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 /** Bold dual-sparkle mark for AI-planned modes. */
 export function IconAi({ className, "aria-label": ariaLabel }: IconProps) {
   return (

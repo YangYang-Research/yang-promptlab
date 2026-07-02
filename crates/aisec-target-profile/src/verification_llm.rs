@@ -8,7 +8,8 @@ use tracing::warn;
 
 use crate::types::{TargetProfile, VerificationResult};
 use crate::verification::{
-    execute_verify_http, extract_model_from_response, VerificationAttempt, VerificationError,
+    execute_verify_http, extract_model_from_response, VerifyHttpSuccess, VerificationAttempt,
+    VerificationError,
 };
 
 const MAX_RESPONSE_CHARS: usize = 8_000;
@@ -32,7 +33,15 @@ pub async fn verify_target_profile_with_llm(
         Ok(success) => success,
         Err(attempt) => return attempt,
     };
+    validate_http_response_with_llm(profile, &http, llm).await
+}
 
+/// AI Runtime classification of a successful connectivity probe.
+pub async fn validate_http_response_with_llm(
+    profile: &TargetProfile,
+    http: &VerifyHttpSuccess,
+    llm: &dyn PlannerLlm,
+) -> VerificationAttempt {
     let prompt = PromptRegistry::endpoint_verify_user(
         profile.provider.as_str(),
         &profile.framework,
@@ -71,12 +80,12 @@ pub async fn verify_target_profile_with_llm(
     let confidence = parsed.confidence.unwrap_or(0.0);
     let message = if rationale.trim().is_empty() {
         format!(
-            "Verification succeeded — AI Runtime confirmed this is an AI API endpoint (confidence {:.0}%)",
+            "Verification succeeded — this is an AI API endpoint (confidence {:.0}%)",
             (confidence * 100.0).clamp(0.0, 100.0)
         )
     } else {
         format!(
-            "Verification succeeded — AI Runtime confirmed this is an AI API endpoint (confidence {:.0}%): {rationale}",
+            "Verification succeeded — this is an AI API endpoint (confidence {:.0}%): {rationale}",
             (confidence * 100.0).clamp(0.0, 100.0)
         )
     };
@@ -88,9 +97,11 @@ pub async fn verify_target_profile_with_llm(
     }
 
     let preview = preview_body(&http.response_text);
-    let mut console = http.console;
+    let mut console = http.console.clone();
     console.success = true;
     console.message = message.clone();
+    // Step 2 console should surface AI Runtime classification, not the target HTTP body.
+    console.response_preview = None;
 
     let result = VerificationResult {
         verified: true,
@@ -260,6 +271,7 @@ fn llm_failure_attempt(
     let mut console = http.console.clone();
     console.success = false;
     console.message = error.to_string();
+    console.response_preview = None;
     VerificationAttempt {
         console,
         result: Err(error),

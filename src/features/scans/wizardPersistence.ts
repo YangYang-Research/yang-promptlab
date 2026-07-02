@@ -11,9 +11,42 @@ import {
   createInitialTargetProfile,
   normalizeVerification,
 } from "./targetProfile";
+import type { VerificationLogLine } from "./verificationLog";
+import type { VerificationConsoleEntryDto } from "./targetProfile";
+import { migrateLegacyVerificationConsole } from "./verificationLog";
 import type { WizardStepId } from "./wizardSteps";
 
-export const WIZARD_DB_VERSION = 6;
+export const WIZARD_DB_VERSION = 7;
+
+function migrateVerificationLog(
+  log: VerificationLogLine[] | unknown[] | undefined,
+  legacyConsole: VerificationConsoleEntryDto | null | undefined,
+): VerificationLogLine[] {
+  if (Array.isArray(log) && log.length > 0) {
+    const first = log[0];
+    if (
+      first &&
+      typeof first === "object" &&
+      "message" in first &&
+      typeof (first as VerificationLogLine).message === "string" &&
+      !("console" in first)
+    ) {
+      return log as VerificationLogLine[];
+    }
+
+    return log.flatMap((item) => {
+      if (item && typeof item === "object" && "console" in item) {
+        const console = (item as { console?: VerificationConsoleEntryDto }).console;
+        return console ? migrateLegacyVerificationConsole(console) : [];
+      }
+      return [];
+    });
+  }
+  if (legacyConsole) {
+    return migrateLegacyVerificationConsole(legacyConsole);
+  }
+  return [];
+}
 
 export type WizardPersistedState = {
   version: typeof WIZARD_DB_VERSION;
@@ -21,7 +54,7 @@ export type WizardPersistedState = {
   selectedProjectId: string;
   savedTargetId: string | null;
   savedTargetFingerprint: string | null;
-  verificationConsole: ScanWizardSession["verificationConsole"];
+  verificationLog: ScanWizardSession["verificationLog"];
   attackPlanUi: AttackPlanUiState;
   attackPlan: AttackPlanConfig | null;
   submittedScanId: string | null;
@@ -36,7 +69,7 @@ export function wizardStateToPersisted(session: ScanWizardSession): WizardPersis
     selectedProjectId: session.selectedProjectId,
     savedTargetId: session.savedTargetId,
     savedTargetFingerprint: session.savedTargetFingerprint,
-    verificationConsole: session.verificationConsole,
+    verificationLog: session.verificationLog,
     attackPlanUi: session.attackPlanUi,
     attackPlan: session.attackPlan,
     submittedScanId: session.submittedScanId,
@@ -63,7 +96,10 @@ export function sessionFromPersistedWizard(
     targetForm: migrateTargetForm(persisted.targetForm ?? createInitialTargetForm()),
     savedTargetId: persisted.savedTargetId,
     savedTargetFingerprint: persisted.savedTargetFingerprint,
-    verificationConsole: persisted.verificationConsole,
+    verificationLog: migrateVerificationLog(
+      persisted.verificationLog,
+      (persisted as { verificationConsole?: VerificationConsoleEntryDto | null }).verificationConsole,
+    ),
     attackPlanUi: { ...createInitialAttackPlanUi(), ...persisted.attackPlanUi },
     attackPlan: persisted.attackPlan ? normalizeAttackPlan(persisted.attackPlan) : null,
     submittedScanId: persisted.submittedScanId,
@@ -72,8 +108,10 @@ export function sessionFromPersistedWizard(
 
 export function parsePersistedWizard(raw: unknown): WizardPersistedState | null {
   if (!raw || typeof raw !== "object") return null;
-  const value = raw as Partial<WizardPersistedState>;
-  if (value.version !== WIZARD_DB_VERSION) return null;
+  const value = raw as Partial<WizardPersistedState> & {
+    verificationConsole?: VerificationConsoleEntryDto | null;
+  };
+  if (value.version !== WIZARD_DB_VERSION && value.version !== 6) return null;
   if (typeof value.currentStep !== "number") return null;
   return {
     version: WIZARD_DB_VERSION,
@@ -82,7 +120,10 @@ export function parsePersistedWizard(raw: unknown): WizardPersistedState | null 
     savedTargetId: typeof value.savedTargetId === "string" ? value.savedTargetId : null,
     savedTargetFingerprint:
       typeof value.savedTargetFingerprint === "string" ? value.savedTargetFingerprint : null,
-    verificationConsole: value.verificationConsole ?? null,
+    verificationLog: migrateVerificationLog(
+      value.verificationLog as VerificationLogLine[] | undefined,
+      value.verificationConsole as VerificationConsoleEntryDto | null | undefined,
+    ),
     attackPlanUi: { ...createInitialAttackPlanUi(), ...(value.attackPlanUi ?? {}) },
     attackPlan: value.attackPlan ? normalizeAttackPlan(value.attackPlan as AttackPlanConfig) : null,
     submittedScanId: typeof value.submittedScanId === "string" ? value.submittedScanId : null,
@@ -128,7 +169,8 @@ export function mergeWizardSessions(
     currentStep: Math.max(local.currentStep, remote.currentStep) as WizardStepId,
     targetForm,
     targetProfile,
-    verificationConsole: local.verificationConsole ?? remote.verificationConsole,
+    verificationLog:
+      local.verificationLog.length > 0 ? local.verificationLog : remote.verificationLog,
     attackPlan:
       remote.attackPlan || local.attackPlan
         ? normalizeAttackPlan((remote.attackPlan ?? local.attackPlan)!)

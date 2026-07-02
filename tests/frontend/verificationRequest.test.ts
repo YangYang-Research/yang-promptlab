@@ -31,12 +31,34 @@ describe("verificationRequest", () => {
     const preview = buildVerificationRequestPreview(profile, authForm);
 
     expect(preview.requestLog).toContain("curl --location 'https://api.yyng.icu/ycre/v1/code-review/github/completions'");
-    expect(preview.requestLog).toContain("x-yang-api-token: Basic abc123");
+    expect(preview.requestLog).toContain("x-yang-api-token: Basic");
+    expect(preview.requestLog).toContain("***");
+    expect(preview.requestLog).not.toContain("x-yang-api-token: Basic abc123");
     expect(preview.requestLog).toContain('"content": "Hello"');
     expect(preview.authDebug).toContain("api_key");
     expect(mergeVerificationHeaders(profile, authForm)["x-yang-api-token"]).toBe(
       "Basic abc123",
     );
+  });
+
+  it("replaces profile credential headers when form auth uses a different header", () => {
+    const profile = createInitialTargetProfile();
+    profile.headersJson = JSON.stringify({
+      Authorization: "Bearer old-token",
+      "Content-Type": "application/json",
+    });
+    profile.requestTemplate = `{"messages":[{"content":"${PROMPT_PLACEHOLDER}"}]}`;
+
+    const authForm = createInitialTargetForm();
+    authForm.authKind = "api_key";
+    authForm.apiKeyHeaderName = "x-yang-api-token";
+    authForm.apiKeyPrefix = "Basic ";
+    authForm.apiKeyValue = "abc123";
+
+    const headers = mergeVerificationHeaders(profile, authForm);
+    expect(headers.Authorization).toBeUndefined();
+    expect(headers["x-yang-api-token"]).toBe("Basic abc123");
+    expect(headers["Content-Type"]).toBe("application/json");
   });
 
   it("inserts space when prefix is Basic without trailing space", () => {
@@ -53,7 +75,9 @@ describe("verificationRequest", () => {
     authForm.apiKeyValue = "eXlwYXQ=";
 
     const preview = buildVerificationRequestPreview(profile, authForm);
-    expect(preview.requestLog).toContain("x-yang-api-token: Basic eXlwYXQ=");
+    expect(preview.requestLog).toContain("x-yang-api-token: Basic");
+    expect(preview.requestLog).toContain("***");
+    expect(preview.requestLog).not.toContain("x-yang-api-token: Basic eXlwYXQ=");
     expect(preview.requestLog).not.toContain("BasiceXlwYXQ=");
   });
 

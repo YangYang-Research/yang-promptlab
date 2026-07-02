@@ -2,11 +2,16 @@ import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/shared/components";
 import { IconAi } from "@/shared/components/Icons";
-import { verifyTargetProfile } from "@/shared/ipc/targetProfile";
+import {
+  verifyTargetProfileAi,
+  verifyTargetProfileConnect,
+} from "@/shared/ipc/targetProfile";
 import { useToast } from "@/shared/notifications";
 
 import { TargetFormFields } from "../TargetFormFields";
 import { VerificationConsole } from "../components/VerificationConsole";
+import type { VerificationPipelinePhase } from "../verificationPipeline";
+import { VerificationProgressPipeline } from "./VerificationProgressPipeline";
 import {
   AUTH_METHOD_OPTIONS,
   buildTargetDescriptor,
@@ -19,9 +24,20 @@ import {
   profileFromDto,
   profileToPayload,
   type TargetProfileFormState,
-  type VerificationConsoleEntryDto,
 } from "../targetProfile";
 import { buildVerificationRequestPreview, authHeadersFromForm } from "../verificationRequest";
+import {
+  appendVerificationLogLine,
+  appendVerificationLogLines,
+  formatAuthenticationLogLines,
+  formatAiValidationLogLine,
+  formatErrorLogLine,
+  formatResponseLogLine,
+  formatSendRequestLogLine,
+  VERIFICATION_LOG_START_AI,
+  VERIFICATION_LOG_START_AUTH,
+  type VerificationLogLine,
+} from "../verificationLog";
 
 type AuthVerificationStepProps = {
   targetId: string;
@@ -29,8 +45,8 @@ type AuthVerificationStepProps = {
   onProfileChange: (patch: Partial<TargetProfileFormState>) => void;
   authForm: TargetFormState;
   onAuthChange: (patch: Partial<TargetFormState>) => void;
-  verificationConsole: VerificationConsoleEntryDto | null;
-  onVerificationConsole: (entry: VerificationConsoleEntryDto | null) => void;
+  verificationLog: VerificationLogLine[];
+  onVerificationLog: (lines: VerificationLogLine[]) => void;
   error: string | null;
   onError: (message: string | null) => void;
   onBeforeVerify?: () => Promise<boolean>;
@@ -48,8 +64,8 @@ export function AuthVerificationStep({
   onProfileChange,
   authForm,
   onAuthChange,
-  verificationConsole,
-  onVerificationConsole,
+  verificationLog,
+  onVerificationLog,
   error,
   onError,
   onBeforeVerify,
@@ -58,6 +74,8 @@ export function AuthVerificationStep({
 }: AuthVerificationStepProps) {
   const { notify } = useToast();
   const [verifying, setVerifying] = useState(false);
+  const [verifyPhase, setVerifyPhase] = useState<VerificationPipelinePhase>("idle");
+  const [verifyResultMessage, setVerifyResultMessage] = useState<string | null>(null);
   const [authDetectedFromProfile, setAuthDetectedFromProfile] = useState(false);
   const authFormRef = useRef(authForm);
   authFormRef.current = authForm;
@@ -88,31 +106,39 @@ export function AuthVerificationStep({
     }
   }, [profile.headersJson, profile.baseUrl, profile.path, targetId]);
 
-  function mergeConsoleWithPreview(
-    backend: VerificationConsoleEntryDto,
-    preview: ReturnType<typeof buildVerificationRequestPreview>,
-  ): VerificationConsoleEntryDto {
-    return {
-      ...backend,
-      requestLog: preview.requestLog,
-      authDebug: preview.authDebug,
-    };
-  }
-
   async function handleVerify() {
     const preview = buildVerificationRequestPreview(profile, authFormRef.current);
     setVerifying(true);
+    let activePhase: VerificationPipelinePhase = "auth";
+    setVerifyPhase(activePhase);
+    setVerifyResultMessage(null);
     onError(null);
-    onVerificationConsole(preview);
+
+    let log: VerificationLogLine[] = [];
+    const publishLog = () => onVerificationLog([...log]);
+    const append = (message: string) => {
+      log = appendVerificationLogLine(log, message);
+      publishLog();
+    };
+    const appendMany = (messages: string[]) => {
+      log = appendVerificationLogLines(log, messages);
+      publishLog();
+    };
+
+    appendMany([
+      VERIFICATION_LOG_START_AUTH,
+      ...formatAuthenticationLogLines(preview.headers),
+      formatSendRequestLogLine(preview.requestLog),
+    ]);
 
     try {
       if (onBeforeVerify) {
         const ready = await onBeforeVerify();
         if (!ready) {
-          onVerificationConsole({
-            ...preview,
-            message: "Authentication was not saved — fix errors above and retry.",
-          });
+          setVerifyPhase("failed_auth");
+          activePhase = "failed_auth";
+          onError("Authentication was not saved — fix errors above and retry.");
+          append(formatErrorLogLine("Authentication was not saved — fix errors above and retry."));
           return;
         }
       }
@@ -122,29 +148,66 @@ export function AuthVerificationStep({
         ...authFormRef.current,
         url: profileUrl,
       }) as { auth?: Record<string, unknown> };
-      const result = await verifyTargetProfile(targetId, profileToPayload(profile), {
+      const verifyOptions = {
         auth: descriptor.auth ?? null,
         authHeaders: authHeadersFromForm(authFormRef.current),
-      });
-      onVerificationConsole(mergeConsoleWithPreview(result.console, preview));
+      };
+
+      const connect = await verifyTargetProfileConnect(
+        targetId,
+        profileToPayload(profile),
+        verifyOptions,
+      );
+      append(formatResponseLogLine(connect.console, "connectivity"));
+
+      if (!connect.success || !connect.connectSnapshot) {
+        setVerifyPhase("failed_auth");
+        activePhase = "failed_auth";
+        onError(connect.message);
+        notify(connect.message, "error");
+        onProfileChange({
+          verification: {
+            ...profile.verification,
+            verified: false,
+            errorMessage: connect.message,
+          },
+        });
+        return;
+      }
+
+      activePhase = "ai";
+      setVerifyPhase(activePhase);
+      append(VERIFICATION_LOG_START_AI);
+
+      const result = await verifyTargetProfileAi(
+        targetId,
+        profileToPayload(profile),
+        connect.connectSnapshot,
+      );
+      append(formatAiValidationLogLine(result.message));
+
       onProfileChange(profileFromDto(result.profile));
       onVerifySettled?.();
+      setVerifyResultMessage(result.message);
       if (result.verified) {
+        setVerifyPhase("done");
+        activePhase = "done";
         onError(null);
         notify(result.message, "success");
         onVerifySuccess?.();
       } else {
+        setVerifyPhase("failed_ai");
+        activePhase = "failed_ai";
         onError(result.message);
         notify(result.message, "error");
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Verification failed";
+      setVerifyResultMessage(message);
+      setVerifyPhase(activePhase === "auth" ? "failed_auth" : "failed_ai");
       onError(message);
       notify(message, "error");
-      onVerificationConsole({
-        ...preview,
-        message,
-      });
+      append(formatErrorLogLine(message));
       onProfileChange({
         verification: {
           ...profile.verification,
@@ -187,15 +250,15 @@ export function AuthVerificationStep({
         <Button variant="primary" disabled={verifying} onClick={() => void handleVerify()}>
           <span className="btn__content">
             <IconAi className="btn__icon" aria-hidden />
-            {verifying ? "Verifying…" : "Verify AI API Endpoint"}
+            {verifying ? "Verifying…" : "Verification"}
           </span>
         </Button>
+        <VerificationProgressPipeline phase={verifyPhase} resultMessage={verifyResultMessage} />
         {error && <p className="text-danger">{error}</p>}
       </section>
 
       <section>
-        <h3 className="wizard-section-title">Verification console</h3>
-        <VerificationConsole entry={verificationConsole} pending={verifying} />
+        <VerificationConsole lines={verificationLog} pending={verifying} />
       </section>
     </div>
   );

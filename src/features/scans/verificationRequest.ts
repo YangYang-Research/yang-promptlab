@@ -1,4 +1,5 @@
-import { formatCredentialWithPrefix, type TargetFormState } from "./targetDescriptor";
+import { formatCredentialWithPrefix, isLikelyAuthHeader, type TargetFormState } from "./targetDescriptor";
+import { maskHeaderCredentialValue } from "./verificationLog";
 import {
   PROMPT_PLACEHOLDER,
   fullProfileUrl,
@@ -57,12 +58,31 @@ export function mergeVerificationHeaders(
   profile: TargetProfileFormState,
   authForm: TargetFormState,
 ): Record<string, string> {
-  const headers = { ...parseProfileHeaders(profile.headersJson) };
+  const profileHeaders = parseProfileHeaders(profile.headersJson);
   const authHeaders = authHeadersFromForm(authForm);
+
+  if (Object.keys(authHeaders).length === 0) {
+    return profileHeaders;
+  }
+
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(profileHeaders)) {
+    if (!isLikelyAuthHeader(key)) {
+      headers[key] = value;
+    }
+  }
   for (const [key, value] of Object.entries(authHeaders)) {
     headers[key] = value;
   }
   return headers;
+}
+
+function maskHeadersForDisplay(headers: Record<string, string>): Record<string, string> {
+  const masked: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    masked[name] = isLikelyAuthHeader(name) ? maskHeaderCredentialValue(value) : value;
+  }
+  return masked;
 }
 
 function shellQuote(value: string): string {
@@ -118,7 +138,7 @@ export function buildAuthDebugSummary(
   }
 
   lines.push(`Profile headers (Step 2): ${profileHeaderNames.join(", ") || "(none)"}`);
-  lines.push("Form auth overrides matching profile header names at verify time.");
+  lines.push("Form auth replaces credential headers from the profile at verify time.");
 
   return lines.join("\n");
 }
@@ -132,7 +152,12 @@ export function buildVerificationRequestPreview(
   const url = fullProfileUrl(profile);
   const headers = mergeVerificationHeaders(profile, authForm);
   const body = buildVerificationBody(profile);
-  const requestLog = formatVerificationRequestLog({ method, url, headers, body });
+  const requestLog = formatVerificationRequestLog({
+    method,
+    url,
+    headers: maskHeadersForDisplay(headers),
+    body,
+  });
 
   return {
     method,

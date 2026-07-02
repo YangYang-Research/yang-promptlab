@@ -22,6 +22,7 @@ import { TargetProfileStep } from "./steps/TargetProfileStep";
 import { mergeScanStatus, useScanStatuses } from "./useScanStatuses";
 import {
   deriveTargetNameFromProfile,
+  createEmptyVerification,
   fullProfileUrl,
   profileFromDto,
   profileToPayload,
@@ -744,15 +745,26 @@ export function ScanWizardPage() {
 
     if (nextStep === 3) {
       try {
+        const reinferFromProfile = session.currentStep === 2;
         const targetForm = await prepareAuthFormForStep3(
           session.targetProfile,
           session.targetForm,
           targetId,
+          { reinferFromProfile },
         );
         updateSession({
           currentStep: nextStep,
           targetForm,
           savedTargetFingerprint: targetFormFingerprint(targetForm),
+          ...(reinferFromProfile
+            ? {
+                verificationLog: [],
+                targetProfile: {
+                  ...session.targetProfile,
+                  verification: createEmptyVerification(),
+                },
+              }
+            : {}),
         });
       } catch {
         updateSession({ currentStep: nextStep });
@@ -779,11 +791,17 @@ export function ScanWizardPage() {
         session.targetProfile,
         session.targetForm,
         target.id,
+        { reinferFromProfile: true },
       );
       updateSession({
         currentStep: 3,
         targetForm,
         savedTargetFingerprint: targetFormFingerprint(targetForm),
+        verificationLog: [],
+        targetProfile: {
+          ...session.targetProfile,
+          verification: createEmptyVerification(),
+        },
       });
       return;
     }
@@ -913,8 +931,8 @@ export function ScanWizardPage() {
             onProfileChange={patchTargetProfile}
             authForm={session.targetForm}
             onAuthChange={patchTargetForm}
-            verificationConsole={session.verificationConsole}
-            onVerificationConsole={(entry) => updateSession({ verificationConsole: entry })}
+            verificationLog={session.verificationLog}
+            onVerificationLog={(entries) => updateSession({ verificationLog: entries })}
             error={verificationError}
             onError={setVerificationError}
             onBeforeVerify={persistAuthDescriptor}

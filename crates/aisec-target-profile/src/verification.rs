@@ -88,6 +88,62 @@ fn mask_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
         .collect()
 }
 
+fn is_likely_auth_header(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    const NON_AUTH: &[&str] = &[
+        "content-type",
+        "accept",
+        "user-agent",
+        "accept-encoding",
+        "accept-language",
+        "cache-control",
+        "connection",
+        "host",
+        "origin",
+        "referer",
+    ];
+    if NON_AUTH.contains(&lower.as_str()) {
+        return false;
+    }
+    if lower == "authorization" {
+        return true;
+    }
+    const API_KEY_HEADERS: &[&str] = &[
+        "x-api-key",
+        "api-key",
+        "anthropic-api-key",
+        "x-goog-api-key",
+        "openai-api-key",
+    ];
+    if API_KEY_HEADERS.contains(&lower.as_str()) {
+        return true;
+    }
+    if lower.ends_with("-key") {
+        return true;
+    }
+    const X_NON_AUTH: &[&str] = &[
+        "x-request-id",
+        "x-correlation-id",
+        "x-trace-id",
+        "x-forwarded-for",
+        "x-forwarded-proto",
+        "x-forwarded-host",
+        "x-real-ip",
+        "x-frame-options",
+        "x-content-type-options",
+    ];
+    if lower.starts_with("x-") && !X_NON_AUTH.contains(&lower.as_str()) {
+        return true;
+    }
+    lower.contains("api-token")
+        || lower.ends_with("-token")
+        || lower.contains("api_key")
+        || lower.contains("api-key")
+        || lower.contains("credential")
+        || lower.contains("secret")
+        || (lower.contains("auth") && lower != "authority")
+}
+
 fn merge_profile_and_auth_headers(
     profile_headers: &HashMap<String, String>,
     auth_headers: HashMap<String, String>,
@@ -96,14 +152,9 @@ fn merge_profile_and_auth_headers(
         return profile_headers.clone();
     }
 
-    let auth_names: Vec<String> = auth_headers
-        .keys()
-        .map(|name| name.to_ascii_lowercase())
-        .collect();
-
     let mut headers: HashMap<String, String> = profile_headers
         .iter()
-        .filter(|(name, _)| !auth_names.contains(&name.to_ascii_lowercase()))
+        .filter(|(name, _)| !is_likely_auth_header(name))
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
 
@@ -167,8 +218,9 @@ fn reqwest_method(method: HttpMethod) -> Method {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct VerifyHttpSuccess {
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyHttpSuccess {
     pub console: VerificationConsoleEntry,
     pub response_text: String,
     pub request_body: String,
@@ -271,7 +323,7 @@ fn map_status_error(status: StatusCode) -> VerificationError {
 }
 
 /// Execute the real HTTP verify probe (connectivity only).
-pub(crate) async fn execute_verify_http(
+pub async fn execute_verify_http(
     profile: &TargetProfile,
     auth_headers: HashMap<String, String>,
 ) -> Result<VerifyHttpSuccess, VerificationAttempt> {
@@ -400,7 +452,7 @@ pub(crate) async fn execute_verify_http(
 
     Ok(VerifyHttpSuccess {
         console: VerificationConsoleEntry {
-            message: "Connectivity check passed — validating response with AI Runtime".into(),
+            message: "Authentication and connectivity verified".into(),
             ..console
         },
         response_text,
@@ -495,5 +547,23 @@ mod tests {
             r#"{"error":"Internal server error"}"#,
             StatusCode::OK,
         ));
+    }
+
+    #[test]
+    fn merge_profile_and_auth_headers_replaces_credential_headers() {
+        let mut profile_headers = HashMap::new();
+        profile_headers.insert("Authorization".into(), "Bearer old".into());
+        profile_headers.insert("Content-Type".into(), "application/json".into());
+
+        let mut auth_headers = HashMap::new();
+        auth_headers.insert("x-api-key".into(), "secret".into());
+
+        let merged = merge_profile_and_auth_headers(&profile_headers, auth_headers);
+        assert!(!merged.contains_key("Authorization"));
+        assert_eq!(merged.get("x-api-key").map(String::as_str), Some("secret"));
+        assert_eq!(
+            merged.get("Content-Type").map(String::as_str),
+            Some("application/json")
+        );
     }
 }

@@ -296,7 +296,7 @@ const X_HEADER_NON_AUTH_NAMES = new Set([
   "x-content-type-options",
 ]);
 
-function isLikelyAuthHeader(name: string): boolean {
+export function isLikelyAuthHeader(name: string): boolean {
   const lower = name.toLowerCase();
   if (NON_AUTH_HEADER_NAMES.has(lower)) return false;
   if (lower === "authorization" || API_KEY_HEADER_NAMES.has(lower)) return true;
@@ -559,6 +559,13 @@ export function syncAuthFormFromProfile(
   current: TargetFormState,
 ): TargetFormState {
   return { ...current, ...inferAuthFromProfileHeaders(profile, current) };
+}
+
+/** Rebuild Step 3 auth fields from Step 2 profile headers (ignores prior Step 3 edits). */
+export function inferFreshAuthFormFromProfile(profile: TargetProfileFormState): TargetFormState {
+  const profileUrl = fullProfileUrl(profile);
+  const blank = { ...createInitialTargetForm(), url: profileUrl };
+  return syncAuthFormFromProfile(profile, blank);
 }
 
 function validateUrl(url: string): string | null {

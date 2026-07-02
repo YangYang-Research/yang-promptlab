@@ -11,6 +11,21 @@ export type TargetProfileVerifyResponse = {
   message: string;
 };
 
+export type VerifyHttpSnapshot = {
+  console: VerificationConsoleEntryDto;
+  responseText: string;
+  requestBody: string;
+  responseTimeMs: number;
+  statusCode: number;
+};
+
+export type TargetProfileConnectVerifyResponse = {
+  success: boolean;
+  console: VerificationConsoleEntryDto;
+  message: string;
+  connectSnapshot: VerifyHttpSnapshot | null;
+};
+
 export const listTargetProfileTemplates = () =>
   invokeCommand<TargetProfileDto[]>("target_profile_list_templates");
 
@@ -19,6 +34,32 @@ export const getTargetProfile = (targetId: string) =>
 
 export const saveTargetProfile = (targetId: string, profile: Record<string, unknown>) =>
   invokeCommand<{ id: string }>("target_profile_save", { targetId, profile });
+
+export const verifyTargetProfileConnect = (
+  targetId: string,
+  profile: Record<string, unknown>,
+  options?: {
+    auth?: Record<string, unknown> | null;
+    authHeaders?: Record<string, string> | null;
+  },
+) =>
+  invokeCommand<TargetProfileConnectVerifyResponse>("target_profile_verify_connect", {
+    targetId,
+    profile,
+    auth: options?.auth ?? null,
+    authHeaders: options?.authHeaders ?? null,
+  });
+
+export const verifyTargetProfileAi = (
+  targetId: string,
+  profile: Record<string, unknown>,
+  connectSnapshot: VerifyHttpSnapshot,
+) =>
+  invokeCommand<TargetProfileVerifyResponse>("target_profile_verify_ai", {
+    targetId,
+    profile,
+    connectSnapshot,
+  });
 
 export const verifyTargetProfile = (
   targetId: string,

@@ -5,6 +5,7 @@ import {
   createInitialTargetForm,
   migrateTargetForm,
   syncAuthFormFromProfile,
+  inferFreshAuthFormFromProfile,
   targetFormFingerprint,
   targetFormFromDescriptor,
   targetFormMatchesDescriptor,
@@ -17,13 +18,13 @@ import {
   profileFromDto,
   fullProfileUrl,
   type TargetProfileFormState,
-  type VerificationConsoleEntryDto,
 } from "./targetProfile";
+import type { VerificationLogLine } from "./verificationLog";
 import type { WizardStepId } from "./wizardSteps";
 import type { Target } from "@/shared/types";
 
 const STORAGE_KEY = "promptlab:scan-wizard";
-const STORAGE_VERSION = 6;
+const STORAGE_VERSION = 7;
 
 export type PlannerSource = "ai_runtime" | "target_profile";
 
@@ -47,7 +48,7 @@ export type ScanWizardSession = {
   targetForm: TargetFormState;
   savedTargetId: string | null;
   savedTargetFingerprint: string | null;
-  verificationConsole: VerificationConsoleEntryDto | null;
+  verificationLog: VerificationLogLine[];
   attackPlanUi: AttackPlanUiState;
   attackPlan: AttackPlanConfig | null;
   submittedScanId: string | null;
@@ -92,7 +93,7 @@ export function createInitialSession(lockedProjectId = ""): ScanWizardSession {
     targetForm: createInitialTargetForm(),
     savedTargetId: null,
     savedTargetFingerprint: null,
-    verificationConsole: null,
+    verificationLog: [],
     attackPlanUi: createInitialAttackPlanUi(),
     attackPlan: null,
     submittedScanId: null,
@@ -261,7 +262,7 @@ export function applyWizardEntryStep(
       submittedScanId: null,
       attackPlan: null,
       attackPlanUi: createInitialAttackPlanUi(),
-      verificationConsole: null,
+      verificationLog: [],
       targetProfile: {
         ...session.targetProfile,
         verification: createEmptyVerification(),
@@ -332,9 +333,13 @@ export async function prepareAuthFormForStep3(
   profile: TargetProfileFormState,
   current: TargetFormState,
   targetId: string | null,
+  options?: { reinferFromProfile?: boolean },
 ): Promise<TargetFormState> {
   const profileUrl = fullProfileUrl(profile);
-  let form = syncAuthFormFromProfile(profile, { ...current, url: profileUrl });
+  const base = options?.reinferFromProfile
+    ? inferFreshAuthFormFromProfile(profile)
+    : { ...current, url: profileUrl };
+  let form = syncAuthFormFromProfile(profile, base);
 
   if (targetId && targetFormNeedsSecretHydration(form)) {
     try {

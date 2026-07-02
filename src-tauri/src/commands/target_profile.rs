@@ -4,8 +4,9 @@ use aisec_auth::{resolve_descriptor_for_wizard, SecretStore};
 use aisec_core::{AisecError, LogCategory};
 use aisec_storage::TargetRepository;
 use aisec_target_profile::{
-    build_wizard_attack_plan_with_llm, list_provider_templates, verify_target_profile_with_llm,
-    TargetProfile,
+    build_wizard_attack_plan_with_llm, execute_verify_http, list_provider_templates,
+    validate_http_response_with_llm, TargetProfile,
+    VerifyHttpSuccess,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -278,10 +279,27 @@ pub struct TargetProfileVerifyResponse {
     pub message: String,
 }
 
-pub async fn target_profile_verify_op(
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetProfileConnectVerifyResponse {
+    pub success: bool,
+    pub console: VerificationConsoleEntryDto,
+    pub message: String,
+    pub connect_snapshot: Option<VerifyHttpSuccess>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetProfileVerifyAiRequest {
+    pub target_id: String,
+    pub profile: serde_json::Value,
+    pub connect_snapshot: VerifyHttpSuccess,
+}
+
+pub async fn target_profile_verify_connect_op(
     state: &AppState,
     request: TargetProfileVerifyRequest,
-) -> CommandResult<TargetProfileVerifyResponse> {
+) -> CommandResult<TargetProfileConnectVerifyResponse> {
     let TargetProfileVerifyRequest {
         target_id,
         profile: profile_value,
@@ -301,6 +319,36 @@ pub async fn target_profile_verify_op(
         auth.as_ref(),
         inline_auth_headers.as_ref(),
     )?;
+
+    let profile: TargetProfile = serde_json::from_value(profile_value).map_err(|err| {
+        CommandError::invalid_input(format!("invalid target profile: {err}"))
+    })?;
+
+    match execute_verify_http(&profile, auth_headers).await {
+        Ok(snapshot) => Ok(TargetProfileConnectVerifyResponse {
+            success: true,
+            message: snapshot.console.message.clone(),
+            console: VerificationConsoleEntryDto::from(snapshot.console.clone()),
+            connect_snapshot: Some(snapshot),
+        }),
+        Err(attempt) => Ok(TargetProfileConnectVerifyResponse {
+            success: false,
+            message: attempt.console.message.clone(),
+            console: VerificationConsoleEntryDto::from(attempt.console),
+            connect_snapshot: None,
+        }),
+    }
+}
+
+pub async fn target_profile_verify_ai_op(
+    state: &AppState,
+    request: TargetProfileVerifyAiRequest,
+) -> CommandResult<TargetProfileVerifyResponse> {
+    let TargetProfileVerifyAiRequest {
+        target_id,
+        profile: profile_value,
+        connect_snapshot,
+    } = request;
 
     let mut profile: TargetProfile = serde_json::from_value(profile_value).map_err(|err| {
         CommandError::invalid_input(format!("invalid target profile: {err}"))
@@ -322,7 +370,7 @@ pub async fn target_profile_verify_op(
         state.runtime_manager().clone(),
     );
 
-    let attempt = verify_target_profile_with_llm(&profile, auth_headers, &llm_host).await;
+    let attempt = validate_http_response_with_llm(&profile, &connect_snapshot, &llm_host).await;
     match attempt.result {
         Ok(verification) => {
             profile.verification = verification;
@@ -371,6 +419,38 @@ pub async fn target_profile_verify_op(
             })
         }
     }
+}
+
+pub async fn target_profile_verify_op(
+    state: &AppState,
+    request: TargetProfileVerifyRequest,
+) -> CommandResult<TargetProfileVerifyResponse> {
+    let connect = target_profile_verify_connect_op(state, request.clone()).await?;
+    if !connect.success {
+        let profile: TargetProfile = serde_json::from_value(request.profile).map_err(|err| {
+            CommandError::invalid_input(format!("invalid target profile: {err}"))
+        })?;
+        return Ok(TargetProfileVerifyResponse {
+            verified: false,
+            profile: TargetProfileDto::from(profile),
+            console: connect.console,
+            message: connect.message,
+        });
+    }
+
+    let snapshot = connect.connect_snapshot.ok_or_else(|| {
+        CommandError::invalid_input("connect verification succeeded without snapshot")
+    })?;
+
+    target_profile_verify_ai_op(
+        state,
+        TargetProfileVerifyAiRequest {
+            target_id: request.target_id,
+            profile: request.profile,
+            connect_snapshot: snapshot,
+        },
+    )
+    .await
 }
 
 pub async fn target_profile_get_op(
@@ -478,6 +558,44 @@ pub async fn target_profile_save(
         TargetProfileSaveRequest {
             target_id,
             profile,
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn target_profile_verify_connect(
+    state: State<'_, AppState>,
+    target_id: String,
+    profile: serde_json::Value,
+    auth: Option<serde_json::Value>,
+    auth_headers: Option<std::collections::HashMap<String, String>>,
+) -> CommandResult<TargetProfileConnectVerifyResponse> {
+    target_profile_verify_connect_op(
+        state.inner(),
+        TargetProfileVerifyRequest {
+            target_id,
+            profile,
+            auth,
+            auth_headers,
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn target_profile_verify_ai(
+    state: State<'_, AppState>,
+    target_id: String,
+    profile: serde_json::Value,
+    connect_snapshot: VerifyHttpSuccess,
+) -> CommandResult<TargetProfileVerifyResponse> {
+    target_profile_verify_ai_op(
+        state.inner(),
+        TargetProfileVerifyAiRequest {
+            target_id,
+            profile,
+            connect_snapshot,
         },
     )
     .await

@@ -251,6 +251,8 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::target_profile::target_profile_list_templates,
             commands::target_profile::target_profile_save,
             commands::target_profile::target_profile_verify,
+            commands::target_profile::target_profile_verify_connect,
+            commands::target_profile::target_profile_verify_ai,
             commands::target_profile::target_profile_get,
             commands::target_profile::planner_generate_from_profile,
             commands::planner::planner_generate,
