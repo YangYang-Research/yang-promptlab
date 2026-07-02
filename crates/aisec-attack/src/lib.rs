@@ -22,7 +22,7 @@ pub mod types;
 pub use category::AttackCategory;
 pub use collector::{ResultCollector, ResultSink};
 pub use error::{AttackError, AttackResult};
-pub use executor::AttackExecutor;
+pub use executor::{AttackExecutor, AttemptStreamItem};
 pub use lifecycle::{AttackLifecycle, AttackPhase, LifecycleEvent};
 pub use orchestrator::{AttackOrchestrator, OrchestratorConfig};
 pub use payload::{MutatorConfig, MutatorKind, PayloadMutator, PayloadRunner};
@@ -32,7 +32,7 @@ pub use scanner::{PromptInjectionScanner, ScanContext, ScanSummary};
 pub use traits::Attack;
 pub use target_auth::{apply_descriptor_auth, apply_descriptor_auth_value};
 pub use transport::{HarnessTransport, MockTransport, TargetTransport, TransportRequest, TransportResponse};
-pub use types::*;
+pub use types::{DEFAULT_ATTACK_CONCURRENCY, *};
 
 /// Pre-built registry with all built-in attack categories.
 pub fn default_registry() -> AttackRegistry {

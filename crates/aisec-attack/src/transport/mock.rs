@@ -8,6 +8,7 @@ use crate::error::AttackResult;
 use crate::transport::{TargetTransport, TransportRequest, TransportResponse};
 
 /// In-memory transport for unit tests.
+#[derive(Clone)]
 pub struct MockTransport {
     responses: Arc<Mutex<Vec<TransportResponse>>>,
     captured: Arc<Mutex<Vec<TransportRequest>>>,

@@ -9,11 +9,11 @@
 
 use aisec_attack::{
     apply_descriptor_auth, AttackCategory, AttackContext, AttackPayload, AttackTarget,
-    AttackExecutor, FindingSeverity, PayloadAttempt,
+    AttackExecutor, AttemptStreamItem, DEFAULT_ATTACK_CONCURRENCY, FindingSeverity, PayloadAttempt,
 };
 use aisec_endpoint_metadata::body_template_from_metadata;
 use crate::dto::metadata_from_endpoint;
-use aisec_target_profile::TargetProfile;
+use aisec_target_profile::{TargetProfile, TargetProvider};
 use aisec_auth::{resolve_descriptor_for_runtime, resolve_descriptor_for_wizard, AuthSessionManager, SecretStore};
 use aisec_judge::{JudgeVerdict, Severity as JudgeSeverity};
 use aisec_plugin_host::evaluate_with_judge_plugins;
@@ -31,6 +31,8 @@ use tracing::{info, instrument, warn};
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::sync::Mutex;
+
+use tokio::sync::mpsc;
 
 use tauri::async_runtime::Mutex as AsyncMutex;
 
@@ -143,6 +145,17 @@ fn merge_descriptor_auth_target(
     Ok(apply_descriptor_auth(target, &resolved))
 }
 
+fn harness_surface_for_provider(provider: TargetProvider) -> &'static str {
+    match provider {
+        TargetProvider::GenericHttp
+        | TargetProvider::Mcp
+        | TargetProvider::Dify
+        | TargetProvider::Langflow => "rest_api",
+        TargetProvider::AnthropicClaude => "anthropic_compatible",
+        _ => "openai_compatible",
+    }
+}
+
 fn finding_evidence_json(
     url: &str,
     method: Option<&str>,
@@ -229,6 +242,286 @@ async fn build_judge_for_category(
     .await
 }
 
+struct CategoryJudgeAccum {
+    successes: u64,
+    created_findings: Vec<FindingDto>,
+    judged: Vec<JudgedAttemptSummary>,
+}
+
+struct CategoryJudgeEnv<'a> {
+    repos: &'a Repositories,
+    scan_id: &'a str,
+    project_id: &'a str,
+    target_id: Option<String>,
+    category: AttackCategory,
+    category_name: &'a str,
+    endpoint_url: &'a str,
+    method: Option<&'a str>,
+    body_template: Option<&'a str>,
+    provider: Option<&'a str>,
+    judge: &'a aisec_judge::JudgeEngine,
+    plugin_manager: &'a Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
+    progress: Option<&'a ScanProgressEmitter>,
+    progress_state: Option<&'a Arc<Mutex<ScanProgress>>>,
+}
+
+async fn judge_single_attempt(
+    env: &CategoryJudgeEnv<'_>,
+    seq: usize,
+    attempt: PayloadAttempt,
+    accum: &mut CategoryJudgeAccum,
+) -> CommandResult<()> {
+    let eval = &attempt.evaluation;
+    let normalized = &attempt.response.normalized;
+    let payload_number = seq + 1;
+
+    if let Some(emitter) = env.progress {
+        emitter.detailed(
+            ScanProgressLevel::Info,
+            emitter
+                .event(
+                    ScanProgressLevel::Info,
+                    format!("Payload #{payload_number} {}", attempt.payload_name),
+                )
+                .payload(&attempt.payload_name)
+                .endpoint(env.endpoint_url),
+        );
+        emitter.detailed(
+            ScanProgressLevel::Info,
+            emitter
+                .event(
+                    ScanProgressLevel::Info,
+                    format!(
+                        "Response {} ({}ms)",
+                        attempt.response.status, attempt.response.duration_ms
+                    ),
+                )
+                .endpoint(env.endpoint_url)
+                .status_code(attempt.response.status)
+                .latency(attempt.response.duration_ms),
+        );
+    }
+
+    let mut verdict: JudgeVerdict = env
+        .judge
+        .judge_normalized(
+            attempt.payload_id.clone(),
+            env.category_name,
+            attempt.mutated_content.clone(),
+            normalized,
+        )
+        .await
+        .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
+
+    {
+        let mut plugins = env.plugin_manager.lock().await;
+        if let Ok(signals) = evaluate_with_judge_plugins(
+            &mut plugins,
+            &attempt.response.body,
+            env.category_name,
+        )
+        .await
+        {
+            for signal in signals {
+                if signal.vulnerable
+                    && (signal.confidence > verdict.confidence || !verdict.vulnerable)
+                {
+                    verdict.vulnerable = true;
+                    verdict.confidence = verdict.confidence.max(signal.confidence);
+                    verdict.summary = format!(
+                        "{} [plugin {}: {}]",
+                        verdict.summary, signal.plugin_id, signal.summary
+                    );
+                }
+            }
+        }
+    }
+
+    let judge_json = serde_json::to_value(&verdict).unwrap_or(serde_json::Value::Null);
+
+    env.repos
+        .attack_results()
+        .create(CreateAttackResult {
+            scan_id: env.scan_id.to_string(),
+            payload_id: None,
+            target_id: env.target_id.clone(),
+            probe_id: Some(attempt.payload_id.clone()),
+            success: verdict.vulnerable,
+            response_json: Some(serde_json::json!({
+                "status": attempt.response.status,
+                "body": attempt.response.body,
+                "duration_ms": attempt.response.duration_ms,
+                "normalized": normalized,
+            })),
+            evaluated_json: Some(serde_json::json!({
+                "attack_evaluation": {
+                    "success": eval.success,
+                    "confidence": eval.confidence,
+                    "severity": eval.severity.map(severity_str),
+                    "indicators": eval.indicators,
+                    "summary": eval.summary,
+                },
+                "judge": judge_json,
+            })),
+            duration_ms: Some(attempt.response.duration_ms as i64),
+        })
+        .await
+        .map_err(CommandError::from)?;
+
+    if verdict.vulnerable {
+        accum.successes += 1;
+        let severity = verdict
+            .severity
+            .map(judge_severity_str)
+            .or_else(|| eval.severity.map(severity_str))
+            .unwrap_or("medium");
+        let finding = env
+            .repos
+            .findings()
+            .create(CreateFinding {
+                scan_id: env.scan_id.to_string(),
+                project_id: env.project_id.to_string(),
+                target_id: env.target_id.clone(),
+                title: format!("{}: {}", env.category.display_name(), attempt.payload_name),
+                severity: severity.to_string(),
+                category: Some(env.category_name.into()),
+                description: Some(verdict.summary.clone()),
+                evidence_json: Some(finding_evidence_json(
+                    env.endpoint_url,
+                    env.method,
+                    env.body_template,
+                    &attempt,
+                    &verdict.summary,
+                    verdict.confidence,
+                    &eval.indicators,
+                    &judge_json,
+                    env.provider,
+                )),
+                status: None,
+            })
+            .await
+            .map_err(CommandError::from)?;
+        let finding_dto = FindingDto::from(finding);
+        accum.created_findings.push(finding_dto.clone());
+        if let Some(emitter) = env.progress {
+            emitter.detailed(
+                ScanProgressLevel::Info,
+                emitter
+                    .event(ScanProgressLevel::Info, "Saved finding")
+                    .endpoint(env.endpoint_url)
+                    .finding_id(&finding_dto.id),
+            );
+        }
+    }
+
+    accum.judged.push(JudgedAttemptSummary {
+        payload_id: attempt.payload_id.clone(),
+        payload_name: attempt.payload_name.clone(),
+        vulnerable: verdict.vulnerable,
+        confidence: verdict.confidence,
+        summary: verdict.summary.clone(),
+    });
+    increment_scan_progress(env.progress_state, 1);
+
+    if let Some(emitter) = env.progress {
+        let confidence_label = if verdict.confidence >= 0.8 {
+            "High Confidence"
+        } else if verdict.confidence >= 0.5 {
+            "Medium Confidence"
+        } else {
+            "Low Confidence"
+        };
+        emitter.detailed(
+            ScanProgressLevel::Info,
+            emitter
+                .event(ScanProgressLevel::Info, format!("Judge: {confidence_label}"))
+                .endpoint(env.endpoint_url)
+                .payload(&attempt.payload_name),
+        );
+    }
+
+    Ok(())
+}
+
+async fn drain_category_judge_stream(
+    env: &CategoryJudgeEnv<'_>,
+    mut rx: mpsc::Receiver<AttemptStreamItem>,
+    accum: &mut CategoryJudgeAccum,
+) -> CommandResult<()> {
+    use std::collections::BTreeMap;
+
+    let mut pending: BTreeMap<usize, PayloadAttempt> = BTreeMap::new();
+    let mut next_seq = 0usize;
+    let mut judged_any = false;
+
+    while let Some((seq, attempt)) = rx.recv().await {
+        pending.insert(seq, attempt);
+        while let Some(attempt) = pending.remove(&next_seq) {
+            if !judged_any {
+                update_scan_phase(
+                    env.progress_state,
+                    "judge",
+                    Some(env.category.display_name()),
+                    None,
+                    None,
+                );
+                judged_any = true;
+            }
+            judge_single_attempt(env, next_seq, attempt, accum).await?;
+            next_seq += 1;
+        }
+    }
+
+    while let Some(attempt) = pending.remove(&next_seq) {
+        if !judged_any {
+            update_scan_phase(
+                env.progress_state,
+                "judge",
+                Some(env.category.display_name()),
+                None,
+                None,
+            );
+            judged_any = true;
+        }
+        judge_single_attempt(env, next_seq, attempt, accum).await?;
+        next_seq += 1;
+    }
+
+    Ok(())
+}
+
+async fn execute_category_with_live_judge(
+    executor: AttackExecutor<crate::plugin_transport::PluginAwareTransport>,
+    category: AttackCategory,
+    ctx: AttackContext,
+    env: &CategoryJudgeEnv<'_>,
+) -> CommandResult<CategoryRunResult> {
+    let (tx, rx) = mpsc::channel(DEFAULT_ATTACK_CONCURRENCY.max(4));
+    let mut accum = CategoryJudgeAccum {
+        successes: 0,
+        created_findings: Vec::new(),
+        judged: Vec::new(),
+    };
+
+    let exec = executor.execute_category_streaming(category, &ctx, tx);
+    let drain = drain_category_judge_stream(env, rx, &mut accum);
+
+    let (result, ()) = tokio::try_join!(
+        async {
+            exec.await
+                .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))
+        },
+        drain
+    )?;
+
+    Ok(CategoryRunResult {
+        attempts: result.attempts.len(),
+        successes: accum.successes,
+        findings: accum.created_findings,
+        judged: accum.judged,
+    })
+}
+
 /// Execute one attack category against a single endpoint; persist attempts and findings.
 pub async fn run_category_on_endpoint(
     repos: &Repositories,
@@ -281,6 +574,7 @@ pub async fn run_category_on_endpoint(
     if let Some(opts) = options {
         ctx.budget.max_payloads = opts.max_payloads;
     }
+    ctx.budget.max_concurrent_requests = DEFAULT_ATTACK_CONCURRENCY;
     let executor = if let Some(opts) = options {
         attack_executor_for_options(runtime.transport, opts)
     } else {
@@ -316,19 +610,6 @@ pub async fn run_category_on_endpoint(
         None,
     );
 
-    let result = executor
-        .execute_category(category, &ctx)
-        .await
-        .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
-
-    update_scan_phase(
-        progress_state,
-        "judge",
-        Some(category.display_name()),
-        None,
-        None,
-    );
-
     let judge = build_judge_for_category(
         data_dir,
         inference_manager,
@@ -337,184 +618,28 @@ pub async fn run_category_on_endpoint(
         runtime_manager,
     )
     .await?;
-    let category_name = category.as_str();
-    let mut successes = 0u64;
-    let mut created_findings: Vec<FindingDto> = Vec::new();
-    let mut judged: Vec<JudgedAttemptSummary> = Vec::new();
+    let endpoint_metadata = metadata_from_endpoint(endpoint);
+    let body_template = endpoint_metadata
+        .as_ref()
+        .map(|meta| body_template_from_metadata(meta));
+    let judge_env = CategoryJudgeEnv {
+        repos,
+        scan_id,
+        project_id,
+        target_id: target_id.clone(),
+        category,
+        category_name: category.as_str(),
+        endpoint_url: &endpoint.url,
+        method: endpoint.method.as_deref(),
+        body_template: body_template.as_deref(),
+        provider: None,
+        judge: &judge,
+        plugin_manager: &plugin_manager,
+        progress,
+        progress_state,
+    };
 
-    for (index, attempt) in result.attempts.iter().enumerate() {
-        let eval = &attempt.evaluation;
-        let normalized = &attempt.response.normalized;
-
-        if let Some(emitter) = progress {
-            emitter.detailed(
-                ScanProgressLevel::Info,
-                emitter
-                    .event(ScanProgressLevel::Info, format!("Payload #{} {}", index + 1, attempt.payload_name))
-                    .payload(&attempt.payload_name)
-                    .endpoint(&endpoint.url),
-            );
-            emitter.detailed(
-                ScanProgressLevel::Info,
-                emitter
-                    .event(
-                        ScanProgressLevel::Info,
-                        format!(
-                            "Response {} ({}ms)",
-                            attempt.response.status, attempt.response.duration_ms
-                        ),
-                    )
-                    .endpoint(&endpoint.url)
-                    .status_code(attempt.response.status)
-                    .latency(attempt.response.duration_ms),
-            );
-        }
-
-        let mut verdict: JudgeVerdict = judge
-            .judge_normalized(
-                attempt.payload_id.clone(),
-                category_name,
-                attempt.mutated_content.clone(),
-                normalized,
-            )
-            .await
-            .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
-
-        {
-            let mut plugins = plugin_manager.lock().await;
-            if let Ok(signals) = evaluate_with_judge_plugins(
-                &mut plugins,
-                &attempt.response.body,
-                category_name,
-            )
-            .await
-            {
-                for signal in signals {
-                    if signal.vulnerable
-                        && (signal.confidence > verdict.confidence || !verdict.vulnerable)
-                    {
-                        verdict.vulnerable = true;
-                        verdict.confidence = verdict.confidence.max(signal.confidence);
-                        verdict.summary = format!(
-                            "{} [plugin {}: {}]",
-                            verdict.summary, signal.plugin_id, signal.summary
-                        );
-                    }
-                }
-            }
-        }
-
-        let judge_json = serde_json::to_value(&verdict).unwrap_or(serde_json::Value::Null);
-
-        repos
-            .attack_results()
-            .create(CreateAttackResult {
-                scan_id: scan_id.to_string(),
-                payload_id: None,
-                target_id: target_id.clone(),
-                probe_id: Some(attempt.payload_id.clone()),
-                success: verdict.vulnerable,
-                response_json: Some(serde_json::json!({
-                    "status": attempt.response.status,
-                    "body": attempt.response.body,
-                    "duration_ms": attempt.response.duration_ms,
-                    "normalized": normalized,
-                })),
-                evaluated_json: Some(serde_json::json!({
-                    "attack_evaluation": {
-                        "success": eval.success,
-                        "confidence": eval.confidence,
-                        "severity": eval.severity.map(severity_str),
-                        "indicators": eval.indicators,
-                        "summary": eval.summary,
-                    },
-                    "judge": judge_json,
-                })),
-                duration_ms: Some(attempt.response.duration_ms as i64),
-            })
-            .await
-            .map_err(CommandError::from)?;
-
-        if verdict.vulnerable {
-            successes += 1;
-            let severity = verdict
-                .severity
-                .map(judge_severity_str)
-                .or_else(|| eval.severity.map(severity_str))
-                .unwrap_or("medium");
-            let finding = repos
-                .findings()
-                .create(CreateFinding {
-                    scan_id: scan_id.to_string(),
-                    project_id: project_id.to_string(),
-                    target_id: target_id.clone(),
-                    title: format!("{}: {}", category.display_name(), attempt.payload_name),
-                    severity: severity.to_string(),
-                    category: Some(category_name.into()),
-                    description: Some(verdict.summary.clone()),
-                    evidence_json: Some(finding_evidence_json(
-                        &endpoint.url,
-                        endpoint.method.as_deref(),
-                        metadata_from_endpoint(endpoint)
-                            .map(|meta| body_template_from_metadata(&meta))
-                            .as_deref(),
-                        attempt,
-                        &verdict.summary,
-                        verdict.confidence,
-                        &eval.indicators,
-                        &judge_json,
-                        None,
-                    )),
-                    status: None,
-                })
-                .await
-                .map_err(CommandError::from)?;
-            let finding_dto = FindingDto::from(finding);
-            created_findings.push(finding_dto.clone());
-            if let Some(emitter) = progress {
-                emitter.detailed(
-                    ScanProgressLevel::Info,
-                    emitter
-                        .event(ScanProgressLevel::Info, "Saved finding")
-                        .endpoint(&endpoint.url)
-                        .finding_id(&finding_dto.id),
-                );
-            }
-        }
-
-        judged.push(JudgedAttemptSummary {
-            payload_id: attempt.payload_id.clone(),
-            payload_name: attempt.payload_name.clone(),
-            vulnerable: verdict.vulnerable,
-            confidence: verdict.confidence,
-            summary: verdict.summary.clone(),
-        });
-        increment_scan_progress(progress_state, 1);
-
-        if let Some(emitter) = progress {
-            let confidence_label = if verdict.confidence >= 0.8 {
-                "High Confidence"
-            } else if verdict.confidence >= 0.5 {
-                "Medium Confidence"
-            } else {
-                "Low Confidence"
-            };
-            emitter.detailed(
-                ScanProgressLevel::Info,
-                emitter
-                    .event(ScanProgressLevel::Info, format!("Judge: {confidence_label}"))
-                    .endpoint(&endpoint.url)
-                    .payload(&attempt.payload_name),
-            );
-        }
-    }
-
-    Ok(CategoryRunResult {
-        attempts: result.attempts.len(),
-        successes,
-        findings: created_findings,
-        judged,
-    })
+    execute_category_with_live_judge(executor, category, ctx, &judge_env).await
 }
 
 /// Execute one attack category against a verified AI Target Profile.
@@ -541,6 +666,8 @@ pub async fn run_category_on_target_profile(
     let mut target = AttackTarget::llm_api(url.clone());
     target.method = Some(profile.method.as_str().into());
     target.body_template = Some(profile.request_template.clone());
+    target.prompt_placeholder = Some(profile.prompt_placeholder.clone());
+    target.harness_surface = Some(harness_surface_for_provider(profile.provider).into());
     for (key, value) in &profile.headers {
         target = target.with_header(key, value);
     }
@@ -568,6 +695,7 @@ pub async fn run_category_on_target_profile(
     if let Some(opts) = options {
         ctx.budget.max_payloads = opts.max_payloads;
     }
+    ctx.budget.max_concurrent_requests = DEFAULT_ATTACK_CONCURRENCY;
     let executor = if let Some(opts) = options {
         attack_executor_for_options(runtime.transport, opts)
     } else {
@@ -600,19 +728,6 @@ pub async fn run_category_on_target_profile(
         None,
     );
 
-    let result = executor
-        .execute_category(category, &ctx)
-        .await
-        .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
-
-    update_scan_phase(
-        progress_state,
-        "judge",
-        Some(category.display_name()),
-        None,
-        None,
-    );
-
     let judge = build_judge_for_category(
         data_dir,
         inference_manager,
@@ -621,182 +736,24 @@ pub async fn run_category_on_target_profile(
         runtime_manager,
     )
     .await?;
-    let category_name = category.as_str();
-    let mut successes = 0u64;
-    let mut created_findings: Vec<FindingDto> = Vec::new();
-    let mut judged: Vec<JudgedAttemptSummary> = Vec::new();
+    let judge_env = CategoryJudgeEnv {
+        repos,
+        scan_id,
+        project_id,
+        target_id: Some(target_id.to_string()),
+        category,
+        category_name: category.as_str(),
+        endpoint_url: &url,
+        method: Some(profile.method.as_str()),
+        body_template: Some(profile.request_template.as_str()),
+        provider: Some(profile.provider.as_str()),
+        judge: &judge,
+        plugin_manager: &plugin_manager,
+        progress,
+        progress_state,
+    };
 
-    for (index, attempt) in result.attempts.iter().enumerate() {
-        let eval = &attempt.evaluation;
-        let normalized = &attempt.response.normalized;
-
-        if let Some(emitter) = progress {
-            emitter.detailed(
-                ScanProgressLevel::Info,
-                emitter
-                    .event(ScanProgressLevel::Info, format!("Payload #{} {}", index + 1, attempt.payload_name))
-                    .payload(&attempt.payload_name)
-                    .endpoint(&url),
-            );
-            emitter.detailed(
-                ScanProgressLevel::Info,
-                emitter
-                    .event(
-                        ScanProgressLevel::Info,
-                        format!(
-                            "Response {} ({}ms)",
-                            attempt.response.status, attempt.response.duration_ms
-                        ),
-                    )
-                    .endpoint(&url)
-                    .status_code(attempt.response.status)
-                    .latency(attempt.response.duration_ms),
-            );
-        }
-
-        let mut verdict: JudgeVerdict = judge
-            .judge_normalized(
-                attempt.payload_id.clone(),
-                category_name,
-                attempt.mutated_content.clone(),
-                normalized,
-            )
-            .await
-            .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
-
-        {
-            let mut plugins = plugin_manager.lock().await;
-            if let Ok(signals) = evaluate_with_judge_plugins(
-                &mut plugins,
-                &attempt.response.body,
-                category_name,
-            )
-            .await
-            {
-                for signal in signals {
-                    if signal.vulnerable
-                        && (signal.confidence > verdict.confidence || !verdict.vulnerable)
-                    {
-                        verdict.vulnerable = true;
-                        verdict.confidence = verdict.confidence.max(signal.confidence);
-                        verdict.summary = format!(
-                            "{} [plugin {}: {}]",
-                            verdict.summary, signal.plugin_id, signal.summary
-                        );
-                    }
-                }
-            }
-        }
-
-        let judge_json = serde_json::to_value(&verdict).unwrap_or(serde_json::Value::Null);
-
-        repos
-            .attack_results()
-            .create(CreateAttackResult {
-                scan_id: scan_id.to_string(),
-                payload_id: None,
-                target_id: Some(target_id.to_string()),
-                probe_id: Some(attempt.payload_id.clone()),
-                success: verdict.vulnerable,
-                response_json: Some(serde_json::json!({
-                    "status": attempt.response.status,
-                    "body": attempt.response.body,
-                    "duration_ms": attempt.response.duration_ms,
-                    "normalized": normalized,
-                })),
-                evaluated_json: Some(serde_json::json!({
-                    "attack_evaluation": {
-                        "success": eval.success,
-                        "confidence": eval.confidence,
-                        "severity": eval.severity.map(severity_str),
-                        "indicators": eval.indicators,
-                        "summary": eval.summary,
-                    },
-                    "judge": judge_json,
-                })),
-                duration_ms: Some(attempt.response.duration_ms as i64),
-            })
-            .await
-            .map_err(CommandError::from)?;
-
-        if verdict.vulnerable {
-            successes += 1;
-            let severity = verdict
-                .severity
-                .map(judge_severity_str)
-                .or_else(|| eval.severity.map(severity_str))
-                .unwrap_or("medium");
-            let finding = repos
-                .findings()
-                .create(CreateFinding {
-                    scan_id: scan_id.to_string(),
-                    project_id: project_id.to_string(),
-                    target_id: Some(target_id.to_string()),
-                    title: format!("{}: {}", category.display_name(), attempt.payload_name),
-                    severity: severity.to_string(),
-                    category: Some(category_name.into()),
-                    description: Some(verdict.summary.clone()),
-                    evidence_json: Some(finding_evidence_json(
-                        &url,
-                        Some(profile.method.as_str()),
-                        Some(profile.request_template.as_str()),
-                        attempt,
-                        &verdict.summary,
-                        verdict.confidence,
-                        &eval.indicators,
-                        &judge_json,
-                        Some(profile.provider.as_str()),
-                    )),
-                    status: None,
-                })
-                .await
-                .map_err(CommandError::from)?;
-            let finding_dto = FindingDto::from(finding);
-            created_findings.push(finding_dto.clone());
-            if let Some(emitter) = progress {
-                emitter.detailed(
-                    ScanProgressLevel::Info,
-                    emitter
-                        .event(ScanProgressLevel::Info, "Saved finding")
-                        .endpoint(&url)
-                        .finding_id(&finding_dto.id),
-                );
-            }
-        }
-
-        judged.push(JudgedAttemptSummary {
-            payload_id: attempt.payload_id.clone(),
-            payload_name: attempt.payload_name.clone(),
-            vulnerable: verdict.vulnerable,
-            confidence: verdict.confidence,
-            summary: verdict.summary.clone(),
-        });
-        increment_scan_progress(progress_state, 1);
-
-        if let Some(emitter) = progress {
-            let confidence_label = if verdict.confidence >= 0.8 {
-                "High Confidence"
-            } else if verdict.confidence >= 0.5 {
-                "Medium Confidence"
-            } else {
-                "Low Confidence"
-            };
-            emitter.detailed(
-                ScanProgressLevel::Info,
-                emitter
-                    .event(ScanProgressLevel::Info, format!("Judge: {confidence_label}"))
-                    .endpoint(&url)
-                    .payload(&attempt.payload_name),
-            );
-        }
-    }
-
-    Ok(CategoryRunResult {
-        attempts: result.attempts.len(),
-        successes,
-        findings: created_findings,
-        judged,
-    })
+    execute_category_with_live_judge(executor, category, ctx, &judge_env).await
 }
 
 #[instrument(skip(state))]

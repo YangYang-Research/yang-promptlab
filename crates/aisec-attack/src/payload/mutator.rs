@@ -4,6 +4,7 @@ use crate::error::AttackResult;
 use crate::payload::{MutatorConfig, MutatorKind};
 
 /// Applies deterministic payload mutations for evasion and coverage.
+#[derive(Clone)]
 pub struct PayloadMutator {
     config: MutatorConfig,
 }

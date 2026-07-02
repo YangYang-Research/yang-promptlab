@@ -56,9 +56,7 @@ fn build_request(ctx: &AttackContext, payload_content: &str) -> AttackResult<Tra
         .unwrap_or_else(|| "POST".into());
 
     let body = if let Some(template) = &target.body_template {
-        template
-            .replace("{{PROMPT}}", payload_content)
-            .replace("{{payload}}", payload_content)
+        inject_payload_into_template(template, target.prompt_placeholder.as_deref(), payload_content)
     } else {
         payload_content.to_string()
     };
@@ -86,12 +84,46 @@ fn has_header(headers: &std::collections::HashMap<String, String>, name: &str) -
     headers.keys().any(|key| key.eq_ignore_ascii_case(name))
 }
 
+/// Inject attack payload into the profile request template (same placeholders as verification).
+fn inject_payload_into_template(
+    template: &str,
+    prompt_placeholder: Option<&str>,
+    payload_content: &str,
+) -> String {
+    let escaped = json_string_fragment(payload_content, template);
+    let primary = prompt_placeholder
+        .filter(|p| !p.is_empty())
+        .unwrap_or("{{PROMPT}}");
+    template
+        .replace(primary, &escaped)
+        .replace("{{PROMPT}}", &escaped)
+        .replace("{{payload}}", &escaped)
+}
+
+fn json_string_fragment(content: &str, template: &str) -> String {
+    let trimmed = template.trim();
+    if !(trimmed.starts_with('{') || trimmed.starts_with('[')) {
+        return content.to_string();
+    }
+    serde_json::to_string(content)
+        .map(|encoded| encoded[1..encoded.len().saturating_sub(1)].to_string())
+        .unwrap_or_else(|_| content.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::transport::MockTransport;
     use crate::target_auth::apply_descriptor_auth;
     use crate::types::AttackTarget;
+
+    #[test]
+    fn injects_json_escaped_payload_into_profile_template() {
+        let template = r#"{"messages":[{"role":"user","content":"{{PROMPT}}"}]}"#;
+        let body = inject_payload_into_template(template, Some("{{PROMPT}}"), r#"say "hello""#);
+        assert!(body.contains(r#"say \"hello\""#));
+        assert!(!body.contains(r#""content":"say "hello""#));
+    }
 
     #[tokio::test]
     async fn builds_json_body_from_template() {

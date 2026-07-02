@@ -26,8 +26,14 @@ pub struct AttackTarget {
     #[serde(default)]
     pub headers: HashMap<String, String>,
     pub auth_token: Option<String>,
-    /// JSON body template with `{{payload}}` placeholder for injection.
+    /// JSON body template with prompt placeholder for injection.
     pub body_template: Option<String>,
+    /// Placeholder token in `body_template` (defaults to `{{PROMPT}}` when unset).
+    #[serde(default)]
+    pub prompt_placeholder: Option<String>,
+    /// Override harness surface (`rest_api`, `openai_compatible`, …).
+    #[serde(default)]
+    pub harness_surface: Option<String>,
     pub method: Option<String>,
 }
 
@@ -42,6 +48,8 @@ impl AttackTarget {
                 r#"{"model":"gpt-4o","messages":[{"role":"user","content":"{{payload}}"}]}"#
                     .into(),
             ),
+            prompt_placeholder: None,
+            harness_surface: None,
             method: Some("POST".into()),
         }
     }
@@ -57,12 +65,22 @@ impl AttackTarget {
     }
 }
 
+/// Maximum in-flight HTTP attack requests per category (pool backfills when one completes).
+pub const DEFAULT_ATTACK_CONCURRENCY: usize = 10;
+
 /// Resource limits for a single attack run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttackBudget {
     pub max_payloads: usize,
     pub max_mutations_per_payload: usize,
     pub timeout_ms: u64,
+    /// Bounded parallelism for outbound probe HTTP requests.
+    #[serde(default = "default_attack_concurrency")]
+    pub max_concurrent_requests: usize,
+}
+
+fn default_attack_concurrency() -> usize {
+    DEFAULT_ATTACK_CONCURRENCY
 }
 
 impl Default for AttackBudget {
@@ -71,7 +89,14 @@ impl Default for AttackBudget {
             max_payloads: 20,
             max_mutations_per_payload: 3,
             timeout_ms: 30_000,
+            max_concurrent_requests: DEFAULT_ATTACK_CONCURRENCY,
         }
+    }
+}
+
+impl AttackBudget {
+    pub fn concurrent_limit(&self) -> usize {
+        self.max_concurrent_requests.max(1)
     }
 }
 

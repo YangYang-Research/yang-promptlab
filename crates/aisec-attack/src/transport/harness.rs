@@ -80,14 +80,15 @@ impl HarnessTransport {
 #[async_trait]
 impl TargetTransport for HarnessTransport {
     async fn send(&self, request: TransportRequest) -> AttackResult<TransportResponse> {
-        let payload = request.body.clone().unwrap_or_default();
+        // Pre-built profile body must be sent as-is (same as verification step 2).
+        // Passing it as `payload` with no body would re-wrap it in a default OpenAI schema.
         let response = self
             .inner
             .send_payload(
-                &payload,
+                "",
                 Some(&request.method),
                 request.headers,
-                None,
+                request.body.as_deref(),
                 request.timeout_ms,
             )
             .await
@@ -104,11 +105,15 @@ impl TargetTransport for HarnessTransport {
 }
 
 fn attack_target_to_descriptor(target: &AttackTarget) -> TargetDescriptor {
-    let surface = match target.kind {
-        TargetKind::LlmApi => TargetSurface::OpenAiCompatible,
-        TargetKind::Chatbot => TargetSurface::BrowserChat,
-        TargetKind::Agent | TargetKind::Rag | TargetKind::Mcp => TargetSurface::RestApi,
-    };
+    let surface = target
+        .harness_surface
+        .as_deref()
+        .and_then(TargetSurface::parse)
+        .unwrap_or_else(|| match target.kind {
+            TargetKind::LlmApi => TargetSurface::OpenAiCompatible,
+            TargetKind::Chatbot => TargetSurface::BrowserChat,
+            TargetKind::Agent | TargetKind::Rag | TargetKind::Mcp => TargetSurface::RestApi,
+        });
 
     let method = target
         .method
@@ -138,6 +143,14 @@ mod tests {
     use super::*;
     use crate::transport::MockTransport;
     use crate::types::AttackContext;
+
+    #[test]
+    fn generic_http_profile_uses_http_harness() {
+        let mut target = AttackTarget::llm_api("https://api.example.com/v1/custom");
+        target.harness_surface = Some("rest_api".into());
+        let transport = HarnessTransport::for_attack_target(&target).unwrap();
+        assert_eq!(transport.preferred_harness(), HarnessKind::Http);
+    }
 
     #[test]
     fn maps_llm_api_to_openai_harness() {
