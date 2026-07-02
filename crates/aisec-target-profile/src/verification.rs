@@ -35,9 +35,9 @@ pub enum VerificationError {
     HttpError(u16),
     #[error("response did not contain AI content")]
     NoAiResponse,
-    #[error("AI Runtime rejected endpoint: {0}")]
+    #[error("Yazg rejected endpoint: {0}")]
     NotAiEndpoint(String),
-    #[error("AI Runtime validation failed: {0}")]
+    #[error("Yazg validation failed: {0}")]
     LlmValidationFailed(String),
 }
 
@@ -462,7 +462,7 @@ pub async fn execute_verify_http(
     })
 }
 
-/// Heuristic-only verification (no AI Runtime). Used by integration tests.
+/// Heuristic-only verification (no Yazg). Used by integration tests.
 pub async fn verify_target_profile(
     profile: &TargetProfile,
     auth_headers: HashMap<String, String>,

@@ -147,7 +147,7 @@ pub async fn generate_scan_payloads(
     config: &ScanExecutionConfig,
     emitter: &ScanProgressEmitter,
 ) -> Result<HashMap<AttackCategory, Vec<AttackPayload>>, String> {
-    emitter.info("Generating attack payloads from AI runtime...");
+    emitter.info("Generating attack payloads from Yazg...");
     let pack = if let Some(ref strategy) = config.payload_strategy {
         generate_payloads_for_scan_job_with_strategy(
             data_dir,

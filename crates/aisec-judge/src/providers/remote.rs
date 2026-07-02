@@ -116,7 +116,7 @@ impl RemoteLlmBackend {
         let body = json!({
             "model": self.settings.model,
             "messages": [
-                {"role": "system", "content": "You are a security judge. Respond with JSON only."},
+                {"role": "system", "content": "You are Yazg, a security judge. Respond with JSON only."},
                 {"role": "user", "content": prompt}
             ],
             "max_tokens": max_tokens,
@@ -167,7 +167,7 @@ impl RemoteLlmBackend {
             "model": self.settings.model,
             "max_tokens": max_tokens,
             "temperature": temperature,
-            "system": "You are a security judge. Respond with JSON only.",
+            "system": "You are Yazg, a security judge. Respond with JSON only.",
             "messages": [{"role": "user", "content": prompt}],
         });
 

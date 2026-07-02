@@ -956,7 +956,7 @@ export function ScanWizardPage() {
         if (plannerGenerating || (!session.attackPlan && !plannerError)) {
           return (
             <p className="text-muted">
-              {plannerGenerating ? "Analyzing API with AI Runtime…" : "Generating attack plan…"}
+              {plannerGenerating ? "Generating attack plan with Yazg…" : "Generating attack plan…"}
             </p>
           );
         }

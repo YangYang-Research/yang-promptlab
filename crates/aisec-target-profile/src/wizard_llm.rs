@@ -247,7 +247,7 @@ fn default_priority() -> u8 {
     2
 }
 
-/// Builds a wizard attack plan from AI Runtime analysis of verify traffic.
+/// Builds a wizard attack plan from Yazg analysis of verify traffic.
 /// All three preset modes (quick/standard/deep) MUST come from the LLM response.
 pub async fn build_wizard_attack_plan_with_llm(
     profile: &TargetProfile,
@@ -357,7 +357,7 @@ pub async fn build_wizard_attack_plan_with_llm(
     );
 
     Err(PlannerError::Llm(format!(
-        "AI Runtime failed to produce a valid attack plan after {MAX_LLM_ATTEMPTS} attempts: {last_errors}"
+        "Yazg failed to produce a valid attack plan after {MAX_LLM_ATTEMPTS} attempts: {last_errors}"
     )))
 }
 

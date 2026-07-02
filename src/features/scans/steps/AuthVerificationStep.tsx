@@ -244,7 +244,7 @@ export function AuthVerificationStep({
 
       <section>
         <p className="text-muted text-sm">
-          Sends a real AI request (<code>Hello</code>) to your endpoint, then uses AI Runtime to
+          Sends a real AI request (<code>Hello</code>) to your endpoint, then uses Yazg to
           confirm the response is from a generative AI system.
         </p>
         <Button variant="primary" disabled={verifying} onClick={() => void handleVerify()}>

@@ -247,7 +247,7 @@ export function ReviewAttackPlanStep({
   function profileModeMeta(id: AttackProfileId): string {
     if (id === "custom") return "Manual selection";
     const mode = getProfileMode(attackPlan, id);
-    if (!mode) return "Re-plan with AI Runtime";
+    if (!mode) return "Re-plan with Yazg";
     return `${mode.categories.length} categories · ${formatExecutionStrategySummary(mode)} · ${formatPayloadGenerationStrategy(mode.payloadStrategy)}`;
   }
 

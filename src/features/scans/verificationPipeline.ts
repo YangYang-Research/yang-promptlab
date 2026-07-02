@@ -25,7 +25,7 @@ export const VERIFICATION_PIPELINE_STEPS: VerificationPipelineStep[] = [
   {
     id: "ai",
     label: "Verify AI API Endpoint",
-    description: "Use AI Runtime to confirm the response is from a generative AI system",
+    description: "Use Yazg to confirm the response is from a generative AI system",
   },
 ];
 
@@ -44,7 +44,7 @@ export function authSegmentLabel(state: VerificationSegmentState): string {
 }
 
 export const AI_SEGMENT_LABEL = "Verify AI API Endpoint";
-export const AI_SEGMENT_ACTIVE_LABEL = "Analyzing AI API Endpoint with AI Runtime…";
+export const AI_SEGMENT_ACTIVE_LABEL = "Analyzing AI API Endpoint with Yazg…";
 
 export function aiSegmentLabel(state: VerificationSegmentState): string {
   return state === "active" ? AI_SEGMENT_ACTIVE_LABEL : AI_SEGMENT_LABEL;
@@ -132,7 +132,7 @@ export function verificationPipelineLiveDetail(
     case "failed_ai":
       return resultMessage
         ? formatVerificationFailureMessage(resultMessage)
-        : "AI Runtime could not confirm an AI system response.";
+        : "Yazg could not confirm an AI system response.";
     case "done":
       return resultMessage
         ? formatVerificationResultMessage(resultMessage)

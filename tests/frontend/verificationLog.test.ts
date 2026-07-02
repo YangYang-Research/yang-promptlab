@@ -35,7 +35,7 @@ describe("verificationLog", () => {
     expect(sendLine).toContain("--header");
   });
 
-  it("shows full target body for connectivity and AI Runtime message for step 2", () => {
+  it("shows full target body for connectivity and Yazg message for step 2", () => {
     const longBody = '{"answer":"' + "x".repeat(400) + '"}';
     const connectivity = formatResponseLogLine(
       {
