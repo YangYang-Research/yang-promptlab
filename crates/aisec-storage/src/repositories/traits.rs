@@ -29,6 +29,8 @@ pub trait ScanRepository: Send + Sync {
     async fn create(&self, input: CreateScan) -> AisecResult<Scan>;
     async fn get(&self, id: &str) -> AisecResult<Scan>;
     async fn list_by_project(&self, project_id: &str) -> AisecResult<Vec<Scan>>;
+    /// Scans left in a non-terminal in-memory state (e.g. after an abrupt app exit).
+    async fn list_interrupted(&self) -> AisecResult<Vec<Scan>>;
     async fn update(&self, id: &str, input: UpdateScan) -> AisecResult<Scan>;
     async fn delete(&self, id: &str) -> AisecResult<()>;
 }

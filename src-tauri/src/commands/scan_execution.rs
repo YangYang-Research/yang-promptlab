@@ -13,7 +13,9 @@ use aisec_planner::AttackPlan;
 use aisec_runtime::{RuntimeManager, SharedModelProvider};
 use aisec_storage::Repositories;
 use aisec_target_profile::PayloadStrategy;
-use aisec_target_profile::wizard_plan::{estimate_scan_requests, ExecutionStrategy};
+use aisec_target_profile::wizard_plan::{
+    enabled_tests_for_category, estimate_scan_requests, ExecutionStrategy,
+};
 use tauri::async_runtime::Mutex as AsyncMutex;
 use tracing::{info, warn};
 
@@ -24,7 +26,7 @@ use crate::commands::generator::{
     parse_generator_mode_optional, prompt_payloads_map, validate_payload_map_budget,
 };
 use crate::events::ScanProgressEmitter;
-use crate::jobs::ScanProgress;
+use crate::jobs::{bump_scan_progress, ScanProgress};
 use crate::session_auth::AttackRuntime;
 
 pub struct ScanExecutionConfig {
@@ -60,7 +62,18 @@ impl ScanExecutionConfig {
     }
 }
 
-pub fn scan_progress_total(
+pub fn scan_testcases_total(
+    categories: &[AttackCategory],
+    disabled_tests: &[String],
+) -> u64 {
+    categories
+        .iter()
+        .map(|category| u64::from(enabled_tests_for_category(*category, disabled_tests)))
+        .sum::<u64>()
+        .max(1)
+}
+
+pub fn scan_attack_requests_total(
     categories: &[AttackCategory],
     disabled_tests: &[String],
     config: &ScanExecutionConfig,
@@ -74,6 +87,52 @@ pub fn scan_progress_total(
         config.max_attempts,
     )
     .max(1) as u64
+}
+
+pub fn scan_progress_total(
+    categories: &[AttackCategory],
+    disabled_tests: &[String],
+    config: &ScanExecutionConfig,
+) -> u64 {
+    let strategy = config.payload_strategy.clone().unwrap_or_default();
+    let attack_units = estimate_scan_requests(
+        categories,
+        disabled_tests,
+        &strategy,
+        config.execution,
+        config.max_attempts,
+    )
+    .max(1) as u64;
+
+    let active_categories = categories
+        .iter()
+        .filter(|category| enabled_tests_for_category(**category, disabled_tests) > 0)
+        .count()
+        .max(1) as u64;
+    let attempts = u64::from(config.max_attempts.max(1));
+
+    let pipeline_units = match config.execution {
+        ExecutionStrategy::Sequential => {
+            // preparing + generate + attack payloads + judge payloads
+            2 + attack_units.saturating_mul(2)
+        }
+        ExecutionStrategy::Agentic => {
+            let generate_units = active_categories.saturating_mul(attempts);
+            let reflection_units = if config.reflection_enabled {
+                active_categories.saturating_mul(attempts)
+            } else {
+                0
+            };
+            let retry_units = if attempts > 1 {
+                active_categories.saturating_mul(attempts - 1)
+            } else {
+                0
+            };
+            1 + generate_units + attack_units.saturating_mul(2) + reflection_units + retry_units
+        }
+    };
+
+    pipeline_units.max(1)
 }
 
 fn set_scan_phase(
@@ -238,6 +297,7 @@ pub struct TargetProfileScanContext<'a> {
     pub plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
     pub cancel: Arc<AtomicBool>,
     pub paused: Arc<AtomicBool>,
+    pub job_controls: Option<crate::jobs::ScanJobControls>,
     pub progress: Arc<Mutex<ScanProgress>>,
     pub emitter: ScanProgressEmitter,
 }
@@ -264,6 +324,7 @@ async fn wait_pipeline_warmup(
     emitter: &ScanProgressEmitter,
 ) {
     if warmup_secs == 0 {
+        bump_scan_progress(progress, 1);
         return;
     }
 
@@ -283,6 +344,8 @@ async fn wait_pipeline_warmup(
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+
+    bump_scan_progress(progress, 1);
 }
 
 pub async fn run_target_profile_attack_scan(
@@ -352,10 +415,23 @@ pub async fn run_target_profile_attack_scan(
         }
     }
 
+    if config.execution == ExecutionStrategy::Sequential {
+        bump_scan_progress(&ctx.progress, 1);
+    }
+
     let mut findings_total = 0u64;
     let mut had_error = false;
 
-    for category in ctx.categories {
+    let categories_completed = ctx
+        .progress
+        .lock()
+        .map(|state| state.categories_completed as usize)
+        .unwrap_or(0);
+
+    for (category_index, category) in ctx.categories.iter().enumerate() {
+        if category_index < categories_completed {
+            continue;
+        }
         if ctx.cancel.load(Ordering::Relaxed) {
             break;
         }
@@ -400,12 +476,16 @@ pub async fn run_target_profile_attack_scan(
             .await
         };
 
+        if ctx.paused.load(Ordering::Relaxed) {
+            break;
+        }
+
         match result {
             Ok(category_result) => {
                 findings_total += category_result.findings.len() as u64;
                 if let Ok(mut state) = ctx.progress.lock() {
                     state.findings = findings_total;
-                    state.current_test = Some(category_label.to_string());
+                    state.categories_completed = state.categories_completed.saturating_add(1);
                 }
             }
             Err(err) => {
@@ -445,6 +525,7 @@ async fn run_sequential_category(
         Some(&ctx.emitter),
         run_options,
         Some(&ctx.progress),
+        ctx.job_controls.as_ref(),
     )
     .await
     .map_err(|err| err.to_string())
@@ -501,6 +582,8 @@ async fn run_agentic_category(
             .await?
         };
 
+        bump_scan_progress(&ctx.progress, 1);
+
         set_scan_phase(
             &ctx.progress,
             "attack",
@@ -527,9 +610,14 @@ async fn run_agentic_category(
             Some(&ctx.emitter),
             run_options,
             Some(&ctx.progress),
+            ctx.job_controls.as_ref(),
         )
         .await
         .map_err(|err| err.to_string())?;
+
+        if ctx.paused.load(Ordering::Relaxed) {
+            break;
+        }
 
         set_scan_phase(
             &ctx.progress,
@@ -547,6 +635,7 @@ async fn run_agentic_category(
                 Some(attempt),
                 Some(retry),
             );
+            bump_scan_progress(&ctx.progress, 1);
         }
 
         let should_retry = reflection_allows_retry(config.reflection_enabled, &result, &ctx.emitter);
@@ -567,6 +656,7 @@ async fn run_agentic_category(
             Some(attempt + 1),
             Some(attempt),
         );
+        bump_scan_progress(&ctx.progress, 1);
         ctx.emitter.info(format!(
             "Retrying {category_label} (attempt {} of {})",
             attempt + 1,
@@ -575,4 +665,49 @@ async fn run_agentic_category(
     }
 
     last_result.ok_or_else(|| "agentic category produced no attempts".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aisec_attack::AttackCategory;
+    use aisec_target_profile::{PayloadGenerationStrategy, PayloadStrategy};
+
+    fn sample_strategy() -> PayloadStrategy {
+        PayloadStrategy {
+            strategy: PayloadGenerationStrategy::Deterministic,
+            ..PayloadStrategy::default()
+        }
+    }
+
+    #[test]
+    fn sequential_progress_total_includes_pipeline_phases() {
+        let categories = vec![AttackCategory::PromptInjection];
+        let config = ScanExecutionConfig::from_flags(false, 1, false, Some(sample_strategy()), None);
+        let attack_units = estimate_scan_requests(
+            &categories,
+            &[],
+            &sample_strategy(),
+            ExecutionStrategy::Sequential,
+            1,
+        ) as u64;
+        let total = scan_progress_total(&categories, &[], &config);
+        assert_eq!(total, 2 + attack_units * 2);
+    }
+
+    #[test]
+    fn agentic_progress_total_includes_generate_reflection_and_retry() {
+        let categories = vec![AttackCategory::PromptInjection];
+        let config = ScanExecutionConfig::from_flags(true, 3, true, Some(sample_strategy()), None);
+        let attack_units = estimate_scan_requests(
+            &categories,
+            &[],
+            &sample_strategy(),
+            ExecutionStrategy::Agentic,
+            3,
+        ) as u64;
+        let total = scan_progress_total(&categories, &[], &config);
+        // 1 prepare + 3 generate + 2*attack + 3 reflection + 2 retry
+        assert_eq!(total, 1 + 3 + attack_units * 2 + 3 + 2);
+    }
 }

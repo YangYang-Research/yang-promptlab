@@ -600,6 +600,18 @@ pub struct ScanStatusDto {
     pub progress_percent: f64,
     pub completed: u64,
     pub total: u64,
+    #[serde(default)]
+    pub categories_completed: u64,
+    #[serde(default)]
+    pub attacks_completed: u64,
+    #[serde(default)]
+    pub attacks_total: u64,
+    #[serde(default)]
+    pub testcases_completed: u64,
+    #[serde(default)]
+    pub testcases_total: u64,
+    #[serde(default)]
+    pub pause_pending: bool,
     pub findings_count: u64,
     pub current_endpoint: Option<String>,
     pub current_test: Option<String>,

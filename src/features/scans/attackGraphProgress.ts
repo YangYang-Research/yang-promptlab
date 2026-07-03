@@ -29,29 +29,33 @@ export function resolveAttackGraphStates(
     return states;
   }
 
-  const completed = Math.min(status.completed, categories.length);
-  const activeId = categoryIdFromCurrentTest(status.current_test);
   const terminal = ["completed", "failed", "cancelled", "stopped"].includes(status.status);
+  const categoriesCompleted = status.categories_completed ?? 0;
+  const activeId = categoryIdFromCurrentTest(status.current_test);
+  const activeIndex = activeId ? categories.indexOf(activeId) : -1;
+  const phase = status.current_phase?.toLowerCase() ?? null;
 
   categories.forEach((category, index) => {
-    if (index < completed) {
+    if (terminal && status.status === "completed") {
       states.set(category, "done");
       return;
     }
-    if (!terminal && category === activeId) {
-      states.set(category, "active");
-      return;
-    }
-    if (!terminal && !activeId && index === completed) {
-      states.set(category, "active");
-      return;
-    }
-    if (terminal && status.status === "failed" && index === completed) {
+    if (terminal && status.status === "failed" && index === categoriesCompleted) {
       states.set(category, "failed");
       return;
     }
-    if (terminal && status.status === "completed" && index < categories.length) {
+    if (index < categoriesCompleted) {
       states.set(category, "done");
+      return;
+    }
+    if (!terminal && index === categoriesCompleted) {
+      if (activeIndex === index || activeIndex < 0) {
+        states.set(category, "active");
+        return;
+      }
+    }
+    if (!terminal && activeIndex === index) {
+      states.set(category, "active");
       return;
     }
     states.set(category, "pending");
@@ -64,4 +68,35 @@ export function resolveAttackGraphStates(
   }
 
   return states;
+}
+
+export function attackGraphStateLabel(
+  state: AttackGraphNodeState,
+  status: ScanStatusDto | null,
+  categoryId: AttackCategoryId,
+): string {
+  if (state !== "active" || !status) {
+    return defaultStateLabel(state);
+  }
+  const phase = status.current_phase?.toLowerCase() ?? null;
+  const activeId = categoryIdFromCurrentTest(status.current_test);
+  if (activeId !== categoryId) {
+    return defaultStateLabel(state);
+  }
+  if (phase === "judge") return "Judging";
+  if (phase === "attack") return "Attacking";
+  return "Running";
+}
+
+function defaultStateLabel(state: AttackGraphNodeState): string {
+  switch (state) {
+    case "active":
+      return "Running";
+    case "done":
+      return "Done";
+    case "failed":
+      return "Failed";
+    default:
+      return "Pending";
+  }
 }

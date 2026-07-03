@@ -3321,7 +3321,20 @@ a:hover {
 .wizard-submitted__actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+}
+.wizard-submitted__actions-buttons {
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
+  margin-left: auto;
+}
+.wizard-submitted__status-hint {
+  flex: 1 1 auto;
+  min-width: 12rem;
 }
 .wizard-submitted__divider {
   border: none;

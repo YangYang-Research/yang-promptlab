@@ -280,6 +280,12 @@ export type ScanStatusDto = {
   progress_percent: number;
   completed: number;
   total: number;
+  categories_completed?: number;
+  attacks_completed?: number;
+  attacks_total?: number;
+  testcases_completed?: number;
+  testcases_total?: number;
+  pause_pending?: boolean;
   findings_count: number;
   current_endpoint: string | null;
   current_test: string | null;

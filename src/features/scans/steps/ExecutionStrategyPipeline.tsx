@@ -72,7 +72,7 @@ export function ExecutionStrategyPipeline({
         })}
       </ol>
 
-      {liveDetail && (
+      {!compact && liveDetail && (
         <p className="wizard-execution-pipeline__live text-sm text-muted">{liveDetail}</p>
       )}
     </section>

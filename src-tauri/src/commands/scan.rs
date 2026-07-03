@@ -20,7 +20,8 @@ use tracing::{info, instrument, warn};
 use crate::agent_service::{agent_config_from_scan, run_agent_endpoint, ScanAgentHost};
 use crate::commands::attack::run_category_on_endpoint;
 use crate::commands::scan_execution::{
-    run_target_profile_attack_scan, scan_progress_total, ScanExecutionConfig, TargetProfileScanContext,
+    run_target_profile_attack_scan, scan_attack_requests_total, scan_progress_total,
+    scan_testcases_total, ScanExecutionConfig, TargetProfileScanContext,
 };
 use aisec_target_profile::PayloadStrategy;
 use crate::events::{emit_app_data_changed, ScanProgressEmitter};
@@ -28,7 +29,11 @@ use crate::session_auth::{build_attack_runtime_parts, fallback_attack_runtime, s
 use crate::commands::target_profile::parse_target_profile;
 use crate::dto::{ScanStartDto, ScanStatusDto};
 use crate::error::{CommandError, CommandResult};
-use crate::jobs::{ScanJobManager, ScanProgress};
+use crate::jobs::{ScanBatchCheckpoint, ScanJobManager, ScanProgress};
+use crate::scan_playbook::{
+    checkpoint_from_playbook, persist_playbook_progress, persist_scan_playbook_state,
+    progress_from_playbook,
+};
 use crate::state::AppState;
 
 fn parse_category(value: &str) -> Option<AttackCategory> {
@@ -40,6 +45,76 @@ fn parse_category(value: &str) -> Option<AttackCategory> {
 
 fn is_restartable_scan_status(status: &str) -> bool {
     matches!(status, "failed" | "cancelled" | "stopped" | "completed")
+}
+
+fn is_interrupted_scan_status(status: &str) -> bool {
+    matches!(status, "running" | "paused" | "pending")
+}
+
+async fn mark_scan_interrupted(
+    repos: &Repositories,
+    scan: &aisec_storage::Scan,
+) -> Result<(), aisec_core::AisecError> {
+    let mut playbook = scan
+        .playbook_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    if let Some(obj) = playbook.as_object_mut() {
+        if let Some(progress) = obj.get_mut("progress").and_then(|value| value.as_object_mut()) {
+            progress.insert("status".into(), serde_json::json!("failed"));
+            progress.insert("current_endpoint".into(), serde_json::Value::Null);
+            progress.insert("current_test".into(), serde_json::Value::Null);
+        }
+        obj.remove("batch_checkpoint");
+    }
+
+    repos
+        .scans()
+        .update(
+            &scan.id,
+            UpdateScan {
+                status: Some("failed".into()),
+                completed_at: Some(Some(OffsetDateTime::now_utc())),
+                playbook_json: Some(playbook),
+                ..Default::default()
+            },
+        )
+        .await?;
+    Ok(())
+}
+
+/// Mark scans that were left active in the database but have no in-memory job.
+pub async fn reconcile_interrupted_scans(state: &AppState, force: bool) -> usize {
+    let repos = state.repositories();
+    let scans = match repos.scans().list_interrupted().await {
+        Ok(scans) => scans,
+        Err(err) => {
+            warn!(error = %err, "failed to list interrupted scans");
+            return 0;
+        }
+    };
+
+    let mut reconciled = 0usize;
+    for scan in scans {
+        if scan.status == "paused" {
+            continue;
+        }
+        if !force && state.jobs().contains(&scan.id) {
+            continue;
+        }
+        match mark_scan_interrupted(&repos, &scan).await {
+            Ok(()) => {
+                info!(scan_id = %scan.id, previous_status = %scan.status, "marked interrupted scan as failed");
+                reconciled += 1;
+            }
+            Err(err) => {
+                warn!(scan_id = %scan.id, error = %err, "failed to reconcile interrupted scan");
+            }
+        }
+    }
+    reconciled
 }
 
 fn user_facing_scan_error(raw: &str) -> String {
@@ -68,6 +143,7 @@ fn merge_scan_execution_playbook(
     if let Some(obj) = playbook.as_object_mut() {
         if clear_progress {
             obj.remove("progress");
+            obj.remove("batch_checkpoint");
         }
         if let Some(execution) = execution_playbook.as_object() {
             for (key, value) in execution {
@@ -78,14 +154,24 @@ fn merge_scan_execution_playbook(
     playbook
 }
 
+fn round_progress_percent(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
+}
+
 fn progress_to_dto(scan_id: &str, progress: &ScanProgress) -> ScanStatusDto {
     ScanStatusDto {
         scan_id: scan_id.to_string(),
         status: progress.status.clone(),
-        progress_percent: progress.progress_percent(),
+        progress_percent: round_progress_percent(progress.progress_percent()),
         completed: progress.completed,
         total: progress.total,
+        categories_completed: progress.categories_completed,
+        attacks_completed: progress.attacks_completed,
+        attacks_total: progress.attacks_total,
+        testcases_completed: progress.testcases_completed,
+        testcases_total: progress.testcases_total,
         findings_count: progress.findings,
+        pause_pending: progress.pause_pending,
         current_endpoint: progress.current_endpoint.clone(),
         current_test: progress.current_test.clone(),
         started_at: progress.started_at.clone(),
@@ -94,44 +180,6 @@ fn progress_to_dto(scan_id: &str, progress: &ScanProgress) -> ScanStatusDto {
         current_attempt: progress.current_attempt,
         current_retry: progress.current_retry,
     }
-}
-
-fn progress_from_playbook(playbook_json: Option<&str>) -> Option<ScanProgress> {
-    let raw = playbook_json?;
-    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
-    serde_json::from_value(value.get("progress")?.clone()).ok()
-}
-
-async fn persist_playbook_progress(
-    repos: &Repositories,
-    scan_id: &str,
-    progress: &ScanProgress,
-) -> Result<(), aisec_core::AisecError> {
-    let scan = repos.scans().get(scan_id).await?;
-    let mut playbook = scan
-        .playbook_json
-        .as_deref()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
-
-    if let Some(obj) = playbook.as_object_mut() {
-        obj.insert(
-            "progress".into(),
-            serde_json::to_value(progress).unwrap_or(serde_json::Value::Null),
-        );
-    }
-
-    repos
-        .scans()
-        .update(
-            scan_id,
-            UpdateScan {
-                playbook_json: Some(playbook),
-                ..Default::default()
-            },
-        )
-        .await?;
-    Ok(())
 }
 
 async fn wait_if_paused(paused: &AtomicBool, cancel: &AtomicBool) {
@@ -211,6 +259,8 @@ async fn run_scan_job(
     let mut findings_total = 0u64;
     let mut had_error = false;
 
+    let job_controls = jobs.controls(&scan_id);
+
     let profile_ref = match (&target_id, &target_profile) {
         (Some(tid), Some(p)) if p.is_verified() => Some((tid.as_str(), p)),
         _ => {
@@ -240,6 +290,7 @@ async fn run_scan_job(
                 plugin_manager: plugin_manager.clone(),
                 cancel: cancel.clone(),
                 paused: paused.clone(),
+                job_controls: job_controls.clone(),
                 progress: progress.clone(),
                 emitter: progress_emitter.clone(),
             },
@@ -252,6 +303,27 @@ async fn run_scan_job(
         let snapshot = progress.lock().ok().map(|guard| guard.clone());
         if let Some(snapshot) = snapshot {
             let _ = persist_playbook_progress(&repos, &scan_id, &snapshot).await;
+        }
+
+        if paused.load(Ordering::Relaxed) {
+            if let Ok(mut p) = progress.lock() {
+                p.status = "paused".into();
+            }
+            let _ = repos
+                .scans()
+                .update(
+                    &scan_id,
+                    UpdateScan {
+                        status: Some("paused".into()),
+                        ..Default::default()
+                    },
+                )
+                .await;
+            if let Some(snapshot) = progress.lock().ok().map(|guard| guard.clone()) {
+                let _ = persist_playbook_progress(&repos, &scan_id, &snapshot).await;
+            }
+            info!(scan_id = %scan_id, "scan job parked at batch checkpoint");
+            return;
         }
     }
 
@@ -268,7 +340,13 @@ async fn run_scan_job(
         p.status = final_status.into();
         p.current_endpoint = None;
         p.current_test = None;
-        p.completed = p.completed.min(total);
+        if final_status == "completed" {
+            p.completed = p.total;
+            p.attacks_completed = p.attacks_total.max(p.attacks_completed);
+            p.testcases_completed = p.testcases_total.max(p.testcases_completed);
+        } else {
+            p.completed = p.completed.min(total);
+        }
     }
 
     let _ = repos
@@ -285,7 +363,7 @@ async fn run_scan_job(
 
     let snapshot = progress.lock().ok().map(|guard| guard.clone());
     if let Some(snapshot) = snapshot {
-        let _ = persist_playbook_progress(&repos, &scan_id, &snapshot).await;
+        let _ = persist_scan_playbook_state(&repos, &scan_id, Some(&snapshot), Some(None)).await;
     }
 
     jobs.remove(&scan_id);
@@ -453,7 +531,13 @@ async fn run_agent_scan_job(
         p.current_phase = None;
         p.current_attempt = None;
         p.current_retry = None;
-        p.completed = p.completed.min(total);
+        if final_status == "completed" {
+            p.completed = p.total;
+            p.attacks_completed = p.attacks_total.max(p.attacks_completed);
+            p.testcases_completed = p.testcases_total.max(p.testcases_completed);
+        } else {
+            p.completed = p.completed.min(total);
+        }
     }
 
     let _ = repos
@@ -470,7 +554,7 @@ async fn run_agent_scan_job(
 
     let snapshot = progress.lock().ok().map(|guard| guard.clone());
     if let Some(snapshot) = snapshot {
-        let _ = persist_playbook_progress(&repos, &scan_id, &snapshot).await;
+        let _ = persist_scan_playbook_state(&repos, &scan_id, Some(&snapshot), Some(None)).await;
     }
 
     jobs.remove(&scan_id);
@@ -602,7 +686,9 @@ pub async fn scan_start_op(
 
         if !is_draft && !is_restart {
             if existing.status == "running" && state.jobs().contains(&draft_id) {
-                return Err(CommandError::invalid_input("scan is already running"));
+                return Ok(ScanStartDto {
+                    scan_id: draft_id.clone(),
+                });
             }
             if existing.status == "paused" {
                 return Err(CommandError::invalid_input(
@@ -669,15 +755,23 @@ pub async fn scan_start_op(
     }
 
     let total = scan_progress_total(&parsed_categories, &disabled_tests, &execution_config);
+    let attacks_total = scan_attack_requests_total(&parsed_categories, &disabled_tests, &execution_config);
+    let testcases_total = scan_testcases_total(&parsed_categories, &disabled_tests);
     let cancel = Arc::new(AtomicBool::new(false));
     let paused = Arc::new(AtomicBool::new(false));
+    let pause_requested = Arc::new(AtomicBool::new(false));
+    let batch_checkpoint = Arc::new(Mutex::new(None::<ScanBatchCheckpoint>));
     let mut progress_state = ScanProgress::new(total.max(1));
     progress_state.agent_mode = agentic;
+    progress_state.attacks_total = attacks_total;
+    progress_state.testcases_total = testcases_total;
     let progress = Arc::new(Mutex::new(progress_state));
     state.jobs().register(
         scan.id.clone(),
         cancel.clone(),
         paused.clone(),
+        pause_requested.clone(),
+        batch_checkpoint.clone(),
         progress.clone(),
     );
 
@@ -738,6 +832,199 @@ pub async fn scan_start_op(
     })
 }
 
+struct ScanPlaybookExecution {
+    categories: Vec<String>,
+    disabled_tests: Vec<String>,
+    profile: String,
+    agentic: bool,
+    reflection_enabled: bool,
+    generator_mode: Option<String>,
+    max_agent_attempts: usize,
+    payload_strategy: Option<PayloadStrategy>,
+}
+
+fn execution_params_from_playbook(
+    playbook_json: &str,
+) -> Result<ScanPlaybookExecution, CommandError> {
+    let value: serde_json::Value = serde_json::from_str(playbook_json)
+        .map_err(|e| CommandError::invalid_input(format!("invalid playbook: {e}")))?;
+
+    Ok(ScanPlaybookExecution {
+        categories: value
+            .get("categories")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default(),
+        disabled_tests: value
+            .get("disabled_tests")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default(),
+        profile: value
+            .get("profile")
+            .and_then(|v| v.as_str())
+            .unwrap_or("balanced")
+            .to_string(),
+        agentic: value
+            .get("agent_mode")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        reflection_enabled: value
+            .get("reflection_enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        generator_mode: value
+            .get("generator_mode")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        max_agent_attempts: value
+            .get("max_agent_attempts")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize)
+            .unwrap_or(5),
+        payload_strategy: value
+            .get("payload_strategy")
+            .and_then(|v| serde_json::from_value(v.clone()).ok()),
+    })
+}
+
+async fn spawn_resumed_scan_job(
+    app: &AppHandle,
+    state: &AppState,
+    scan: &aisec_storage::Scan,
+) -> CommandResult<()> {
+    if state.jobs().contains(&scan.id) {
+        return Ok(());
+    }
+
+    let playbook_json = scan
+        .playbook_json
+        .as_deref()
+        .ok_or_else(|| CommandError::invalid_input("scan playbook missing"))?;
+    let params = execution_params_from_playbook(playbook_json)?;
+    let parsed_categories: Vec<AttackCategory> = params
+        .categories
+        .iter()
+        .filter_map(|value| parse_category(value))
+        .collect();
+    if parsed_categories.is_empty() {
+        return Err(CommandError::invalid_input(
+            "no valid attack categories in saved playbook",
+        ));
+    }
+
+    let mut execution_config = ScanExecutionConfig::from_flags(
+        params.agentic,
+        params.max_agent_attempts,
+        params.reflection_enabled,
+        params.payload_strategy.clone(),
+        params.generator_mode.clone(),
+    );
+    execution_config.pipeline_warmup_secs = 0;
+
+    let total = scan_progress_total(
+        &parsed_categories,
+        &params.disabled_tests,
+        &execution_config,
+    );
+    let attacks_total = scan_attack_requests_total(
+        &parsed_categories,
+        &params.disabled_tests,
+        &execution_config,
+    );
+    let testcases_total = scan_testcases_total(&parsed_categories, &params.disabled_tests);
+    let mut progress_state = progress_from_playbook(Some(playbook_json))
+        .unwrap_or_else(|| ScanProgress::new(total.max(1)));
+    progress_state.status = "running".into();
+    progress_state.pause_pending = false;
+    progress_state.total = total.max(1);
+    progress_state.attacks_total = attacks_total;
+    progress_state.testcases_total = testcases_total;
+    progress_state.completed = progress_state.completed.min(progress_state.total);
+    progress_state.sync_testcases_completed();
+
+    let checkpoint = checkpoint_from_playbook(Some(playbook_json));
+    let target_id = scan
+        .target_id
+        .clone()
+        .ok_or_else(|| CommandError::invalid_input("scan has no target"))?;
+    let project_id = scan.project_id.clone();
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let paused = Arc::new(AtomicBool::new(false));
+    let pause_requested = Arc::new(AtomicBool::new(false));
+    let batch_checkpoint = Arc::new(Mutex::new(checkpoint));
+    let progress = Arc::new(Mutex::new(progress_state));
+
+    state.jobs().register(
+        scan.id.clone(),
+        cancel.clone(),
+        paused.clone(),
+        pause_requested.clone(),
+        batch_checkpoint.clone(),
+        progress.clone(),
+    );
+
+    let repos = state.repositories();
+    let _ = repos
+        .scans()
+        .update(
+            &scan.id,
+            UpdateScan {
+                status: Some("running".into()),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    if let Some(snapshot) = state.jobs().progress(&scan.id) {
+        let _ = persist_playbook_progress(&repos, &scan.id, &snapshot).await;
+    }
+
+    let db = state.database().clone();
+    let jobs = state.jobs().clone();
+    let scan_id = scan.id.clone();
+    let data_dir = state.data_dir().to_path_buf();
+    let auth_config = state.auth_engine_config().clone();
+    let harness_factory = state.harness_factory().clone();
+    let plugin_manager = Arc::clone(state.plugin_manager());
+    let inference_manager = Arc::clone(state.inference_manager());
+    let model_manager = Arc::clone(state.model_manager());
+    let model_provider = state.model_provider().clone();
+    let runtime_manager = Arc::clone(state.runtime_manager());
+    let app_for_job = app.clone();
+
+    emit_app_data_changed(app, "scan_resumed");
+
+    tauri::async_runtime::spawn(async move {
+        run_scan_job(
+            app_for_job,
+            db,
+            jobs,
+            scan_id,
+            project_id,
+            Some(target_id),
+            parsed_categories,
+            params.disabled_tests,
+            params.profile,
+            execution_config,
+            cancel,
+            paused,
+            progress,
+            data_dir,
+            auth_config,
+            harness_factory,
+            plugin_manager,
+            inference_manager,
+            model_manager,
+            model_provider,
+            runtime_manager,
+        )
+        .await;
+    });
+
+    info!(scan_id = %scan.id, "scan resumed from persisted checkpoint");
+    Ok(())
+}
+
 pub async fn scan_status_op(state: &AppState, scan_id: String) -> CommandResult<ScanStatusDto> {
     if let Some(progress) = state.jobs().progress(&scan_id) {
         return Ok(progress_to_dto(&scan_id, &progress));
@@ -750,19 +1037,40 @@ pub async fn scan_status_op(state: &AppState, scan_id: String) -> CommandResult<
         .await
         .map_err(CommandError::from)?;
 
+    if is_interrupted_scan_status(&scan.status) {
+        if scan.status == "paused" {
+            return scan_status_from_db(&repos, &scan_id, &scan).await;
+        }
+        let _ = mark_scan_interrupted(&repos, &scan).await;
+        let scan = repos
+            .scans()
+            .get(&scan_id)
+            .await
+            .map_err(CommandError::from)?;
+        return scan_status_from_db(&repos, &scan_id, &scan).await;
+    }
+
+    scan_status_from_db(&repos, &scan_id, &scan).await
+}
+
+async fn scan_status_from_db(
+    repos: &Repositories,
+    scan_id: &str,
+    scan: &aisec_storage::Scan,
+) -> CommandResult<ScanStatusDto> {
     if let Some(progress) = progress_from_playbook(scan.playbook_json.as_deref()) {
-        return Ok(progress_to_dto(&scan_id, &progress));
+        return Ok(progress_to_dto(scan_id, &progress));
     }
 
     let findings_count = repos
         .findings()
-        .list_by_scan(&scan_id)
+        .list_by_scan(scan_id)
         .await
         .map_err(CommandError::from)?
         .len() as u64;
 
     Ok(ScanStatusDto {
-        scan_id,
+        scan_id: scan_id.to_string(),
         status: scan.status.clone(),
         progress_percent: if scan.status == "completed" {
             100.0
@@ -771,7 +1079,13 @@ pub async fn scan_status_op(state: &AppState, scan_id: String) -> CommandResult<
         },
         completed: 0,
         total: 0,
+        categories_completed: 0,
+        attacks_completed: 0,
+        attacks_total: 0,
+        testcases_completed: 0,
+        testcases_total: 0,
         findings_count,
+        pause_pending: false,
         current_endpoint: None,
         current_test: None,
         started_at: scan.started_at.map(|dt| {
@@ -786,69 +1100,85 @@ pub async fn scan_status_op(state: &AppState, scan_id: String) -> CommandResult<
 }
 
 pub async fn scan_pause_op(state: &AppState, scan_id: String) -> CommandResult<ScanStatusDto> {
-    let current = state
-        .jobs()
-        .progress(&scan_id)
-        .ok_or_else(|| CommandError::invalid_input("Scan is not running"))?;
-    if current.status == "paused" {
+    if let Some(current) = state.jobs().progress(&scan_id) {
+        if current.status == "paused" {
+            return scan_status_op(state, scan_id).await;
+        }
+        if current.status != "running" {
+            return Err(CommandError::invalid_input("Scan is not running"));
+        }
+        if current.pause_pending {
+            return scan_status_op(state, scan_id).await;
+        }
+
+        if !state.jobs().request_pause(&scan_id) {
+            return Err(CommandError::invalid_input("Scan is not running"));
+        }
+
         return scan_status_op(state, scan_id).await;
     }
-    if current.status != "running" {
-        return Err(CommandError::invalid_input("Scan is not running"));
-    }
 
-    if !state.jobs().set_paused(&scan_id, true) {
-        return Err(CommandError::invalid_input("Scan is not running"));
-    }
-
-    let _ = state
-        .repositories()
+    let repos = state.repositories();
+    let scan = repos
         .scans()
-        .update(
-            &scan_id,
-            UpdateScan {
-                status: Some("paused".into()),
-                ..Default::default()
-            },
-        )
-        .await;
-
-    if let Some(progress) = state.jobs().progress(&scan_id) {
-        let _ = persist_playbook_progress(&state.repositories(), &scan_id, &progress).await;
+        .get(&scan_id)
+        .await
+        .map_err(CommandError::from)?;
+    if scan.status == "paused" {
+        return scan_status_from_db(&repos, &scan_id, &scan).await;
     }
 
-    scan_status_op(state, scan_id).await
+    Err(CommandError::invalid_input("Scan is not running"))
 }
 
-pub async fn scan_resume_op(state: &AppState, scan_id: String) -> CommandResult<ScanStatusDto> {
-    let current = state
-        .jobs()
-        .progress(&scan_id)
-        .ok_or_else(|| CommandError::invalid_input("Scan is not paused"))?;
-    if current.status != "paused" {
-        return Err(CommandError::invalid_input("Scan is not paused"));
+pub async fn scan_resume_op(
+    state: &AppState,
+    app: &AppHandle,
+    scan_id: String,
+) -> CommandResult<ScanStatusDto> {
+    if state.jobs().contains(&scan_id) {
+        let current = state
+            .jobs()
+            .progress(&scan_id)
+            .ok_or_else(|| CommandError::invalid_input("Scan is not paused"))?;
+        if current.status != "paused" {
+            return Err(CommandError::invalid_input("Scan is not paused"));
+        }
+
+        if !state.jobs().set_paused(&scan_id, false) {
+            return Err(CommandError::invalid_input("Scan is not paused"));
+        }
+
+        let _ = state
+            .repositories()
+            .scans()
+            .update(
+                &scan_id,
+                UpdateScan {
+                    status: Some("running".into()),
+                    ..Default::default()
+                },
+            )
+            .await;
+
+        if let Some(progress) = state.jobs().progress(&scan_id) {
+            let _ = persist_playbook_progress(&state.repositories(), &scan_id, &progress).await;
+        }
+
+        return scan_status_op(state, scan_id).await;
     }
 
-    if !state.jobs().set_paused(&scan_id, false) {
-        return Err(CommandError::invalid_input("Scan is not paused"));
-    }
-
-    let _ = state
-        .repositories()
+    let repos = state.repositories();
+    let scan = repos
         .scans()
-        .update(
-            &scan_id,
-            UpdateScan {
-                status: Some("running".into()),
-                ..Default::default()
-            },
-        )
-        .await;
-
-    if let Some(progress) = state.jobs().progress(&scan_id) {
-        let _ = persist_playbook_progress(&state.repositories(), &scan_id, &progress).await;
+        .get(&scan_id)
+        .await
+        .map_err(CommandError::from)?;
+    if scan.status != "paused" {
+        return Err(CommandError::invalid_input("Scan is not paused"));
     }
 
+    spawn_resumed_scan_job(app, state, &scan).await?;
     scan_status_op(state, scan_id).await
 }
 
@@ -929,10 +1259,11 @@ pub async fn scan_pause(
 
 #[tauri::command]
 pub async fn scan_resume(
+    app: AppHandle,
     state: State<'_, AppState>,
     scan_id: String,
 ) -> CommandResult<ScanStatusDto> {
-    scan_resume_op(state.inner(), scan_id).await
+    scan_resume_op(state.inner(), &app, scan_id).await
 }
 
 #[tauri::command]
@@ -952,6 +1283,15 @@ mod tests {
         assert!(is_restartable_scan_status("completed"));
         assert!(!is_restartable_scan_status("draft"));
         assert!(!is_restartable_scan_status("running"));
+    }
+
+    #[test]
+    fn interrupted_scan_statuses_include_active_states() {
+        assert!(is_interrupted_scan_status("running"));
+        assert!(is_interrupted_scan_status("paused"));
+        assert!(is_interrupted_scan_status("pending"));
+        assert!(!is_interrupted_scan_status("failed"));
+        assert!(!is_interrupted_scan_status("completed"));
     }
 
     #[test]

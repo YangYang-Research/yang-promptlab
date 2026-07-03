@@ -9,7 +9,7 @@
 
 use aisec_attack::{
     apply_descriptor_auth, AttackCategory, AttackContext, AttackPayload, AttackTarget,
-    AttackExecutor, AttemptStreamItem, DEFAULT_ATTACK_CONCURRENCY, FindingSeverity, PayloadAttempt,
+    AttackExecutor, FindingSeverity, PayloadAttempt, DEFAULT_ATTACK_CONCURRENCY,
 };
 use aisec_endpoint_metadata::body_template_from_metadata;
 use crate::dto::metadata_from_endpoint;
@@ -28,7 +28,9 @@ use tauri::State;
 use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -41,7 +43,8 @@ use crate::error::{CommandError, CommandResult};
 use crate::events::{ScanProgressEmitter, ScanProgressLevel};
 use crate::inference_host::build_judge_engine_from_gateway;
 use crate::session_auth::{attack_executor, attack_executor_with_variants, build_attack_runtime, AttackRuntime};
-use crate::jobs::ScanProgress;
+use crate::jobs::{bump_scan_progress, ScanBatchCheckpoint, ScanJobControls, ScanProgress};
+use crate::scan_playbook::persist_scan_playbook_state;
 use crate::state::AppState;
 
 pub struct CategoryRunOptions {
@@ -98,15 +101,7 @@ fn update_scan_phase(
     }
 }
 
-fn increment_scan_progress(progress: Option<&Arc<Mutex<ScanProgress>>>, units: u64) {
-    let Some(progress) = progress else {
-        return;
-    };
-    if let Ok(mut state) = progress.lock() {
-        state.completed = state.completed.saturating_add(units).min(state.total);
-    }
-}
-
+#[derive(Clone)]
 pub struct JudgedAttemptSummary {
     pub payload_id: String,
     pub payload_name: String,
@@ -263,6 +258,7 @@ struct CategoryJudgeEnv<'a> {
     plugin_manager: &'a Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
     progress: Option<&'a ScanProgressEmitter>,
     progress_state: Option<&'a Arc<Mutex<ScanProgress>>>,
+    job_controls: Option<&'a ScanJobControls>,
 }
 
 async fn judge_single_attempt(
@@ -273,34 +269,6 @@ async fn judge_single_attempt(
 ) -> CommandResult<()> {
     let eval = &attempt.evaluation;
     let normalized = &attempt.response.normalized;
-    let payload_number = seq + 1;
-
-    if let Some(emitter) = env.progress {
-        emitter.detailed(
-            ScanProgressLevel::Info,
-            emitter
-                .event(
-                    ScanProgressLevel::Info,
-                    format!("Payload #{payload_number} {}", attempt.payload_name),
-                )
-                .payload(&attempt.payload_name)
-                .endpoint(env.endpoint_url),
-        );
-        emitter.detailed(
-            ScanProgressLevel::Info,
-            emitter
-                .event(
-                    ScanProgressLevel::Info,
-                    format!(
-                        "Response {} ({}ms)",
-                        attempt.response.status, attempt.response.duration_ms
-                    ),
-                )
-                .endpoint(env.endpoint_url)
-                .status_code(attempt.response.status)
-                .latency(attempt.response.duration_ms),
-        );
-    }
 
     let mut verdict: JudgeVerdict = env
         .judge
@@ -421,7 +389,9 @@ async fn judge_single_attempt(
         confidence: verdict.confidence,
         summary: verdict.summary.clone(),
     });
-    increment_scan_progress(env.progress_state, 1);
+    if let Some(progress_state) = env.progress_state {
+        bump_scan_progress(progress_state, 1);
+    }
 
     if let Some(emitter) = env.progress {
         let confidence_label = if verdict.confidence >= 0.8 {
@@ -436,90 +406,358 @@ async fn judge_single_attempt(
             emitter
                 .event(ScanProgressLevel::Info, format!("Judge: {confidence_label}"))
                 .endpoint(env.endpoint_url)
-                .payload(&attempt.payload_name),
+                .payload(&truncate_console_payload(&attempt.mutated_content, 500)),
         );
     }
 
     Ok(())
 }
 
-async fn drain_category_judge_stream(
-    env: &CategoryJudgeEnv<'_>,
-    mut rx: mpsc::Receiver<AttemptStreamItem>,
-    accum: &mut CategoryJudgeAccum,
-) -> CommandResult<()> {
+fn truncate_console_payload(content: &str, max_bytes: usize) -> String {
+    let trimmed = content.trim();
+    if trimmed.len() <= max_bytes {
+        return trimmed.to_string();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !trimmed.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &trimmed[..end])
+}
+
+fn emit_attack_attempt(
+    emitter: &ScanProgressEmitter,
+    endpoint_url: &str,
+    seq: usize,
+    attempt: &PayloadAttempt,
+) {
+    emitter.detailed(
+        ScanProgressLevel::Info,
+        emitter
+            .event(
+                ScanProgressLevel::Info,
+                format!("Attack #{} {}", seq + 1, attempt.payload_name),
+            )
+            .endpoint(endpoint_url)
+            .payload(&truncate_console_payload(&attempt.mutated_content, 500)),
+    );
+    emitter.detailed(
+        ScanProgressLevel::Info,
+        emitter
+            .event(
+                ScanProgressLevel::Info,
+                format!(
+                    "Response {} ({}ms)",
+                    attempt.response.status, attempt.response.duration_ms
+                ),
+            )
+            .endpoint(endpoint_url)
+            .status_code(attempt.response.status)
+            .latency(attempt.response.duration_ms),
+    );
+}
+
+async fn collect_category_attempts(
+    executor: &AttackExecutor<crate::plugin_transport::PluginAwareTransport>,
+    category: AttackCategory,
+    ctx: &AttackContext,
+    emitter: Option<&ScanProgressEmitter>,
+    endpoint_url: &str,
+    progress_state: Option<&Arc<Mutex<ScanProgress>>>,
+) -> CommandResult<Vec<PayloadAttempt>> {
     use std::collections::BTreeMap;
 
-    let mut pending: BTreeMap<usize, PayloadAttempt> = BTreeMap::new();
-    let mut next_seq = 0usize;
-    let mut judged_any = false;
+    let (tx, mut rx) = mpsc::channel(DEFAULT_ATTACK_CONCURRENCY.max(4));
+    let mut exec = std::pin::pin!(executor.execute_category_streaming(category, &ctx, tx));
 
-    while let Some((seq, attempt)) = rx.recv().await {
-        pending.insert(seq, attempt);
-        while let Some(attempt) = pending.remove(&next_seq) {
-            if !judged_any {
-                update_scan_phase(
-                    env.progress_state,
-                    "judge",
-                    Some(env.category.display_name()),
-                    None,
-                    None,
-                );
-                judged_any = true;
+    let mut ordered: BTreeMap<usize, PayloadAttempt> = BTreeMap::new();
+    let mut next_seq = 0usize;
+    let mut attempts = Vec::new();
+
+    loop {
+        tokio::select! {
+            result = exec.as_mut() => {
+                result.map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
+                break;
             }
-            judge_single_attempt(env, next_seq, attempt, accum).await?;
-            next_seq += 1;
+            item = rx.recv() => {
+                match item {
+                    Some((seq, attempt)) => {
+                        ordered.insert(seq, attempt);
+                        while let Some(attempt) = ordered.remove(&next_seq) {
+                            if let Some(emitter) = emitter {
+                                emit_attack_attempt(emitter, endpoint_url, next_seq, &attempt);
+                            }
+                            if let Some(progress_state) = progress_state {
+                                bump_scan_progress(progress_state, 1);
+                                if let Ok(mut state) = progress_state.lock() {
+                                    state.attacks_completed = state
+                                        .attacks_completed
+                                        .saturating_add(1)
+                                        .min(state.attacks_total.max(1));
+                                    state.sync_testcases_completed();
+                                }
+                            }
+                            attempts.push(attempt);
+                            next_seq += 1;
+                        }
+                    }
+                    None => break,
+                }
+            }
         }
     }
 
-    while let Some(attempt) = pending.remove(&next_seq) {
-        if !judged_any {
-            update_scan_phase(
-                env.progress_state,
-                "judge",
-                Some(env.category.display_name()),
-                None,
-                None,
-            );
-            judged_any = true;
+    while let Some(attempt) = ordered.remove(&next_seq) {
+        if let Some(emitter) = emitter {
+            emit_attack_attempt(emitter, endpoint_url, next_seq, &attempt);
         }
-        judge_single_attempt(env, next_seq, attempt, accum).await?;
+        if let Some(progress_state) = progress_state {
+            bump_scan_progress(progress_state, 1);
+            if let Ok(mut state) = progress_state.lock() {
+                state.attacks_completed = state
+                    .attacks_completed
+                    .saturating_add(1)
+                    .min(state.attacks_total.max(1));
+                state.sync_testcases_completed();
+            }
+        }
+        attempts.push(attempt);
         next_seq += 1;
     }
 
-    Ok(())
+    Ok(attempts)
 }
 
-async fn execute_category_with_live_judge(
+async fn wait_if_job_paused(controls: &ScanJobControls) {
+    while controls.paused.load(Ordering::Relaxed) {
+        if controls.cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+async fn park_at_batch_checkpoint(
+    controls: &ScanJobControls,
+    checkpoint: ScanBatchCheckpoint,
+    repos: &Repositories,
+    scan_id: &str,
+    progress_state: Option<&Arc<Mutex<ScanProgress>>>,
+    emitter: Option<&ScanProgressEmitter>,
+    category_label: &str,
+) {
+    let checkpoint_for_db = checkpoint.clone();
+    {
+        *controls.batch_checkpoint.lock().unwrap() = Some(checkpoint);
+    }
+    controls.pause_requested.store(false, Ordering::Relaxed);
+    controls.paused.store(true, Ordering::Relaxed);
+
+    let progress_snapshot = if let Some(progress_state) = progress_state {
+        if let Ok(mut progress) = progress_state.lock() {
+            progress.status = "paused".into();
+            progress.pause_pending = false;
+            progress.current_test = Some(category_label.into());
+            Some(progress.clone())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let _ = repos
+        .scans()
+        .update(
+            scan_id,
+            UpdateScan {
+                status: Some("paused".into()),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    if let Some(progress) = progress_snapshot.as_ref() {
+        let _ = persist_scan_playbook_state(
+            repos,
+            scan_id,
+            Some(progress),
+            Some(Some(&checkpoint_for_db)),
+        )
+        .await;
+    } else {
+        let _ = persist_scan_playbook_state(repos, scan_id, None, Some(Some(&checkpoint_for_db))).await;
+    }
+
+    if let Some(emitter) = emitter {
+        emitter.info(format!(
+            "Paused at batch checkpoint for {category_label} — press Resume to continue"
+        ));
+    }
+
+    wait_if_job_paused(controls).await;
+}
+
+async fn execute_category_then_judge(
     executor: AttackExecutor<crate::plugin_transport::PluginAwareTransport>,
     category: AttackCategory,
     ctx: AttackContext,
     env: &CategoryJudgeEnv<'_>,
 ) -> CommandResult<CategoryRunResult> {
-    let (tx, rx) = mpsc::channel(DEFAULT_ATTACK_CONCURRENCY.max(4));
+    let category_label = env.category.display_name();
     let mut accum = CategoryJudgeAccum {
         successes: 0,
         created_findings: Vec::new(),
         judged: Vec::new(),
     };
 
-    let exec = executor.execute_category_streaming(category, &ctx, tx);
-    let drain = drain_category_judge_stream(env, rx, &mut accum);
+    'category: loop {
+        let (attempts, judge_start) = if let Some(ctrl) = env.job_controls {
+            let restored_checkpoint = {
+                let mut guard = ctrl.batch_checkpoint.lock().unwrap();
+                guard.take()
+            };
+            if let Some(checkpoint) = restored_checkpoint {
+                match checkpoint {
+                    ScanBatchCheckpoint::PendingJudge { attempts, .. } => (attempts, 0usize),
+                    ScanBatchCheckpoint::JudgingPartial {
+                        attempts,
+                        next_judge_index,
+                        ..
+                    } => (attempts, next_judge_index),
+                }
+            } else {
+                let collected = collect_category_attempts(
+                    &executor,
+                    category,
+                    &ctx,
+                    env.progress,
+                    env.endpoint_url,
+                    env.progress_state,
+                )
+                .await?;
+                if ctrl.cancel.load(Ordering::Relaxed) {
+                    return Ok(category_result_from_accum(&accum));
+                }
+                if ctrl.pause_requested.load(Ordering::Relaxed) {
+                    park_at_batch_checkpoint(
+                        ctrl,
+                        ScanBatchCheckpoint::PendingJudge {
+                            category: category_label.to_string(),
+                            attempts: collected.clone(),
+                        },
+                        env.repos,
+                        env.scan_id,
+                        env.progress_state,
+                        env.progress,
+                        &category_label,
+                    )
+                    .await;
+                    continue 'category;
+                }
+                (collected, 0)
+            }
+        } else {
+            (
+                collect_category_attempts(
+                    &executor,
+                    category,
+                    &ctx,
+                    env.progress,
+                    env.endpoint_url,
+                    env.progress_state,
+                )
+                .await?,
+                0,
+            )
+        };
 
-    let (result, ()) = tokio::try_join!(
-        async {
-            exec.await
-                .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))
-        },
-        drain
-    )?;
+        if attempts.is_empty() {
+            return Ok(category_result_from_accum(&accum));
+        }
 
-    Ok(CategoryRunResult {
-        attempts: result.attempts.len(),
+        if judge_start == 0 {
+            if let Some(emitter) = env.progress {
+                emitter.info(format!(
+                    "Judging {} attack{} for {}",
+                    attempts.len(),
+                    if attempts.len() == 1 { "" } else { "s" },
+                    category_label,
+                ));
+            }
+            update_scan_phase(
+                env.progress_state,
+                "judge",
+                Some(&category_label),
+                None,
+                None,
+            );
+        }
+
+        let mut paused_mid_judge = false;
+        for seq in judge_start..attempts.len() {
+            if let Some(ctrl) = env.job_controls {
+                wait_if_job_paused(ctrl).await;
+                if ctrl.cancel.load(Ordering::Relaxed) {
+                    return Ok(category_result_from_accum(&accum));
+                }
+            }
+
+            judge_single_attempt(env, seq, attempts[seq].clone(), &mut accum).await?;
+
+            if let Some(ctrl) = env.job_controls {
+                if ctrl.pause_requested.load(Ordering::Relaxed) {
+                    park_at_batch_checkpoint(
+                        ctrl,
+                        ScanBatchCheckpoint::JudgingPartial {
+                            category: category_label.to_string(),
+                            attempts: attempts.clone(),
+                            next_judge_index: seq + 1,
+                        },
+                        env.repos,
+                        env.scan_id,
+                        env.progress_state,
+                        env.progress,
+                        &category_label,
+                    )
+                    .await;
+                    paused_mid_judge = true;
+                    break;
+                }
+            }
+        }
+
+        if paused_mid_judge {
+            continue 'category;
+        }
+
+        if let Some(ctrl) = env.job_controls {
+            if ctrl.paused.load(Ordering::Relaxed) {
+                continue 'category;
+            }
+        }
+        break 'category;
+    }
+
+    if let Some(ctrl) = env.job_controls {
+        {
+            let mut guard = ctrl.batch_checkpoint.lock().unwrap();
+            *guard = None;
+        }
+        let _ = persist_scan_playbook_state(env.repos, env.scan_id, None, Some(None)).await;
+    }
+
+    Ok(category_result_from_accum(&accum))
+}
+
+fn category_result_from_accum(accum: &CategoryJudgeAccum) -> CategoryRunResult {
+    CategoryRunResult {
+        attempts: accum.judged.len(),
         successes: accum.successes,
-        findings: accum.created_findings,
-        judged: accum.judged,
-    })
+        findings: accum.created_findings.clone(),
+        judged: accum.judged.clone(),
+    }
 }
 
 /// Execute one attack category against a single endpoint; persist attempts and findings.
@@ -637,9 +875,10 @@ pub async fn run_category_on_endpoint(
         plugin_manager: &plugin_manager,
         progress,
         progress_state,
+        job_controls: None,
     };
 
-    execute_category_with_live_judge(executor, category, ctx, &judge_env).await
+    execute_category_then_judge(executor, category, ctx, &judge_env).await
 }
 
 /// Execute one attack category against a verified AI Target Profile.
@@ -661,6 +900,7 @@ pub async fn run_category_on_target_profile(
     progress: Option<&ScanProgressEmitter>,
     options: Option<&CategoryRunOptions>,
     progress_state: Option<&Arc<Mutex<ScanProgress>>>,
+    job_controls: Option<&ScanJobControls>,
 ) -> CommandResult<CategoryRunResult> {
     let url = profile.full_url();
     let mut target = AttackTarget::llm_api(url.clone());
@@ -751,9 +991,10 @@ pub async fn run_category_on_target_profile(
         plugin_manager: &plugin_manager,
         progress,
         progress_state,
+        job_controls,
     };
 
-    execute_category_with_live_judge(executor, category, ctx, &judge_env).await
+    execute_category_then_judge(executor, category, ctx, &judge_env).await
 }
 
 #[instrument(skip(state))]
@@ -896,4 +1137,22 @@ pub async fn attack_run_prompt_injection(
     endpoint_id: String,
 ) -> CommandResult<AttackRunDto> {
     attack_run_prompt_injection_op(state.inner(), endpoint_id).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_console_payload;
+
+    #[test]
+    fn truncate_console_payload_respects_char_boundaries() {
+        let zwsp = "\u{200b}";
+        let mut payload = "A".repeat(498);
+        payload.push_str(zwsp);
+        payload.push_str("tail");
+
+        let truncated = truncate_console_payload(&payload, 500);
+        assert!(truncated.ends_with('…'));
+        assert!(truncated.len() <= 500 + '…'.len_utf8());
+        assert!(std::str::from_utf8(truncated.as_bytes()).is_ok());
+    }
 }

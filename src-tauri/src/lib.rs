@@ -21,6 +21,7 @@ pub mod playwright_runtime;
 pub mod agent_service;
 pub mod runtime_watch;
 pub mod session_auth;
+pub mod scan_playbook;
 pub mod state;
 
 use aisec_models::ModelEntry;
@@ -40,6 +41,14 @@ pub fn run() {
         if let RunEvent::Exit = event {
             if let Some(state) = app_handle.try_state::<AppState>() {
                 tauri::async_runtime::block_on(async {
+                    let reconciled =
+                        commands::scan::reconcile_interrupted_scans(state.inner(), true).await;
+                    if reconciled > 0 {
+                        tracing::info!(
+                            reconciled,
+                            "marked interrupted scans as failed on shutdown"
+                        );
+                    }
                     let mut manager = state.runtime_manager().lock().await;
                     let _ = manager.stop_runtime().await;
                     tracing::info!("embedded runtime stopped (graceful shutdown)");
@@ -154,6 +163,14 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 model_provider,
                 model_catalog_meta,
             ));
+
+            let startup_state = app.state::<AppState>();
+            let reconciled = tauri::async_runtime::block_on(
+                commands::scan::reconcile_interrupted_scans(startup_state.inner(), false),
+            );
+            if reconciled > 0 {
+                tracing::info!(reconciled, "marked interrupted scans as failed on startup");
+            }
 
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {

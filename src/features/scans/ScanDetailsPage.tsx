@@ -37,7 +37,9 @@ import {
 } from "@/features/scans/scanPlaybook";
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
 import { buildScanWizardUrl } from "@/features/scans/wizardState";
-import { getScan, getTarget, type ScanDetailDto, type TargetDto } from "@/shared/ipc";
+import { getScan, getTarget, resumeScan, type ScanDetailDto, type TargetDto } from "@/shared/ipc";
+import { toAppError } from "@/shared/errors";
+import { useToast } from "@/shared/notifications";
 import type { DiscoveredEndpoint, Finding, ScanRun, Severity } from "@/shared/types";
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
@@ -53,12 +55,14 @@ function isMonitorableAttackScan(scan: Pick<ScanRun, "name">): boolean {
 export function ScanDetailsPage() {
   const { scanId = "" } = useParams();
   const navigate = useNavigate();
+  const { notify } = useToast();
   const { scans, projects, targets, endpoints, findings, reports, actions } = useAppStore();
   const [detail, setDetail] = useState<ScanDetailDto | null>(null);
   const [targetDto, setTargetDto] = useState<TargetDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [resumePending, setResumePending] = useState(false);
 
   const scan = scans.find((item) => item.id === scanId) ?? (detail ? mapScanDetailToRun(detail) : null);
   const project = projects.find((item) => item.id === scan?.projectId);
@@ -138,6 +142,27 @@ export function ScanDetailsPage() {
       ? new Date(scan.completedAt).getTime() - new Date(scan.startedAt).getTime()
       : null;
 
+  async function handleResumeScan() {
+    setResumePending(true);
+    try {
+      await resumeScan(scanId);
+      notify("Scan resumed", "success");
+      await actions.refresh();
+      if (scan?.projectId && scan.targetId) {
+        navigate(
+          buildScanWizardUrl(scan.projectId, scan.targetId, {
+            scanId: scan.id,
+            step: 5,
+          }),
+        );
+      }
+    } catch (err) {
+      notify(toAppError(err).message || "Failed to resume scan", "error");
+    } finally {
+      setResumePending(false);
+    }
+  }
+
   async function handleExport(format: ReportExportFormat) {
     setExporting(format);
     try {
@@ -184,6 +209,23 @@ export function ScanDetailsPage() {
     isMonitorableAttackScan(scan) &&
     isLiveScanStatus(status?.status ?? scan.status);
 
+  const effectiveStatus = status?.status ?? scan?.status ?? "pending";
+  const showResumeScan =
+    scan &&
+    scan.targetId &&
+    playbook &&
+    isAttackScanName(scan.name) &&
+    effectiveStatus === "paused";
+
+  const showRetryScan =
+    scan &&
+    scan.targetId &&
+    playbook &&
+    isAttackScanName(scan.name) &&
+    (effectiveStatus === "failed" ||
+      effectiveStatus === "cancelled" ||
+      effectiveStatus === "stopped");
+
   return (
     <div className="page">
       <PageHeader
@@ -191,20 +233,48 @@ export function ScanDetailsPage() {
         backOnly
         title={scan?.name ?? "Scan Details"}
         actions={
-          showViewScan ? (
-            <Button
-              variant="primary"
-              onClick={() =>
-                navigate(
-                  buildScanWizardUrl(scan.projectId, scan.targetId ?? undefined, {
-                    scanId: scan.id,
-                    step: 5,
-                  }),
-                )
-              }
-            >
-              View Scan
-            </Button>
+          showResumeScan || showRetryScan || showViewScan ? (
+            <div className="page-actions">
+              {showResumeScan && (
+                <Button
+                  variant="primary"
+                  disabled={resumePending}
+                  onClick={() => void handleResumeScan()}
+                >
+                  {resumePending ? "Resuming…" : "Resume Scan"}
+                </Button>
+              )}
+              {showRetryScan && (
+                <Button
+                  variant="primary"
+                  onClick={() =>
+                    navigate(
+                      buildScanWizardUrl(scan.projectId, scan.targetId ?? undefined, {
+                        scanId: scan.id,
+                        step: 4,
+                      }),
+                    )
+                  }
+                >
+                  Retry Scan
+                </Button>
+              )}
+              {showViewScan && (
+                <Button
+                  variant={showRetryScan || showResumeScan ? "secondary" : "primary"}
+                  onClick={() =>
+                    navigate(
+                      buildScanWizardUrl(scan.projectId, scan.targetId ?? undefined, {
+                        scanId: scan.id,
+                        step: 5,
+                      }),
+                    )
+                  }
+                >
+                  View Scan
+                </Button>
+              )}
+            </div>
           ) : undefined
         }
       />
@@ -269,7 +339,7 @@ export function ScanDetailsPage() {
             label="Progress"
             value={
               status
-                ? `${status.progress_percent}% (${status.completed}/${status.total || "—"} tests)`
+                ? `${status.progress_percent}% (${status.completed}/${status.total || "—"} pipeline steps)`
                 : "—"
             }
           />

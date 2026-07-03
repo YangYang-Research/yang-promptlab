@@ -26,7 +26,7 @@ function formatLine(event: ScanProgressEvent): string {
     parts.push(`@ ${path}`);
   }
   if (event.payload) {
-    parts.push(`(${event.payload})`);
+    parts.push(`\n    payload: ${event.payload}`);
   }
   if (event.statusCode != null) {
     const latency = event.latency != null ? ` ${event.latency}ms` : "";
@@ -40,7 +40,7 @@ function formatLine(event: ScanProgressEvent): string {
 
 export function ScanConsole({ scanId }: ScanConsoleProps) {
   const [lines, setLines] = useState<string[]>([]);
-  const tailRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
     setLines([]);
@@ -65,13 +65,15 @@ export function ScanConsole({ scanId }: ScanConsoleProps) {
   }, [scanId]);
 
   useEffect(() => {
-    tailRef.current?.scrollIntoView({ behavior: "smooth" });
+    const body = bodyRef.current;
+    if (!body) return;
+    body.scrollTop = body.scrollHeight;
   }, [lines]);
 
   return (
     <div className="scan-console">
-      <h4 className="scan-console__title">Live Scan Console</h4>
-      <pre className="scan-console__body" aria-live="polite">
+      <h4 className="scan-console__title">Attack Console</h4>
+      <pre ref={bodyRef} className="scan-console__body" aria-live="polite">
         {lines.length === 0 ? (
           <span className="scan-console__placeholder text-muted">Waiting for scan events…</span>
         ) : (
@@ -81,7 +83,6 @@ export function ScanConsole({ scanId }: ScanConsoleProps) {
             </div>
           ))
         )}
-        <div ref={tailRef} />
       </pre>
     </div>
   );

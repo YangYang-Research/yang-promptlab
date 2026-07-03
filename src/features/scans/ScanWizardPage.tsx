@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAppStore } from "@/app/store/AppStore";
 import { mapProjects, mapTargets } from "@/app/store/mappers";
 import { Button, Card, PageHeader, Badge } from "@/shared/components";
-import { getProject, startScan, updateTargetDescriptor } from "@/shared/ipc";
+import { getProject, getScanStatus, pauseScan, resumeScan, startScan, updateTargetDescriptor } from "@/shared/ipc";
 import { createWizardScan, loadWizardScan, saveWizardScan } from "@/shared/ipc/scanWizard";
 import { generateAttackPlanForTarget } from "@/shared/ipc/attackPlanner";
 import { getTargetProfile, saveTargetProfile } from "@/shared/ipc/targetProfile";
@@ -119,7 +119,9 @@ export function ScanWizardPage() {
   const [dbVerification, setDbVerification] = useState<VerificationResultForm | null>(null);
   const [dbVerificationLoading, setDbVerificationLoading] = useState(false);
   const [importApiOpen, setImportApiOpen] = useState(false);
+  const [scanControlPending, setScanControlPending] = useState(false);
   const plannerRunRef = useRef<string | null>(null);
+  const startingScanRef = useRef(false);
   const wizardDbBootstrap = useRef(false);
   const sessionRef = useRef(session);
   sessionRef.current = session;
@@ -623,13 +625,22 @@ export function ScanWizardPage() {
   const showStartScan = session.currentStep === 5 && session.submittedScanId === null;
   const showFooterDone = session.currentStep === 6;
   const showViewResult =
-    session.currentStep === 5 && submittedStatus?.status === "completed";
+    session.currentStep === 5 &&
+    submittedStatus?.status === "completed" &&
+    session.submittedScanId === null;
   const showRetryScan =
     session.currentStep === 5 &&
     submittedStatus !== null &&
     (submittedStatus.status === "failed" ||
       submittedStatus.status === "stopped" ||
       submittedStatus.status === "cancelled");
+  const attackScanActive =
+    session.currentStep === 5 &&
+    session.submittedScanId !== null &&
+    submittedStatus !== null &&
+    ["running", "paused", "pending"].includes(submittedStatus.status);
+  const showAttackScanControls = attackScanActive;
+  const showHeaderCancel = !(session.currentStep === 5 && session.submittedScanId !== null);
   const hideBack =
     session.currentStep === 6 ||
     (session.currentStep === 5 && session.submittedScanId !== null);
@@ -840,6 +851,34 @@ export function ScanWizardPage() {
     navigate("/scans");
   }
 
+  async function handleScanPause() {
+    if (!session.submittedScanId) return;
+    setScanControlPending(true);
+    try {
+      await pauseScan(session.submittedScanId);
+      notify("Scan paused", "success");
+      await actions.refresh();
+    } catch (err) {
+      notify(toAppError(err).message || "Failed to pause scan", "error");
+    } finally {
+      setScanControlPending(false);
+    }
+  }
+
+  async function handleScanResume() {
+    if (!session.submittedScanId) return;
+    setScanControlPending(true);
+    try {
+      await resumeScan(session.submittedScanId);
+      notify("Scan resumed", "success");
+      await actions.refresh();
+    } catch (err) {
+      notify(toAppError(err).message || "Failed to resume scan", "error");
+    } finally {
+      setScanControlPending(false);
+    }
+  }
+
   async function handleStartScan() {
     if (!canStartScan(draft) || !store.savedTarget || !session.attackPlan) return;
     await submitScanJob();
@@ -847,14 +886,12 @@ export function ScanWizardPage() {
 
   async function submitScanJob(options?: { restart?: boolean }) {
     if (!store.savedTarget || !session.attackPlan) return;
+    if (startingScanRef.current) return;
 
     const scanIdToReuse = session.submittedScanId ?? session.draftScanId ?? undefined;
 
     if (!options?.restart) {
-      updateSession({
-        currentStep: 5,
-        submittedScanId: scanIdToReuse ?? session.submittedScanId,
-      });
+      updateSession({ currentStep: 5 });
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => resolve());
@@ -862,6 +899,19 @@ export function ScanWizardPage() {
       });
     }
 
+    if (scanIdToReuse && !options?.restart) {
+      try {
+        const live = await getScanStatus(scanIdToReuse);
+        if (["running", "paused", "pending"].includes(live.status)) {
+          updateSession({ submittedScanId: scanIdToReuse, currentStep: 5 });
+          return;
+        }
+      } catch {
+        // Continue and attempt a fresh start below.
+      }
+    }
+
+    startingScanRef.current = true;
     setStartingScan(true);
     setScanSubmitError(null);
     try {
@@ -885,6 +935,7 @@ export function ScanWizardPage() {
       setScanSubmitError(message);
       notify(message, "error");
     } finally {
+      startingScanRef.current = false;
       setStartingScan(false);
     }
   }
@@ -1007,6 +1058,7 @@ export function ScanWizardPage() {
               submittedScanId={session.submittedScanId}
               onViewResult={() => updateSession({ currentStep: 6 })}
               onRetryScan={() => void handleRetryScan()}
+              onClose={handleCancel}
             />
             {scanSubmitError && <p className="text-danger">{scanSubmitError}</p>}
           </>
@@ -1037,9 +1089,35 @@ export function ScanWizardPage() {
         title={pageHeaderTitle}
         description={pageHeaderDescription}
         actions={
-          <Button variant="danger" onClick={handleCancel}>
-            Cancel
-          </Button>
+          showAttackScanControls ? (
+            <div className="page-actions">
+              {submittedStatus?.status === "running" && (
+                <Button
+                  variant="secondary"
+                  disabled={
+                    scanControlPending ||
+                    submittedStatus.pause_pending === true
+                  }
+                  onClick={() => void handleScanPause()}
+                >
+                  {submittedStatus.pause_pending ? "Pausing…" : "Pause"}
+                </Button>
+              )}
+              {submittedStatus?.status === "paused" && (
+                <Button
+                  variant="secondary"
+                  disabled={scanControlPending}
+                  onClick={() => void handleScanResume()}
+                >
+                  Resume
+                </Button>
+              )}
+            </div>
+          ) : showHeaderCancel ? (
+            <Button variant="danger" onClick={handleCancel}>
+              Cancel
+            </Button>
+          ) : undefined
         }
       />
 

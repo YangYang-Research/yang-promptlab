@@ -1,5 +1,5 @@
 import { Badge, Button, ProgressBar, StatusBadge } from "@/shared/components";
-import { formatDurationMs, formatTimestamp } from "@/features/scans/scanDetailsHelpers";
+import { formatScanProgressPercent } from "@/features/scans/scanProgressFormat";
 import type { ScanStatusDto } from "@/shared/ipc";
 import type { ScanRun } from "@/shared/types";
 
@@ -19,7 +19,8 @@ function progressLabel(status: ScanStatusDto): string {
     return "Scan paused";
   }
   if (status.total > 0) {
-    return `${status.completed} / ${status.total} tests`;
+    const tests = `${status.testcases_completed ?? 0}/${status.testcases_total ?? "—"}`;
+    return `${formatScanProgressPercent(status.progress_percent)} · ${tests} active tests`;
   }
   return "Scan in progress";
 }
@@ -80,7 +81,7 @@ export function ScanMonitorCard({
         </div>
         <div>
           <dt>Progress</dt>
-          <dd>{Math.round(status.progress_percent)}%</dd>
+          <dd>{formatScanProgressPercent(status.progress_percent)}</dd>
         </div>
         <div className="scan-monitor-card__metric--wide">
           <dt>Current endpoint</dt>
@@ -114,22 +115,26 @@ export function ScanMonitorCard({
         >
           <span className="card-footer-meta text-sm text-muted">{scanStartedLabel(scan)}</span>
           <div className="card-footer-actions scan-monitor-card__controls">
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={controlPending || !canPause}
-              onClick={onPause}
-            >
-              Pause
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={controlPending || !canResume}
-              onClick={onResume}
-            >
-              Resume
-            </Button>
+            {canPause && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={controlPending || status.pause_pending === true}
+                onClick={onPause}
+              >
+                {status.pause_pending ? "Pausing…" : "Pause"}
+              </Button>
+            )}
+            {canResume && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={controlPending}
+                onClick={onResume}
+              >
+                Resume
+              </Button>
+            )}
             <Button variant="danger" size="sm" disabled={controlPending} onClick={onStop}>
               Stop
             </Button>

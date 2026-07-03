@@ -3,6 +3,7 @@ import { Badge } from "@/shared/components";
 import type { AttackCategoryId } from "../attackProfiles";
 import { getCategory } from "../attackProfiles";
 import {
+  attackGraphStateLabel,
   resolveAttackGraphStates,
   type AttackGraphNodeState,
 } from "../attackGraphProgress";
@@ -39,7 +40,9 @@ export function AttackGraphProgress({
             <div className="wizard-attack-graph__body">
               <div className="wizard-attack-graph__title-row">
                 <span className="wizard-attack-graph__label">{meta.label}</span>
-                <Badge variant={badgeVariant(state)}>{stateLabel(state)}</Badge>
+                <Badge variant={badgeVariant(state)}>
+                  {attackGraphStateLabel(state, status, category)}
+                </Badge>
               </div>
               {!compact && (
                 <p className="wizard-attack-graph__description text-sm text-muted">
@@ -52,19 +55,6 @@ export function AttackGraphProgress({
       })}
     </ol>
   );
-}
-
-function stateLabel(state: AttackGraphNodeState): string {
-  switch (state) {
-    case "active":
-      return "Attacking";
-    case "done":
-      return "Done";
-    case "failed":
-      return "Failed";
-    default:
-      return "Pending";
-  }
 }
 
 function badgeVariant(
