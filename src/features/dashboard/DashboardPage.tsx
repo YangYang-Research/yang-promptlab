@@ -3,7 +3,12 @@ import { Link, useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import { AiRuntimeDashboardCard } from "@/features/dashboard/AiRuntimeDashboardCard";
-import { severityCounts } from "@/shared/stats";
+import { RecentActivityPanel } from "@/features/dashboard/RecentActivityPanel";
+import {
+  SeverityDoughnutChart,
+  severitySliceColor,
+} from "@/features/dashboard/SeverityDoughnutChart";
+import { severityCounts, severityCountSeries } from "@/shared/stats";
 import { getRuntimeConfiguration, type RuntimeConfigurationDto } from "@/shared/ipc/runtime";
 import { assertAiRuntimeReady } from "@/shared/runtime/aiRuntimeReadiness";
 import {
@@ -17,20 +22,16 @@ import {
 } from "@/shared/components";
 import { useToast } from "@/shared/notifications";
 
-function formatRelativeTime(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const hours = Math.floor(diff / 3_600_000);
-  if (hours < 1) return "Just now";
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
-
 export function DashboardPage() {
   const { stats, findings, activity, attackRuns, projects, backendConnected } =
     useAppStore();
   const navigate = useNavigate();
   const { notify } = useToast();
   const counts = severityCounts(findings);
+  const severitySlices = severityCountSeries(findings).map((slice) => ({
+    ...slice,
+    color: severitySliceColor(slice.severity),
+  }));
   const maxCount = Math.max(...Object.values(counts), 1);
   const [runtimeConfiguration, setRuntimeConfiguration] = useState<RuntimeConfigurationDto | null>(
     null,
@@ -111,38 +112,33 @@ export function DashboardPage() {
       </div>
 
       <div className="dashboard-grid">
-        <Card className="dashboard-grid__chart">
-          <h3 className="card__title">Findings by Severity</h3>
-          <div className="severity-chart">
-            {(["critical", "high", "medium", "low", "info"] as const).map((sev) => (
-              <div key={sev} className="severity-chart__row">
-                <SeverityBadge severity={sev} />
-                <div className="severity-chart__bar-track">
-                  <div
-                    className={`severity-chart__bar severity-chart__bar--${sev}`}
-                    style={{ width: `${(counts[sev] / maxCount) * 100}%` }}
-                  />
+        <div className="dashboard-grid__left-stack">
+          <Card className="dashboard-grid__chart">
+            <h3 className="card__title">Findings by Severity</h3>
+            <div className="severity-chart">
+              {(["critical", "high", "medium", "low", "info"] as const).map((sev) => (
+                <div key={sev} className="severity-chart__row">
+                  <SeverityBadge severity={sev} />
+                  <div className="severity-chart__bar-track">
+                    <div
+                      className={`severity-chart__bar severity-chart__bar--${sev}`}
+                      style={{ width: `${(counts[sev] / maxCount) * 100}%` }}
+                    />
+                  </div>
+                  <span className="severity-chart__count">{counts[sev]}</span>
                 </div>
-                <span className="severity-chart__count">{counts[sev]}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
+              ))}
+            </div>
+          </Card>
+
+          <Card className="dashboard-grid__overview">
+            <h3 className="card__title">Security Overview</h3>
+            <SeverityDoughnutChart data={severitySlices} />
+          </Card>
+        </div>
 
         <Card className="dashboard-grid__activity">
-          <h3 className="card__title">Recent Activity</h3>
-          <ul className="activity-list">
-            {activity.map((item) => (
-              <li key={item.id} className="activity-list__item">
-                <span className={`activity-list__dot activity-list__dot--${item.type}`} />
-                <div className="activity-list__body">
-                  <p className="activity-list__message">{item.message}</p>
-                  <time className="activity-list__time">{formatRelativeTime(item.timestamp)}</time>
-                </div>
-                {item.severity && <SeverityBadge severity={item.severity} />}
-              </li>
-            ))}
-          </ul>
+          <RecentActivityPanel activity={activity} />
         </Card>
 
         <Card className="dashboard-grid__jobs">

@@ -792,12 +792,129 @@ a:hover {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
+  align-items: start;
 }
 
-.dashboard-grid__chart { grid-column: 1; }
-.dashboard-grid__activity { grid-column: 2; }
-.dashboard-grid__jobs { grid-column: 1; }
-.dashboard-grid__projects { grid-column: 2; }
+.dashboard-grid__left-stack {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.dashboard-grid__chart,
+.dashboard-grid__overview {
+  grid-column: auto;
+}
+
+.dashboard-grid__activity {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-grid__activity .dashboard-activity {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.dashboard-grid__jobs { grid-column: 1; grid-row: 2; }
+.dashboard-grid__projects { grid-column: 2; grid-row: 2; }
+
+.category-doughnut {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.category-doughnut__chart {
+  flex-shrink: 0;
+}
+
+.category-doughnut__total {
+  fill: var(--text);
+  font-size: 1.375rem;
+  font-weight: 700;
+}
+
+.category-doughnut__total-label {
+  fill: var(--text-subtle);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.category-doughnut__legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  min-width: 10rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.category-doughnut__legend-item {
+  display: grid;
+  grid-template-columns: 0.625rem 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.category-doughnut__swatch {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 2px;
+}
+
+.category-doughnut__legend-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-doughnut__legend-count {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-activity__pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.dashboard-activity__page-btn {
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.dashboard-activity__page-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dashboard-activity__page-btn:not(:disabled):hover {
+  border-color: var(--border);
+}
 
 .severity-chart__row {
   display: grid;
@@ -837,6 +954,22 @@ a:hover {
   list-style: none;
   margin: 0;
   padding: 0;
+  overflow: hidden;
+}
+
+.activity-list--timeline {
+  position: relative;
+  padding-left: 0.25rem;
+}
+
+.activity-list--timeline::before {
+  content: "";
+  position: absolute;
+  left: 0.4375rem;
+  top: 0.75rem;
+  bottom: 0.75rem;
+  width: 2px;
+  background: var(--border-subtle);
 }
 
 .activity-list__item {
@@ -845,6 +978,7 @@ a:hover {
   gap: 0.75rem;
   padding: 0.625rem 0;
   border-bottom: 1px solid var(--border-subtle);
+  box-sizing: border-box;
 }
 
 .activity-list__item:last-child {
@@ -858,6 +992,9 @@ a:hover {
   margin-top: 0.375rem;
   flex-shrink: 0;
   background: var(--text-subtle);
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 0 0 2px var(--bg);
 }
 
 .activity-list__dot--finding { background: var(--danger); }
@@ -870,13 +1007,25 @@ a:hover {
   min-width: 0;
 }
 
+.activity-list--paged {
+  overflow: visible;
+}
+
+.activity-list--paged .activity-list__item {
+  min-height: 3.75rem;
+}
+
 .activity-list__message {
   margin: 0;
   font-size: 0.8125rem;
+  line-height: 1.35;
 }
 
 .activity-list__time {
+  display: block;
+  margin-top: 0.125rem;
   font-size: 0.75rem;
+  line-height: 1.35;
   color: var(--text-subtle);
 }
 
@@ -5110,10 +5259,15 @@ a:hover {
 @media (max-width: 1200px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .dashboard-grid { grid-template-columns: 1fr; }
+  .dashboard-grid__left-stack,
   .dashboard-grid__chart,
+  .dashboard-grid__overview,
   .dashboard-grid__activity,
   .dashboard-grid__jobs,
-  .dashboard-grid__projects { grid-column: 1; }
+  .dashboard-grid__projects {
+    grid-column: 1;
+    grid-row: auto;
+  }
   .report-format-grid { grid-template-columns: repeat(3, 1fr); }
 }
 

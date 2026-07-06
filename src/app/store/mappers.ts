@@ -118,6 +118,7 @@ export function mapTargets(targets: TargetDto[]): Target[] {
     url: extractTargetUrl(t.descriptor),
     type: coerceTargetType(t.target_type),
     status: "pending",
+    createdAt: t.created_at,
     lastScanAt: null,
     fingerprint: null,
     tags: [],

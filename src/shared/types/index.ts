@@ -40,6 +40,7 @@ export type Target = {
   url: string;
   type: TargetType;
   status: JobStatus;
+  createdAt: string;
   lastScanAt: string | null;
   fingerprint: string | null;
   tags: string[];

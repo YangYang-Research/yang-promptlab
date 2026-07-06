@@ -8,6 +8,8 @@ import type {
   Target,
 } from "@/shared/types";
 
+const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
+
 const SCANNING_STATUSES = new Set(["running", "paused", "pending"]);
 
 function isAttackScan(scan: ScanRun): boolean {
@@ -77,4 +79,19 @@ export function severityCounts(findings: Finding[]): Record<Severity, number> {
     counts[f.severity] = (counts[f.severity] ?? 0) + 1;
   }
   return counts;
+}
+
+export type SeverityCountSlice = {
+  severity: Severity;
+  label: string;
+  count: number;
+};
+
+export function severityCountSeries(findings: Finding[]): SeverityCountSlice[] {
+  const counts = severityCounts(findings);
+  return SEVERITY_ORDER.map((severity) => ({
+    severity,
+    label: severity.charAt(0).toUpperCase() + severity.slice(1),
+    count: counts[severity],
+  }));
 }
