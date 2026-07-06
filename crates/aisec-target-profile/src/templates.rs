@@ -63,6 +63,26 @@ pub fn template_for_provider(provider: TargetProvider) -> TargetProfile {
             None,
             "openai_chat_completion",
         ),
+        TargetProvider::OpenRouter => profile(
+            provider,
+            "openrouter",
+            "https://openrouter.ai/api/v1",
+            "/chat/completions",
+            HashMap::from([("Content-Type", "application/json")]),
+            r#"{
+  "model": "google/gemini-2.5-flash-lite",
+  "messages": [
+    { "role": "user", "content": "{{PROMPT}}" }
+  ],
+  "stream": false
+}"#,
+            Some("model"),
+            Some("stream"),
+            Some("messages"),
+            Some("tools"),
+            None,
+            "openai_chat_completion",
+        ),
         TargetProvider::AnthropicClaude => profile(
             provider,
             "anthropic",
@@ -288,6 +308,7 @@ pub fn list_provider_templates() -> Vec<TargetProfile> {
     use TargetProvider::*;
     [
         OpenAiCompatible,
+        OpenRouter,
         AnthropicClaude,
         GoogleGemini,
         AzureOpenAi,

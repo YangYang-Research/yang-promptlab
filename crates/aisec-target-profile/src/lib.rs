@@ -10,6 +10,7 @@ pub mod payload_strategy;
 pub mod planner;
 pub mod wizard_llm;
 pub mod wizard_plan;
+pub mod wizard_recommendations;
 pub mod prompt;
 pub mod serde_verified_at;
 pub mod templates;
@@ -25,6 +26,10 @@ pub use payload_strategy::{
 };
 pub use planner::{plan_from_target_profile, summary_for_api_endpoint};
 pub use wizard_llm::build_wizard_attack_plan_with_llm;
+pub use wizard_recommendations::{
+    build_attack_results_summary, generate_attack_recommendations_with_llm, AttackRecommendation,
+    AttackResultsSummary, FindingSummaryInput,
+};
 pub use wizard_plan::{
     adjust_wizard_attack_plan, active_categories_for_profile, apply_profile_mode_settings,
     build_deterministic_profile_modes, build_wizard_attack_plan, build_wizard_plan_summary,

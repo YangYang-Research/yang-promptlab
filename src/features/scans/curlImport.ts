@@ -243,6 +243,7 @@ function inferProvider(url: string, body: string | null): TargetProviderId {
   const b = (body ?? "").toLowerCase();
 
   if (u.includes("api.anthropic.com")) return "anthropic_claude";
+  if (u.includes("openrouter.ai")) return "openrouter";
   if (u.includes("generativelanguage.googleapis.com")) return "google_gemini";
   if (u.includes(".openai.azure.com")) return "azure_openai";
   if (u.includes("bedrock-runtime")) return "aws_bedrock";
@@ -404,6 +405,17 @@ function filterHeaders(headers: Record<string, string>): Record<string, string> 
   return filtered;
 }
 
+function providerImportDefaults(
+  provider: TargetProviderId,
+): Pick<TargetProfileFormState, "framework" | "verificationStrategy"> | null {
+  switch (provider) {
+    case "openrouter":
+      return { framework: "openrouter", verificationStrategy: "openai_chat_completion" };
+    default:
+      return null;
+  }
+}
+
 export function curlToProfilePatch(raw: string): CurlImportResult {
   const parsedResult = parseCurl(raw);
   if (!parsedResult.ok) {
@@ -416,6 +428,7 @@ export function curlToProfilePatch(raw: string): CurlImportResult {
   const provider = inferProvider(url, body);
   const requestTemplate = bodyToRequestTemplate(body);
   const fieldMapping = inferFieldMapping(body);
+  const providerDefaults = providerImportDefaults(provider);
 
   if (!requestTemplate.includes(PROMPT_PLACEHOLDER)) {
     return {
@@ -429,6 +442,7 @@ export function curlToProfilePatch(raw: string): CurlImportResult {
     patch: {
       ...endpointPatch,
       ...fieldMapping,
+      ...providerDefaults,
       provider,
       method,
       headersJson: JSON.stringify(filteredHeaders, null, 2),

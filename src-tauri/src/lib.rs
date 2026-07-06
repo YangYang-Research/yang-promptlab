@@ -272,6 +272,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::target_profile::target_profile_verify_ai,
             commands::target_profile::target_profile_get,
             commands::target_profile::planner_generate_from_profile,
+            commands::scan_recommendations::scan_recommendations_generate,
             commands::planner::planner_generate,
             commands::planner::attack_planner_adjust,
             commands::generator::generator_generate,

@@ -216,6 +216,31 @@ Set false for validation errors, auth failures rendered as JSON, static REST/CRU
         )
     }
 
+    pub fn attack_results_recommend_system() -> &'static str {
+        "You are Yazg, an AI security consultant for authorized red-team assessments in AISec. \
+         Produce concise, actionable remediation guidance from scan findings. \
+         Reply with a single compact JSON object only — no markdown, no prose."
+    }
+
+    pub fn attack_results_recommend_user(summary_json: &str) -> String {
+        format!(
+            r#"Review the attack scan findings summary below and produce prioritized remediation recommendations.
+
+Findings summary (JSON):
+{summary_json}
+
+Respond ONLY with valid JSON:
+{{"recommendations":[{{"title":"short action title","description":"1-3 sentences of concrete mitigation","priority":"critical|high|medium|low|info"}}]}}
+
+Rules:
+- Return 3 to 6 recommendations ordered by priority (most urgent first).
+- Tie each recommendation to patterns visible in the findings (categories, severities, titles).
+- Focus on guardrails, architecture, monitoring, and policy — not re-running the scan.
+- If there are zero findings, recommend continuous testing and baseline hardening.
+- Keep titles under 80 characters; descriptions under 280 characters each."#
+        )
+    }
+
     pub fn wizard_profile_repair(
         allowed: &str,
         previous_json: &str,

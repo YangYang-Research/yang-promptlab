@@ -2,6 +2,7 @@ export const PROMPT_PLACEHOLDER = "{{PROMPT}}";
 
 export type TargetProviderId =
   | "openai_compatible"
+  | "openrouter"
   | "anthropic_claude"
   | "google_gemini"
   | "azure_openai"
@@ -92,6 +93,7 @@ export type VerificationConsoleEntryDto = {
 
 export const PROVIDER_OPTIONS: Array<{ id: TargetProviderId; label: string }> = [
   { id: "openai_compatible", label: "OpenAI Compatible" },
+  { id: "openrouter", label: "OpenRouter" },
   { id: "anthropic_claude", label: "Anthropic Claude" },
   { id: "google_gemini", label: "Google Gemini" },
   { id: "azure_openai", label: "Azure OpenAI" },

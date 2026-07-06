@@ -5,6 +5,7 @@ use crate::types::{TargetCapabilities, TargetProfile, TargetProvider};
 pub fn default_capabilities_for_provider(provider: TargetProvider) -> TargetCapabilities {
     match provider {
         TargetProvider::OpenAiCompatible
+        | TargetProvider::OpenRouter
         | TargetProvider::AzureOpenAi
         | TargetProvider::GitHubCopilot
         | TargetProvider::OpenWebUi => TargetCapabilities {

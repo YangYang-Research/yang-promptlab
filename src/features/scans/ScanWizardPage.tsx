@@ -13,6 +13,7 @@ import { useToast } from "@/shared/notifications";
 import type { Project, Target } from "@/shared/types";
 
 import { ImportApiModal } from "./components/ImportApiModal";
+import { ReportExportDropdown } from "./components/ReportExportDropdown";
 import { ReviewAttackPlanStep } from "./steps/ReviewAttackPlanStep";
 import { AuthVerificationStep } from "./steps/AuthVerificationStep";
 import { ProjectStep } from "./steps/ProjectStep";
@@ -94,7 +95,7 @@ export function ScanWizardPage() {
     targetId: lockedTargetId,
     step: requestedStep,
   });
-  const { projects, targets, scans, loading, error, dispatch, actions } = useAppStore();
+  const { projects, targets, scans, findings, loading, error, dispatch, actions } = useAppStore();
   const { notify } = useToast();
   const deepLinkApplied = useRef(false);
   const deepLinkTargetId = useRef<string | null>(null);
@@ -590,7 +591,7 @@ export function ScanWizardPage() {
 
   const submittedStatuses = useScanStatuses(
     session.submittedScanId ? [session.submittedScanId] : [],
-    session.currentStep === 5 && session.submittedScanId !== null,
+    (session.currentStep === 5 || session.currentStep === 6) && session.submittedScanId !== null,
   );
   const submittedLiveStatus = session.submittedScanId
     ? submittedStatuses.get(session.submittedScanId)
@@ -603,27 +604,35 @@ export function ScanWizardPage() {
   const activeScanId = session.submittedScanId ?? session.draftScanId;
   const targetEndpointUrl =
     fullProfileUrl(session.targetProfile) || store.savedTarget?.url || "";
-  const pageHeaderTitle =
-    session.currentStep === 5 && activeScanId ? `Scan ID: ${activeScanId}` : "New Scan";
-  const pageHeaderDescription =
-    session.currentStep === 5 ? (
-      targetEndpointUrl ? (
-        <span className="wizard-planner-summary page-header__endpoint-summary">
-          <strong>AI API Endpoint:</strong>{" "}
-          <span className="wizard-planner-summary__url mono">{targetEndpointUrl}</span>
-        </span>
-      ) : (
-        "AI API Endpoint"
-      )
+  const showScanContextHeader =
+    (session.currentStep === 5 || session.currentStep === 6) && activeScanId !== null;
+  const pageHeaderTitle = showScanContextHeader
+    ? `Scan ID: ${activeScanId}`
+    : "New Scan";
+  const pageHeaderDescription = showScanContextHeader ? (
+    targetEndpointUrl ? (
+      <span className="wizard-planner-summary page-header__endpoint-summary">
+        <strong>AI API Endpoint:</strong>{" "}
+        <span className="wizard-planner-summary__url mono">{targetEndpointUrl}</span>
+      </span>
     ) : (
-      "Configure a new security scan"
-    );
+      "AI API Endpoint"
+    )
+  ) : (
+    "Configure a new security scan"
+  );
+  const resultsFindingsCount = useMemo(
+    () =>
+      session.submittedScanId
+        ? findings.filter((finding) => finding.scanId === session.submittedScanId).length
+        : 0,
+    [findings, session.submittedScanId],
+  );
   const showFooterNext =
     session.currentStep < 5 &&
     (session.currentStep !== 4 ||
       (draft.attackPlanGenerated && !plannerGenerating));
   const showStartScan = session.currentStep === 5 && session.submittedScanId === null;
-  const showFooterDone = session.currentStep === 6;
   const showViewResult =
     session.currentStep === 5 &&
     submittedStatus?.status === "completed" &&
@@ -640,7 +649,10 @@ export function ScanWizardPage() {
     submittedStatus !== null &&
     ["running", "paused", "pending"].includes(submittedStatus.status);
   const showAttackScanControls = attackScanActive;
-  const showHeaderCancel = !(session.currentStep === 5 && session.submittedScanId !== null);
+  const scanCompleted = submittedStatus?.status === "completed";
+  const showHeaderCancel =
+    !(session.currentStep === 5 && session.submittedScanId !== null) &&
+    !(session.currentStep === 6 && scanCompleted);
   const hideBack =
     session.currentStep === 6 ||
     (session.currentStep === 5 && session.submittedScanId !== null);
@@ -841,7 +853,12 @@ export function ScanWizardPage() {
     updateSession({ currentStep: (session.currentStep + 1) as WizardStepId });
   }
 
+  function goToResultsStep() {
+    updateSession({ currentStep: 6 });
+  }
+
   function handleBack() {
+    if (session.currentStep === 6) return;
     if (session.currentStep > 1) {
       void navigateToStep((session.currentStep - 1) as WizardStepId);
     }
@@ -1056,7 +1073,7 @@ export function ScanWizardPage() {
               targetProfile={session.targetProfile}
               attackPlan={session.attackPlan}
               submittedScanId={session.submittedScanId}
-              onViewResult={() => updateSession({ currentStep: 6 })}
+              onViewResult={goToResultsStep}
               onRetryScan={() => void handleRetryScan()}
               onClose={handleCancel}
             />
@@ -1066,14 +1083,10 @@ export function ScanWizardPage() {
           <p className="text-muted">Complete steps 1–4 before submitting the scan.</p>
         );
       case 6:
-        return session.submittedScanId && activeProjectId ? (
+        return session.submittedScanId ? (
           <ResultsStep
-            projectId={activeProjectId}
             scanId={session.submittedScanId}
-            onDone={() => {
-              clearWizardSession();
-              navigate("/");
-            }}
+            attackCategories={session.attackPlan?.categories}
           />
         ) : (
           <p className="text-muted">Submit a scan in step 5 to review results.</p>
@@ -1173,6 +1186,13 @@ export function ScanWizardPage() {
                 Import
               </Button>
             ) : null}
+            {session.currentStep === 6 && activeProjectId && session.submittedScanId ? (
+              <ReportExportDropdown
+                projectId={activeProjectId}
+                scanId={session.submittedScanId}
+                findingsCount={resultsFindingsCount}
+              />
+            ) : null}
           </div>
         </header>
 
@@ -1197,7 +1217,7 @@ export function ScanWizardPage() {
               </Button>
             )}
             {showViewResult && (
-              <Button variant="primary" onClick={() => updateSession({ currentStep: 6 })}>
+              <Button variant="primary" onClick={goToResultsStep}>
                 View Result
               </Button>
             )}
@@ -1223,17 +1243,6 @@ export function ScanWizardPage() {
                   : persistingTarget
                     ? "Saving target…"
                     : "Next"}
-              </Button>
-            )}
-            {showFooterDone && (
-              <Button
-                variant="primary"
-                onClick={() => {
-                  clearWizardSession();
-                  navigate("/");
-                }}
-              >
-                Done
               </Button>
             )}
           </div>

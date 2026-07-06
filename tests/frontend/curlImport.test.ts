@@ -74,4 +74,25 @@ describe("curlToProfilePatch", () => {
     expect(result.patch.conversationField).toBe("messages");
     expect(result.patch.verification?.verified).toBe(false);
   });
+
+  it("maps OpenRouter cURL into openrouter provider", () => {
+    const raw = `curl https://openrouter.ai/api/v1/chat/completions \\
+      -H "Content-Type: application/json" \\
+      -H "Authorization: Bearer sk-or-test" \\
+      -d '{
+        "model": "google/gemini-2.5-flash-lite",
+        "messages": [{ "role": "user", "content": "What is the meaning of life?" }]
+      }'`;
+
+    const result = curlToProfilePatch(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.patch.provider).toBe("openrouter");
+    expect(result.patch.framework).toBe("openrouter");
+    expect(result.patch.baseUrl).toBe("https://openrouter.ai");
+    expect(result.patch.path).toBe("/api/v1/chat/completions");
+    expect(result.patch.requestTemplate).toContain(PROMPT_PLACEHOLDER);
+    expect(result.patch.requestTemplate).toContain("google/gemini-2.5-flash-lite");
+  });
 });
