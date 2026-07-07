@@ -42,38 +42,32 @@ pub enum EvaluatorKind {
     Llm,
 }
 
-/// Hybrid judge execution mode.
+/// Hybrid judge execution mode (LLM-only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JudgeMode {
-    Deterministic,
     LocalLlm,
     RemoteLlm,
-    Consensus,
 }
 
 impl Default for JudgeMode {
     fn default() -> Self {
-        Self::Deterministic
+        Self::LocalLlm
     }
 }
 
 impl JudgeMode {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Deterministic => "deterministic",
             Self::LocalLlm => "local_llm",
             Self::RemoteLlm => "remote_llm",
-            Self::Consensus => "consensus",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "deterministic" => Some(Self::Deterministic),
             "local_llm" => Some(Self::LocalLlm),
             "remote_llm" => Some(Self::RemoteLlm),
-            "consensus" => Some(Self::Consensus),
             _ => None,
         }
     }
@@ -297,9 +291,6 @@ impl JudgeVerdict {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JudgeConfig {
     pub mode: JudgeMode,
-    pub enable_rules: bool,
-    pub enable_regex: bool,
-    pub enable_llm: bool,
     pub consensus_threshold: f32,
     pub min_confidence: f32,
     pub llm_max_tokens: u32,
@@ -309,10 +300,7 @@ pub struct JudgeConfig {
 impl Default for JudgeConfig {
     fn default() -> Self {
         Self {
-            mode: JudgeMode::Deterministic,
-            enable_rules: true,
-            enable_regex: true,
-            enable_llm: true,
+            mode: JudgeMode::LocalLlm,
             consensus_threshold: 0.55,
             min_confidence: 0.45,
             llm_max_tokens: 512,

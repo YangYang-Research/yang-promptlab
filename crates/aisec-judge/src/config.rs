@@ -170,7 +170,7 @@ fn default_temperature() -> f32 {
 impl Default for JudgeProviderConfig {
     fn default() -> Self {
         Self {
-            mode: JudgeMode::Deterministic,
+            mode: JudgeMode::LocalLlm,
             local: LocalProviderSettings::default(),
             remote: RemoteProviderSettings::default(),
             consensus_threshold: default_threshold(),
@@ -185,12 +185,6 @@ impl JudgeProviderConfig {
     pub fn to_engine_config(&self) -> crate::types::JudgeConfig {
         crate::types::JudgeConfig {
             mode: self.mode,
-            enable_rules: true,
-            enable_regex: true,
-            enable_llm: matches!(
-                self.mode,
-                JudgeMode::LocalLlm | JudgeMode::RemoteLlm | JudgeMode::Consensus
-            ),
             consensus_threshold: self.consensus_threshold,
             min_confidence: self.min_confidence,
             llm_max_tokens: self.llm_max_tokens,

@@ -10,7 +10,7 @@ use aisec_inference::{
     InferenceMode, InferenceProvider, InferenceRuntimeManager, InferenceSession,
     PromptRegistry, RemoteAdapterSettings,
 };
-use aisec_judge::{build_judge_engine_with_adapter, deterministic_engine, JudgeEngine, JudgeProviderConfig};
+use aisec_judge::{build_judge_engine_with_adapter, JudgeEngine, JudgeMode, JudgeProviderConfig};
 use aisec_models::{BuiltinCatalog, LocalModelManager, ModelEntry, ModelProvider};
 use aisec_planner::PlannerLlm;
 use aisec_generator::GeneratorLlm;
@@ -104,8 +104,11 @@ pub async fn build_judge_engine_from_gateway(
     runtime_manager: &mut RuntimeManager,
 ) -> CommandResult<JudgeEngine> {
     if !inference.is_ready() {
-        return Ok(deterministic_engine());
+        return Err(CommandError::invalid_input(
+            "AI runtime must be ready before judging scan results — configure and start AI Runtime",
+        ));
     }
+    let entry = model_entry(model_manager, inference)?;
     let mut session = open_gateway_session(
         data_dir,
         inference,
@@ -117,7 +120,12 @@ pub async fn build_judge_engine_from_gateway(
     let adapter = DefaultAiInferenceGateway::adapter_for(&mut session.inner)
         .await
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-    let config = JudgeProviderConfig::default();
+    let mut config = JudgeProviderConfig::default();
+    config.mode = if entry.provider == ModelProvider::Remote {
+        JudgeMode::RemoteLlm
+    } else {
+        JudgeMode::LocalLlm
+    };
     build_judge_engine_with_adapter(adapter, &config)
         .await
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
