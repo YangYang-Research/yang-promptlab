@@ -214,6 +214,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::domain::target_get,
             commands::domain::target_wizard_descriptor,
             commands::domain::target_update_descriptor,
+            commands::domain::target_delete,
             commands::domain::scan_create,
             commands::domain::scan_list,
             commands::domain::scan_get,

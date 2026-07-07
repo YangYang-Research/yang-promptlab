@@ -350,6 +350,8 @@ export const createTarget = (
   descriptor?: unknown,
 ) => invokeCommand<TargetDto>("target_create", { projectId, name, targetType, descriptor });
 
+export const deleteTarget = (id: string) => invokeCommand<void>("target_delete", { id });
+
 export const listScans = (projectId: string) =>
   invokeCommand<ScanDto[]>("scan_list", { projectId });
 

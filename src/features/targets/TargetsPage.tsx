@@ -23,6 +23,7 @@ import {
 import type { Project, ScanRun, Target } from "@/shared/types";
 
 import { AddTargetModal } from "./AddTargetModal";
+import { targetDisplayType } from "@/features/scans/targetProfile";
 
 type FlatTargetRow = Target & {
   projectName: string;
@@ -168,7 +169,7 @@ export function TargetsPage() {
                 <ListCard
                   key={target.id}
                   title={target.name}
-                  status={<Badge variant="info">{target.type}</Badge>}
+                  status={<Badge variant="info">{targetDisplayType(target)}</Badge>}
                   metadata={[
                     { label: "Project", value: target.projectName },
                     { label: "URL", value: <span className="mono text-sm">{target.url}</span> },

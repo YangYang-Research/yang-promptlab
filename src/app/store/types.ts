@@ -82,6 +82,7 @@ export type AppActions = {
     targetType: string,
     descriptor?: unknown,
   ) => Promise<Target>;
+  deleteTarget: (id: string) => Promise<void>;
   createScan: (
     projectId: string,
     name: string,

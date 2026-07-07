@@ -129,6 +129,7 @@ export function ScanWizardPage() {
   const wizardSaveTimerRef = useRef<number | null>(null);
   const authHydratedKeyRef = useRef<string | null>(null);
   const freshWizardKeyRef = useRef<string | null>(null);
+  const newTargetEntryKeyRef = useRef<string | null>(null);
 
   function appendWizardUrlParams(params: URLSearchParams) {
     if (lockedTargetId) params.set("targetId", lockedTargetId);
@@ -484,6 +485,22 @@ export function ScanWizardPage() {
       cancelled = true;
     };
   }, [lockedProjectId, storeProject, loading, dispatch]);
+
+  useEffect(() => {
+    if (entryStep !== 2 || lockedTargetId || !lockedProjectId) return;
+
+    const entryKey = `${lockedProjectId}|2`;
+    if (newTargetEntryKeyRef.current === entryKey) return;
+    newTargetEntryKeyRef.current = entryKey;
+
+    wizardDbBootstrap.current = false;
+    deepLinkApplied.current = true;
+    clearWizardSession();
+    const next = applyWizardEntryStep(createInitialSession(lockedProjectId), 2);
+    setSession(next);
+    saveWizardSession(next);
+    dispatch({ type: "SET_SELECTED_PROJECT", projectId: lockedProjectId });
+  }, [entryStep, lockedTargetId, lockedProjectId, dispatch]);
 
   useEffect(() => {
     if (lockedScanId) return;

@@ -39,6 +39,8 @@ export type Target = {
   name: string;
   url: string;
   type: TargetType;
+  /** Human label from saved target profile provider (e.g. OpenRouter). */
+  providerLabel: string | null;
   status: JobStatus;
   createdAt: string;
   lastScanAt: string | null;

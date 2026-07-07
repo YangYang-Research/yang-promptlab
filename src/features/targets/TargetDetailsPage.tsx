@@ -10,6 +10,7 @@ import {
   StatusBadge,
 } from "@/shared/components";
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
+import { targetDisplayType } from "@/features/scans/targetProfile";
 import {
   buildScanWizardUrl,
   peekWizardSession,
@@ -130,7 +131,7 @@ export function TargetDetailsPage() {
             <DetailRow label="Name" value={target.name} />
             <DetailRow label="URL" value={target.url} mono />
             <DetailRow label="Project" value={project?.name ?? "—"} />
-            <DetailRow label="Type" value={target.type} />
+            <DetailRow label="Type" value={targetDisplayType(target)} />
             <DetailRow label="Authentication" value={target.authType} />
             <DetailRow label="Status" value={target.status} />
           </div>

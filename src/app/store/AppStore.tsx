@@ -16,6 +16,7 @@ import {
   createScan as createScanCmd,
   createTarget as createTargetCmd,
   deleteProject as deleteProjectCmd,
+  deleteTarget as deleteTargetCmd,
   updateProject as updateProjectCmd,
   generateReport as generateReportCmd,
   listEndpoints,
@@ -290,6 +291,7 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
           throw appError;
         }
       },
+      deleteTarget: (id) => runMutation("deleteTarget", () => deleteTargetCmd(id)),
       createScan: (projectId, name, targetId, status) =>
         runMutation("createScan", () => createScanCmd(projectId, name, targetId, status)),
       generateReport: (projectId, scanId, format, kind) =>

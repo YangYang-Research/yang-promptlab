@@ -255,18 +255,11 @@ export function applyWizardEntryStep(
   if (!step) return session;
 
   if (step === 2) {
+    const projectId = session.selectedProjectId;
     return {
-      ...session,
+      ...createInitialSession(projectId),
       currentStep: 2,
-      draftScanId: null,
-      submittedScanId: null,
-      attackPlan: null,
-      attackPlanUi: createInitialAttackPlanUi(),
-      verificationLog: [],
-      targetProfile: {
-        ...session.targetProfile,
-        verification: createEmptyVerification(),
-      },
+      selectedProjectId: projectId,
     };
   }
 

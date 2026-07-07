@@ -3,6 +3,8 @@ import { Link, useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
+  ActionsDropdown,
+  type ActionsDropdownItem,
   Button,
   Card,
   ContentToolbar,
@@ -16,7 +18,8 @@ import {
 import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
 import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
 import { useViewPreference } from "@/shared/hooks/useViewPreference";
-import { pauseScan, resumeScan, stopScan } from "@/shared/ipc";
+import { pauseScan, resumeScan, stopScan, deleteScan } from "@/shared/ipc";
+import { toAppError } from "@/shared/errors/AppError";
 import { useToast } from "@/shared/notifications";
 import { formatDurationMs, formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import { buildScanWizardUrl } from "@/features/scans/wizardState";
@@ -49,6 +52,7 @@ export function ScansPage() {
   const [viewMode, setViewMode] = useViewPreference("scans");
   const [pageSize, setPageSize] = usePageSizePreference("scans");
   const [controlPending, setControlPending] = useState<string | null>(null);
+  const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
 
   const findingsByScan = useMemo(() => {
     const map = new Map<string, number>();
@@ -128,7 +132,81 @@ export function ScansPage() {
     [navigate],
   );
 
-  const tableColumns = [
+  const handleDeleteScan = useCallback(
+    async (scan: ScanRun) => {
+      const confirmed = window.confirm(
+        `Delete scan "${scan.name}"? This permanently removes findings and reports linked to this scan.`,
+      );
+      if (!confirmed) return;
+
+      setDeletingScanId(scan.id);
+      try {
+        await deleteScan(scan.id);
+        await actions.refresh();
+        notify("Scan deleted", "success");
+      } catch (err) {
+        notify(toAppError(err).message || "Failed to delete scan", "error");
+      } finally {
+        setDeletingScanId(null);
+      }
+    },
+    [actions, notify],
+  );
+
+  const buildScanActionItems = useCallback(
+    (scan: ScanRun): ActionsDropdownItem[] => {
+      const items: ActionsDropdownItem[] = [
+        {
+          id: "open",
+          label: scan.status === "draft" ? "Continue Setup" : "View Scan",
+          onClick: () => openScan(scan),
+        },
+      ];
+
+      if (scan.status === "running") {
+        items.push({
+          id: "pause",
+          label: "Pause Scan",
+          disabled: controlPending === scan.id,
+          onClick: () => void runControl(scan.id, "pause"),
+        });
+      }
+      if (scan.status === "paused") {
+        items.push({
+          id: "resume",
+          label: "Resume Scan",
+          disabled: controlPending === scan.id,
+          onClick: () => void runControl(scan.id, "resume"),
+        });
+      }
+      if (
+        scan.status === "running" ||
+        scan.status === "paused" ||
+        scan.status === "pending"
+      ) {
+        items.push({
+          id: "stop",
+          label: "Stop Scan",
+          disabled: controlPending === scan.id,
+          onClick: () => void runControl(scan.id, "stop"),
+        });
+      }
+
+      items.push({
+        id: "delete",
+        label: "Delete Scan",
+        tone: "danger",
+        disabled: deletingScanId === scan.id,
+        onClick: () => void handleDeleteScan(scan),
+      });
+
+      return items;
+    },
+    [controlPending, deletingScanId, handleDeleteScan, openScan, runControl],
+  );
+
+  const tableColumns = useMemo(
+    () => [
     {
       key: "id",
       header: "Scan ID",
@@ -168,7 +246,23 @@ export function ScansPage() {
       width: "100px",
       render: (scan: ScanRun) => scanDuration(scan),
     },
-  ];
+    {
+      key: "actions",
+      header: "",
+      width: "56px",
+      render: (scan: ScanRun) => (
+        <span onClick={(event) => event.stopPropagation()}>
+          <ActionsDropdown
+            label="Scan actions"
+            disabled={deletingScanId === scan.id}
+            items={buildScanActionItems(scan)}
+          />
+        </span>
+      ),
+    },
+  ],
+    [buildScanActionItems, deletingScanId, findingsByScan, projectName, targetLabel],
+  );
 
   return (
     <div className="page">
@@ -257,6 +351,13 @@ export function ScansPage() {
                           onPause={() => void runControl(scan.id, "pause")}
                           onResume={() => void runControl(scan.id, "resume")}
                           onStop={() => void runControl(scan.id, "stop")}
+                          actions={
+                            <ActionsDropdown
+                              label="Scan actions"
+                              disabled={deletingScanId === scan.id}
+                              items={buildScanActionItems(scan)}
+                            />
+                          }
                         />
                       ) : (
                         <ScanHistoryCard
@@ -264,6 +365,13 @@ export function ScansPage() {
                           findingsCount={findingsByScan.get(scan.id) ?? 0}
                           projectName={projectName(scan.projectId)}
                           targetName={targetLabel(scan.targetId)}
+                          actions={
+                            <ActionsDropdown
+                              label="Scan actions"
+                              disabled={deletingScanId === scan.id}
+                              items={buildScanActionItems(scan)}
+                            />
+                          }
                         />
                       )}
                     </Card>

@@ -68,6 +68,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 import { extractAuthType, extractTargetUrl } from "@/features/scans/scanDetailsHelpers";
+import { extractTargetProviderLabel } from "@/features/scans/targetProfile";
 
 function extractConfidence(evidence: unknown): number {
   const obj = asRecord(evidence);
@@ -117,6 +118,7 @@ export function mapTargets(targets: TargetDto[]): Target[] {
     name: t.name,
     url: extractTargetUrl(t.descriptor),
     type: coerceTargetType(t.target_type),
+    providerLabel: extractTargetProviderLabel(t.profile),
     status: "pending",
     createdAt: t.created_at,
     lastScanAt: null,

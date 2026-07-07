@@ -19,6 +19,7 @@ export {
   getTargetWizardDescriptor,
   updateTargetDescriptor,
   createTarget,
+  deleteTarget,
   listTargets,
   healthCheck,
   getAppInfo,

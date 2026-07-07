@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
+  ActionsDropdown,
+  type ActionsDropdownItem,
   Badge,
   Button,
   Card,
@@ -21,6 +23,7 @@ import { assertAiRuntimeReady } from "@/shared/runtime/aiRuntimeReadiness";
 import type { Project } from "@/shared/types";
 
 import { NewProjectModal } from "./NewProjectModal";
+import { EditProjectModal } from "./EditProjectModal";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, {
@@ -36,6 +39,8 @@ export function ProjectsPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [openingProject, setOpeningProject] = useState(false);
   const [viewMode, setViewMode] = useViewPreference("projects");
   const [pageSize, setPageSize] = usePageSizePreference("projects");
@@ -79,16 +84,46 @@ export function ProjectsPage() {
 
   const { page, setPage, pagination } = usePaginatedList(filtered, pageSize);
 
-  async function handleDelete(project: Project) {
-    try {
-      await actions.deleteProject(project.id);
-      notify(`Project "${project.name}" deleted`, "success");
-    } catch {
-      notify("Failed to delete project", "error");
-    }
-  }
+  const handleDelete = useCallback(
+    async (project: Project) => {
+      const confirmed = window.confirm(
+        `Delete project "${project.name}"? This cannot be undone.`,
+      );
+      if (!confirmed) return;
 
-  const columns = [
+      setDeletingProjectId(project.id);
+      try {
+        await actions.deleteProject(project.id);
+        notify(`Project "${project.name}" deleted`, "success");
+      } catch {
+        notify("Failed to delete project", "error");
+      } finally {
+        setDeletingProjectId(null);
+      }
+    },
+    [actions, notify],
+  );
+
+  const buildProjectActionItems = useCallback(
+    (project: Project): ActionsDropdownItem[] => [
+      {
+        id: "edit",
+        label: "Edit Project",
+        onClick: () => setEditingProject(project),
+      },
+      {
+        id: "delete",
+        label: "Delete Project",
+        tone: "danger",
+        disabled: deletingProjectId === project.id,
+        onClick: () => void handleDelete(project),
+      },
+    ],
+    [deletingProjectId, handleDelete],
+  );
+
+  const columns = useMemo(
+    () => [
     {
       key: "name",
       header: "Project",
@@ -138,16 +173,20 @@ export function ProjectsPage() {
     {
       key: "actions",
       header: "",
-      width: "80px",
+      width: "56px",
       render: (project: Project) => (
-        <span className="table-actions" onClick={(event) => event.stopPropagation()}>
-          <Button variant="danger" size="sm" onClick={() => void handleDelete(project)}>
-            Delete
-          </Button>
+        <span onClick={(event) => event.stopPropagation()}>
+          <ActionsDropdown
+            label="Project actions"
+            disabled={deletingProjectId === project.id}
+            items={buildProjectActionItems(project)}
+          />
         </span>
       ),
     },
-  ];
+  ],
+    [buildProjectActionItems, deletingProjectId],
+  );
 
   return (
     <div className="page">
@@ -217,9 +256,11 @@ export function ProjectsPage() {
               ]}
               footerMeta={`Updated: ${formatDate(project.updatedAt)}`}
               actions={
-                <Button variant="danger" size="sm" onClick={() => void handleDelete(project)}>
-                  Delete
-                </Button>
+                <ActionsDropdown
+                  label="Project actions"
+                  disabled={deletingProjectId === project.id}
+                  items={buildProjectActionItems(project)}
+                />
               }
               onClick={() => navigate(`/projects/${project.id}`)}
             />
@@ -246,6 +287,11 @@ export function ProjectsPage() {
       )}
 
       <NewProjectModal open={modalOpen} onClose={() => setModalOpen(false)} />
+      <EditProjectModal
+        open={editingProject !== null}
+        project={editingProject}
+        onClose={() => setEditingProject(null)}
+      />
     </div>
   );
 }

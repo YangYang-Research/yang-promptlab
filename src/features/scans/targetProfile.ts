@@ -320,3 +320,29 @@ export function deriveTargetNameFromProfile(form: TargetProfileFormState): strin
     return form.provider.replace(/_/g, " ");
   }
 }
+
+export function formatProviderLabel(providerId: string): string {
+  const match = PROVIDER_OPTIONS.find((option) => option.id === providerId);
+  if (match) return match.label;
+  return providerId.replace(/_/g, " ");
+}
+
+export function extractTargetProviderLabel(profile: unknown): string | null {
+  if (typeof profile !== "object" || profile === null || Array.isArray(profile)) {
+    return null;
+  }
+  const provider = (profile as Record<string, unknown>).provider;
+  if (typeof provider !== "string" || !provider.trim()) {
+    return null;
+  }
+  return formatProviderLabel(provider.trim());
+}
+
+export function targetDisplayType(target: {
+  type: string;
+  providerLabel: string | null;
+}): string {
+  if (target.providerLabel) return target.providerLabel;
+  if (target.type === "llm") return "LLM";
+  return target.type.charAt(0).toUpperCase() + target.type.slice(1);
+}

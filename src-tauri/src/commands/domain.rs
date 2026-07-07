@@ -149,6 +149,28 @@ pub async fn target_update_descriptor_op(
     Ok(TargetDto::from(target))
 }
 
+#[instrument(skip(state), fields(id = %id))]
+pub async fn target_delete_op(state: &AppState, id: String) -> CommandResult<()> {
+    let repos = state.repositories();
+    let target = repos.targets().get(&id).await.map_err(CommandError::from)?;
+
+    let scans = repos
+        .scans()
+        .list_by_project(&target.project_id)
+        .await
+        .map_err(CommandError::from)?;
+    for scan in scans
+        .iter()
+        .filter(|scan| scan.target_id.as_deref() == Some(id.as_str()))
+    {
+        let _ = state.jobs().request_cancel(&scan.id);
+    }
+
+    repos.targets().delete(&id).await.map_err(CommandError::from)?;
+    info!(%id, "target deleted");
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Scans
 // ---------------------------------------------------------------------------
@@ -442,6 +464,11 @@ pub async fn target_update_descriptor(
     descriptor: serde_json::Value,
 ) -> CommandResult<TargetDto> {
     target_update_descriptor_op(state.inner(), id, descriptor).await
+}
+
+#[tauri::command]
+pub async fn target_delete(state: State<'_, AppState>, id: String) -> CommandResult<()> {
+    target_delete_op(state.inner(), id).await
 }
 
 #[tauri::command]

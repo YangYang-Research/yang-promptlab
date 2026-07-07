@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
   ActionsDropdown,
+  type ActionsDropdownItem,
   Badge,
   Button,
   Card,
@@ -11,6 +12,7 @@ import {
   EmptyState,
   PageHeader,
   SeverityBadge,
+  TargetScanStatusBadge,
 } from "@/shared/components";
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import {
@@ -18,13 +20,13 @@ import {
   peekWizardSession,
   wizardResumeInputFromSession,
 } from "@/features/scans/wizardState";
+import { targetDisplayType } from "@/features/scans/targetProfile";
 import { buildTargetScanContext } from "@/shared/targetScanContext";
 import { resolveTargetScanAction } from "@/shared/targetScanAction";
 import { useToast } from "@/shared/notifications";
 import type { Severity, ScanRun, Target } from "@/shared/types";
 
 import { EditProjectModal } from "./EditProjectModal";
-import { AddTargetModal } from "@/features/targets/AddTargetModal";
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
 
@@ -38,7 +40,7 @@ export function ProjectDetailsPage() {
   const { projects, targets, scans, findings, reports, loading, actions } = useAppStore();
   const { notify } = useToast();
   const [editOpen, setEditOpen] = useState(false);
-  const [addTargetOpen, setAddTargetOpen] = useState(false);
+  const [deletingTargetId, setDeletingTargetId] = useState<string | null>(null);
 
   const project = projects.find((item) => item.id === projectId);
 
@@ -112,6 +114,33 @@ export function ProjectDetailsPage() {
     [projectReports],
   );
 
+  const handleDeleteTarget = useCallback(
+    async (target: Target) => {
+      const hasActiveScan = projectScans.some(
+        (scan) =>
+          scan.targetId === target.id &&
+          (scan.status === "running" || scan.status === "paused" || scan.status === "pending"),
+      );
+      const confirmed = window.confirm(
+        hasActiveScan
+          ? `Delete target "${target.name}"? Any active scan will be stopped. This cannot be undone.`
+          : `Delete target "${target.name}"? This cannot be undone.`,
+      );
+      if (!confirmed) return;
+
+      setDeletingTargetId(target.id);
+      try {
+        await actions.deleteTarget(target.id);
+        notify(`Target "${target.name}" deleted`, "success");
+      } catch {
+        notify("Failed to delete target", "error");
+      } finally {
+        setDeletingTargetId(null);
+      }
+    },
+    [actions, notify, projectScans],
+  );
+
   const targetColumns = useMemo(
     () => [
       {
@@ -125,6 +154,12 @@ export function ProjectDetailsPage() {
         ),
       },
       {
+        key: "type",
+        header: "Type",
+        width: "80px",
+        render: (target: Target) => <Badge variant="info">{targetDisplayType(target)}</Badge>,
+      },
+      {
         key: "auth",
         header: "Auth",
         width: "120px",
@@ -133,27 +168,33 @@ export function ProjectDetailsPage() {
       {
         key: "status",
         header: "Scan Status",
-        width: "120px",
-        render: (target: Target) => buildTargetScanContext(target.id, projectScans).scanStatusLabel,
+        width: "140px",
+        render: (target: Target) => (
+          <TargetScanStatusBadge
+            label={buildTargetScanContext(target.id, projectScans).scanStatusLabel}
+          />
+        ),
       },
       {
         key: "actions",
         header: "",
-        width: "130px",
+        width: "56px",
         render: (target: Target) => (
           <span onClick={(event) => event.stopPropagation()}>
-            <TargetScanActionButton
+            <TargetActionsDropdown
               target={target}
               projectId={projectId}
               scans={projectScans}
               wizardSession={wizardSession}
+              deleting={deletingTargetId === target.id}
               onNavigate={navigate}
+              onDelete={handleDeleteTarget}
             />
           </span>
         ),
       },
     ],
-    [projectScans, projectId, navigate, wizardSession],
+    [projectScans, projectId, navigate, wizardSession, deletingTargetId, handleDeleteTarget],
   );
 
   async function handleDelete() {
@@ -229,7 +270,11 @@ export function ProjectDetailsPage() {
         <Card className="detail-section">
           <div className="card__header-row">
             <h2 className="detail-section__title card__title">Recent Targets</h2>
-            <Button variant="secondary" size="sm" onClick={() => setAddTargetOpen(true)}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => navigate(buildScanWizardUrl(project.id, undefined, { step: 2 }))}
+            >
               Add Target
             </Button>
           </div>
@@ -252,7 +297,7 @@ export function ProjectDetailsPage() {
             {SEVERITIES.map((severity) => (
               <SummaryStat
                 key={severity}
-                label={severity.charAt(0).toUpperCase() + severity.slice(1)}
+                severity={severity}
                 value={severityCounts.get(severity) ?? 0}
               />
             ))}
@@ -299,12 +344,6 @@ export function ProjectDetailsPage() {
         project={project}
         onClose={() => setEditOpen(false)}
       />
-
-      <AddTargetModal
-        open={addTargetOpen}
-        defaultProjectId={project.id}
-        onClose={() => setAddTargetOpen(false)}
-      />
     </div>
   );
 }
@@ -318,27 +357,43 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function SummaryStat({ label, value }: { label: string; value: number }) {
+function SummaryStat({
+  label,
+  value,
+  severity,
+}: {
+  label?: string;
+  value: number;
+  severity?: Severity;
+}) {
   return (
     <div className="summary-stat">
-      <span className="summary-stat__label">{label}</span>
+      {severity ? (
+        <SeverityBadge severity={severity} />
+      ) : (
+        <span className="summary-stat__label">{label}</span>
+      )}
       <span className="summary-stat__value">{value}</span>
     </div>
   );
 }
 
-function TargetScanActionButton({
+function TargetActionsDropdown({
   target,
   projectId,
   scans,
   wizardSession,
+  deleting,
   onNavigate,
+  onDelete,
 }: {
   target: Target;
   projectId: string;
   scans: ScanRun[];
   wizardSession: ReturnType<typeof peekWizardSession>;
+  deleting: boolean;
   onNavigate: (path: string) => void;
+  onDelete: (target: Target) => void;
 }) {
   const action = useMemo(
     () =>
@@ -351,66 +406,63 @@ function TargetScanActionButton({
     [target.id, projectId, scans, wizardSession],
   );
 
-  if (action.kind === "view_scan") {
-    return (
-      <Button
-        variant="primary"
-        size="sm"
-        onClick={() =>
+  const items = useMemo(() => {
+    const scanItems: ActionsDropdownItem[] = [];
+
+    if (action.kind === "view_scan") {
+      scanItems.push({
+        id: "view-scan",
+        label: "View Scan",
+        onClick: () =>
           onNavigate(
             buildScanWizardUrl(projectId, target.id, {
               scanId: action.scanId,
               step: 5,
             }),
-          )
-        }
-      >
-        View Scan
-      </Button>
-    );
-  }
-
-  if (action.kind === "view_report") {
-    return (
-      <Button variant="primary" size="sm" onClick={() => onNavigate(`/scans/${action.scanId}`)}>
-        View Report
-      </Button>
-    );
-  }
-
-  if (action.kind === "retry") {
-    return (
-      <Button
-        variant="primary"
-        size="sm"
-        onClick={() =>
+          ),
+      });
+    } else if (action.kind === "view_report") {
+      scanItems.push({
+        id: "view-report",
+        label: "View Scan",
+        onClick: () => onNavigate(`/scans/${action.scanId}`),
+      });
+    } else if (action.kind === "retry") {
+      scanItems.push({
+        id: "retry",
+        label: "Retry Scan",
+        onClick: () =>
           onNavigate(
             buildScanWizardUrl(projectId, target.id, {
               step: action.step,
               scanId: action.scanId,
             }),
-          )
-        }
-      >
-        Retry Scan
-      </Button>
-    );
-  }
+          ),
+      });
+    } else {
+      scanItems.push({
+        id: "setup",
+        label: "Setup Scan",
+        onClick: () =>
+          onNavigate(
+            buildScanWizardUrl(projectId, target.id, {
+              step: action.step,
+              scanId: action.scanId,
+            }),
+          ),
+      });
+    }
 
-  return (
-    <Button
-      variant="primary"
-      size="sm"
-      onClick={() =>
-        onNavigate(
-          buildScanWizardUrl(projectId, target.id, {
-            step: action.step,
-            scanId: action.scanId,
-          }),
-        )
-      }
-    >
-      Setup Scan
-    </Button>
-  );
+    scanItems.push({
+      id: "delete",
+      label: "Delete Target",
+      tone: "danger",
+      disabled: deleting,
+      onClick: () => onDelete(target),
+    });
+
+    return scanItems;
+  }, [action, deleting, onDelete, onNavigate, projectId, target]);
+
+  return <ActionsDropdown items={items} disabled={deleting} label="Target actions" />;
 }

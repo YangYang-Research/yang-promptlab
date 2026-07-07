@@ -1,4 +1,5 @@
 import type { Severity } from "@/shared/types";
+import type { TargetScanStatusLabel } from "@/shared/targetScanContext";
 
 type BadgeProps = {
   children: string;
@@ -29,6 +30,17 @@ export function SeverityBadge({ severity }: SeverityBadgeProps) {
       {severity}
     </Badge>
   );
+}
+
+const targetScanStatusVariant: Record<TargetScanStatusLabel, BadgeProps["variant"]> = {
+  "Never Scanned": "muted",
+  Running: "info",
+  Completed: "success",
+  Failed: "danger",
+};
+
+export function TargetScanStatusBadge({ label }: { label: TargetScanStatusLabel }) {
+  return <Badge variant={targetScanStatusVariant[label]}>{label}</Badge>;
 }
 
 export function StatusBadge({ status }: { status: string }) {

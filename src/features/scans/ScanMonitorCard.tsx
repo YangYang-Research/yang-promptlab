@@ -13,6 +13,7 @@ type ScanMonitorCardProps = {
   onPause: () => void;
   onResume: () => void;
   onStop: () => void;
+  actions?: React.ReactNode;
 };
 
 function progressLabel(status: ScanStatusDto): string {
@@ -48,6 +49,7 @@ export function ScanMonitorCard({
   onPause,
   onResume,
   onStop,
+  actions,
 }: ScanMonitorCardProps) {
   const isActive = status.status === "running" || status.status === "paused";
   const canPause = status.status === "running";
@@ -63,8 +65,18 @@ export function ScanMonitorCard({
           </p>
           <p className="text-muted text-sm mono">{scan.id}</p>
         </div>
-        <StatusBadge status={status.status as ScanRun["status"]} />
-        {status.agent_mode && <Badge variant="info">Agent</Badge>}
+        <div className="scan-monitor-card__header-actions">
+          {actions && (
+            <div
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              {actions}
+            </div>
+          )}
+          <StatusBadge status={status.status as ScanRun["status"]} />
+          {status.agent_mode && <Badge variant="info">Agent</Badge>}
+        </div>
       </div>
 
       {isActive && (
@@ -151,6 +163,7 @@ type ScanHistoryCardProps = {
   findingsCount: number;
   projectName: string;
   targetName: string;
+  actions?: React.ReactNode;
 };
 
 export function ScanHistoryCard({
@@ -158,6 +171,7 @@ export function ScanHistoryCard({
   findingsCount,
   projectName,
   targetName,
+  actions,
 }: ScanHistoryCardProps) {
   return (
     <div className="scan-monitor-card scan-monitor-card--history">
@@ -168,7 +182,17 @@ export function ScanHistoryCard({
             {projectName} · {targetName}
           </p>
         </div>
-        <StatusBadge status={scan.status} />
+        <div className="scan-monitor-card__header-actions">
+          {actions && (
+            <div
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              {actions}
+            </div>
+          )}
+          <StatusBadge status={scan.status} />
+        </div>
       </div>
       <dl className="scan-monitor-card__metrics">
         <div>
