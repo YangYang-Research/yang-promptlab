@@ -442,7 +442,7 @@ function TargetActionsDropdown({
     } else {
       scanItems.push({
         id: "setup",
-        label: "Setup Scan",
+        label: "Continue Setup",
         onClick: () =>
           onNavigate(
             buildScanWizardUrl(projectId, target.id, {

@@ -55,7 +55,9 @@ export function StatusBadge({ status }: { status: string }) {
           ? "danger"
           : status === "cancelled"
             ? "muted"
-          : status === "pending" || status === "available"
+          : status === "pending"
+            ? "warning"
+          : status === "available"
             ? "muted"
             : "default";
 

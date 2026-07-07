@@ -1,13 +1,15 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
-  Button,
+  ActionsDropdown,
+  type ActionsDropdownItem,
   Card,
   EmptyState,
   PageHeader,
   StatusBadge,
+  TargetScanStatusBadge,
 } from "@/shared/components";
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import { targetDisplayType } from "@/features/scans/targetProfile";
@@ -21,6 +23,7 @@ import {
   formatTargetTimestamp,
 } from "@/shared/targetScanContext";
 import { resolveTargetScanAction } from "@/shared/targetScanAction";
+import { useToast } from "@/shared/notifications";
 import type { ScanRun } from "@/shared/types";
 
 function isAttackScan(scan: ScanRun): boolean {
@@ -30,7 +33,9 @@ function isAttackScan(scan: ScanRun): boolean {
 export function TargetDetailsPage() {
   const { targetId = "" } = useParams();
   const navigate = useNavigate();
-  const { targets, projects, scans, loading } = useAppStore();
+  const { targets, projects, scans, loading, actions } = useAppStore();
+  const { notify } = useToast();
+  const [deleting, setDeleting] = useState(false);
 
   const target = targets.find((item) => item.id === targetId);
   const project = projects.find((item) => item.id === target?.projectId);
@@ -65,6 +70,107 @@ export function TargetDetailsPage() {
     [targetScans],
   );
 
+  const handleDeleteTarget = useCallback(async () => {
+    if (!target) return;
+    const hasActiveScan = scans.some(
+      (scan) =>
+        scan.targetId === target.id &&
+        (scan.status === "running" || scan.status === "paused" || scan.status === "pending"),
+    );
+    const confirmed = window.confirm(
+      hasActiveScan
+        ? `Delete target "${target.name}"? Any active scan will be stopped. This cannot be undone.`
+        : `Delete target "${target.name}"? This cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    setDeleting(true);
+    try {
+      await actions.deleteTarget(target.id);
+      notify(`Target "${target.name}" deleted`, "success");
+      navigate(`/projects/${target.projectId}`);
+    } catch {
+      notify("Failed to delete target", "error");
+    } finally {
+      setDeleting(false);
+    }
+  }, [actions, navigate, notify, scans, target]);
+
+  const actionItems = useMemo((): ActionsDropdownItem[] => {
+    if (!target || !scanAction) return [];
+
+    const items: ActionsDropdownItem[] = [];
+
+    if (scanAction.kind === "view_scan") {
+      items.push({
+        id: "view-scan",
+        label: "View Scan",
+        onClick: () =>
+          navigate(
+            buildScanWizardUrl(target.projectId, target.id, {
+              scanId: scanAction.scanId,
+              step: 5,
+            }),
+          ),
+      });
+    } else if (scanAction.kind === "view_report") {
+      items.push({
+        id: "view-scan",
+        label: "View Scan",
+        onClick: () => navigate(`/scans/${scanAction.scanId}`),
+      });
+    } else if (scanAction.kind === "retry") {
+      items.push({
+        id: "retry",
+        label: "Retry Scan",
+        onClick: () =>
+          navigate(
+            buildScanWizardUrl(target.projectId, target.id, {
+              step: scanAction.step,
+              scanId: scanAction.scanId,
+            }),
+          ),
+      });
+    } else {
+      items.push({
+        id: "continue-setup",
+        label: "Continue Setup",
+        onClick: () =>
+          navigate(
+            buildScanWizardUrl(target.projectId, target.id, {
+              step: scanAction.step,
+              scanId: scanAction.scanId,
+            }),
+          ),
+      });
+    }
+
+    items.push({
+      id: "new-scan",
+      label: "New Scan",
+      onClick: () =>
+        navigate(buildScanWizardUrl(target.projectId, target.id, { step: 2 })),
+    });
+
+    if (project) {
+      items.push({
+        id: "view-project",
+        label: "View Project",
+        onClick: () => navigate(`/projects/${project.id}`),
+      });
+    }
+
+    items.push({
+      id: "delete",
+      label: "Delete Target",
+      tone: "danger",
+      disabled: deleting,
+      onClick: () => void handleDeleteTarget(),
+    });
+
+    return items;
+  }, [deleting, handleDeleteTarget, navigate, project, scanAction, target]);
+
   if (!target && !loading) {
     return (
       <div className="page">
@@ -89,38 +195,11 @@ export function TargetDetailsPage() {
         backOnly
         title={target.name}
         actions={
-          <div className="page-actions">
-            <Button
-              variant="primary"
-              onClick={() =>
-                navigate(
-                  buildScanWizardUrl(target.projectId, target.id, { step: 2 }),
-                )
-              }
-            >
-              New Scan
-            </Button>
-            {scanAction?.kind === "retry" && (
-              <Button
-                variant="secondary"
-                onClick={() =>
-                  navigate(
-                    buildScanWizardUrl(target.projectId, target.id, {
-                      step: scanAction.step,
-                      scanId: scanAction.scanId,
-                    }),
-                  )
-                }
-              >
-                Retry Scan
-              </Button>
-            )}
-            {project && (
-              <Button variant="secondary" onClick={() => navigate(`/projects/${project.id}`)}>
-                View Project
-              </Button>
-            )}
-          </div>
+          <ActionsDropdown
+            label="Target actions"
+            disabled={deleting}
+            items={actionItems}
+          />
         }
       />
 
@@ -133,14 +212,17 @@ export function TargetDetailsPage() {
             <DetailRow label="Project" value={project?.name ?? "—"} />
             <DetailRow label="Type" value={targetDisplayType(target)} />
             <DetailRow label="Authentication" value={target.authType} />
-            <DetailRow label="Status" value={target.status} />
+            <DetailRow label="Status" value={<StatusBadge status={target.status} />} />
           </div>
         </Card>
 
         <Card className="detail-section">
           <h2 className="detail-section__title">Scan Context</h2>
           <div className="detail-section__body">
-            <DetailRow label="Scan Status" value={scanContext.scanStatusLabel} />
+            <DetailRow
+              label="Scan Status"
+              value={<TargetScanStatusBadge label={scanContext.scanStatusLabel} />}
+            />
             <DetailRow label="Last Scan" value={formatTargetTimestamp(scanContext.lastScanTime)} />
             <DetailRow label="Latest Result" value={scanContext.latestScanResult} />
           </div>
@@ -181,7 +263,7 @@ function DetailRow({
   mono = false,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   mono?: boolean;
 }) {
   return (
