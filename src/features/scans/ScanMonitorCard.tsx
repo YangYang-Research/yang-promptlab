@@ -1,5 +1,6 @@
 import { Badge, Button, ProgressBar, StatusBadge } from "@/shared/components";
 import { formatScanProgressPercent } from "@/features/scans/scanProgressFormat";
+import { formatDurationMs, formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import type { ScanStatusDto } from "@/shared/ipc";
 import type { ScanRun } from "@/shared/types";
 

@@ -437,3 +437,6 @@ export const resumeScan = (scanId: string) =>
 
 export const stopScan = (scanId: string) =>
   invokeCommand<ScanStatusDto>("scan_stop", { scanId });
+
+export const deleteScan = (scanId: string) =>
+  invokeCommand<null>("scan_delete", { id: scanId });

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
+  ActionsDropdown,
   Badge,
   Button,
   Card,
@@ -37,7 +38,7 @@ import {
 } from "@/features/scans/scanPlaybook";
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
 import { buildScanWizardUrl } from "@/features/scans/wizardState";
-import { getScan, getTarget, resumeScan, type ScanDetailDto, type TargetDto } from "@/shared/ipc";
+import { getScan, getTarget, resumeScan, deleteScan, type ScanDetailDto, type TargetDto } from "@/shared/ipc";
 import { toAppError } from "@/shared/errors";
 import { useToast } from "@/shared/notifications";
 import type { DiscoveredEndpoint, Finding, ScanRun, Severity } from "@/shared/types";
@@ -63,6 +64,7 @@ export function ScanDetailsPage() {
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
   const [resumePending, setResumePending] = useState(false);
+  const [deletePending, setDeletePending] = useState(false);
 
   const scan = scans.find((item) => item.id === scanId) ?? (detail ? mapScanDetailToRun(detail) : null);
   const project = projects.find((item) => item.id === scan?.projectId);
@@ -163,6 +165,26 @@ export function ScanDetailsPage() {
     }
   }
 
+  async function handleDeleteScan() {
+    if (!scan) return;
+    const confirmed = window.confirm(
+      `Delete scan "${scan.name}"? This permanently removes findings and reports linked to this scan.`,
+    );
+    if (!confirmed) return;
+
+    setDeletePending(true);
+    try {
+      await deleteScan(scanId);
+      await actions.refresh();
+      notify("Scan deleted", "success");
+      navigate("/scans");
+    } catch (err) {
+      notify(toAppError(err).message || "Failed to delete scan", "error");
+    } finally {
+      setDeletePending(false);
+    }
+  }
+
   async function handleExport(format: ReportExportFormat) {
     setExporting(format);
     try {
@@ -233,49 +255,59 @@ export function ScanDetailsPage() {
         backOnly
         title={scan?.name ?? "Scan Details"}
         actions={
-          showResumeScan || showRetryScan || showViewScan ? (
-            <div className="page-actions">
-              {showResumeScan && (
-                <Button
-                  variant="primary"
-                  disabled={resumePending}
-                  onClick={() => void handleResumeScan()}
-                >
-                  {resumePending ? "Resuming…" : "Resume Scan"}
-                </Button>
-              )}
-              {showRetryScan && (
-                <Button
-                  variant="primary"
-                  onClick={() =>
-                    navigate(
-                      buildScanWizardUrl(scan.projectId, scan.targetId ?? undefined, {
-                        scanId: scan.id,
-                        step: 4,
-                      }),
-                    )
-                  }
-                >
-                  Retry Scan
-                </Button>
-              )}
-              {showViewScan && (
-                <Button
-                  variant={showRetryScan || showResumeScan ? "secondary" : "primary"}
-                  onClick={() =>
-                    navigate(
-                      buildScanWizardUrl(scan.projectId, scan.targetId ?? undefined, {
-                        scanId: scan.id,
-                        step: 5,
-                      }),
-                    )
-                  }
-                >
-                  View Scan
-                </Button>
-              )}
-            </div>
-          ) : undefined
+          <div className="page-actions">
+            {showResumeScan && (
+              <Button
+                variant="primary"
+                disabled={resumePending}
+                onClick={() => void handleResumeScan()}
+              >
+                {resumePending ? "Resuming…" : "Resume Scan"}
+              </Button>
+            )}
+            {showRetryScan && (
+              <Button
+                variant="primary"
+                onClick={() =>
+                  navigate(
+                    buildScanWizardUrl(scan!.projectId, scan!.targetId ?? undefined, {
+                      scanId: scan!.id,
+                      step: 4,
+                    }),
+                  )
+                }
+              >
+                Retry Scan
+              </Button>
+            )}
+            {showViewScan && (
+              <Button
+                variant={showRetryScan || showResumeScan ? "secondary" : "primary"}
+                onClick={() =>
+                  navigate(
+                    buildScanWizardUrl(scan!.projectId, scan!.targetId ?? undefined, {
+                      scanId: scan!.id,
+                      step: 5,
+                    }),
+                  )
+                }
+              >
+                View Scan
+              </Button>
+            )}
+            <ActionsDropdown
+              disabled={deletePending}
+              items={[
+                {
+                  id: "delete",
+                  label: "Delete Scan",
+                  tone: "danger",
+                  disabled: deletePending,
+                  onClick: () => void handleDeleteScan(),
+                },
+              ]}
+            />
+          </div>
         }
       />
 

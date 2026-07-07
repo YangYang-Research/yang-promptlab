@@ -197,6 +197,28 @@ pub async fn scan_get_op(state: &AppState, scan_id: String) -> CommandResult<Sca
     Ok(ScanDetailDto::from_scan(scan))
 }
 
+#[instrument(skip(state), fields(id = %id))]
+pub async fn scan_delete_op(state: &AppState, id: String) -> CommandResult<()> {
+    let _scan = state
+        .repositories()
+        .scans()
+        .get(&id)
+        .await
+        .map_err(CommandError::from)?;
+
+    let _ = state.jobs().request_cancel(&id);
+
+    state
+        .repositories()
+        .scans()
+        .delete(&id)
+        .await
+        .map_err(CommandError::from)?;
+
+    info!(%id, "scan deleted");
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Findings
 // ---------------------------------------------------------------------------
@@ -444,6 +466,11 @@ pub async fn scan_list(
 #[tauri::command]
 pub async fn scan_get(state: State<'_, AppState>, id: String) -> CommandResult<ScanDetailDto> {
     scan_get_op(state.inner(), id).await
+}
+
+#[tauri::command]
+pub async fn scan_delete(state: State<'_, AppState>, id: String) -> CommandResult<()> {
+    scan_delete_op(state.inner(), id).await
 }
 
 #[tauri::command]

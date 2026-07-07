@@ -265,7 +265,8 @@ a:hover {
 /* Top bar */
 .topbar {
   height: var(--topbar-height);
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 420px) 1fr;
   align-items: center;
   gap: 1rem;
   padding: 0 1.75rem;
@@ -275,33 +276,19 @@ a:hover {
 }
 
 .topbar__left {
-  display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-  min-width: 180px;
-}
-
-.topbar__title {
-  margin: 0;
-  font-size: 0.9375rem;
-  font-weight: 600;
-}
-
-.topbar__context {
-  font-size: 0.8125rem;
-  color: var(--text-muted);
+  min-width: 0;
 }
 
 .topbar__center {
-  flex: 1;
-  max-width: 420px;
+  width: 100%;
 }
 
 .topbar__right {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 1rem;
-  margin-left: auto;
+  min-width: 0;
 }
 
 .topbar__status {
@@ -5274,7 +5261,6 @@ a:hover {
 @media (max-width: 900px) {
   .settings-grid { grid-template-columns: 1fr; }
   .third-party-models__form { grid-template-columns: 1fr; }
-  .topbar__context { display: none; }
 }
 
 /* AI endpoint metadata (discovery wizard) */

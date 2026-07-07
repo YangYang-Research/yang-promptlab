@@ -41,6 +41,7 @@ export {
   pauseScan,
   resumeScan,
   stopScan,
+  deleteScan,
   type AppInfoResponse,
   type HealthResponse,
   type TargetDto,

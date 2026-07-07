@@ -17,14 +17,24 @@ import {
   Card,
   PageHeader,
   ProgressBar,
+  RefreshButton,
   SeverityBadge,
   StatCard,
 } from "@/shared/components";
 import { useToast } from "@/shared/notifications";
 
 export function DashboardPage() {
-  const { stats, findings, activity, attackRuns, projects, backendConnected } =
-    useAppStore();
+  const {
+    stats,
+    findings,
+    activity,
+    attackRuns,
+    projects,
+    backendConnected,
+    loading,
+    error,
+    actions,
+  } = useAppStore();
   const navigate = useNavigate();
   const { notify } = useToast();
   const counts = severityCounts(findings);
@@ -58,6 +68,10 @@ export function DashboardPage() {
     void loadRuntimeConfiguration();
   }, [loadRuntimeConfiguration]);
 
+  async function handleRefresh() {
+    await Promise.all([actions.refresh(), loadRuntimeConfiguration()]);
+  }
+
   async function handleNewProject() {
     if (openingProject) return;
     setOpeningProject(true);
@@ -80,13 +94,20 @@ export function DashboardPage() {
         title="Dashboard"
         description="Overview of your AI security testing workspace"
         actions={
-          <Button
-            variant="primary"
-            disabled={openingProject}
-            onClick={() => void handleNewProject()}
-          >
-            {openingProject ? "Checking AI Runtime…" : "New Project"}
-          </Button>
+          <>
+            <RefreshButton
+              loading={loading || runtimeLoading}
+              error={error}
+              onClick={() => void handleRefresh()}
+            />
+            <Button
+              variant="primary"
+              disabled={openingProject}
+              onClick={() => void handleNewProject()}
+            >
+              {openingProject ? "Checking AI Runtime…" : "New Project"}
+            </Button>
+          </>
         }
       />
 
