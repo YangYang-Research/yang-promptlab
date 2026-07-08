@@ -1,4 +1,5 @@
 import { invokeCommand } from "./invoke";
+import { withModelOperationTimeout } from "./modelOperationTimeout";
 import { saveThirdPartyModel, type ThirdPartyModelSaveRequest } from "./models";
 
 export type ThirdPartyProvider =
@@ -7,6 +8,7 @@ export type ThirdPartyProvider =
   | "gemini"
   | "azure"
   | "bedrock"
+  | "openrouter"
   | "custom";
 
 export type ThirdPartyModelForm = {
@@ -50,6 +52,7 @@ const KNOWN_THIRD_PARTY_PROVIDERS = new Set<ThirdPartyProvider>([
   "gemini",
   "azure",
   "bedrock",
+  "openrouter",
 ]);
 
 export const THIRD_PARTY_PROVIDERS: Array<{
@@ -98,6 +101,13 @@ export const THIRD_PARTY_PROVIDERS: Array<{
     regionPlaceholder: "us-east-1",
   },
   {
+    value: "openrouter",
+    label: "OpenRouter",
+    modelPlaceholder: "google/gemma-3-27b-it:free",
+    apiKeyEnv: "OPENROUTER_API_KEY",
+    baseUrlPlaceholder: "https://openrouter.ai/api/v1",
+  },
+  {
     value: "custom",
     label: "Custom",
     modelPlaceholder: "my-model",
@@ -123,7 +133,7 @@ export function thirdPartyModelTemplate(
     provider,
     customProviderName: "",
     model: "",
-    baseUrl: null,
+    baseUrl: provider === "openrouter" ? "https://openrouter.ai/api/v1" : null,
     apiKey: "",
     apiKeyEnv: meta?.apiKeyEnv ?? "OPENAI_API_KEY",
     awsSecretAccessKey: "",
@@ -162,6 +172,14 @@ export function validateThirdPartyModelForm(form: ThirdPartyModelForm): string |
 
   if (form.provider === "azure" && !form.baseUrl?.trim()) {
     return "Endpoint URL is required";
+  }
+
+  if (
+    form.provider === "openai" &&
+    !form.baseUrl?.trim() &&
+    form.model.includes("/")
+  ) {
+    return "Model IDs like vendor/model are OpenRouter-style. Select OpenRouter or set Base URL to https://openrouter.ai/api/v1";
   }
 
   if (form.provider === "custom" && !form.customProviderName.trim()) {
@@ -210,9 +228,12 @@ export function thirdPartyModelToSaveRequest(
 export function testThirdPartyModelConnectivity(
   form: ThirdPartyModelForm,
 ): Promise<ThirdPartyModelConnectivityResult> {
-  return invokeCommand<ThirdPartyModelConnectivityResult>("models_test_third_party", {
-    request: thirdPartyModelToSaveRequest(form),
-  });
+  return withModelOperationTimeout(
+    invokeCommand<ThirdPartyModelConnectivityResult>("models_test_third_party", {
+      request: thirdPartyModelToSaveRequest(form),
+    }),
+    "Connection test",
+  );
 }
 
 export function getThirdPartyModelEditForm(

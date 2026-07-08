@@ -268,7 +268,7 @@ export function ScansPage() {
     <div className="page">
       <PageHeader
         title="Scans"
-        description="Monitor background security scans"
+        description="Track progress and results for your security test runs"
         actions={
           <div className="page-actions">
             <RefreshButton loading={loading} error={error} onClick={() => void actions.refresh()} />
@@ -288,12 +288,7 @@ export function ScansPage() {
       {attackScans.length === 0 && !loading ? (
         <EmptyState
           title="No scans yet"
-          description="Configure a new scan in the wizard to start a background attack job."
-          action={
-            <Link to="/scans/new">
-              <Button variant="primary">New Scan</Button>
-            </Link>
-          }
+          description="Use the scan wizard to configure a target and start your first test."
         />
       ) : (
         <>

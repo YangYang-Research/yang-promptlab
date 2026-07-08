@@ -8,6 +8,7 @@ import {
   Card,
   ContentToolbar,
   DataTable,
+  EmptyState,
   ListCard,
   PageHeader,
   Pagination,
@@ -138,12 +139,11 @@ export function TargetsPage() {
         </Card>
       )}
 
-      {rows.length === 0 ? (
-        <Card>
-          <p className="text-muted">
-            {loading ? "Loading targets…" : "No targets yet. Add your first target."}
-          </p>
-        </Card>
+      {targets.length === 0 && !loading ? (
+        <EmptyState
+          title="No targets yet"
+          description="Add an endpoint, application, or model to start security testing."
+        />
       ) : (
         <>
           <ContentToolbar
@@ -160,7 +160,7 @@ export function TargetsPage() {
                 rows={pagination.items}
                 keyField="id"
                 onRowClick={(target) => navigate(`/targets/${target.id}`)}
-                emptyMessage={loading ? "Loading targets…" : "No targets found"}
+                emptyMessage={loading ? "Loading targets…" : "No targets match your filters"}
                 loading={loading && pagination.items.length === 0}
               />
             </Card>

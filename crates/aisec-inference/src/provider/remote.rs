@@ -49,6 +49,10 @@ impl RemoteProviderAdapter {
         }
     }
 
+    fn is_openrouter_endpoint(&self) -> bool {
+        self.base_url().to_ascii_lowercase().contains("openrouter.ai")
+    }
+
     fn timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(120)
     }
@@ -114,15 +118,39 @@ impl ProviderAdapter for RemoteProviderAdapter {
     }
 
     async fn health(&self) -> InferenceResult<bool> {
-        let sample = self
-            .complete(
-                Some(PromptRegistry::health_check_system()),
-                PromptRegistry::health_check_user(),
-                32,
-                0.0,
-            )
-            .await?;
-        Ok(!sample.trim().is_empty())
+        match self.settings.provider {
+            InferenceProvider::Anthropic => {
+                let sample = self
+                    .complete_anthropic(
+                        PromptRegistry::health_check_system(),
+                        PromptRegistry::health_check_user(),
+                        32,
+                        0.0,
+                    )
+                    .await?;
+                Ok(!sample.trim().is_empty())
+            }
+            InferenceProvider::Gemini => {
+                let sample = self
+                    .complete_gemini(PromptRegistry::health_check_user(), 32, 0.0)
+                    .await?;
+                Ok(!sample.trim().is_empty())
+            }
+            InferenceProvider::Bedrock => {
+                let sample = self
+                    .complete_bedrock(PromptRegistry::health_check_user(), 32, 0.0)
+                    .await?;
+                Ok(!sample.trim().is_empty())
+            }
+            InferenceProvider::OpenRouter => self.probe_openai_compatible_connectivity().await,
+            _ if self.is_openrouter_endpoint() => self.probe_openai_compatible_connectivity().await,
+            _ => {
+                let sample = self
+                    .complete_openai_compatible_user_only("Reply with exactly: OK", 64, 0.0)
+                    .await?;
+                Ok(!sample.trim().is_empty())
+            }
+        }
     }
 }
 
@@ -134,20 +162,46 @@ impl RemoteProviderAdapter {
         max_tokens: u32,
         temperature: f32,
     ) -> InferenceResult<String> {
+        let mut messages = Vec::new();
+        if !system.trim().is_empty() {
+            messages.push(json!({"role": "system", "content": system}));
+        }
+        messages.push(json!({"role": "user", "content": prompt}));
+        self.post_openai_compatible_chat(messages, max_tokens, temperature)
+            .await
+    }
+
+    async fn complete_openai_compatible_user_only(
+        &self,
+        prompt: &str,
+        max_tokens: u32,
+        temperature: f32,
+    ) -> InferenceResult<String> {
+        let messages = vec![json!({"role": "user", "content": prompt})];
+        self.post_openai_compatible_chat(messages, max_tokens, temperature)
+            .await
+    }
+
+    async fn post_openai_compatible_chat(
+        &self,
+        messages: Vec<serde_json::Value>,
+        max_tokens: u32,
+        temperature: f32,
+    ) -> InferenceResult<String> {
         let url = format!("{}/chat/completions", self.base_url());
-        let body = json!({
+        let mut body = json!({
             "model": self.settings.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": prompt}
-            ],
+            "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
         });
+        if self.settings.provider == InferenceProvider::OpenRouter || self.is_openrouter_endpoint() {
+            body["include_reasoning"] = json!(true);
+        }
 
         let mut req = self.client.post(url).json(&body);
         req = req.header("Authorization", format!("Bearer {}", self.settings.api_key));
-        if self.settings.provider == InferenceProvider::OpenRouter {
+        if self.settings.provider == InferenceProvider::OpenRouter || self.is_openrouter_endpoint() {
             req = req.header("HTTP-Referer", "https://aisec.local");
             req = req.header("X-Title", "PromptLab");
         }
@@ -171,11 +225,50 @@ impl RemoteProviderAdapter {
             .await
             .map_err(|e| InferenceError::Provider(e.to_string()))?;
 
-        value
-            .pointer("/choices/0/message/content")
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
-            .ok_or_else(|| InferenceError::Provider("remote llm returned empty content".into()))
+        extract_openai_chat_content(&value).ok_or_else(|| {
+            InferenceError::Provider("remote llm returned empty content".into())
+        })
+    }
+
+    async fn probe_openai_compatible_connectivity(&self) -> InferenceResult<bool> {
+        let url = format!("{}/chat/completions", self.base_url());
+        let body = json!({
+            "model": self.settings.model,
+            "messages": [{"role": "user", "content": "OK"}],
+            "max_tokens": 16,
+            "temperature": 0.0,
+            "reasoning": {"effort": "minimal"},
+        });
+
+        let mut req = self.client.post(url).json(&body);
+        req = req.header("Authorization", format!("Bearer {}", self.settings.api_key));
+        req = req.header("HTTP-Referer", "https://aisec.local");
+        req = req.header("X-Title", "PromptLab");
+
+        let response = req
+            .timeout(self.timeout())
+            .send()
+            .await
+            .map_err(|e| InferenceError::Provider(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(InferenceError::Provider(format!(
+                "remote llm returned {status}: {text}"
+            )));
+        }
+
+        let value: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| InferenceError::Provider(e.to_string()))?;
+
+        if extract_openai_chat_content(&value).is_some() {
+            return Ok(true);
+        }
+
+        Ok(connectivity_response_has_completion(&value))
     }
 
     async fn complete_anthropic(
@@ -358,5 +451,132 @@ impl RemoteProviderAdapter {
             .and_then(|v| v.as_str())
             .map(str::to_string)
             .ok_or_else(|| InferenceError::Provider("bedrock returned empty content".into()))
+    }
+}
+
+fn push_non_empty_text(out: &mut String, text: &str) {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(trimmed);
+}
+
+fn text_from_json_value(value: &serde_json::Value) -> Option<String> {
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            if let Some(parts) = value.as_array() {
+                let mut out = String::new();
+                for part in parts {
+                    if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                        push_non_empty_text(&mut out, text);
+                    }
+                }
+                if out.trim().is_empty() {
+                    None
+                } else {
+                    Some(out)
+                }
+            } else {
+                None
+            }
+        })
+}
+
+fn extract_openai_chat_content(value: &serde_json::Value) -> Option<String> {
+    let message = value.pointer("/choices/0/message")?;
+
+    for key in ["content", "reasoning", "reasoning_content"] {
+        if let Some(field) = message.get(key) {
+            if !field.is_null() {
+                if let Some(text) = text_from_json_value(field) {
+                    return Some(text);
+                }
+            }
+        }
+    }
+
+    if let Some(details) = message.get("reasoning_details").and_then(|v| v.as_array()) {
+        let mut out = String::new();
+        for item in details {
+            if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                push_non_empty_text(&mut out, text);
+            }
+        }
+        if !out.trim().is_empty() {
+            return Some(out);
+        }
+    }
+
+    if let Some(text) = value.pointer("/choices/0/text").and_then(|v| v.as_str()) {
+        if !text.trim().is_empty() {
+            return Some(text.to_string());
+        }
+    }
+
+    None
+}
+
+fn connectivity_response_has_completion(value: &serde_json::Value) -> bool {
+    let finish_ok = value
+        .pointer("/choices/0/finish_reason")
+        .and_then(|v| v.as_str())
+        .is_some_and(|reason| reason == "stop" || reason == "length");
+    let tokens = value
+        .pointer("/usage/completion_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    finish_ok && tokens > 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn extract_openai_chat_content_reads_string_content() {
+        let value = json!({"choices":[{"message":{"content":"hello"}}]});
+        assert_eq!(extract_openai_chat_content(&value).as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn extract_openai_chat_content_reads_reasoning_when_content_empty() {
+        let value = json!({"choices":[{"message":{"content":"","reasoning":"thinking"}}]});
+        assert_eq!(
+            extract_openai_chat_content(&value).as_deref(),
+            Some("thinking")
+        );
+    }
+
+    #[test]
+    fn extract_openai_chat_content_reads_array_content() {
+        let value = json!({"choices":[{"message":{"content":[{"type":"text","text":"hello"}]}}]});
+        assert_eq!(extract_openai_chat_content(&value).as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn extract_openai_chat_content_reads_reasoning_details() {
+        let value = json!({"choices":[{"message":{"content":null,"reasoning_details":[{"type":"reasoning.text","text":"thinking"}]}}]});
+        assert_eq!(
+            extract_openai_chat_content(&value).as_deref(),
+            Some("thinking")
+        );
+    }
+
+    #[test]
+    fn connectivity_response_has_completion_accepts_openrouter_usage() {
+        let value = json!({
+            "choices":[{"finish_reason":"stop","message":{"content":"hello"}}],
+            "usage":{"completion_tokens":12}
+        });
+        assert!(connectivity_response_has_completion(&value));
     }
 }

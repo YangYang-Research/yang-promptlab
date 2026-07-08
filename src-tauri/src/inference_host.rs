@@ -451,19 +451,36 @@ pub async fn test_remote_connectivity_only(
 
     let adapter = RemoteProviderAdapter::new(remote.clone());
     let started = std::time::Instant::now();
-    let ok = ProviderAdapter::health(&adapter).await.unwrap_or(false);
-    Ok(ConnectivityTestResult {
-        ok,
-        provider: remote.provider.as_str().into(),
-        model: entry.display_model_name(),
-        latency_ms: started.elapsed().as_millis() as u64,
-        message: if ok {
-            "Connection Successful".into()
-        } else {
-            "Connection Failed".into()
-        },
-        sample_response: None,
-    })
+    let latency_ms = || started.elapsed().as_millis() as u64;
+
+    let result = ProviderAdapter::health(&adapter).await;
+
+    match result {
+        Ok(true) => Ok(ConnectivityTestResult {
+            ok: true,
+            provider: remote.provider.as_str().into(),
+            model: entry.display_model_name(),
+            latency_ms: latency_ms(),
+            message: "Connection Successful".into(),
+            sample_response: None,
+        }),
+        Ok(false) => Ok(ConnectivityTestResult {
+            ok: false,
+            provider: remote.provider.as_str().into(),
+            model: entry.display_model_name(),
+            latency_ms: latency_ms(),
+            message: "Connection Failed: model returned an empty response".into(),
+            sample_response: None,
+        }),
+        Err(err) => Ok(ConnectivityTestResult {
+            ok: false,
+            provider: remote.provider.as_str().into(),
+            model: entry.display_model_name(),
+            latency_ms: latency_ms(),
+            message: format!("Connection Failed: {err}"),
+            sample_response: None,
+        }),
+    }
 }
 
 pub async fn test_connectivity_for_entry(

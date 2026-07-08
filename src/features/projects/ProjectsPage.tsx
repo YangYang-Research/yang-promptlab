@@ -10,6 +10,7 @@ import {
   Card,
   ContentToolbar,
   DataTable,
+  EmptyState,
   ListCard,
   PageHeader,
   Pagination,
@@ -213,78 +214,80 @@ export function ProjectsPage() {
         </Card>
       )}
 
-      <ContentToolbar
-        pageSize={pageSize}
-        onPageSizeChange={setPageSize}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
-      />
-
-      {viewMode === "table" ? (
-        <Card padding="none">
-          <DataTable
-            columns={columns}
-            rows={pagination.items}
-            keyField="id"
-            onRowClick={(project) => navigate(`/projects/${project.id}`)}
-            emptyMessage={loading ? "Loading projects…" : "No projects yet. Create your first project."}
-            loading={loading && pagination.items.length === 0}
-          />
-        </Card>
-      ) : (
-        <div className="list-card-grid">
-          {pagination.items.map((project) => (
-            <ListCard
-              key={project.id}
-              title={project.name}
-              status={
-                <Badge
-                  variant={
-                    project.status === "active"
-                      ? "success"
-                      : project.status === "draft"
-                        ? "muted"
-                        : "default"
-                  }
-                >
-                  {project.status}
-                </Badge>
-              }
-              metadata={[
-                { label: "Targets", value: project.targetCount },
-                { label: "Findings", value: project.findingCount },
-                { label: "Description", value: project.description || "—" },
-              ]}
-              footerMeta={`Updated: ${formatDate(project.updatedAt)}`}
-              actions={
-                <ActionsDropdown
-                  label="Project actions"
-                  disabled={deletingProjectId === project.id}
-                  items={buildProjectActionItems(project)}
-                />
-              }
-              onClick={() => navigate(`/projects/${project.id}`)}
-            />
-          ))}
-          {pagination.items.length === 0 && (
-            <Card>
-              <p className="text-muted">
-                {loading ? "Loading projects…" : "No projects yet. Create your first project."}
-              </p>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {filtered.length > 0 && (
-        <Pagination
-          page={page}
-          totalItems={pagination.totalItems}
-          rangeStart={pagination.rangeStart}
-          rangeEnd={pagination.rangeEnd}
-          totalPages={pagination.totalPages}
-          onPageChange={setPage}
+      {projects.length === 0 && !loading ? (
+        <EmptyState
+          title="No projects yet"
+          description="Create a project to organize assessments, targets, and scan results."
         />
+      ) : (
+        <>
+          <ContentToolbar
+            pageSize={pageSize}
+            onPageSizeChange={setPageSize}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+          />
+
+          {viewMode === "table" ? (
+            <Card padding="none">
+              <DataTable
+                columns={columns}
+                rows={pagination.items}
+                keyField="id"
+                onRowClick={(project) => navigate(`/projects/${project.id}`)}
+                emptyMessage={loading ? "Loading projects…" : "No projects match your search"}
+                loading={loading && pagination.items.length === 0}
+              />
+            </Card>
+          ) : (
+            <div className="list-card-grid">
+              {pagination.items.map((project) => (
+                <ListCard
+                  key={project.id}
+                  title={project.name}
+                  status={
+                    <Badge
+                      variant={
+                        project.status === "active"
+                          ? "success"
+                          : project.status === "draft"
+                            ? "muted"
+                            : "default"
+                      }
+                    >
+                      {project.status}
+                    </Badge>
+                  }
+                  metadata={[
+                    { label: "Targets", value: project.targetCount },
+                    { label: "Findings", value: project.findingCount },
+                    { label: "Description", value: project.description || "—" },
+                  ]}
+                  footerMeta={`Updated: ${formatDate(project.updatedAt)}`}
+                  actions={
+                    <ActionsDropdown
+                      label="Project actions"
+                      disabled={deletingProjectId === project.id}
+                      items={buildProjectActionItems(project)}
+                    />
+                  }
+                  onClick={() => navigate(`/projects/${project.id}`)}
+                />
+              ))}
+            </div>
+          )}
+
+          {filtered.length > 0 && (
+            <Pagination
+              page={page}
+              totalItems={pagination.totalItems}
+              rangeStart={pagination.rangeStart}
+              rangeEnd={pagination.rangeEnd}
+              totalPages={pagination.totalPages}
+              onPageChange={setPage}
+            />
+          )}
+        </>
       )}
 
       <NewProjectModal open={modalOpen} onClose={() => setModalOpen(false)} />
