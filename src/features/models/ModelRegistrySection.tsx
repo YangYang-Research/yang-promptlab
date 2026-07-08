@@ -5,6 +5,7 @@ import {
   Card,
   ContentToolbar,
   DataTable,
+  EmptyState,
   ListCard,
   Pagination,
 } from "@/shared/components";
@@ -32,7 +33,7 @@ function formatModelSize(model: ModelEntryDto): string {
   if (model.sizeGb > 0) {
     return `${model.sizeGb.toFixed(2)} GB`;
   }
-  return "—";
+  return "N/A";
 }
 
 function formatModelCapabilities(model: ModelEntryDto): string {
@@ -41,7 +42,7 @@ function formatModelCapabilities(model: ModelEntryDto): string {
     model.capabilities.completion && "Completion",
     model.capabilities.embeddings && "Embeddings",
   ].filter(Boolean);
-  return caps.length > 0 ? caps.join(", ") : "—";
+  return caps.length > 0 ? caps.join(", ") : "N/A";
 }
 
 function ModelTypeBadge({ model }: { model: ModelEntryDto }) {
@@ -249,8 +250,17 @@ export function ModelRegistrySection({
   ];
 
   return (
-    <section className="runtime-section">
-      <h2 className="runtime-section__title">Model Registry</h2>
+    <Card className="detail-section models-page__registry">
+      <div className="detail-section__header">
+        <div>
+          <h2 className="detail-section__title">Model registry</h2>
+          <p className="detail-section__hint">
+            {models.length === 0
+              ? "Add a catalog model, import a file, or register a remote provider."
+              : `${models.length} registered model${models.length === 1 ? "" : "s"}`}
+          </p>
+        </div>
+      </div>
 
       <ContentToolbar
         pageSize={pageSize}
@@ -260,14 +270,12 @@ export function ModelRegistrySection({
       />
 
       {viewMode === "table" ? (
-        <Card padding="none">
-          <DataTable
-            columns={columns}
-            rows={pagination.items}
-            keyField="id"
-            emptyMessage="No models registered yet."
-          />
-        </Card>
+        <DataTable
+          columns={columns}
+          rows={pagination.items}
+          keyField="id"
+          emptyMessage="No models registered yet."
+        />
       ) : (
         <div className="list-card-grid">
           {pagination.items.map((model) => (
@@ -277,7 +285,7 @@ export function ModelRegistrySection({
               status={<ModelRegistryBadges model={model} />}
               metadata={[
                 { label: "Provider", value: model.provider },
-                { label: "Version", value: model.version || "—" },
+                { label: "Version", value: model.version || "N/A" },
                 { label: "Size", value: formatModelSize(model) },
                 { label: "Capabilities", value: formatModelCapabilities(model) },
               ]}
@@ -286,9 +294,10 @@ export function ModelRegistrySection({
             />
           ))}
           {pagination.items.length === 0 && (
-            <Card>
-              <p className="text-muted">No models registered yet.</p>
-            </Card>
+            <EmptyState
+              title="No models yet"
+              description="Use Add Model to download from the catalog, import a GGUF file, or connect a remote provider."
+            />
           )}
         </div>
       )}
@@ -303,6 +312,6 @@ export function ModelRegistrySection({
           onPageChange={setPage}
         />
       )}
-    </section>
+    </Card>
   );
 }

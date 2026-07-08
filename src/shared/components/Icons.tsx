@@ -145,6 +145,28 @@ export function IconCloud({ className }: IconProps) {
   );
 }
 
+export function IconImport({ className }: IconProps) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path
+        d="M9 3.5v7M6.25 7.25 9 3.5l2.75 3.75"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4.5 14.5h9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function IconCheck({ className }: IconProps) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">

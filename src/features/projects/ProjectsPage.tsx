@@ -228,6 +228,7 @@ export function ProjectsPage() {
             keyField="id"
             onRowClick={(project) => navigate(`/projects/${project.id}`)}
             emptyMessage={loading ? "Loading projects…" : "No projects yet. Create your first project."}
+            loading={loading && pagination.items.length === 0}
           />
         </Card>
       ) : (

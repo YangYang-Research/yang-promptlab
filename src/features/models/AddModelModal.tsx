@@ -1,15 +1,13 @@
 import { useEffect, useState, type ComponentType } from "react";
 
-import { IconCloud, IconOnDevice, Modal } from "@/shared/components";
+import { IconCloud, IconImport, IconOnDevice, Modal } from "@/shared/components";
 import type { ModelCatalogEntryDto } from "@/shared/ipc/models";
 
-import { HuggingFaceModelCatalog } from "./HuggingFaceModelCatalog";
+import { HuggingFaceModelCatalog, ImportModelDetail } from "./HuggingFaceModelCatalog";
 import { ThirdPartyModelsPanel } from "./ThirdPartyModelsPanel";
 import type { ThirdPartyModelForm } from "@/shared/ipc/thirdPartyModels";
 
 export type AddModelTab = "public" | "third-party" | "import";
-
-type NavTab = Exclude<AddModelTab, "import">;
 
 type AddModelModalProps = {
   open: boolean;
@@ -35,7 +33,7 @@ type AddModelModalProps = {
 };
 
 const TABS: Array<{
-  id: NavTab;
+  id: AddModelTab;
   navLabel: string;
   panelTitle: string;
   hint: string;
@@ -43,22 +41,29 @@ const TABS: Array<{
 }> = [
   {
     id: "public",
-    navLabel: "On-device",
-    panelTitle: "Public Models",
-    hint: "Built-in Hugging Face GGUF catalog and local import",
+    navLabel: "Catalog",
+    panelTitle: "Public models",
+    hint: "Download GGUF models from the built-in Hugging Face catalog.",
     icon: IconOnDevice,
+  },
+  {
+    id: "import",
+    navLabel: "Import",
+    panelTitle: "Import model",
+    hint: "Register a local .gguf file or extract one from a .zip package.",
+    icon: IconImport,
   },
   {
     id: "third-party",
     navLabel: "Remote",
-    panelTitle: "Third-party Providers",
-    hint: "Register cloud LLM providers for remote inference. Credentials are stored securely in the OS keychain when available.",
+    panelTitle: "Third-party providers",
+    hint: "Connect cloud LLM providers. Credentials use the OS keychain when available.",
     icon: IconCloud,
   },
 ];
 
-function resolveNavTab(initialTab?: AddModelTab): NavTab {
-  if (initialTab === "third-party") return "third-party";
+function resolveTab(initialTab?: AddModelTab): AddModelTab {
+  if (initialTab === "third-party" || initialTab === "import") return initialTab;
   return "public";
 }
 
@@ -84,17 +89,26 @@ export function AddModelModal({
   editingModelId = null,
   modalTitle = "Add Model",
 }: AddModelModalProps) {
-  const [tab, setTab] = useState<NavTab>(resolveNavTab(initialTab));
-  const [selectImport, setSelectImport] = useState(initialTab === "import");
+  const [tab, setTab] = useState<AddModelTab>(resolveTab(initialTab));
 
   useEffect(() => {
     if (!open) return;
-    setTab(resolveNavTab(initialTab));
-    setSelectImport(initialTab === "import");
+    setTab(resolveTab(initialTab));
   }, [open, initialTab]);
 
   const isEditing = Boolean(editingModelId);
   const selectedTab = TABS.find((entry) => entry.id === tab) ?? TABS[0];
+
+  const importFormProps = {
+    backendConnected,
+    importName,
+    importPath,
+    importBusy,
+    onImportNameChange,
+    onImportPathChange,
+    onBrowseImport,
+    onImport,
+  };
 
   if (isEditing) {
     return (
@@ -121,55 +135,39 @@ export function AddModelModal({
             {TABS.map((entry) => {
               const NavIcon = entry.icon;
               return (
-              <button
-                key={entry.id}
-                type="button"
-                className={`add-model-modal__nav-item ${tab === entry.id ? "add-model-modal__nav-item--active" : ""}`}
-                onClick={() => {
-                  setTab(entry.id);
-                  setSelectImport(false);
-                }}
-              >
-                <NavIcon className="add-model-modal__nav-icon" />
-                <span>{entry.navLabel}</span>
-              </button>
+                <button
+                  key={entry.id}
+                  type="button"
+                  className={`add-model-modal__nav-item ${tab === entry.id ? "add-model-modal__nav-item--active" : ""}`}
+                  onClick={() => setTab(entry.id)}
+                >
+                  <NavIcon className="add-model-modal__nav-icon" />
+                  <span>{entry.navLabel}</span>
+                </button>
               );
             })}
           </nav>
 
           <div className="add-model-modal__panel">
-            <div className="add-model-modal__panel-header">
-              <h3 className="add-model-modal__panel-title">{selectedTab.panelTitle}</h3>
-              <p className="text-muted text-sm">{selectedTab.hint}</p>
+            <div className="detail-section__header add-model-modal__panel-intro">
+              <div>
+                <h3 className="add-model-modal__panel-title">{selectedTab.panelTitle}</h3>
+                <p className="detail-section__hint">{selectedTab.hint}</p>
+              </div>
             </div>
 
             {tab === "public" && (
-              <>
-                <p className="text-muted text-sm">
-                  Built-in GGUF catalog from <code>resources/models.json</code>. Click a card for
-                  details; use <strong>+</strong> or <strong>Add Model</strong> to download.
-                </p>
-                <HuggingFaceModelCatalog
-                  catalog={catalog}
-                  installedNames={installedNames}
-                  downloadingId={downloadingId}
-                  installingId={installingId}
-                  backendConnected={backendConnected}
-                  onInstall={onInstall}
-                  initialSelectImport={selectImport}
-                  importForm={{
-                    backendConnected,
-                    importName,
-                    importPath,
-                    importBusy,
-                    onImportNameChange,
-                    onImportPathChange,
-                    onBrowseImport,
-                    onImport,
-                  }}
-                />
-              </>
+              <HuggingFaceModelCatalog
+                catalog={catalog}
+                installedNames={installedNames}
+                downloadingId={downloadingId}
+                installingId={installingId}
+                backendConnected={backendConnected}
+                onInstall={onInstall}
+              />
             )}
+
+            {tab === "import" && <ImportModelDetail {...importFormProps} />}
 
             {tab === "third-party" && (
               <ThirdPartyModelsPanel

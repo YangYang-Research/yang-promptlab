@@ -58,8 +58,8 @@ function AppBootstrap() {
       <div className="boot-screen">
         <div className="boot-screen__logo" aria-hidden="true">
           <svg viewBox="0 0 48 48" width="48" height="48">
-            <rect width="48" height="48" rx="12" fill="#2563eb" />
-            <path d="M12 30l6-12 6 7 6-14 6 19" stroke="#fff" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            <rect width="48" height="48" rx="12" fill="#2dd4bf" />
+            <path d="M12 30l6-12 6 7 6-14 6 19" stroke="#042f2e" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
         <h1 className="boot-screen__title">PromptLab</h1>

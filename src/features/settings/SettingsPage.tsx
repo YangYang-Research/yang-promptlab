@@ -1,31 +1,56 @@
-import { useEffect, useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ask } from "@tauri-apps/plugin-dialog";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Button, Card, PageHeader, Select } from "@/shared/components";
+import { Button, Card, PageHeader, Select, Badge } from "@/shared/components";
 import type { AppSettings } from "@/app/store/types";
 import { toAppError } from "@/shared/errors";
 import { clearAllAppData } from "@/shared/ipc/app";
-import { getLogsFolderPath } from "@/shared/ipc/environment";
-import {
-  securityAudit,
-  securityMigrateSecrets,
-  type SecretMigrationAudit,
-} from "@/shared/ipc/security";
 
 import { EnvironmentsPanel } from "./EnvironmentsPanel";
+import { RuntimeInferencePanel } from "./RuntimeInferencePanel";
 import { TroubleshootingPanel } from "./TroubleshootingPanel";
 
-type SettingsTab = "general" | "troubleshooting" | "security" | "environments" | "about";
+type SettingsTab = "general" | "ai" | "storage" | "diagnostics" | "about";
 
-const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
-  { id: "general", label: "General" },
-  { id: "troubleshooting", label: "Troubleshooting" },
-  { id: "security", label: "Security" },
-  { id: "environments", label: "Environments" },
-  { id: "about", label: "About" },
+const SETTINGS_SECTIONS: {
+  id: SettingsTab;
+  label: string;
+  hint: string;
+}[] = [
+  { id: "general", label: "General", hint: "Theme and privacy" },
+  { id: "ai", label: "AI Runtime", hint: "Model and inference" },
+  { id: "storage", label: "Data & storage", hint: "Paths and reset" },
+  { id: "diagnostics", label: "Diagnostics", hint: "Logs and health" },
+  { id: "about", label: "About", hint: "Version info" },
 ];
+
+type SettingsSectionProps = {
+  title: string;
+  description?: string;
+  variant?: "default" | "danger";
+  children: ReactNode;
+};
+
+function SettingsSection({
+  title,
+  description,
+  variant = "default",
+  children,
+}: SettingsSectionProps) {
+  return (
+    <section
+      className={`settings-section ${variant === "danger" ? "settings-section--danger" : ""}`}
+    >
+      <header className="settings-section__header">
+        <h2 className="settings-section__title">{title}</h2>
+        {description ? <p className="settings-section__lead">{description}</p> : null}
+      </header>
+      <div className="settings-section__body">{children}</div>
+    </section>
+  );
+}
 
 function clearBrowserAppStorage() {
   if (typeof window === "undefined") return;
@@ -71,109 +96,21 @@ function ClearAllDataCard({ backendConnected }: { backendConnected: boolean }) {
 
   return (
     <Card className="settings-danger-card">
-      <h3 className="card__title">Data</h3>
       <p className="text-muted text-sm">
         Remove all application data from this device and restart PromptLab with a fresh workspace.
       </p>
       {error ? <p className="text-danger text-sm">{error}</p> : null}
-      <Button
-        variant="danger"
-        disabled={!backendConnected || busy}
-        onClick={() => void handleClearAllData()}
-      >
-        {busy ? "Clearing…" : "Clear All Data"}
-      </Button>
+      <div className="settings-section__actions">
+        <Button
+          variant="danger"
+          disabled={!backendConnected || busy}
+          onClick={() => void handleClearAllData()}
+        >
+          {busy ? "Clearing…" : "Clear All Data"}
+        </Button>
+      </div>
     </Card>
   );
-}
-
-function SecuritySecretsCard({ backendConnected }: { backendConnected: boolean }) {
-  const [audit, setAudit] = useState<SecretMigrationAudit | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [lastMigrated, setLastMigrated] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!backendConnected) {
-      setAudit(null);
-      return;
-    }
-    void securityAudit()
-      .then(setAudit)
-      .catch(() => setAudit(null));
-  }, [backendConnected, lastMigrated]);
-
-  async function handleMigrate() {
-    setBusy(true);
-    setError(null);
-    try {
-      const report = await securityMigrateSecrets();
-      setAudit(report.auditAfter);
-      setLastMigrated(
-        report.authMigrated +
-          report.targetsMigrated +
-          report.storageMigrated +
-          report.judgeMigrated,
-      );
-    } catch (err) {
-      setError(toAppError(err).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const legacyCount = audit?.legacyCount ?? 0;
-
-  return (
-    <>
-      <p className="text-muted text-sm">
-        Move plaintext credentials from targets, auth profiles, sessions, and legacy judge config into the
-        OS keychain and encrypted session vault.
-      </p>
-      {!backendConnected ? (
-        <p className="text-muted text-sm">Connect to the Tauri backend to audit secrets.</p>
-      ) : audit ? (
-        <dl className="about-list">
-          <div>
-            <dt>Legacy records</dt>
-            <dd>{legacyCount === 0 ? "None" : legacyCount}</dd>
-          </div>
-          {legacyCount > 0 ? (
-            <>
-              <div>
-                <dt>Targets</dt>
-                <dd>{audit.targetsLegacy}</dd>
-              </div>
-              <div>
-                <dt>Auth profiles</dt>
-                <dd>{audit.authProfilesLegacy}</dd>
-              </div>
-              <div>
-                <dt>Sessions</dt>
-                <dd>{audit.sessionsLegacy + audit.sessionStorageLegacy}</dd>
-              </div>
-              <div>
-                <dt>Judge config</dt>
-                <dd>{audit.judgeConfigLegacy}</dd>
-              </div>
-            </>
-          ) : null}
-        </dl>
-      ) : null}
-      {error ? <p className="text-danger text-sm">{error}</p> : null}
-      <Button
-        variant="secondary"
-        disabled={!backendConnected || busy || legacyCount === 0}
-        onClick={() => void handleMigrate()}
-      >
-        {busy ? "Migrating…" : "Migrate Secrets"}
-      </Button>
-    </>
-  );
-}
-
-function TroubleshootingTab({ backendConnected }: { backendConnected: boolean }) {
-  return <TroubleshootingPanel backendConnected={backendConnected} />;
 }
 
 export function SettingsPage() {
@@ -188,140 +125,144 @@ export function SettingsPage() {
     <div className="page settings-page">
       <PageHeader
         title="Settings"
-        description="Application preferences and workspace configuration"
+        description="Preferences, workspace paths, and diagnostics for this device"
       />
 
-      <div className="settings-tabs" role="tablist" aria-label="Settings sections">
-        {SETTINGS_TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === tab.id}
-            className={`settings-tabs__btn ${activeTab === tab.id ? "settings-tabs__btn--active" : ""}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="Settings sections">
+          {SETTINGS_SECTIONS.map((section) => (
+            <button
+              key={section.id}
+              type="button"
+              className={`settings-nav__btn ${activeTab === section.id ? "settings-nav__btn--active" : ""}`}
+              aria-current={activeTab === section.id ? "page" : undefined}
+              onClick={() => setActiveTab(section.id)}
+            >
+              <span className="settings-nav__label">{section.label}</span>
+              <span className="settings-nav__hint">{section.hint}</span>
+            </button>
+          ))}
+        </nav>
 
-      {activeTab === "general" && (
-        <div className="settings-tab-panel">
-          <div className="settings-grid">
-            <Card>
-              <h3 className="card__title">Appearance</h3>
-              <div className="settings-field">
-                <label htmlFor="theme">Theme</label>
-                <Select
-                  id="theme"
-                  value={settings.theme}
-                  onChange={(e) => update("theme", e.target.value as AppSettings["theme"])}
-                >
-                  <option value="dark">Dark</option>
-                  <option value="light">Light</option>
-                  <option value="system">System</option>
-                </Select>
-              </div>
-            </Card>
-
-            <Card>
-              <h3 className="card__title">AI Runtime</h3>
-              <p className="text-muted text-sm">
-                All AI features (judge, planner, payload generator) use the single AI Runtime
-                configuration. Choose local llama.cpp or a third-party API model on the AI Runtime
-                page.
-              </p>
-              <Link className="button button--secondary" to="/runtime">
-                Open AI Runtime
-              </Link>
-            </Card>
-
-            <Card>
-              <h3 className="card__title">Security Testing</h3>
-              <label className="settings-toggle">
-                <input
-                  type="checkbox"
-                  checked={settings.offlineMode}
-                  onChange={(e) => update("offlineMode", e.target.checked)}
-                />
-                <span>Offline mode (local models only)</span>
-              </label>
-              <label className="settings-toggle">
-                <input
-                  type="checkbox"
-                  checked={settings.autoJudge}
-                  onChange={(e) => update("autoJudge", e.target.checked)}
-                />
-                <span>Auto-run AI judge after attacks (uses AI Runtime)</span>
-              </label>
-              <label className="settings-toggle">
-                <input
-                  type="checkbox"
-                  checked={settings.telemetry}
-                  onChange={(e) => update("telemetry", e.target.checked)}
-                />
-                <span>Anonymous usage telemetry</span>
-              </label>
-            </Card>
-
-            <ClearAllDataCard backendConnected={backendConnected} />
-          </div>
-        </div>
-      )}
-
-      {activeTab === "troubleshooting" && (
-        <TroubleshootingTab backendConnected={backendConnected} />
-      )}
-
-      {activeTab === "security" && (
-        <div className="settings-tab-panel">
-          <div className="settings-grid">
-            <Card>
-              <h3 className="card__title">Secret Migration</h3>
-              <SecuritySecretsCard backendConnected={backendConnected} />
-            </Card>
-          </div>
-        </div>
-      )}
-
-      {activeTab === "environments" && (
-        <EnvironmentsPanel backendConnected={backendConnected} />
-      )}
-
-      {activeTab === "about" && (
-        <div className="settings-tab-panel">
-          <div className="settings-grid">
-            <Card>
-              <h3 className="card__title">About PromptLab</h3>
-              <dl className="about-list">
-                <div>
-                  <dt>Application</dt>
-                  <dd>PromptLab Desktop v0.1.0</dd>
-                </div>
-                <div>
-                  <dt>Backend</dt>
-                  <dd>
-                    {backendConnected
-                      ? `Connected (v${backendVersion})`
-                      : "Mock mode — Tauri IPC unavailable"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Platform</dt>
-                  <dd>Offline-first AI Security Testing Platform</dd>
-                </div>
-              </dl>
-              <Button
-                variant="ghost"
-                onClick={() => void getLogsFolderPath().then((path) => navigator.clipboard.writeText(path))}
+        <div className="settings-content">
+          {activeTab === "general" && (
+            <div className="settings-tab-panel settings-sections">
+              <SettingsSection
+                title="Appearance"
+                description="Choose how PromptLab looks on this device."
               >
-                View Logs
-              </Button>
-            </Card>
-          </div>
+                <Card>
+                  <div className="settings-field settings-field--last">
+                    <label htmlFor="theme">Theme</label>
+                    <Select
+                      id="theme"
+                      value={settings.theme}
+                      onChange={(e) => update("theme", e.target.value as AppSettings["theme"])}
+                    >
+                      <option value="dark">Dark</option>
+                      <option value="light">Light</option>
+                      <option value="system">System</option>
+                    </Select>
+                  </div>
+                </Card>
+              </SettingsSection>
+
+              <SettingsSection
+                title="Privacy"
+                description="Control optional data sent outside this device."
+              >
+                <Card>
+                  <label className="settings-toggle settings-toggle--disabled">
+                    <input type="checkbox" disabled checked={false} readOnly />
+                    <span>Anonymous usage telemetry</span>
+                    <Badge variant="muted">Coming soon</Badge>
+                  </label>
+                </Card>
+              </SettingsSection>
+            </div>
+          )}
+
+          {activeTab === "ai" && (
+            <div className="settings-tab-panel settings-sections">
+              <SettingsSection
+                title="AI runtime"
+                description="Judge, planner, and payload generation share one runtime configuration."
+              >
+                <Card>
+                  <p className="text-muted text-sm">
+                    Configure local llama.cpp or a third-party API model on the AI Runtime page.
+                  </p>
+                  <div className="settings-section__actions">
+                    <Link className="button button--secondary" to="/runtime">
+                      Open AI Runtime
+                    </Link>
+                  </div>
+                </Card>
+              </SettingsSection>
+
+              <SettingsSection
+                title="Runtime inference"
+                description="Where scans invoke your AI Runtime model — verification, planning, execution, and results."
+              >
+                <RuntimeInferencePanel />
+              </SettingsSection>
+            </div>
+          )}
+
+          {activeTab === "storage" && (
+            <div className="settings-tab-panel settings-sections">
+              <SettingsSection
+                title="Workspace location"
+                description="All projects, models, logs, and runtime state live under this root directory."
+              >
+                <EnvironmentsPanel backendConnected={backendConnected} />
+              </SettingsSection>
+
+              <SettingsSection
+                title="Danger zone"
+                description="Permanently remove local data. This cannot be undone."
+                variant="danger"
+              >
+                <ClearAllDataCard backendConnected={backendConnected} />
+              </SettingsSection>
+            </div>
+          )}
+
+          {activeTab === "diagnostics" && (
+            <TroubleshootingPanel backendConnected={backendConnected} />
+          )}
+
+          {activeTab === "about" && (
+            <div className="settings-tab-panel settings-sections">
+              <SettingsSection
+                title="Application"
+                description="Build and connection details for this installation."
+              >
+                <Card>
+                  <dl className="about-list">
+                    <div>
+                      <dt>Application</dt>
+                      <dd>PromptLab Desktop v0.1.0</dd>
+                    </div>
+                    <div>
+                      <dt>Backend</dt>
+                      <dd>
+                        {backendConnected
+                          ? `Connected (v${backendVersion})`
+                          : "Mock mode — Tauri IPC unavailable"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Platform</dt>
+                      <dd>Offline-first AI Security Testing Platform</dd>
+                    </div>
+                  </dl>
+                </Card>
+              </SettingsSection>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

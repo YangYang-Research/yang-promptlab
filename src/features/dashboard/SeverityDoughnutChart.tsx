@@ -8,11 +8,11 @@ export type SeveritySlice = {
 };
 
 const SEVERITY_COLORS: Record<Severity, string> = {
-  critical: "#ef4444",
-  high: "#f97316",
-  medium: "#eab308",
-  low: "#6366f1",
-  info: "#94a3b8",
+  critical: "#f87171",
+  high: "#fbbf24",
+  medium: "#38bdf8",
+  low: "#a78bfa",
+  info: "#71717a",
 };
 
 type SeverityDoughnutChartProps = {

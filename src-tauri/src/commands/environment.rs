@@ -181,6 +181,19 @@ pub async fn logs_recent_events(
 }
 
 #[tauri::command]
-pub async fn logs_open_folder(state: State<'_, AppState>) -> CommandResult<String> {
-    Ok(state.logs_dir().display().to_string())
+pub async fn logs_open_folder(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> CommandResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let path = state.logs_dir();
+    app.opener()
+        .open_path(path.display().to_string(), None::<&str>)
+        .map_err(|err| {
+            CommandError::from(aisec_core::AisecError::internal(format!(
+                "failed to open logs directory: {err}"
+            )))
+        })?;
+    Ok(())
 }

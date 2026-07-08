@@ -72,5 +72,4 @@ export const tailLogFile = (fileName: string, maxBytes?: number) =>
 export const getRecentLogEvents = (limit?: number) =>
   invokeCommand<OcsfEventDto[]>("logs_recent_events", { limit: limit ?? null });
 
-export const getLogsFolderPath = () =>
-  invokeCommand<string>("logs_open_folder");
+export const openLogsFolder = () => invokeCommand<void>("logs_open_folder");

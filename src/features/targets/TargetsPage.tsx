@@ -161,6 +161,7 @@ export function TargetsPage() {
                 keyField="id"
                 onRowClick={(target) => navigate(`/targets/${target.id}`)}
                 emptyMessage={loading ? "Loading targets…" : "No targets found"}
+                loading={loading && pagination.items.length === 0}
               />
             </Card>
           ) : (

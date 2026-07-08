@@ -312,6 +312,7 @@ export function ScansPage() {
                 keyField="id"
                 onRowClick={openScan}
                 emptyMessage={loading ? "Loading scans…" : "No scans found"}
+                loading={loading && pagination.items.length === 0}
               />
             </Card>
           ) : (

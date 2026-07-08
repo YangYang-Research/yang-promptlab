@@ -200,7 +200,7 @@ export function HuggingFaceModelCatalog({
   );
 }
 
-function ImportModelDetail({
+export function ImportModelDetail({
   backendConnected,
   importName,
   importPath,

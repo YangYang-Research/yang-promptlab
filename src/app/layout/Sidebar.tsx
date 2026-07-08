@@ -58,8 +58,8 @@ export function Sidebar() {
       <div className="sidebar__brand">
         <div className="sidebar__logo" aria-hidden="true">
           <svg viewBox="0 0 32 32" width="28" height="28">
-            <rect width="32" height="32" rx="8" fill="#2563eb" />
-            <path d="M8 20l4-8 4 5 4-9 4 12" stroke="#fff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            <rect width="32" height="32" rx="8" fill="#2dd4bf" />
+            <path d="M8 20l4-8 4 5 4-9 4 12" stroke="#042f2e" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
         {!collapsed && (

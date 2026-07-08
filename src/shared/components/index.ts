@@ -6,7 +6,7 @@ export { ConnectivityStatus, connectivityStatusVariant } from "./ConnectivitySta
 export { ContentToolbar, PageSizeSelect, Pagination } from "./Pagination";
 export { DataTable } from "./DataTable";
 export { EmptyState } from "./EmptyState";
-export { IconAi, IconArrowRight, IconBack, IconCloud, IconDiscovery, IconList, IconMore, IconOnDevice, IconRefresh, IconTable, IconWarning } from "./Icons";
+export { IconAi, IconArrowRight, IconBack, IconCloud, IconDiscovery, IconImport, IconList, IconMore, IconOnDevice, IconRefresh, IconTable, IconWarning } from "./Icons";
 export { IconButton } from "./IconButton";
 export { RefreshButton } from "./RefreshButton";
 export { ListCard } from "./ListCard";
@@ -14,5 +14,6 @@ export { Modal } from "./Modal";
 export { PageHeader } from "./PageHeader";
 export { ProgressBar } from "./ProgressBar";
 export { SearchInput } from "./SearchInput";
+export { PageLoadingSkeleton, Skeleton } from "./Skeleton";
 export { Select } from "./Select";
 export { ViewModeToggle } from "./ViewModeToggle";

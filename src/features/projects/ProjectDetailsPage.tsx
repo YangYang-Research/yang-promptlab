@@ -11,6 +11,7 @@ import {
   DataTable,
   EmptyState,
   PageHeader,
+  PageLoadingSkeleton,
   SeverityBadge,
   TargetScanStatusBadge,
 } from "@/shared/components";
@@ -219,14 +220,19 @@ export function ProjectDetailsPage() {
 
   if (!project) {
     return (
-      <div className="page">
-        <PageHeader title="Project Details" backTo="/projects" backOnly description="Loading project…" />
+      <div className="page project-details">
+        <PageHeader title="Project Details" backTo="/projects" backOnly />
+        <PageLoadingSkeleton />
       </div>
     );
   }
 
+  const openFindings = projectFindings.length;
+  const openFindingsLabel =
+    openFindings === 1 ? "1 finding" : `${openFindings} findings`;
+
   return (
-    <div className="page">
+    <div className="page project-details">
       <PageHeader
         backTo="/projects"
         backOnly
@@ -246,40 +252,79 @@ export function ProjectDetailsPage() {
         }
       />
 
-      <div className="detail-sections">
-        <Card className="detail-section">
-          <h2 className="detail-section__title">Project Information</h2>
+      {project.description ? (
+        <p className="project-details__lead">{project.description}</p>
+      ) : null}
+
+      <section className="project-details__overview" aria-label="Project overview">
+        <Card className="detail-section project-details__meta">
+          <h2 className="detail-section__title">Project information</h2>
           <div className="detail-section__body">
             <DetailRow label="Name" value={project.name} />
-            <DetailRow label="Description" value={project.description || "—"} />
+            <DetailRow label="Status" value={project.status} capitalize />
             <DetailRow label="Created" value={formatDate(project.createdAt)} />
-            <DetailRow label="Last Updated" value={formatDate(project.updatedAt)} />
+            <DetailRow label="Last updated" value={formatDate(project.updatedAt)} />
           </div>
         </Card>
 
-        <Card className="detail-section">
-          <h2 className="detail-section__title">Targets Summary</h2>
-          <div className="detail-summary-grid">
-            <SummaryStat label="Target Count" value={targetSummary.targetCount} />
-            <SummaryStat label="Scanned Targets" value={targetSummary.scanned} />
-            <SummaryStat label="Unscanned Targets" value={targetSummary.unscanned} />
-            <SummaryStat label="Running Scans" value={targetSummary.running} />
+        <Card className="detail-section project-details__target-stats">
+          <h2 className="detail-section__title">Target coverage</h2>
+          <div className="detail-summary-grid detail-summary-grid--metrics">
+            <SummaryStat label="Targets" value={targetSummary.targetCount} />
+            <SummaryStat label="Scanned" value={targetSummary.scanned} accent="success" />
+            <SummaryStat label="Unscanned" value={targetSummary.unscanned} />
+            <SummaryStat
+              label="Running"
+              value={targetSummary.running}
+              accent={targetSummary.running > 0 ? "active" : undefined}
+            />
           </div>
         </Card>
+      </section>
 
+      <section className="project-details__primary" aria-label="Targets">
         <Card className="detail-section">
-          <div className="card__header-row">
-            <h2 className="detail-section__title card__title">Recent Targets</h2>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => navigate(buildScanWizardUrl(project.id, undefined, { step: 2 }))}
-            >
-              Add Target
-            </Button>
+          <div className="detail-section__header">
+            <div>
+              <h2 className="detail-section__title">Targets</h2>
+              <p className="detail-section__hint">
+                {projectTargets.length === 0
+                  ? "Add a target to start scanning this project."
+                  : `Showing ${Math.min(recentTargets.length, 5)} of ${projectTargets.length} targets`}
+              </p>
+            </div>
+            <div className="detail-section__header-actions">
+              {projectTargets.length > 0 ? (
+                <Link
+                  to={`/targets?projectId=${encodeURIComponent(project.id)}`}
+                  className="link"
+                >
+                  View all
+                </Link>
+              ) : null}
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => navigate(buildScanWizardUrl(project.id, undefined, { step: 2 }))}
+              >
+                Add target
+              </Button>
+            </div>
           </div>
           {recentTargets.length === 0 ? (
-            <p className="text-muted">No targets in this project yet.</p>
+            <EmptyState
+              title="No targets yet"
+              description="Add a target URL or API endpoint to include it in this project."
+              action={
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => navigate(buildScanWizardUrl(project.id, undefined, { step: 2 }))}
+                >
+                  Add target
+                </Button>
+              }
+            />
           ) : (
             <DataTable
               columns={targetColumns}
@@ -290,10 +335,23 @@ export function ProjectDetailsPage() {
             />
           )}
         </Card>
+      </section>
 
-        <Card className="detail-section">
-          <h2 className="detail-section__title">Findings Summary</h2>
-          <div className="detail-summary-grid">
+      <section className="project-details__insights" aria-label="Findings and reports">
+        <Card className="detail-section project-details__findings-panel">
+          <div className="detail-section__header">
+            <div>
+              <h2 className="detail-section__title">Findings</h2>
+              <p className="detail-section__hint">{openFindingsLabel} in this project</p>
+            </div>
+            {openFindings > 0 ? (
+              <Link to="/findings" className="link">
+                View all
+              </Link>
+            ) : null}
+          </div>
+
+          <div className="detail-summary-grid detail-summary-grid--severity">
             {SEVERITIES.map((severity) => (
               <SummaryStat
                 key={severity}
@@ -302,42 +360,71 @@ export function ProjectDetailsPage() {
               />
             ))}
           </div>
+
+          <div className="project-details__subsection">
+            <h3 className="project-details__subsection-title">Recent findings</h3>
+            {recentFindings.length === 0 ? (
+              <p className="text-muted text-sm">No findings recorded for this project yet.</p>
+            ) : (
+              <ul className="detail-list">
+                {recentFindings.map((finding) => (
+                  <li key={finding.id} className="detail-list-row">
+                    <SeverityBadge severity={finding.severity} />
+                    <span className="detail-list-row__title">{finding.title}</span>
+                    <span className="text-muted text-sm detail-list-row__meta">
+                      {formatTimestamp(finding.discoveredAt)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </Card>
 
-        <Card className="detail-section">
-          <h2 className="detail-section__title">Recent Findings</h2>
-          {recentFindings.length === 0 ? (
-            <p className="text-muted">No findings recorded for this project.</p>
-          ) : (
-            <ul className="detail-list">
-              {recentFindings.map((finding) => (
-                <li key={finding.id} className="detail-list-row">
-                  <SeverityBadge severity={finding.severity} />
-                  <span>{finding.title}</span>
-                  <span className="text-muted text-sm">{formatTimestamp(finding.discoveredAt)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+        <Card className="detail-section project-details__reports-panel">
+          <div className="detail-section__header">
+            <div>
+              <h2 className="detail-section__title">Reports</h2>
+              <p className="detail-section__hint">
+                {projectReports.length === 0
+                  ? "Export a scan to generate a report."
+                  : `${projectReports.length} stored report${projectReports.length === 1 ? "" : "s"}`}
+              </p>
+            </div>
+            {projectReports.length > 0 ? (
+              <Link to="/reports" className="link">
+                View all
+              </Link>
+            ) : null}
+          </div>
 
-        <Card className="detail-section">
-          <h2 className="detail-section__title">Reports</h2>
           {recentReports.length === 0 ? (
-            <p className="text-muted">No reports generated for this project.</p>
+            <EmptyState
+              title="No reports yet"
+              description="Complete a scan and export results to build a report archive."
+              action={
+                <Link to={`/scans/new?projectId=${encodeURIComponent(project.id)}`}>
+                  <Button variant="secondary" size="sm">
+                    Start scan
+                  </Button>
+                </Link>
+              }
+            />
           ) : (
             <ul className="detail-list">
               {recentReports.map((report) => (
-                <li key={report.id} className="detail-list-row">
-                  <span>{report.title}</span>
+                <li key={report.id} className="detail-list-row detail-list-row--reports">
+                  <span className="detail-list-row__title">{report.title}</span>
                   <Badge variant="muted">{report.format.toUpperCase()}</Badge>
-                  <span className="text-muted text-sm">{formatTimestamp(report.createdAt)}</span>
+                  <span className="text-muted text-sm detail-list-row__meta">
+                    {formatTimestamp(report.createdAt)}
+                  </span>
                 </li>
               ))}
             </ul>
           )}
         </Card>
-      </div>
+      </section>
 
       <EditProjectModal
         open={editOpen}
@@ -348,11 +435,21 @@ export function ProjectDetailsPage() {
   );
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function DetailRow({
+  label,
+  value,
+  capitalize = false,
+}: {
+  label: string;
+  value: string;
+  capitalize?: boolean;
+}) {
   return (
     <div className="detail-row">
       <span className="detail-row__label">{label}</span>
-      <span className="detail-row__value">{value}</span>
+      <span className={`detail-row__value ${capitalize ? "detail-row__value--cap" : ""}`}>
+        {value}
+      </span>
     </div>
   );
 }
@@ -361,13 +458,23 @@ function SummaryStat({
   label,
   value,
   severity,
+  accent,
 }: {
   label?: string;
   value: number;
   severity?: Severity;
+  accent?: "success" | "active";
 }) {
   return (
-    <div className="summary-stat">
+    <div
+      className={[
+        "summary-stat",
+        accent === "success" ? "summary-stat--success" : "",
+        accent === "active" ? "summary-stat--active" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       {severity ? (
         <SeverityBadge severity={severity} />
       ) : (

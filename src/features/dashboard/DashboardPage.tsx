@@ -172,7 +172,7 @@ export function DashboardPage() {
             .map((a) => (
               <ProgressBar
                 key={a.id}
-                label={`${a.category.replace(/_/g, " ")} — ${a.targetName}`}
+                label={`${a.category.replace(/_/g, " ")} - ${a.targetName}`}
                 value={a.payloadsRun}
                 max={a.payloadsTotal}
               />

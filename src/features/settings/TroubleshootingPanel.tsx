@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { Button, Card } from "@/shared/components";
+import { Button, Card, RefreshButton, SearchInput, Select } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
 import { shortenPromptLabPath } from "@/shared/utils/format";
 import {
   getEnvironment,
-  getLogsFolderPath,
   getRecentLogEvents,
   listLogFiles,
+  openLogsFolder,
   tailLogFile,
   type EnvironmentStatusDto,
   type LogFileInfoDto,
@@ -117,125 +117,150 @@ export function TroubleshootingPanel({ backendConnected }: TroubleshootingPanelP
     .find((event) => event.severity === "medium" || event.severity === "low");
 
   async function openLogFolder() {
-    const path = await getLogsFolderPath();
-    await navigator.clipboard.writeText(path);
+    try {
+      await openLogsFolder();
+    } catch (err) {
+      setError(toAppError(err).message);
+    }
   }
 
   return (
     <div className="settings-tab-panel troubleshooting-panel">
-      <div className="settings-grid">
-        <Card>
-          <h3 className="card__title">Environment Status</h3>
-          {!backendConnected ? (
-            <p className="text-muted text-sm">Connect to the desktop backend to load environment status.</p>
-          ) : environment ? (
-            <dl className="about-list">
-              <div><dt>Root</dt><dd className="mono">{shortenPromptLabPath(environment.root, environment.root)}</dd></div>
-              <div><dt>Workspaces</dt><dd className="mono">{shortenPromptLabPath(environment.workspaces, environment.root)}</dd></div>
-              <div><dt>Models</dt><dd className="mono">{shortenPromptLabPath(environment.models, environment.root)}</dd></div>
-              <div><dt>Runtime</dt><dd className="mono">{shortenPromptLabPath(environment.runtime, environment.root)}</dd></div>
-              <div><dt>Logs</dt><dd className="mono">{shortenPromptLabPath(environment.logs, environment.root)}</dd></div>
-              <div><dt>Database</dt><dd className="mono">{shortenPromptLabPath(environment.database, environment.root)}</dd></div>
-            </dl>
-          ) : null}
-        </Card>
+      <div className="settings-sections">
+        <section className="settings-section">
+          <header className="settings-section__header">
+            <h2 className="settings-section__title">Health summary</h2>
+            <p className="settings-section__lead">
+              Recent high-severity events and model registry validation at startup.
+            </p>
+          </header>
+          <div className="settings-section__body">
+            <div className="settings-grid settings-grid--diagnostics">
+              <Card>
+                <h3 className="card__title">Recent errors</h3>
+                {latestError ? (
+                  <p className="text-danger text-sm">{latestError.message}</p>
+                ) : (
+                  <p className="text-muted text-sm">No recent high-severity events.</p>
+                )}
+                <h4 className="card__subtitle">Latest warning</h4>
+                {latestWarning ? (
+                  <p className="text-warning text-sm">{latestWarning.message}</p>
+                ) : (
+                  <p className="text-muted text-sm">No recent warnings.</p>
+                )}
+              </Card>
 
-        <Card>
-          <h3 className="card__title">Recent Errors</h3>
-          {latestError ? (
-            <p className="text-danger text-sm">{latestError.message}</p>
-          ) : (
-            <p className="text-muted text-sm">No recent high-severity events.</p>
-          )}
-          <h4 className="card__subtitle">Latest Warning</h4>
-          {latestWarning ? (
-            <p className="text-warning text-sm">{latestWarning.message}</p>
-          ) : (
-            <p className="text-muted text-sm">No recent warnings.</p>
-          )}
-        </Card>
-
-        <Card>
-          <h3 className="card__title">Registry Diagnostics</h3>
-          {diagnostics ? <RegistryDiagnosticsPanel diagnostics={diagnostics} /> : null}
-        </Card>
-
-        <Card className="troubleshooting-logs">
-          <div className="troubleshooting-logs__header">
-            <h3 className="card__title">Live Log Viewer</h3>
-            <div className="troubleshooting-logs__actions">
-              <label className="settings-toggle">
-                <input
-                  type="checkbox"
-                  checked={autoRefresh}
-                  onChange={(e) => setAutoRefresh(e.target.checked)}
-                />
-                <span>Auto refresh</span>
-              </label>
-              <Button variant="ghost" onClick={() => void refresh()} disabled={loading}>
-                {loading ? "Refreshing…" : "Refresh"}
-              </Button>
-              <Button variant="secondary" onClick={() => void openLogFolder()}>
-                Copy Log Folder Path
-              </Button>
+              <Card>
+                <h3 className="card__title">Registry diagnostics</h3>
+                {diagnostics ? <RegistryDiagnosticsPanel diagnostics={diagnostics} /> : null}
+              </Card>
             </div>
           </div>
+        </section>
 
-          <div className="troubleshooting-logs__filters">
-            <input
-              className="input"
-              placeholder="Search logs…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <select className="input" value={severity} onChange={(e) => setSeverity(e.target.value)}>
-              <option value="all">All severities</option>
-              <option value="informational">Informational</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
-            </select>
-            <select
-              className="input mono"
-              value={selectedLog}
-              onChange={(e) => setSelectedLog(e.target.value)}
-            >
-              {logFiles.map((file) => (
-                <option key={file.path} value={file.name}>
-                  {file.name}
-                </option>
-              ))}
-            </select>
+        <section className="settings-section">
+          <header className="settings-section__header">
+            <h2 className="settings-section__title">Live logs</h2>
+            <p className="settings-section__lead">
+              Tail application logs with filters. Workspace paths are under Data &amp; storage.
+              {environment ? (
+                <>
+                  {" "}
+                  Logs directory:{" "}
+                  <span className="mono text-sm">
+                    {shortenPromptLabPath(environment.logs, environment.root)}
+                  </span>
+                </>
+              ) : null}
+            </p>
+          </header>
+          <div className="settings-section__body">
+            <Card className="troubleshooting-logs">
+              <div className="troubleshooting-logs__header">
+                <label className="settings-toggle troubleshooting-logs__toggle">
+                  <input
+                    type="checkbox"
+                    checked={autoRefresh}
+                    onChange={(e) => setAutoRefresh(e.target.checked)}
+                  />
+                  <span>Auto refresh</span>
+                </label>
+                <div className="troubleshooting-logs__actions">
+                  <RefreshButton
+                    loading={loading}
+                    error={error}
+                    showSuccessToast={false}
+                    onClick={() => void refresh()}
+                  />
+                  <Button variant="secondary" onClick={() => void openLogFolder()}>
+                    Open log folder
+                  </Button>
+                </div>
+              </div>
+
+              <div className="troubleshooting-logs__filters">
+                <SearchInput
+                  value={query}
+                  onChange={setQuery}
+                  placeholder="Search logs…"
+                />
+                <label className="field troubleshooting-logs__field">
+                  <span className="field__label">Severity</span>
+                  <Select value={severity} onChange={(e) => setSeverity(e.target.value)}>
+                    <option value="all">All severities</option>
+                    <option value="informational">Informational</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="critical">Critical</option>
+                  </Select>
+                </label>
+                <label className="field troubleshooting-logs__field">
+                  <span className="field__label">Log file</span>
+                  <Select
+                    className="mono"
+                    value={selectedLog}
+                    onChange={(e) => setSelectedLog(e.target.value)}
+                  >
+                    {logFiles.map((file) => (
+                      <option key={file.path} value={file.name}>
+                        {file.name}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+              </div>
+
+              {error ? <p className="text-danger text-sm">{error}</p> : null}
+
+              <div className="troubleshooting-logs__table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Severity</th>
+                      <th>Category</th>
+                      <th>Activity</th>
+                      <th>Message</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredEvents.slice(-200).map((event) => (
+                      <tr key={`${event.timestamp}-${event.activityName}-${event.message}`}>
+                        <td className="mono text-sm">{event.timestamp}</td>
+                        <td>{event.severity}</td>
+                        <td>{event.category}</td>
+                        <td>{event.activityName}</td>
+                        <td>{event.message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
           </div>
-
-          {error ? <p className="text-danger text-sm">{error}</p> : null}
-
-          <div className="troubleshooting-logs__table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Severity</th>
-                  <th>Category</th>
-                  <th>Activity</th>
-                  <th>Message</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredEvents.slice(-200).map((event) => (
-                  <tr key={`${event.timestamp}-${event.activityName}-${event.message}`}>
-                    <td className="mono text-sm">{event.timestamp}</td>
-                    <td>{event.severity}</td>
-                    <td>{event.category}</td>
-                    <td>{event.activityName}</td>
-                    <td>{event.message}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        </section>
       </div>
     </div>
   );

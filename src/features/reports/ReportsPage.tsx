@@ -258,6 +258,7 @@ export function ReportsPage() {
               rows={exportPagination.items}
               keyField="scanId"
               emptyMessage={loading ? "Loading scans…" : "No exportable scans"}
+              loading={loading && exportPagination.items.length === 0}
             />
           </Card>
         )}
@@ -300,6 +301,7 @@ export function ReportsPage() {
               rows={archivePagination.items}
               keyField="id"
               emptyMessage={loading ? "Loading reports…" : "No stored reports"}
+              loading={loading && archivePagination.items.length === 0}
             />
           </Card>
         )}

@@ -57,6 +57,7 @@ import type {
   LoadedData,
 } from "./types";
 import type { LocalModel, ModelStatus } from "@/shared/types";
+import { loadThemePreference } from "@/shared/theme/theme";
 
 function mapLocalModels(entries: ModelEntryDto[]): LocalModel[] {
   return entries.map((entry) => ({
@@ -85,7 +86,7 @@ const initialState: AppDataState = {
   models: [],
   activity: [],
   settings: {
-    theme: "dark",
+    theme: loadThemePreference(),
     pluginsDir: "~/.promptlab/plugins",
     modelsDir: "~/.promptlab/models",
     offlineMode: true,
