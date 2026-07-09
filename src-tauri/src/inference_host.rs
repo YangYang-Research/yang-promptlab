@@ -200,7 +200,7 @@ impl PlannerLlm for HostPlannerLlm {
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
-            None,
+            Some(PromptRegistry::planner_system()),
             prompt,
             2048,
             0.15,
