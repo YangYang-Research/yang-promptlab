@@ -91,7 +91,12 @@ impl InferenceRuntime for AdapterRuntime {
         request: aisec_models::types::InferenceRequest,
     ) -> aisec_models::error::ModelResult<aisec_models::types::InferenceResponse> {
         self.adapter
-            .complete(None, &request.prompt, request.max_tokens, request.temperature)
+            .complete(
+                request.system.as_deref(),
+                &request.prompt,
+                request.max_tokens,
+                request.temperature,
+            )
             .await
             .map(|text| aisec_models::types::InferenceResponse {
                 text,
@@ -135,7 +140,12 @@ impl InferenceRuntime for BackendRuntime {
         request: aisec_models::types::InferenceRequest,
     ) -> aisec_models::error::ModelResult<aisec_models::types::InferenceResponse> {
         self.backend
-            .complete(&request.prompt, request.max_tokens, request.temperature)
+            .complete(
+                request.system.as_deref(),
+                &request.prompt,
+                request.max_tokens,
+                request.temperature,
+            )
             .await
             .map(|text| aisec_models::types::InferenceResponse {
                 text,

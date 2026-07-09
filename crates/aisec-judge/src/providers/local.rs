@@ -34,10 +34,17 @@ impl LlmBackend for LocalLlmBackend {
         &self.model
     }
 
-    async fn complete(&self, prompt: &str, max_tokens: u32, temperature: f32) -> JudgeResult<String> {
+    async fn complete(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        max_tokens: u32,
+        temperature: f32,
+    ) -> JudgeResult<String> {
         let runtime = self.runtime.lock().await;
         let response = runtime
             .complete(InferenceRequest {
+                system: system.map(str::to_string),
                 prompt: prompt.to_string(),
                 max_tokens,
                 temperature,

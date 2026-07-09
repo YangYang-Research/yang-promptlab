@@ -75,6 +75,7 @@ mod tests {
         runtime.load_model(Path::new("/fake/model.gguf")).await.unwrap();
         let resp = runtime
             .complete(InferenceRequest {
+                system: None,
                 prompt: "hello".into(),
                 max_tokens: 32,
                 temperature: 0.7,

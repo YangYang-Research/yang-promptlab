@@ -115,6 +115,7 @@ mod tests {
         let mut runtime = ModelProviderRuntime::new(provider, "vault-model");
         let response = runtime
             .complete(InferenceRequest {
+                system: None,
                 prompt: "probe".into(),
                 max_tokens: 8,
                 temperature: 0.0,

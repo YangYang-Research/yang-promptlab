@@ -7,7 +7,13 @@ use crate::error::JudgeResult;
 pub trait LlmBackend: Send + Sync {
     fn provider_label(&self) -> &str;
     fn model_label(&self) -> &str;
-    async fn complete(&self, prompt: &str, max_tokens: u32, temperature: f32) -> JudgeResult<String>;
+    async fn complete(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        max_tokens: u32,
+        temperature: f32,
+    ) -> JudgeResult<String>;
     async fn health_check(&self) -> JudgeResult<bool> {
         Ok(true)
     }

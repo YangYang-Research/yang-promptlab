@@ -25,6 +25,7 @@ async fn main() {
 
     let response = runtime
         .complete(InferenceRequest {
+            system: None,
             prompt: prompt.clone(),
             max_tokens: 96,
             temperature: 0.0,

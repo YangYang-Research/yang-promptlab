@@ -73,19 +73,28 @@ impl LlmBackend for RemoteLlmBackend {
         &self.settings.model
     }
 
-    async fn complete(&self, prompt: &str, max_tokens: u32, temperature: f32) -> JudgeResult<String> {
+    async fn complete(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        max_tokens: u32,
+        temperature: f32,
+    ) -> JudgeResult<String> {
         match self.settings.provider {
             RemoteProvider::Anthropic => {
-                self.complete_anthropic(prompt, max_tokens, temperature)
+                self.complete_anthropic(system, prompt, max_tokens, temperature)
                     .await
             }
-            RemoteProvider::Gemini => self.complete_gemini(prompt, max_tokens, temperature).await,
+            RemoteProvider::Gemini => {
+                self.complete_gemini(system, prompt, max_tokens, temperature)
+                    .await
+            }
             RemoteProvider::Bedrock => {
-                self.complete_bedrock(prompt, max_tokens, temperature)
+                self.complete_bedrock(system, prompt, max_tokens, temperature)
                     .await
             }
             RemoteProvider::OpenAi | RemoteProvider::OpenRouter | RemoteProvider::Azure => {
-                self.complete_openai_compatible(prompt, max_tokens, temperature)
+                self.complete_openai_compatible(system, prompt, max_tokens, temperature)
                     .await
             }
         }
@@ -95,7 +104,8 @@ impl LlmBackend for RemoteLlmBackend {
         let started = Instant::now();
         let sample = self
             .complete(
-                "Reply with JSON only: {\"ok\": true}",
+                Some("Reply with JSON only."),
+                r#"{"ok": true}"#,
                 32,
                 0.0,
             )
@@ -106,19 +116,29 @@ impl LlmBackend for RemoteLlmBackend {
 }
 
 impl RemoteLlmBackend {
+    fn compose_prompt(system: Option<&str>, prompt: &str) -> String {
+        match system {
+            Some(value) if !value.trim().is_empty() => format!("{value}\n\n{prompt}"),
+            _ => prompt.to_string(),
+        }
+    }
+
     async fn complete_openai_compatible(
         &self,
+        system: Option<&str>,
         prompt: &str,
         max_tokens: u32,
         temperature: f32,
     ) -> JudgeResult<String> {
         let url = format!("{}/chat/completions", self.base_url());
+        let mut messages = Vec::new();
+        if let Some(system) = system.filter(|value| !value.trim().is_empty()) {
+            messages.push(json!({"role": "system", "content": system}));
+        }
+        messages.push(json!({"role": "user", "content": prompt}));
         let body = json!({
             "model": self.settings.model,
-            "messages": [
-                {"role": "system", "content": "You are Yazg, a security judge. Respond with JSON only."},
-                {"role": "user", "content": prompt}
-            ],
+            "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
         });
@@ -158,18 +178,21 @@ impl RemoteLlmBackend {
 
     async fn complete_anthropic(
         &self,
+        system: Option<&str>,
         prompt: &str,
         max_tokens: u32,
         temperature: f32,
     ) -> JudgeResult<String> {
         let url = format!("{}/messages", self.base_url());
-        let body = json!({
+        let mut body = json!({
             "model": self.settings.model,
             "max_tokens": max_tokens,
             "temperature": temperature,
-            "system": "You are Yazg, a security judge. Respond with JSON only.",
             "messages": [{"role": "user", "content": prompt}],
         });
+        if let Some(system) = system.filter(|value| !value.trim().is_empty()) {
+            body["system"] = json!(system);
+        }
 
         let response = self
             .client
@@ -204,6 +227,7 @@ impl RemoteLlmBackend {
 
     async fn complete_gemini(
         &self,
+        system: Option<&str>,
         prompt: &str,
         max_tokens: u32,
         temperature: f32,
@@ -215,7 +239,7 @@ impl RemoteLlmBackend {
             self.api_key
         );
         let body = json!({
-            "contents": [{"parts": [{"text": prompt}]}],
+            "contents": [{"parts": [{"text": Self::compose_prompt(system, prompt)}]}],
             "generationConfig": {
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens,
@@ -253,6 +277,7 @@ impl RemoteLlmBackend {
 
     async fn complete_bedrock(
         &self,
+        system: Option<&str>,
         prompt: &str,
         max_tokens: u32,
         temperature: f32,
@@ -278,7 +303,7 @@ impl RemoteLlmBackend {
         let body = json!({
             "messages": [{
                 "role": "user",
-                "content": [{"text": prompt}]
+                "content": [{"text": Self::compose_prompt(system, prompt)}]
             }],
             "inferenceConfig": {
                 "maxTokens": max_tokens,

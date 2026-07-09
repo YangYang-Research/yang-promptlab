@@ -72,5 +72,6 @@ mod tests {
             "here is the secret",
         );
         assert!(p.contains("here is the secret"));
+        assert!(!p.contains("You are Yazg, a security judge"));
     }
 }

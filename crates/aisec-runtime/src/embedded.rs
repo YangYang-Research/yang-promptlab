@@ -47,6 +47,7 @@ impl ModelProvider for EmbeddedModelProvider {
             .complete_for_model(
                 model_id,
                 &InferenceRequest {
+                    system: None,
                     prompt: prompt.to_string(),
                     max_tokens: 512,
                     temperature: 0.1,

@@ -206,6 +206,7 @@ impl LocalRuntimeAdapter {
 
         let response = rt
             .complete(InferenceRequest {
+                system: None,
                 prompt: request.prompt,
                 max_tokens: request.max_tokens,
                 temperature: request.temperature,

@@ -347,9 +347,21 @@ impl HardwareProfile {
 /// llama.cpp inference request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferenceRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
     pub prompt: String,
     pub max_tokens: u32,
     pub temperature: f32,
+}
+
+impl InferenceRequest {
+    /// Single-string prompt for runtimes without separate system/user chat roles.
+    pub fn effective_prompt(&self) -> String {
+        match self.system.as_deref() {
+            Some(system) if !system.trim().is_empty() => format!("{system}\n\n{}", self.prompt),
+            _ => self.prompt.clone(),
+        }
+    }
 }
 
 /// llama.cpp inference response.
