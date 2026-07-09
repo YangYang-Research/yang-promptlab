@@ -347,7 +347,7 @@ impl GeneratorLlm for HostGeneratorLlm {
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
-            None,
+            Some(PromptRegistry::generator_system()),
             prompt,
             1536,
             0.2,
