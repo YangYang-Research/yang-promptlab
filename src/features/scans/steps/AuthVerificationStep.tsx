@@ -47,7 +47,6 @@ type AuthVerificationStepProps = {
   onAuthChange: (patch: Partial<TargetFormState>) => void;
   verificationLog: VerificationLogLine[];
   onVerificationLog: (lines: VerificationLogLine[]) => void;
-  error: string | null;
   onError: (message: string | null) => void;
   onBeforeVerify?: () => Promise<boolean>;
   onVerifySuccess?: () => void;
@@ -66,7 +65,6 @@ export function AuthVerificationStep({
   onAuthChange,
   verificationLog,
   onVerificationLog,
-  error,
   onError,
   onBeforeVerify,
   onVerifySuccess,
@@ -254,7 +252,6 @@ export function AuthVerificationStep({
           </span>
         </Button>
         <VerificationProgressPipeline phase={verifyPhase} resultMessage={verifyResultMessage} />
-        {error && <p className="text-danger">{error}</p>}
       </section>
 
       <section>

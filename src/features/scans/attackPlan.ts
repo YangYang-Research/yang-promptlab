@@ -5,11 +5,14 @@ import type {
 } from "./attackProfiles";
 import { ALL_ATTACK_CATEGORY_IDS } from "./attackProfiles";
 import {
+  payloadStrategyForAttackProfile,
   payloadStrategyFromDto,
   payloadStrategyToDto,
+  PAYLOAD_BUDGET_DEFAULT,
   type PayloadStrategyConfig,
   type PayloadStrategyDto,
 } from "./payloadStrategy";
+import { parseAttackPlaybook } from "./scanPlaybook";
 import type { AttackPlanUiState, PlannerSource } from "./wizardState";
 import { attackPlanUiFromPlan } from "./wizardState";
 
@@ -637,4 +640,83 @@ export function syncAttackPlanUiAfterAdjust(
     plannerSource: prev.plannerSource,
     suggestedPlanKey: prev.suggestedPlanKey,
   };
+}
+
+/** Rebuild a minimal attack plan from scan execution playbook when wizard state is missing. */
+export function attackPlanFromExecutionPlaybook(
+  playbook: unknown,
+  endpoint = "target",
+): AttackPlanConfig | null {
+  const parsed = parseAttackPlaybook(playbook);
+  if (!parsed || parsed.categories.length === 0) return null;
+
+  const profileId = asProfileId(parsed.profile);
+  const categories = parsed.categories
+    .map((id) => asCategoryId(id))
+    .filter((id): id is AttackCategoryId => id !== null);
+  if (categories.length === 0) return null;
+
+  const playbookRecord =
+    typeof playbook === "object" && playbook !== null && !Array.isArray(playbook)
+      ? (playbook as Record<string, unknown>)
+      : null;
+  const payloadRaw = playbookRecord?.payload_strategy;
+  const defaultRecommended: PayloadStrategyConfig = {
+    strategy: "mutation",
+    mutationLevel: "medium",
+    variantsPerTest: 5,
+    maxTotalPayloads: PAYLOAD_BUDGET_DEFAULT,
+    enableContextAwareness: false,
+    enableConversationMemory: false,
+    enableResponseAdaptation: false,
+    enablePayloadDeduplication: true,
+    enableCrossCategoryMutation: false,
+  };
+  const payloadStrategy =
+    payloadRaw && typeof payloadRaw === "object"
+      ? payloadStrategyFromDto(payloadRaw as PayloadStrategyDto)
+      : payloadStrategyForAttackProfile(profileId, defaultRecommended);
+
+  const executionStrategy: ExecutionStrategy = parsed.agentMode ? "agentic" : "sequential";
+  const attackGraph = categories.map((category) => ({
+    category,
+    priority: 1,
+    risk: 50,
+    confidence: 0.85,
+    dependencies: [] as AttackCategoryId[],
+    enabled: true,
+  }));
+
+  return recomputePlanPreview(
+    normalizeAttackPlan({
+      profileId,
+      recommendedProfileId: profileId,
+      suggestedCategories: categories,
+      profileModes: [],
+      customCategories: categories,
+      categories,
+      disabledTests: parsed.disabledTests,
+      disabledGraphNodes: [],
+      capabilityGraph: [],
+      attackGraph,
+      executionStrategy,
+      maxAttempts: parsed.maxAgentAttempts ?? 5,
+      reflectionEnabled: playbookRecord?.reflection_enabled === true,
+      adaptivePlanning: false,
+      rationales: [],
+      confidence: 0.85,
+      summary: `Plan for ${endpoint}`,
+      riskScore: 50,
+      riskLevel: "medium",
+      estimatedRequests: 0,
+      estimatedRuntimeSeconds: 0,
+      estimatedTokens: 0,
+      coverageScore: 0,
+      riskCoverage: 0,
+      totalTestcases: 0,
+      payloadStrategy,
+      recommendedPayloadStrategy: payloadStrategy,
+      plannerSource: "target_profile",
+    }),
+  );
 }

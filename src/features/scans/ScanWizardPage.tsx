@@ -68,10 +68,13 @@ import {
 } from "./wizardSteps";
 import {
   mergeWizardSessions,
-  parsePersistedWizard,
-  sessionFromPersistedWizard,
   wizardStateToPersisted,
 } from "./wizardPersistence";
+import {
+  hydrateWizardSessionForScanResume,
+  sessionReadyForSubmitStep,
+  sessionReadyForWizardEntry,
+} from "./wizardResume";
 import {
   resolveOrCreateDraftScanId,
   storeDraftScanId,
@@ -121,6 +124,9 @@ export function ScanWizardPage() {
   const [dbVerificationLoading, setDbVerificationLoading] = useState(false);
   const [importApiOpen, setImportApiOpen] = useState(false);
   const [scanControlPending, setScanControlPending] = useState(false);
+  const [wizardResumeLoading, setWizardResumeLoading] = useState(() =>
+    Boolean(lockedScanId && (entryStep === 4 || entryStep === 5)),
+  );
   const plannerRunRef = useRef<string | null>(null);
   const startingScanRef = useRef(false);
   const wizardDbBootstrap = useRef(false);
@@ -129,6 +135,7 @@ export function ScanWizardPage() {
   const wizardSaveTimerRef = useRef<number | null>(null);
   const authHydratedKeyRef = useRef<string | null>(null);
   const freshWizardKeyRef = useRef<string | null>(null);
+  const wizardResumeHydratedRef = useRef<string | null>(null);
   const newTargetEntryKeyRef = useRef<string | null>(null);
 
   function appendWizardUrlParams(params: URLSearchParams) {
@@ -209,6 +216,7 @@ export function ScanWizardPage() {
     deepLinkApplied.current = false;
     authHydratedKeyRef.current = null;
     plannerRunRef.current = null;
+    wizardResumeHydratedRef.current = null;
     clearWizardSession();
     setPlannerError(null);
     setPlannerGenerating(false);
@@ -223,7 +231,14 @@ export function ScanWizardPage() {
 
     async function ensureDraftScan() {
       if (lockedScanId) {
-        if (session.draftScanId === lockedScanId) {
+        const savedTarget =
+          session.savedTargetId
+            ? targets.find((target) => target.id === session.savedTargetId) ?? null
+            : null;
+        const readyForEntry = sessionReadyForWizardEntry(session, savedTarget, entryStep);
+        const resumeKey = `${lockedScanId}:${entryStep ?? ""}`;
+
+        if (session.draftScanId === lockedScanId && readyForEntry) {
           if (entryStep) {
             setSession((prev) => {
               const next = applyWizardEntryStep(prev, entryStep);
@@ -232,33 +247,43 @@ export function ScanWizardPage() {
             });
           }
           wizardDbBootstrap.current = true;
+          wizardResumeHydratedRef.current = resumeKey;
+          setWizardResumeLoading(false);
           return;
         }
+
+        if (wizardResumeHydratedRef.current === resumeKey) {
+          wizardDbBootstrap.current = true;
+          setWizardResumeLoading(false);
+          return;
+        }
+
         wizardDbBootstrap.current = true;
+        setWizardResumeLoading(entryStep === 4 || entryStep === 5);
         try {
           const loaded = await loadWizardScan(lockedScanId);
-          const persisted = parsePersistedWizard(loaded.wizard);
-          const projectId = lockedProjectId || loaded.scan.project_id;
-          const remote = persisted
-            ? sessionFromPersistedWizard(persisted, lockedScanId, lockedProjectId)
-            : {
-                ...createInitialSession(projectId),
-                draftScanId: lockedScanId,
-                selectedProjectId: projectId,
-              };
-          const local = peekWizardSession();
+          const next = await hydrateWizardSessionForScanResume(session, loaded, {
+            lockedProjectId,
+            lockedTargetId,
+            entryStep,
+          });
           const merged = withNormalizedAttackPlan(
-            local?.draftScanId === lockedScanId ? mergeWizardSessions(local, remote) : remote,
+            peekWizardSession()?.draftScanId === lockedScanId
+              ? mergeWizardSessions(peekWizardSession()!, next)
+              : next,
           );
-          const next = entryStep ? applyWizardEntryStep(merged, entryStep) : merged;
+          const projectId = lockedProjectId || loaded.scan.project_id;
           storeDraftScanId(projectId, lockedScanId);
-          setSession(next);
-          saveWizardSession(next);
+          setSession(merged);
+          saveWizardSession(merged);
+          wizardResumeHydratedRef.current = resumeKey;
           await actions.refresh();
         } catch (err) {
           wizardDbBootstrap.current = false;
           const message = err instanceof Error ? err.message : "Failed to load wizard scan";
           notify(message, "error");
+        } finally {
+          setWizardResumeLoading(false);
         }
         return;
       }
@@ -310,11 +335,16 @@ export function ScanWizardPage() {
     session.draftScanId,
     session.selectedProjectId,
     session.savedTargetId,
+    session.attackPlan,
+    session.submittedScanId,
+    session.targetProfile.verification.verified,
+    targets,
     scans,
     actions,
     notify,
     navigate,
     applyDraftScanId,
+    entryStep,
   ]);
 
   useEffect(() => {
@@ -1018,7 +1048,6 @@ export function ScanWizardPage() {
             onAuthChange={patchTargetForm}
             verificationLog={session.verificationLog}
             onVerificationLog={(entries) => updateSession({ verificationLog: entries })}
-            error={verificationError}
             onError={setVerificationError}
             onBeforeVerify={persistAuthDescriptor}
             onVerifySettled={() => {
@@ -1035,6 +1064,9 @@ export function ScanWizardPage() {
           <p className="text-muted">Complete step 2 to configure authentication.</p>
         );
       case 4:
+        if (wizardResumeLoading) {
+          return <p className="text-muted">Loading attack plan…</p>;
+        }
         if (!session.targetProfile.verification.verified) {
           return <p className="text-muted">Waiting for target verification…</p>;
         }
@@ -1078,17 +1110,17 @@ export function ScanWizardPage() {
         ) : (
           <p className="text-muted">Generating attack plan…</p>
         );
-      case 5:
-        return activeProjectId &&
-          store.savedTarget &&
-          session.attackPlan &&
-          session.attackPlan.categories.length > 0 &&
-          session.targetProfile.verification.verified ? (
+      case 5: {
+        const waitingForTarget =
+          Boolean(session.submittedScanId && session.savedTargetId && !store.savedTarget);
+        return wizardResumeLoading || waitingForTarget ? (
+          <p className="text-muted">Loading attack progress…</p>
+        ) : sessionReadyForSubmitStep(session, store.savedTarget) && store.savedTarget ? (
           <>
             <SubmitStep
               target={store.savedTarget}
               targetProfile={session.targetProfile}
-              attackPlan={session.attackPlan}
+              attackPlan={session.attackPlan!}
               submittedScanId={session.submittedScanId}
               onViewResult={goToResultsStep}
               onRetryScan={() => void handleRetryScan()}
@@ -1099,6 +1131,7 @@ export function ScanWizardPage() {
         ) : (
           <p className="text-muted">Complete steps 1–4 before submitting the scan.</p>
         );
+      }
       case 6:
         return session.submittedScanId ? (
           <ResultsStep

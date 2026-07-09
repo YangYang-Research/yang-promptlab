@@ -294,14 +294,6 @@ export function ProjectDetailsPage() {
               </p>
             </div>
             <div className="detail-section__header-actions">
-              {projectTargets.length > 0 ? (
-                <Link
-                  to={`/targets?projectId=${encodeURIComponent(project.id)}`}
-                  className="link"
-                >
-                  View all
-                </Link>
-              ) : null}
               <Button
                 variant="primary"
                 size="sm"
