@@ -5,6 +5,8 @@ import {
   formatExecutionStrategySummary,
   plannerSourceFromPlan,
   previewPlanForProfile,
+  planUiForCustomFromCategories,
+  previewPlanForCustomTransition,
   recomputePlanPreview,
   resolveActivePlannerRationales,
   resolvePlannerSummaryBadge,
@@ -195,6 +197,34 @@ describe("attack plan preview", () => {
     expect(preview.attackGraph.find((node) => node.category === "tool_abuse")?.enabled).toBe(
       false,
     );
+  });
+
+  it("keeps preset categories when switching to custom and exposes the rest as disabled", () => {
+    const quick = previewPlanForProfile(samplePlan(), "quick", []);
+    const custom = previewPlanForCustomTransition(quick, quick.categories, [], "quick");
+    const ui = planUiForCustomFromCategories(quick.categories);
+
+    expect(custom.profileId).toBe("custom");
+    expect(custom.categories).toEqual(quick.categories);
+    expect(custom.customCategories).toEqual(quick.categories);
+    expect(ui.customCategories).toEqual(quick.categories);
+    expect(ui.disabledGraphNodes.length).toBeGreaterThan(0);
+    expect(ui.disabledGraphNodes).not.toContain("prompt_injection");
+    expect(custom.disabledGraphNodes).toEqual(ui.disabledGraphNodes);
+    expect(custom.payloadStrategy.variantsPerTest).toBe(2);
+    expect(custom.executionStrategy).toBe("sequential");
+  });
+
+  it("inherits execution and payload strategy from the source preset when entering custom", () => {
+    const deep = previewPlanForProfile(samplePlan(), "deep", []);
+    const custom = previewPlanForCustomTransition(deep, deep.categories, [], "deep");
+
+    expect(custom.executionStrategy).toBe("agentic");
+    expect(custom.reflectionEnabled).toBe(true);
+    expect(custom.adaptivePlanning).toBe(true);
+    expect(custom.payloadStrategy.strategy).toBe("adaptive");
+    expect(custom.payloadStrategy.mutationLevel).toBe("extreme");
+    expect(custom.payloadStrategy.variantsPerTest).toBe(10);
   });
 
   it("updates summary when execution strategy changes", () => {

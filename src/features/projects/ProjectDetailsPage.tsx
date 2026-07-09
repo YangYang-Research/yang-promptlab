@@ -17,6 +17,7 @@ import {
 } from "@/shared/components";
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import {
+  buildScanProgressUrl,
   buildScanWizardUrl,
   peekWizardSession,
   wizardResumeInputFromSession,
@@ -495,19 +496,14 @@ function TargetActionsDropdown({
     if (action.kind === "view_scan") {
       scanItems.push({
         id: "view-scan",
-        label: "View Scan",
+        label: "View Scan Progress",
         onClick: () =>
-          onNavigate(
-            buildScanWizardUrl(projectId, target.id, {
-              scanId: action.scanId,
-              step: 5,
-            }),
-          ),
+          onNavigate(buildScanProgressUrl(projectId, action.scanId, target.id)),
       });
     } else if (action.kind === "view_report") {
       scanItems.push({
         id: "view-report",
-        label: "View Scan",
+        label: "View Scan Details",
         onClick: () => onNavigate(`/scans/${action.scanId}`),
       });
     } else if (action.kind === "retry") {

@@ -16,6 +16,7 @@ import {
   getProfileMode,
   plannerAdjustContext,
   plannerSourceFromPlan,
+  planUiForCustomFromCategories,
   previewPlanForProfile,
   recomputePlanPreview,
   resolveCategoriesForAdjust,
@@ -63,7 +64,6 @@ export function ReviewAttackPlanStep({
   const { profileId, customCategories, expandedCategory, disabledTests, disabledGraphNodes } =
     planUi;
   const disabledTestSet = useMemo(() => new Set(disabledTests), [disabledTests]);
-  const disabledGraphSet = useMemo(() => new Set(disabledGraphNodes), [disabledGraphNodes]);
   const payloadAdjustTimerRef = useRef<number | null>(null);
   const adjustRequestRef = useRef(0);
 
@@ -110,7 +110,9 @@ export function ReviewAttackPlanStep({
     onAdjustingChange?.(true);
     const profileChanged =
       patch.profileId !== undefined && patch.profileId !== planUi.profileId;
-    const strategyForRequest = profileChanged
+    const switchingPreset =
+      profileChanged && patch.profileId !== "custom" && planUi.profileId !== "custom";
+    const strategyForRequest = switchingPreset
       ? undefined
       : payloadStrategyToDto(payloadStrategy ?? attackPlan.payloadStrategy);
     const requestId = ++adjustRequestRef.current;
@@ -144,20 +146,43 @@ export function ReviewAttackPlanStep({
   }
 
   function selectProfile(next: AttackProfileId) {
+    const switchingToCustom = next === "custom" && profileId !== "custom";
+    const presetCategories = switchingToCustom
+      ? [...attackPlan.categories]
+      : attackPlan.categories;
+    const customUi = switchingToCustom
+      ? planUiForCustomFromCategories(presetCategories)
+      : null;
+
     const patch: Partial<AttackPlanUiState> = {
       profileId: next,
       disabledTests: next !== "custom" ? [] : disabledTests,
-      disabledGraphNodes: next !== "custom" ? [] : disabledGraphNodes,
-      customCategories:
-        next === "custom"
-          ? ALL_ATTACK_CATEGORY_IDS.filter((id) => !disabledGraphSet.has(id))
+      disabledGraphNodes: switchingToCustom
+        ? customUi!.disabledGraphNodes
+        : next !== "custom"
+          ? []
+          : disabledGraphNodes,
+      customCategories: switchingToCustom
+        ? customUi!.customCategories
+        : next === "custom"
+          ? customCategories
           : customCategories,
     };
-    onPlanChange(
-      previewPlanForProfile(attackPlan, next, patch.disabledTests ?? disabledTests),
-    );
+    const preview = previewPlanForProfile(attackPlan, next, patch.disabledTests ?? disabledTests, {
+      sourceProfileId: switchingToCustom ? profileId : undefined,
+    });
+    onPlanChange(preview);
     onPlanUiChange(patch);
-    void applyAdjust(patch);
+    void applyAdjust(
+      patch,
+      {
+        executionStrategy: preview.executionStrategy,
+        maxAttempts: preview.maxAttempts,
+        reflectionEnabled: preview.reflectionEnabled,
+        adaptivePlanning: preview.adaptivePlanning,
+      },
+      preview.payloadStrategy,
+    );
   }
 
   function toggleCustomCategory(id: AttackCategoryId, enabled: boolean) {
@@ -324,7 +349,9 @@ export function ReviewAttackPlanStep({
       </section>
 
       <section className="wizard-fingerprint-summary">
-        <h4 className="wizard-endpoints__title">Attack Mode</h4>
+        <div className="wizard-planner-summary-header">
+          <h4 className="wizard-endpoints__title">Attack Mode</h4>
+        </div>
         <div className="wizard-attack-profiles">
         {ATTACK_PROFILES.map((profile) => {
           const selected = profileId === profile.id;
@@ -454,7 +481,9 @@ export function ReviewAttackPlanStep({
       </section>
 
       <section className="wizard-fingerprint-summary">
-        <h4 className="wizard-endpoints__title">Execution strategy</h4>
+        <div className="wizard-planner-summary-header">
+          <h4 className="wizard-endpoints__title">Execution strategy</h4>
+        </div>
         <div className="wizard-attack-profiles">
           <button
             type="button"

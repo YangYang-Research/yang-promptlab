@@ -22,7 +22,7 @@ import { pauseScan, resumeScan, stopScan, deleteScan } from "@/shared/ipc";
 import { toAppError } from "@/shared/errors/AppError";
 import { useToast } from "@/shared/notifications";
 import { formatDurationMs, formatTimestamp } from "@/features/scans/scanDetailsHelpers";
-import { buildScanWizardUrl } from "@/features/scans/wizardState";
+import { isLiveScanStatus, isRetryableScanStatus, resolveScanOpenPath } from "@/features/scans/wizardState";
 import type { ScanRun } from "@/shared/types";
 
 import { ScanHistoryCard, ScanMonitorCard } from "./ScanMonitorCard";
@@ -73,17 +73,16 @@ export function ScansPage() {
   const { page, setPage, pagination } = usePaginatedList(attackScans, pageSize);
 
   const activeScanIds = useMemo(
-    () =>
-      pagination.items
-        .filter(
-          (scan) =>
-            scan.status === "running" || scan.status === "paused" || scan.status === "pending",
-        )
-        .map((scan) => scan.id),
+    () => pagination.items.map((scan) => scan.id),
     [pagination.items],
   );
 
   const liveStatuses = useScanStatuses(activeScanIds, activeScanIds.length > 0);
+
+  const effectiveScanStatus = useCallback(
+    (scan: ScanRun) => liveStatuses.get(scan.id)?.status ?? scan.status,
+    [liveStatuses],
+  );
 
   const targetLabel = (targetId: string | null) => {
     if (!targetId) return "—";
@@ -121,15 +120,9 @@ export function ScansPage() {
 
   const openScan = useCallback(
     (scan: ScanRun) => {
-      if (scan.status === "draft") {
-        navigate(
-          buildScanWizardUrl(scan.projectId, scan.targetId ?? undefined, { scanId: scan.id }),
-        );
-        return;
-      }
-      navigate(`/scans/${scan.id}`);
+      navigate(resolveScanOpenPath(scan, liveStatuses.get(scan.id)?.status));
     },
-    [navigate],
+    [navigate, liveStatuses],
   );
 
   const handleDeleteScan = useCallback(
@@ -158,7 +151,14 @@ export function ScansPage() {
       const items: ActionsDropdownItem[] = [
         {
           id: "open",
-          label: scan.status === "draft" ? "Continue Setup" : "View Scan",
+          label:
+            scan.status === "draft"
+              ? "Continue Setup"
+              : isLiveScanStatus(effectiveScanStatus(scan))
+                ? "View Scan Progress"
+                : isRetryableScanStatus(effectiveScanStatus(scan))
+                  ? "Retry Scan"
+                  : "View Scan Details",
           onClick: () => openScan(scan),
         },
       ];
@@ -202,7 +202,7 @@ export function ScansPage() {
 
       return items;
     },
-    [controlPending, deletingScanId, handleDeleteScan, openScan, runControl],
+    [controlPending, deletingScanId, effectiveScanStatus, handleDeleteScan, openScan, runControl],
   );
 
   const tableColumns = useMemo(
@@ -226,7 +226,7 @@ export function ScansPage() {
       key: "status",
       header: "Status",
       width: "110px",
-      render: (scan: ScanRun) => <StatusBadge status={scan.status} />,
+      render: (scan: ScanRun) => <StatusBadge status={effectiveScanStatus(scan)} />,
     },
     {
       key: "findings",
@@ -261,7 +261,7 @@ export function ScansPage() {
       ),
     },
   ],
-    [buildScanActionItems, deletingScanId, findingsByScan, projectName, targetLabel],
+    [buildScanActionItems, deletingScanId, effectiveScanStatus, findingsByScan, projectName, targetLabel],
   );
 
   return (
@@ -320,10 +320,7 @@ export function ScansPage() {
                   live,
                   findingsByScan.get(scan.id) ?? 0,
                 );
-                const isActive =
-                  scan.status === "running" ||
-                  scan.status === "paused" ||
-                  scan.status === "pending";
+                const isActive = isLiveScanStatus(effectiveScanStatus(scan));
 
                 return (
                   <div

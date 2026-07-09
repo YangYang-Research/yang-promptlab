@@ -21,7 +21,7 @@ import {
 } from "./targetProfile";
 import type { VerificationLogLine } from "./verificationLog";
 import type { WizardStepId } from "./wizardSteps";
-import type { Target } from "@/shared/types";
+import type { ScanRun, Target } from "@/shared/types";
 
 const STORAGE_KEY = "promptlab:scan-wizard";
 const STORAGE_VERSION = 7;
@@ -298,6 +298,47 @@ export function buildScanWizardUrl(
     params.set("step", String(options.step));
   }
   return `/scans/new?${params.toString()}`;
+}
+
+export function isLiveScanStatus(status: string): boolean {
+  return status === "running" || status === "paused" || status === "pending";
+}
+
+export function isRetryableScanStatus(status: string): boolean {
+  return status === "failed" || status === "cancelled" || status === "stopped";
+}
+
+export function buildScanProgressUrl(
+  projectId: string,
+  scanId: string,
+  targetId?: string | null,
+): string {
+  return buildScanWizardUrl(projectId, targetId ?? undefined, { scanId, step: 5 });
+}
+
+export function buildScanRetryUrl(
+  projectId: string,
+  scanId: string,
+  targetId?: string | null,
+): string {
+  return buildScanWizardUrl(projectId, targetId ?? undefined, { scanId, step: 4 });
+}
+
+export function resolveScanOpenPath(
+  scan: Pick<ScanRun, "id" | "projectId" | "targetId" | "status">,
+  liveStatus?: string | null,
+): string {
+  const status = liveStatus ?? scan.status;
+  if (isLiveScanStatus(status)) {
+    return buildScanProgressUrl(scan.projectId, scan.id, scan.targetId);
+  }
+  if (isRetryableScanStatus(status)) {
+    return buildScanRetryUrl(scan.projectId, scan.id, scan.targetId);
+  }
+  if (scan.status === "draft") {
+    return buildScanWizardUrl(scan.projectId, scan.targetId ?? undefined, { scanId: scan.id });
+  }
+  return `/scans/${scan.id}`;
 }
 
 export async function fetchTargetFormForWizard(

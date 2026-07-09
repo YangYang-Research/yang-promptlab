@@ -42,6 +42,7 @@ export {
   pauseScan,
   resumeScan,
   stopScan,
+  tailScanConsole,
   deleteScan,
   type AppInfoResponse,
   type HealthResponse,
@@ -57,6 +58,7 @@ export {
   type ScanStartRequest,
   type ScanStatusDto,
   type ScanProgressEvent,
+  type ScanConsoleTailDto,
 } from "./client";
 export {
   listModels,

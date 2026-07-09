@@ -21,6 +21,7 @@ pub mod playwright_runtime;
 pub mod agent_service;
 pub mod runtime_watch;
 pub mod session_auth;
+pub mod scan_console_log;
 pub mod scan_playbook;
 pub mod state;
 
@@ -235,6 +236,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::scan::scan_pause,
             commands::scan::scan_resume,
             commands::scan::scan_stop,
+            commands::scan::scan_console_tail,
             commands::wizard_scan::scan_wizard_create,
             commands::wizard_scan::scan_wizard_save,
             commands::wizard_scan::scan_wizard_load,

@@ -15,6 +15,7 @@ import type { Project, Target } from "@/shared/types";
 import { ImportApiModal } from "./components/ImportApiModal";
 import { ReportExportDropdown } from "./components/ReportExportDropdown";
 import { ReviewAttackPlanStep } from "./steps/ReviewAttackPlanStep";
+import { AttackPlanPlanningState } from "./steps/AttackPlanPlanningState";
 import { AuthVerificationStep } from "./steps/AuthVerificationStep";
 import { ProjectStep } from "./steps/ProjectStep";
 import { ResultsStep } from "./steps/ResultsStep";
@@ -118,6 +119,7 @@ export function ScanWizardPage() {
   const [persistingTarget, setPersistingTarget] = useState(false);
   const [startingScan, setStartingScan] = useState(false);
   const [plannerGenerating, setPlannerGenerating] = useState(false);
+  const [plannerReplanning, setPlannerReplanning] = useState(false);
   const [plannerError, setPlannerError] = useState<string | null>(null);
   const [planAdjusting, setPlanAdjusting] = useState(false);
   const [dbVerification, setDbVerification] = useState<VerificationResultForm | null>(null);
@@ -409,7 +411,9 @@ export function ScanWizardPage() {
   }, [session.currentStep, session.savedTargetId, session.draftScanId]);
 
   const runAttackPlanner = useCallback(
-    async (targetId: string) => {
+    async (targetId: string, options?: { replan?: boolean }) => {
+      const replan = options?.replan ?? false;
+      setPlannerReplanning(replan);
       setPlannerGenerating(true);
       setPlannerError(null);
       try {
@@ -434,6 +438,7 @@ export function ScanWizardPage() {
         return null;
       } finally {
         setPlannerGenerating(false);
+        setPlannerReplanning(false);
       }
     },
     [notify],
@@ -463,7 +468,7 @@ export function ScanWizardPage() {
     if (session.currentStep !== 4 || !store.savedTarget) return;
     if (!session.targetProfile.verification.verified) return;
     if (session.attackPlan || plannerGenerating) return;
-    void runAttackPlanner(store.savedTarget.id);
+    void runAttackPlanner(store.savedTarget.id, { replan: false });
   }, [
     session.currentStep,
     store.savedTarget,
@@ -1071,11 +1076,7 @@ export function ScanWizardPage() {
           return <p className="text-muted">Waiting for target verification…</p>;
         }
         if (plannerGenerating || (!session.attackPlan && !plannerError)) {
-          return (
-            <p className="text-muted">
-              {plannerGenerating ? "Generating attack plan with Yazg…" : "Generating attack plan…"}
-            </p>
-          );
+          return <AttackPlanPlanningState replanning={plannerReplanning} />;
         }
         if (plannerError && !session.attackPlan) {
           return (
@@ -1084,7 +1085,7 @@ export function ScanWizardPage() {
               {store.savedTarget && (
                 <Button
                   variant="primary"
-                  onClick={() => void runAttackPlanner(store.savedTarget!.id)}
+                  onClick={() => void runAttackPlanner(store.savedTarget!.id, { replan: false })}
                 >
                   Retry planning
                 </Button>
@@ -1108,7 +1109,7 @@ export function ScanWizardPage() {
             onAdjustingChange={setPlanAdjusting}
           />
         ) : (
-          <p className="text-muted">Generating attack plan…</p>
+          <AttackPlanPlanningState replanning={false} />
         );
       case 5: {
         const waitingForTarget =
@@ -1206,7 +1207,8 @@ export function ScanWizardPage() {
             <p className="wizard-panel__hint text-muted">{stepDef.hint}</p>
             {session.currentStep === 4 &&
             store.savedTarget &&
-            session.targetProfile.verification.verified ? (
+            session.targetProfile.verification.verified &&
+            session.attackPlan ? (
               <Button
                 variant="ghost"
                 disabled={plannerGenerating || planAdjusting}
@@ -1216,11 +1218,13 @@ export function ScanWizardPage() {
                     attackPlan: null,
                     attackPlanUi: createInitialAttackPlanUi(),
                   });
-                  void runAttackPlanner(store.savedTarget!.id);
+                  void runAttackPlanner(store.savedTarget!.id, { replan: true });
                 }}
               >
-                {plannerGenerating ? "Re-planning…" : "Re-plan"}
+                {plannerGenerating && plannerReplanning ? "Re-planning…" : "Re-plan"}
               </Button>
+            ) : session.currentStep === 4 && plannerGenerating ? (
+              <Badge variant="muted">{plannerReplanning ? "Re-planning…" : "Planning…"}</Badge>
             ) : null}
             {session.currentStep === 3 && session.savedTargetId ? (
               dbVerificationLoading ? (

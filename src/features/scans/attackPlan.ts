@@ -507,9 +507,15 @@ export function previewPlanForProfile(
   plan: AttackPlanConfig,
   profileId: AttackProfileId,
   disabledTests: string[],
+  options?: { sourceProfileId?: AttackProfileId },
 ): AttackPlanConfig {
   if (profileId === "custom") {
-    return recomputePlanPreview({ ...plan, profileId, disabledTests });
+    return previewPlanForCustomTransition(
+      plan,
+      plan.categories,
+      disabledTests,
+      options?.sourceProfileId,
+    );
   }
 
   const mode = getProfileMode(plan, profileId);
@@ -535,6 +541,54 @@ export function previewPlanForProfile(
     reflectionEnabled: mode.reflectionEnabled,
     adaptivePlanning: mode.adaptivePlanning,
     payloadStrategy: mode.payloadStrategy,
+  });
+}
+
+/** Custom mode UI state — active categories plus the rest available to toggle on. */
+export function planUiForCustomFromCategories(
+  categories: AttackCategoryId[],
+): Pick<AttackPlanUiState, "customCategories" | "disabledGraphNodes"> {
+  const active = [...categories];
+  return {
+    customCategories: active,
+    disabledGraphNodes: ALL_ATTACK_CATEGORY_IDS.filter((id) => !active.includes(id)),
+  };
+}
+
+/** Enter custom mode while preserving the active categories from the current preset. */
+export function previewPlanForCustomTransition(
+  plan: AttackPlanConfig,
+  categories: AttackCategoryId[],
+  disabledTests: string[],
+  sourceProfileId?: AttackProfileId,
+): AttackPlanConfig {
+  const sourceMode =
+    sourceProfileId && sourceProfileId !== "custom"
+      ? getProfileMode(plan, sourceProfileId)
+      : null;
+  const { customCategories, disabledGraphNodes } = planUiForCustomFromCategories(categories);
+  const attackGraph = plan.attackGraph.map((node) => ({
+    ...node,
+    enabled: categories.includes(node.category),
+  }));
+
+  return recomputePlanPreview({
+    ...plan,
+    profileId: "custom",
+    categories,
+    customCategories,
+    disabledGraphNodes,
+    disabledTests,
+    attackGraph,
+    ...(sourceMode
+      ? {
+          executionStrategy: sourceMode.executionStrategy,
+          maxAttempts: sourceMode.maxAttempts,
+          reflectionEnabled: sourceMode.reflectionEnabled,
+          adaptivePlanning: sourceMode.adaptivePlanning,
+          payloadStrategy: sourceMode.payloadStrategy,
+        }
+      : {}),
   });
 }
 

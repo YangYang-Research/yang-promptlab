@@ -4928,6 +4928,102 @@ a:hover {
 }
 
 /* Scan wizard — step 4 (attack planning) */
+.wizard-attack-planning {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 0.25rem 0 0.5rem;
+  animation: wizard-attack-planning-fade-in 0.28s ease-out;
+}
+
+.wizard-attack-planning--replan .wizard-attack-planning__title {
+  color: var(--warning, #d4a017);
+}
+
+.wizard-attack-planning__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+}
+
+.wizard-attack-planning__spinner {
+  flex: 0 0 auto;
+  margin-top: 0.125rem;
+}
+
+.wizard-attack-planning__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.wizard-attack-planning__icon {
+  width: 1.125rem;
+  height: 1.125rem;
+  color: var(--accent);
+  animation: wizard-attack-planning-pulse 1.6s ease-in-out infinite;
+}
+
+.wizard-attack-planning__detail {
+  margin: 0.35rem 0 0;
+}
+
+.wizard-attack-planning__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.wizard-attack-planning__skeleton-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.wizard-attack-planning__skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.wizard-attack-planning__skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.875rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+}
+
+@keyframes wizard-attack-planning-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes wizard-attack-planning-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .wizard-planner-summary {
   display: flex;
   flex-wrap: wrap;

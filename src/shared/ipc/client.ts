@@ -308,6 +308,12 @@ export type ScanProgressEvent = {
   findingId?: string;
 };
 
+export type ScanConsoleTailDto = {
+  content: string;
+  offset: number;
+  totalBytes: number;
+};
+
 export type ReportDto = {
   id: string;
   project_id: string;
@@ -439,6 +445,12 @@ export const resumeScan = (scanId: string) =>
 
 export const stopScan = (scanId: string) =>
   invokeCommand<ScanStatusDto>("scan_stop", { scanId });
+
+export const tailScanConsole = (scanId: string, offset?: number) =>
+  invokeCommand<ScanConsoleTailDto>("scan_console_tail", {
+    scanId,
+    offset: offset ?? null,
+  });
 
 export const deleteScan = (scanId: string) =>
   invokeCommand<null>("scan_delete", { id: scanId });

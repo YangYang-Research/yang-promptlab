@@ -140,6 +140,10 @@ export async function hydrateWizardSessionForScanResume(
     }
   }
 
+  if (["running", "paused", "pending"].includes(scan.status)) {
+    next = { ...next, submittedScanId: scan.id };
+  }
+
   return next;
 }
 

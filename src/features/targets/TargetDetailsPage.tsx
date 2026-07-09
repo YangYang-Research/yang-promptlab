@@ -16,6 +16,7 @@ import {
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import { targetDisplayType } from "@/features/scans/targetProfile";
 import {
+  buildScanProgressUrl,
   buildScanWizardUrl,
   peekWizardSession,
   wizardResumeInputFromSession,
@@ -111,19 +112,14 @@ export function TargetDetailsPage() {
     if (scanAction.kind === "view_scan") {
       items.push({
         id: "view-scan",
-        label: "View Scan",
+        label: "View Scan Progress",
         onClick: () =>
-          navigate(
-            buildScanWizardUrl(target.projectId, target.id, {
-              scanId: scanAction.scanId,
-              step: 5,
-            }),
-          ),
+          navigate(buildScanProgressUrl(target.projectId, scanAction.scanId, target.id)),
       });
     } else if (scanAction.kind === "view_report") {
       items.push({
         id: "view-scan",
-        label: "View Scan",
+        label: "View Scan Details",
         onClick: () => navigate(`/scans/${scanAction.scanId}`),
       });
     } else if (scanAction.kind === "retry") {
@@ -375,19 +371,14 @@ function primaryScanAction(
 ): { label: string; onClick: () => void } {
   if (action.kind === "view_scan") {
     return {
-      label: "View scan",
+      label: "View Scan Progress",
       onClick: () =>
-        navigate(
-          buildScanWizardUrl(target.projectId, target.id, {
-            scanId: action.scanId,
-            step: 5,
-          }),
-        ),
+        navigate(buildScanProgressUrl(target.projectId, action.scanId, target.id)),
     };
   }
   if (action.kind === "view_report") {
     return {
-      label: "View scan",
+      label: "View Scan Details",
       onClick: () => navigate(`/scans/${action.scanId}`),
     };
   }

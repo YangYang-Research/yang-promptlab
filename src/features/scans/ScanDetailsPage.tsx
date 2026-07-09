@@ -37,17 +37,13 @@ import {
   profileLabel,
 } from "@/features/scans/scanPlaybook";
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
-import { buildScanWizardUrl } from "@/features/scans/wizardState";
+import { buildScanProgressUrl, buildScanWizardUrl, isLiveScanStatus } from "@/features/scans/wizardState";
 import { getScan, getTarget, resumeScan, deleteScan, type ScanDetailDto, type TargetDto } from "@/shared/ipc";
 import { toAppError } from "@/shared/errors";
 import { useToast } from "@/shared/notifications";
 import type { DiscoveredEndpoint, Finding, ScanRun, Severity } from "@/shared/types";
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
-
-function isLiveScanStatus(status: string | undefined): boolean {
-  return status === "running" || status === "paused" || status === "pending";
-}
 
 function isMonitorableAttackScan(scan: Pick<ScanRun, "name">): boolean {
   return scan.name.startsWith("Scan (") || scan.name.startsWith("Agent Scan (");
@@ -125,6 +121,14 @@ export function ScanDetailsPage() {
   const status = scan
     ? mergeScanStatus(scanId, scan.status, live, scanFindings.length)
     : null;
+
+  useEffect(() => {
+    if (!scan?.projectId || !scan.targetId) return;
+    if (!isMonitorableAttackScan(scan)) return;
+    const effectiveStatus = live?.status ?? scan.status;
+    if (!isLiveScanStatus(effectiveStatus)) return;
+    navigate(buildScanProgressUrl(scan.projectId, scan.id, scan.targetId), { replace: true });
+  }, [live?.status, navigate, scan]);
 
   const estimates = playbook
     ? estimateAttackPlan(
@@ -285,14 +289,11 @@ export function ScanDetailsPage() {
                 variant={showRetryScan || showResumeScan ? "secondary" : "primary"}
                 onClick={() =>
                   navigate(
-                    buildScanWizardUrl(scan!.projectId, scan!.targetId ?? undefined, {
-                      scanId: scan!.id,
-                      step: 5,
-                    }),
+                    buildScanProgressUrl(scan!.projectId, scan!.id, scan!.targetId),
                   )
                 }
               >
-                View Scan
+                View Scan Progress
               </Button>
             )}
             <ActionsDropdown

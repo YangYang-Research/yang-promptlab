@@ -24,12 +24,14 @@ use crate::commands::scan_execution::{
     scan_testcases_total, ScanExecutionConfig, TargetProfileScanContext,
 };
 use aisec_target_profile::PayloadStrategy;
+use serde::Serialize;
 use crate::events::{emit_app_data_changed, ScanProgressEmitter};
 use crate::session_auth::{build_attack_runtime_parts, fallback_attack_runtime, seed_url_from_descriptor, AttackRuntime};
 use crate::commands::target_profile::parse_target_profile;
 use crate::dto::{ScanStartDto, ScanStatusDto};
 use crate::error::{CommandError, CommandResult};
 use crate::jobs::{ScanBatchCheckpoint, ScanJobManager, ScanProgress};
+use crate::scan_console_log;
 use crate::scan_playbook::{
     checkpoint_from_playbook, persist_playbook_progress, persist_scan_playbook_state,
     progress_from_playbook,
@@ -1269,6 +1271,32 @@ pub async fn scan_resume(
 #[tauri::command]
 pub async fn scan_stop(state: State<'_, AppState>, scan_id: String) -> CommandResult<ScanStatusDto> {
     scan_stop_op(state.inner(), scan_id).await
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanConsoleTailDto {
+    pub content: String,
+    pub offset: usize,
+    pub total_bytes: usize,
+}
+
+#[tauri::command]
+pub async fn scan_console_tail(
+    state: State<'_, AppState>,
+    scan_id: String,
+    offset: Option<usize>,
+) -> CommandResult<ScanConsoleTailDto> {
+    let start = offset.unwrap_or(0);
+    let (content, next_offset, total_bytes) =
+        scan_console_log::read_from_offset(&state.logs_dir(), &scan_id, start).map_err(|e| {
+            CommandError::from(aisec_core::AisecError::internal(e.to_string()))
+        })?;
+    Ok(ScanConsoleTailDto {
+        content,
+        offset: next_offset,
+        total_bytes,
+    })
 }
 
 #[cfg(test)]

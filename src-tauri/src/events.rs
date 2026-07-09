@@ -1,8 +1,11 @@
 //! Tauri event payloads for live UI updates.
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use time::OffsetDateTime;
+
+use crate::scan_console_log;
+use crate::state::AppState;
 
 pub const SCAN_PROGRESS_EVENT: &str = "scan-progress";
 pub const APP_DATA_CHANGED_EVENT: &str = "app-data-changed";
@@ -80,6 +83,11 @@ impl ScanProgressEvent {
 }
 
 pub fn emit_scan_progress(app: &AppHandle, event: ScanProgressEvent) {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Err(err) = scan_console_log::append_line(&state.logs_dir(), &event) {
+            tracing::warn!(scan_id = %event.scan_id, ?err, "failed to write scan console log");
+        }
+    }
     let _ = app.emit(SCAN_PROGRESS_EVENT, event);
 }
 
