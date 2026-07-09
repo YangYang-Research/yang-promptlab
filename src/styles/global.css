@@ -1308,6 +1308,14 @@ a:hover {
   font-variant-numeric: tabular-nums;
 }
 
+.data-table__cell--align-right {
+  text-align: right;
+}
+
+.data-table__cell--align-right .table-actions {
+  justify-content: flex-end;
+}
+
 .data-table tbody tr {
   transition: background 0.15s var(--ease-out);
 }
@@ -3486,6 +3494,7 @@ a:hover {
 
 .table-actions {
   display: inline-flex;
+  align-items: center;
   gap: 0.375rem;
 }
 
@@ -5475,6 +5484,8 @@ a:hover {
 .scan-monitor-card__controls {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
   gap: 0.5rem;
 }
 .scan-monitor-card--history .scan-monitor-card__metrics {

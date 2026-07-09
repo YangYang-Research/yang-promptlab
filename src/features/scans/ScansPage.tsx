@@ -260,8 +260,9 @@ export function ScansPage() {
       key: "actions",
       header: "",
       width: "56px",
+      align: "right",
       render: (scan: ScanRun) => (
-        <span onClick={(event) => event.stopPropagation()}>
+        <span className="table-actions" onClick={(event) => event.stopPropagation()}>
           <ActionsDropdown
             label="Scan actions"
             disabled={deletingScanId === scan.id}

@@ -3,7 +3,12 @@ type Column<T> = {
   header: string;
   render: (row: T) => React.ReactNode;
   width?: string;
+  align?: "left" | "right";
 };
+
+function cellClassName(align?: "left" | "right") {
+  return align === "right" ? "data-table__cell--align-right" : undefined;
+}
 
 type DataTableProps<T> = {
   columns: Column<T>[];
@@ -37,7 +42,11 @@ export function DataTable<T extends { [key: string]: unknown }>({
         <thead>
           <tr>
             {columns.map((col) => (
-              <th key={col.key} style={col.width ? { width: col.width } : undefined}>
+              <th
+                key={col.key}
+                className={cellClassName(col.align)}
+                style={col.width ? { width: col.width } : undefined}
+              >
                 {col.header}
               </th>
             ))}
@@ -51,7 +60,9 @@ export function DataTable<T extends { [key: string]: unknown }>({
               onClick={onRowClick ? () => onRowClick(row) : undefined}
             >
               {columns.map((col) => (
-                <td key={col.key}>{col.render(row)}</td>
+                <td key={col.key} className={cellClassName(col.align)}>
+                  {col.render(row)}
+                </td>
               ))}
             </tr>
           ))}

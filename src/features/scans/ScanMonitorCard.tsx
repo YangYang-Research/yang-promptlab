@@ -66,14 +66,6 @@ export function ScanMonitorCard({
           <p className="text-muted text-sm mono">{scan.id}</p>
         </div>
         <div className="scan-monitor-card__header-actions">
-          {actions && (
-            <div
-              onClick={(event) => event.stopPropagation()}
-              onKeyDown={(event) => event.stopPropagation()}
-            >
-              {actions}
-            </div>
-          )}
           <StatusBadge status={status.status as ScanRun["status"]} />
           {status.agent_mode && <Badge variant="info">Agent</Badge>}
         </div>
@@ -151,7 +143,18 @@ export function ScanMonitorCard({
             <Button variant="danger" size="sm" disabled={controlPending} onClick={onStop}>
               Stop
             </Button>
+            {actions}
           </div>
+        </div>
+      )}
+      {!isActive && actions && (
+        <div
+          className="card-footer"
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          <span className="card-footer-meta text-sm text-muted">{scanStartedLabel(scan)}</span>
+          <div className="card-footer-actions">{actions}</div>
         </div>
       )}
     </div>
@@ -183,14 +186,6 @@ export function ScanHistoryCard({
           </p>
         </div>
         <div className="scan-monitor-card__header-actions">
-          {actions && (
-            <div
-              onClick={(event) => event.stopPropagation()}
-              onKeyDown={(event) => event.stopPropagation()}
-            >
-              {actions}
-            </div>
-          )}
           <StatusBadge status={scan.status} />
         </div>
       </div>
@@ -204,8 +199,13 @@ export function ScanHistoryCard({
           <dd className="text-sm">{scanDurationLabel(scan)}</dd>
         </div>
       </dl>
-      <div className="card-footer">
+      <div
+        className="card-footer"
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
         <span className="card-footer-meta text-sm text-muted">{scanStartedLabel(scan)}</span>
+        {actions ? <div className="card-footer-actions">{actions}</div> : null}
       </div>
     </div>
   );
