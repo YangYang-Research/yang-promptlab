@@ -20,6 +20,21 @@ pub fn scan_console_log_path(logs_dir: &Path, scan_id: &str) -> Option<PathBuf> 
     Some(logs_dir.join(SCAN_CONSOLE_DIR).join(format!("{safe_id}.log")))
 }
 
+pub fn clear_log(logs_dir: &Path, scan_id: &str) -> std::io::Result<()> {
+    let Some(path) = scan_console_log_path(logs_dir, scan_id) else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid scan id",
+        ));
+    };
+
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if path.exists() {
+        fs::remove_file(&path)?;
+    }
+    Ok(())
+}
+
 pub fn append_line(logs_dir: &Path, event: &ScanProgressEvent) -> std::io::Result<()> {
     let Some(path) = scan_console_log_path(logs_dir, &event.scan_id) else {
         return Err(std::io::Error::new(
@@ -150,6 +165,21 @@ mod tests {
         let (more, next, _) = read_from_offset(dir.path(), "scan-abc-123", offset).unwrap();
         assert!(more.is_empty());
         assert_eq!(next, offset);
+    }
+
+    #[test]
+    fn clear_log_removes_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let event = ScanProgressEvent::new("scan-abc-123", ScanProgressLevel::Info, "Probe sent");
+        append_line(dir.path(), &event).unwrap();
+        assert!(scan_console_log_path(dir.path(), "scan-abc-123").unwrap().exists());
+
+        clear_log(dir.path(), "scan-abc-123").unwrap();
+        assert!(!scan_console_log_path(dir.path(), "scan-abc-123").unwrap().exists());
+
+        let (content, _, total) = read_from_offset(dir.path(), "scan-abc-123", 0).unwrap();
+        assert!(content.is_empty());
+        assert_eq!(total, 0);
     }
 
     #[test]

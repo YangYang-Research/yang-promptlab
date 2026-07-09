@@ -119,6 +119,7 @@ export function ScanWizardPage() {
   const [scanSubmitError, setScanSubmitError] = useState<string | null>(null);
   const [persistingTarget, setPersistingTarget] = useState(false);
   const [startingScan, setStartingScan] = useState(false);
+  const [consoleResetKey, setConsoleResetKey] = useState(0);
   const [plannerGenerating, setPlannerGenerating] = useState(false);
   const [plannerReplanning, setPlannerReplanning] = useState(false);
   const [plannerError, setPlannerError] = useState<string | null>(null);
@@ -1017,6 +1018,9 @@ export function ScanWizardPage() {
       });
       await actions.refresh();
       updateSession({ submittedScanId: result.scan_id, currentStep: 5 });
+      if (options?.restart) {
+        setConsoleResetKey((key) => key + 1);
+      }
       notify(options?.restart ? "Attack restarted" : "Attack started in the background", "success");
     } catch (err) {
       const message = toAppError(err).message || "Failed to start scan";
@@ -1142,6 +1146,7 @@ export function ScanWizardPage() {
               targetProfile={session.targetProfile}
               attackPlan={session.attackPlan!}
               submittedScanId={session.submittedScanId}
+              consoleResetKey={consoleResetKey}
               onViewResult={goToResultsStep}
               onRetryScan={() => void handleRetryScan()}
               onClose={handleCancel}

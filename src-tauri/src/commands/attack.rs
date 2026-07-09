@@ -407,7 +407,7 @@ async fn judge_single_attempt(
                 .event(ScanProgressLevel::Info, format!("Judge: {confidence_label}"))
                 .endpoint(env.endpoint_url)
                 .payload(&truncate_console_payload(&attempt.mutated_content, 500))
-                .response(&response_console_excerpt(attempt, 500)),
+                .response(&response_console_excerpt(&attempt, 500)),
         );
     }
 

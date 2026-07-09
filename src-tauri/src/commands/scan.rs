@@ -670,6 +670,7 @@ pub async fn scan_start_op(
         playbook
     };
 
+    let mut clear_console_log = false;
     let scan = if let Some(draft_id) = draft_scan_id.filter(|id| !id.trim().is_empty()) {
         let existing = repos
             .scans()
@@ -682,6 +683,10 @@ pub async fn scan_start_op(
 
         let is_draft = existing.status == crate::commands::wizard_scan::WIZARD_SCAN_STATUS;
         let is_restart = is_restartable_scan_status(&existing.status);
+        clear_console_log = is_restart
+            || (!is_draft
+                && existing.status == "running"
+                && !state.jobs().contains(&draft_id));
         if is_restart {
             execution_config.pipeline_warmup_secs = 0;
         }
@@ -754,6 +759,12 @@ pub async fn scan_start_op(
                 },
             )
             .await;
+    }
+
+    if clear_console_log {
+        if let Err(err) = scan_console_log::clear_log(&state.logs_dir(), &scan.id) {
+            warn!(scan_id = %scan.id, error = %err, "failed to clear scan console log on restart");
+        }
     }
 
     let total = scan_progress_total(&parsed_categories, &disabled_tests, &execution_config);

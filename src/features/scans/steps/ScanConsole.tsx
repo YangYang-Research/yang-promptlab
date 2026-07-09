@@ -6,11 +6,12 @@ import { tailScanConsole, type ScanProgressEvent } from "@/shared/ipc";
 
 type ScanConsoleProps = {
   scanId: string;
+  resetKey?: number;
 };
 
 const TAIL_POLL_MS = 1_000;
 
-export function ScanConsole({ scanId }: ScanConsoleProps) {
+export function ScanConsole({ scanId, resetKey = 0 }: ScanConsoleProps) {
   const [content, setContent] = useState("");
   const bodyRef = useRef<HTMLPreElement>(null);
   const offsetRef = useRef(0);
@@ -61,7 +62,7 @@ export function ScanConsole({ scanId }: ScanConsoleProps) {
       if (pollTimer) clearInterval(pollTimer);
       void unlisten?.();
     };
-  }, [appendTail, scanId]);
+  }, [appendTail, resetKey, scanId]);
 
   useEffect(() => {
     const body = bodyRef.current;

@@ -24,6 +24,7 @@ type SubmitStepProps = {
   targetProfile: TargetProfileFormState;
   attackPlan: AttackPlanConfig;
   submittedScanId: string | null;
+  consoleResetKey?: number;
   onViewResult: () => void;
   onRetryScan: () => void;
   onClose: () => void;
@@ -34,6 +35,7 @@ export function SubmitStep({
   targetProfile,
   attackPlan,
   submittedScanId,
+  consoleResetKey,
   onViewResult,
   onRetryScan,
   onClose,
@@ -135,7 +137,7 @@ export function SubmitStep({
 
         {attackGraphSection}
 
-        <ScanConsole scanId={submittedScanId} />
+        <ScanConsole scanId={submittedScanId} resetKey={consoleResetKey} />
 
         <div className="wizard-submitted__actions">
           {isRunning && (
