@@ -48,7 +48,7 @@ function scanDuration(scan: ScanRun): string {
 export function ScansPage() {
   const navigate = useNavigate();
   const { scans, targets, projects, findings, loading, error, actions } = useAppStore();
-  const { notify } = useToast();
+  const { notify, dismiss } = useToast();
   const [viewMode, setViewMode] = useViewPreference("scans");
   const [pageSize, setPageSize] = usePageSizePreference("scans");
   const [controlPending, setControlPending] = useState<string | null>(null);
@@ -99,12 +99,19 @@ export function ScansPage() {
   const runControl = useCallback(
     async (scanId: string, action: "pause" | "resume" | "stop") => {
       setControlPending(scanId);
+      let pendingToastId: number | undefined;
       try {
         if (action === "pause") {
+          pendingToastId = notify("Pausing scan…", "info");
           await pauseScan(scanId);
+          dismiss(pendingToastId);
+          pendingToastId = undefined;
           notify("Scan paused", "info");
         } else if (action === "resume") {
+          pendingToastId = notify("Resuming scan…", "info");
           await resumeScan(scanId);
+          dismiss(pendingToastId);
+          pendingToastId = undefined;
           notify("Scan resumed", "success");
         } else {
           await stopScan(scanId);
@@ -112,13 +119,14 @@ export function ScansPage() {
         }
         await actions.refresh();
       } catch (err) {
+        if (pendingToastId !== undefined) dismiss(pendingToastId);
         const message = err instanceof Error ? err.message : "Scan control failed";
         notify(message, "error");
       } finally {
         setControlPending(null);
       }
     },
-    [actions, notify],
+    [actions, dismiss, notify],
   );
 
   const openScanDetails = useCallback(

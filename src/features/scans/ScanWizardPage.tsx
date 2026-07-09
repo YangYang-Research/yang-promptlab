@@ -100,7 +100,7 @@ export function ScanWizardPage() {
     step: requestedStep,
   });
   const { projects, targets, scans, findings, loading, error, dispatch, actions } = useAppStore();
-  const { notify } = useToast();
+  const { notify, dismiss } = useToast();
   const deepLinkApplied = useRef(false);
   const deepLinkTargetId = useRef<string | null>(null);
 
@@ -923,11 +923,16 @@ export function ScanWizardPage() {
   async function handleScanPause() {
     if (!session.submittedScanId) return;
     setScanControlPending(true);
+    let pendingToastId: number | undefined;
     try {
+      pendingToastId = notify("Pausing scan…", "info");
       await pauseScan(session.submittedScanId);
+      dismiss(pendingToastId);
+      pendingToastId = undefined;
       notify("Scan paused", "success");
       await actions.refresh();
     } catch (err) {
+      if (pendingToastId !== undefined) dismiss(pendingToastId);
       notify(toAppError(err).message || "Failed to pause scan", "error");
     } finally {
       setScanControlPending(false);
@@ -937,11 +942,16 @@ export function ScanWizardPage() {
   async function handleScanResume() {
     if (!session.submittedScanId) return;
     setScanControlPending(true);
+    let pendingToastId: number | undefined;
     try {
+      pendingToastId = notify("Resuming scan…", "info");
       await resumeScan(session.submittedScanId);
+      dismiss(pendingToastId);
+      pendingToastId = undefined;
       notify("Scan resumed", "success");
       await actions.refresh();
     } catch (err) {
+      if (pendingToastId !== undefined) dismiss(pendingToastId);
       notify(toAppError(err).message || "Failed to resume scan", "error");
     } finally {
       setScanControlPending(false);

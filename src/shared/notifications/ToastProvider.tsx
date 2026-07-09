@@ -17,7 +17,8 @@ export type Toast = {
 };
 
 type ToastContextValue = {
-  notify: (message: string, type?: ToastType) => void;
+  notify: (message: string, type?: ToastType) => number;
+  dismiss: (id: number) => void;
 };
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -37,11 +38,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       const id = nextId.current++;
       setToasts((prev) => [...prev, { id, type, message }]);
       window.setTimeout(() => dismiss(id), DEFAULT_DURATION_MS);
+      return id;
     },
     [dismiss],
   );
 
-  const value = useMemo<ToastContextValue>(() => ({ notify }), [notify]);
+  const value = useMemo<ToastContextValue>(() => ({ notify, dismiss }), [notify, dismiss]);
 
   return (
     <ToastContext.Provider value={value}>

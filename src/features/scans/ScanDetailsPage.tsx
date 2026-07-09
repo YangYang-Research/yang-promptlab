@@ -53,7 +53,7 @@ function isMonitorableAttackScan(scan: Pick<ScanRun, "name">): boolean {
 export function ScanDetailsPage() {
   const { scanId = "" } = useParams();
   const navigate = useNavigate();
-  const { notify } = useToast();
+  const { notify, dismiss } = useToast();
   const { scans, projects, targets, endpoints, findings, reports, actions } = useAppStore();
   const [detail, setDetail] = useState<ScanDetailDto | null>(null);
   const [targetDto, setTargetDto] = useState<TargetDto | null>(null);
@@ -150,8 +150,12 @@ export function ScanDetailsPage() {
 
   async function handleResumeScan() {
     setResumePending(true);
+    let pendingToastId: number | undefined;
     try {
+      pendingToastId = notify("Resuming scan…", "info");
       await resumeScan(scanId);
+      dismiss(pendingToastId);
+      pendingToastId = undefined;
       notify("Scan resumed", "success");
       await actions.refresh();
       if (scan?.projectId && scan.targetId) {
@@ -163,6 +167,7 @@ export function ScanDetailsPage() {
         );
       }
     } catch (err) {
+      if (pendingToastId !== undefined) dismiss(pendingToastId);
       notify(toAppError(err).message || "Failed to resume scan", "error");
     } finally {
       setResumePending(false);
