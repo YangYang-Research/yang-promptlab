@@ -801,19 +801,6 @@ export function AIRuntimePage() {
                     <EmptyState
                       title="No remote models yet"
                       description="Register an OpenAI, Anthropic, or custom endpoint provider from Models."
-                      action={
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={() =>
-                            navigate("/models", {
-                              state: { openAddModel: true, openAddModelTab: "third-party" },
-                            })
-                          }
-                        >
-                          Add Model
-                        </Button>
-                      }
                     />
                   )}
                 </Card>
@@ -949,19 +936,6 @@ export function AIRuntimePage() {
                     <EmptyState
                       title="No local models yet"
                       description="Download a catalog model or import a GGUF file from Models."
-                      action={
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={() =>
-                            navigate("/models", {
-                              state: { openAddModel: true, openAddModelTab: "public" },
-                            })
-                          }
-                        >
-                          Add Model
-                        </Button>
-                      }
                     />
                   ) : (
                     <ul className="runtime-route-models" aria-label="Installed local models">

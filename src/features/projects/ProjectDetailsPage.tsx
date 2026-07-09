@@ -315,15 +315,6 @@ export function ProjectDetailsPage() {
             <EmptyState
               title="No targets yet"
               description="Add a target URL or API endpoint to include it in this project."
-              action={
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => navigate(buildScanWizardUrl(project.id, undefined, { step: 2 }))}
-                >
-                  Add target
-                </Button>
-              }
             />
           ) : (
             <DataTable
@@ -402,13 +393,6 @@ export function ProjectDetailsPage() {
             <EmptyState
               title="No reports yet"
               description="Complete a scan and export results to build a report archive."
-              action={
-                <Link to={`/scans/new?projectId=${encodeURIComponent(project.id)}`}>
-                  <Button variant="secondary" size="sm">
-                    Start scan
-                  </Button>
-                </Link>
-              }
             />
           ) : (
             <ul className="detail-list">
