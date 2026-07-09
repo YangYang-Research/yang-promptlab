@@ -324,11 +324,21 @@ export function buildScanRetryUrl(
   return buildScanWizardUrl(projectId, targetId ?? undefined, { scanId, step: 4 });
 }
 
+export function resolveScanNavigationStatus(
+  storeStatus: string,
+  liveStatus?: string | null,
+): string {
+  if (!isLiveScanStatus(storeStatus)) {
+    return storeStatus;
+  }
+  return liveStatus ?? storeStatus;
+}
+
 export function resolveScanOpenPath(
   scan: Pick<ScanRun, "id" | "projectId" | "targetId" | "status">,
   liveStatus?: string | null,
 ): string {
-  const status = liveStatus ?? scan.status;
+  const status = resolveScanNavigationStatus(scan.status, liveStatus);
   if (isLiveScanStatus(status)) {
     return buildScanProgressUrl(scan.projectId, scan.id, scan.targetId);
   }

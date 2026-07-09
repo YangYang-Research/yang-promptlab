@@ -22,7 +22,7 @@ import { pauseScan, resumeScan, stopScan, deleteScan } from "@/shared/ipc";
 import { toAppError } from "@/shared/errors/AppError";
 import { useToast } from "@/shared/notifications";
 import { formatDurationMs, formatTimestamp } from "@/features/scans/scanDetailsHelpers";
-import { isLiveScanStatus, isRetryableScanStatus, resolveScanOpenPath } from "@/features/scans/wizardState";
+import { isLiveScanStatus, isRetryableScanStatus, resolveScanNavigationStatus, resolveScanOpenPath } from "@/features/scans/wizardState";
 import type { ScanRun } from "@/shared/types";
 
 import { ScanHistoryCard, ScanMonitorCard } from "./ScanMonitorCard";
@@ -73,14 +73,17 @@ export function ScansPage() {
   const { page, setPage, pagination } = usePaginatedList(attackScans, pageSize);
 
   const activeScanIds = useMemo(
-    () => pagination.items.map((scan) => scan.id),
+    () =>
+      pagination.items
+        .filter((scan) => isLiveScanStatus(scan.status))
+        .map((scan) => scan.id),
     [pagination.items],
   );
 
   const liveStatuses = useScanStatuses(activeScanIds, activeScanIds.length > 0);
 
   const effectiveScanStatus = useCallback(
-    (scan: ScanRun) => liveStatuses.get(scan.id)?.status ?? scan.status,
+    (scan: ScanRun) => resolveScanNavigationStatus(scan.status, liveStatuses.get(scan.id)?.status),
     [liveStatuses],
   );
 
@@ -118,7 +121,14 @@ export function ScansPage() {
     [actions, notify],
   );
 
-  const openScan = useCallback(
+  const openScanDetails = useCallback(
+    (scan: ScanRun) => {
+      navigate(`/scans/${scan.id}`);
+    },
+    [navigate],
+  );
+
+  const openScanAction = useCallback(
     (scan: ScanRun) => {
       navigate(resolveScanOpenPath(scan, liveStatuses.get(scan.id)?.status));
     },
@@ -159,7 +169,7 @@ export function ScansPage() {
                 : isRetryableScanStatus(effectiveScanStatus(scan))
                   ? "Retry Scan"
                   : "View Scan Details",
-          onClick: () => openScan(scan),
+          onClick: () => openScanAction(scan),
         },
       ];
 
@@ -202,7 +212,7 @@ export function ScansPage() {
 
       return items;
     },
-    [controlPending, deletingScanId, effectiveScanStatus, handleDeleteScan, openScan, runControl],
+    [controlPending, deletingScanId, effectiveScanStatus, handleDeleteScan, openScanAction, runControl],
   );
 
   const tableColumns = useMemo(
@@ -305,7 +315,7 @@ export function ScansPage() {
                 columns={tableColumns}
                 rows={pagination.items}
                 keyField="id"
-                onRowClick={openScan}
+                onRowClick={openScanDetails}
                 emptyMessage={loading ? "Loading scans…" : "No scans found"}
                 loading={loading && pagination.items.length === 0}
               />
@@ -326,9 +336,9 @@ export function ScansPage() {
                   <div
                     key={scan.id}
                     className="scan-card-link"
-                    onClick={() => openScan(scan)}
+                    onClick={() => openScanDetails(scan)}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") openScan(scan);
+                      if (event.key === "Enter" || event.key === " ") openScanDetails(scan);
                     }}
                     role="link"
                     tabIndex={0}

@@ -5871,16 +5871,18 @@ a:hover {
   gap: 1.25rem;
 }
 
-/* Project / target details — reorganized section layout */
+/* Project / target / scan details — reorganized section layout */
 .project-details,
-.target-details {
+.target-details,
+.scan-details {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
 }
 
 .project-details__lead,
-.target-details__lead {
+.target-details__lead,
+.scan-details__lead {
   margin: -0.5rem 0 0;
   max-width: 72ch;
   color: var(--text-muted);
@@ -5888,35 +5890,76 @@ a:hover {
   line-height: 1.6;
 }
 
+.scan-details__lead-sep {
+  color: var(--text-subtle);
+}
+
 .target-details__lead {
   font-size: 0.8125rem;
   word-break: break-all;
 }
 
+.scan-details__lead .mono {
+  font-size: 0.8125rem;
+  word-break: break-all;
+}
+
 .project-details__overview,
-.target-details__overview {
+.target-details__overview,
+.scan-details__overview {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
   gap: 1.25rem;
   align-items: stretch;
 }
 
-.project-details__insights {
+.project-details__insights,
+.scan-details__insights {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
   gap: 1.25rem;
   align-items: start;
 }
 
+.scan-details__config-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.scan-details__metrics {
+  margin-top: 1rem;
+}
+
+.scan-details__metrics .summary-stat__value--sm,
+.scan-details__endpoints-summary .summary-stat__value {
+  font-size: 1.125rem;
+}
+
+.scan-details__test-list {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.scan-details__export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .project-details__subsection,
-.target-details__subsection {
+.target-details__subsection,
+.scan-details__subsection {
   margin-top: 1.25rem;
   padding-top: 1.25rem;
   border-top: 1px solid var(--border-subtle);
 }
 
 .project-details__subsection-title,
-.target-details__subsection-title {
+.target-details__subsection-title,
+.scan-details__subsection-title {
   margin: 0 0 0.75rem;
   font-size: 0.8125rem;
   font-weight: 600;
@@ -5997,7 +6040,10 @@ a:hover {
 @media (max-width: 1024px) {
   .project-details__overview,
   .project-details__insights,
-  .target-details__overview {
+  .target-details__overview,
+  .scan-details__overview,
+  .scan-details__insights,
+  .scan-details__config-grid {
     grid-template-columns: 1fr;
   }
 
