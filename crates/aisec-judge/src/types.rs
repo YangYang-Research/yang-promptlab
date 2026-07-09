@@ -189,7 +189,7 @@ impl JudgeRequest {
             probe_id: probe_id.into(),
             attack_category: attack_category.into(),
             payload: payload.into(),
-            response_text: normalized.content.clone(),
+            response_text: normalized.judge_text(),
             context: serde_json::json!({
                 "raw_response": normalized.raw_response,
                 "status_code": normalized.status_code,

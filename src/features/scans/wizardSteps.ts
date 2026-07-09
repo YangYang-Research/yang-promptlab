@@ -1,6 +1,7 @@
 import type { AttackPlanConfig } from "./attackPlan";
 import type { TargetFormState } from "./targetDescriptor";
 import { validateTargetProfile, type TargetProfileFormState } from "./targetProfile";
+import { isScanResultsReady } from "./wizardState";
 import type { Target } from "@/shared/types";
 
 export type WizardStepId = 1 | 2 | 3 | 4 | 5 | 6;
@@ -105,12 +106,23 @@ export function maxCompletableStep(draft: WizardDraft): WizardStepId {
   return 6;
 }
 
-export function canNavigateToStep(target: WizardStepId, draft: WizardDraft): boolean {
+export type WizardNavigationOptions = {
+  scanStatus?: string | null;
+};
+
+export function canNavigateToStep(
+  target: WizardStepId,
+  draft: WizardDraft,
+  options?: WizardNavigationOptions,
+): boolean {
   if (draft.submittedScanId) {
-    return target === 5 || target === 6;
+    if (target === 6) {
+      return isScanResultsReady(options?.scanStatus);
+    }
+    return target === 5;
   }
   if (target === 1) return true;
-  if (target === 6) return draft.submittedScanId !== null;
+  if (target === 6) return false;
   const max = maxCompletableStep(draft);
   if (target <= max) return true;
   return target === max + 1 && isStepComplete(max, draft);

@@ -50,6 +50,7 @@ import {
   applyWizardEntryStep,
   parseWizardEntryStep,
   isFreshWizardEntry,
+  isScanResultsReady,
   createInitialAttackPlanUi,
   fetchTargetFormForWizard,
   loadTargetDtoForWizard,
@@ -652,6 +653,13 @@ export function ScanWizardPage() {
     ? mergeScanStatus(session.submittedScanId, "running", submittedLiveStatus, 0)
     : null;
 
+  useEffect(() => {
+    if (session.currentStep !== 6 || !session.submittedScanId || !submittedStatus) return;
+    if (!isScanResultsReady(submittedStatus.status)) {
+      updateSession({ currentStep: 5 });
+    }
+  }, [session.currentStep, session.submittedScanId, submittedStatus, updateSession]);
+
   const stepDef = getWizardStep(session.currentStep);
   const activeScanId = session.submittedScanId ?? session.draftScanId;
   const targetEndpointUrl =
@@ -851,7 +859,7 @@ export function ScanWizardPage() {
   }
 
   function handleStepChange(step: WizardStepId) {
-    if (canNavigateToStep(step, draft)) {
+    if (canNavigateToStep(step, draft, { scanStatus: submittedStatus?.status })) {
       void navigateToStep(step);
     }
   }
@@ -906,6 +914,7 @@ export function ScanWizardPage() {
   }
 
   function goToResultsStep() {
+    if (!isScanResultsReady(submittedStatus?.status)) return;
     updateSession({ currentStep: 6 });
   }
 
@@ -1204,6 +1213,7 @@ export function ScanWizardPage() {
       <WizardStepper
         currentStep={session.currentStep}
         draft={draft}
+        scanStatus={submittedStatus?.status}
         onStepChange={handleStepChange}
       />
 

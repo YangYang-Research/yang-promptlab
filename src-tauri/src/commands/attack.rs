@@ -175,7 +175,7 @@ fn finding_evidence_json(
             "status": attempt.response.status,
             "body": attempt.response.body,
             "duration_ms": attempt.response.duration_ms,
-            "normalized": attempt.response.normalized.content,
+            "normalized": attempt.response.normalized.judge_text(),
         },
         "response_excerpt": attempt.response.body.chars().take(2000).collect::<String>(),
         "explanation": verdict_summary,
@@ -406,7 +406,8 @@ async fn judge_single_attempt(
             emitter
                 .event(ScanProgressLevel::Info, format!("Judge: {confidence_label}"))
                 .endpoint(env.endpoint_url)
-                .payload(&truncate_console_payload(&attempt.mutated_content, 500)),
+                .payload(&truncate_console_payload(&attempt.mutated_content, 500))
+                .response(&response_console_excerpt(attempt, 500)),
         );
     }
 
@@ -423,6 +424,10 @@ fn truncate_console_payload(content: &str, max_bytes: usize) -> String {
         end -= 1;
     }
     format!("{}…", &trimmed[..end])
+}
+
+fn response_console_excerpt(attempt: &PayloadAttempt, max_bytes: usize) -> String {
+    truncate_console_payload(&attempt.response.normalized.judge_text(), max_bytes)
 }
 
 fn emit_attack_attempt(
@@ -453,7 +458,8 @@ fn emit_attack_attempt(
             )
             .endpoint(endpoint_url)
             .status_code(attempt.response.status)
-            .latency(attempt.response.duration_ms),
+            .latency(attempt.response.duration_ms)
+            .response(&response_console_excerpt(attempt, 500)),
     );
 }
 

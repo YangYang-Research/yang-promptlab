@@ -308,6 +308,10 @@ export function isRetryableScanStatus(status: string): boolean {
   return status === "failed" || status === "cancelled" || status === "stopped";
 }
 
+export function isScanResultsReady(status: string | null | undefined): boolean {
+  return status === "completed";
+}
+
 export function buildScanProgressUrl(
   projectId: string,
   scanId: string,

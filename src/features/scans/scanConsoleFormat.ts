@@ -20,6 +20,9 @@ export function formatScanConsoleLine(event: ScanProgressEvent): string {
   if (event.payload) {
     parts.push(`\n    payload: ${event.payload}`);
   }
+  if (event.response) {
+    parts.push(`\n    response: ${event.response}`);
+  }
   if (event.statusCode != null) {
     const latency = event.latency != null ? ` ${event.latency}ms` : "";
     parts.push(`→ ${event.statusCode}${latency}`);

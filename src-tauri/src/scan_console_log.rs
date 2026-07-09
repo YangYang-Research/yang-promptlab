@@ -106,6 +106,10 @@ fn format_console_line(event: &ScanProgressEvent) -> String {
         parts.push(format!("\n    payload: {payload}"));
     }
 
+    if let Some(response) = &event.response {
+        parts.push(format!("\n    response: {response}"));
+    }
+
     if let Some(code) = event.status_code {
         let latency = event
             .latency

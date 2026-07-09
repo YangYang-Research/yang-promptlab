@@ -303,6 +303,7 @@ export type ScanProgressEvent = {
   message: string;
   endpoint?: string;
   payload?: string;
+  response?: string;
   statusCode?: number;
   latency?: number;
   findingId?: string;
