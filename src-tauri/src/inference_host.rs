@@ -161,55 +161,6 @@ pub async fn gateway_complete(
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
 }
 
-/// Planner LLM backed by the AI Inference Gateway.
-pub struct HostPlannerLlm {
-    data_dir: PathBuf,
-    inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
-    model_manager: Arc<AsyncMutex<LocalModelManager>>,
-    model_provider: SharedModelProvider,
-    runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
-}
-
-impl HostPlannerLlm {
-    pub fn new(
-        data_dir: PathBuf,
-        inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
-        model_manager: Arc<AsyncMutex<LocalModelManager>>,
-        model_provider: SharedModelProvider,
-        runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
-    ) -> Self {
-        Self {
-            data_dir,
-            inference,
-            model_manager,
-            model_provider,
-            runtime_manager,
-        }
-    }
-}
-
-#[async_trait]
-impl PlannerLlm for HostPlannerLlm {
-    async fn complete(&self, prompt: &str) -> aisec_planner::PlannerResult<String> {
-        let inference = self.inference.lock().await;
-        let manager = self.model_manager.lock().await;
-        let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete(
-            &self.data_dir,
-            &inference,
-            &manager,
-            self.model_provider.clone(),
-            &mut runtime_mgr,
-            Some(PromptRegistry::planner_system()),
-            prompt,
-            2048,
-            0.15,
-        )
-        .await
-        .map_err(|e| aisec_planner::PlannerError::Llm(e.to_string()))
-    }
-}
-
 /// Wizard attack-plan LLM — higher token budget and JSON-focused system prompt.
 pub struct HostWizardPlannerLlm {
     data_dir: PathBuf,

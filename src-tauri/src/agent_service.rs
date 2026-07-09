@@ -24,7 +24,7 @@ use crate::commands::attack::run_category_on_endpoint;
 use crate::jobs::ScanProgress;
 use crate::events::ScanProgressEmitter;
 use crate::session_auth::AttackRuntime;
-use crate::inference_host::{build_judge_engine_from_gateway, is_inference_ready, HostGeneratorLlm, HostPlannerLlm};
+use crate::inference_host::{is_inference_ready, HostGeneratorLlm};
 
 pub struct ScanAgentHost<'a> {
     pub repos: &'a Repositories,
@@ -92,33 +92,10 @@ impl AgentHost for ScanAgentHost<'_> {
     }
 
     async fn plan(&mut self, fingerprint: &FingerprintResult) -> AgentResult<AttackPlan> {
-        let mode = if self.planner_mode == PlannerMode::LocalLlm {
-            let inference = self.inference_manager.lock().await;
-            if is_inference_ready(&inference) {
-                PlannerMode::LocalLlm
-            } else {
-                PlannerMode::Deterministic
-            }
-        } else {
-            self.planner_mode
-        };
-
-        let llm = if mode == PlannerMode::LocalLlm {
-            Some(Arc::new(HostPlannerLlm::new(
-                self.data_dir.to_path_buf(),
-                self.inference_manager.clone(),
-                self.model_manager_arc.clone(),
-                self.model_provider.clone(),
-                self.runtime_manager_arc.clone(),
-            )) as Arc<dyn aisec_planner::PlannerLlm>)
-        } else {
-            None
-        };
-
         generate_attack_plan(
             fingerprint,
-            mode,
-            llm.as_ref().map(|adapter| adapter.as_ref()),
+            PlannerMode::Deterministic,
+            None,
         )
         .await
         .map_err(Into::into)
