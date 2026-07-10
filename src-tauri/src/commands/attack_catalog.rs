@@ -3,9 +3,11 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use aisec_inference::PromptRegistry;
 use aisec_storage::{AttackCatalogRepository, AttackCatalogTechnique, UpdateAttackCatalogTechnique};
 
 use crate::error::{CommandError, CommandResult};
+use crate::inference_host::{gateway_complete, is_inference_ready};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,6 +171,93 @@ pub async fn attack_catalog_reset_op(
     Ok(to_dto(updated))
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttackCatalogGeneratePromptDto {
+    pub id: String,
+    pub content: String,
+}
+
+fn strip_generated_prompt(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let without_fence = if trimmed.starts_with("```") {
+        let mut lines = trimmed.lines();
+        let _ = lines.next();
+        let body: Vec<&str> = lines.collect();
+        let mut joined = body.join("\n");
+        if let Some(idx) = joined.rfind("```") {
+            joined.truncate(idx);
+        }
+        joined.trim().to_string()
+    } else {
+        trimmed.to_string()
+    };
+    without_fence
+        .trim_start_matches('"')
+        .trim_end_matches('"')
+        .trim()
+        .to_string()
+}
+
+pub async fn attack_catalog_generate_prompt_op(
+    state: &AppState,
+    id: String,
+) -> CommandResult<AttackCatalogGeneratePromptDto> {
+    let row = state
+        .database()
+        .repositories()
+        .attack_catalog()
+        .get(&id)
+        .await
+        .map_err(CommandError::from)?;
+
+    {
+        let inference = state.inference_manager().lock().await;
+        if !is_inference_ready(&inference) {
+            return Err(CommandError::invalid_input(
+                "AI runtime is not ready — configure and start AI Runtime first",
+            ));
+        }
+    }
+
+    let user = PromptRegistry::attack_catalog_prompt_user(
+        &row.id,
+        &row.name,
+        &row.category_id,
+        row.owasp.as_deref().unwrap_or("n/a"),
+        row.description.as_deref().unwrap_or("n/a"),
+        &row.content,
+    );
+
+    let inference = state.inference_manager().lock().await;
+    let manager = state.model_manager().lock().await;
+    let mut runtime_mgr = state.runtime_manager().lock().await;
+    let raw = gateway_complete(
+        state.data_dir(),
+        &inference,
+        &manager,
+        state.model_provider().clone(),
+        &mut runtime_mgr,
+        Some(PromptRegistry::attack_catalog_prompt_system()),
+        &user,
+        1024,
+        0.35,
+    )
+    .await?;
+
+    let content = strip_generated_prompt(&raw);
+    if content.is_empty() {
+        return Err(CommandError::invalid_input(
+            "AI runtime returned an empty prompt",
+        ));
+    }
+
+    Ok(AttackCatalogGeneratePromptDto {
+        id: row.id,
+        content,
+    })
+}
+
 #[tauri::command]
 pub async fn attack_catalog_list(
     state: State<'_, AppState>,
@@ -198,4 +287,12 @@ pub async fn attack_catalog_reset(
     id: String,
 ) -> CommandResult<AttackCatalogTechniqueDto> {
     attack_catalog_reset_op(&state, id).await
+}
+
+#[tauri::command]
+pub async fn attack_catalog_generate_prompt(
+    state: State<'_, AppState>,
+    id: String,
+) -> CommandResult<AttackCatalogGeneratePromptDto> {
+    attack_catalog_generate_prompt_op(&state, id).await
 }

@@ -49,10 +49,11 @@ export const ATTACK_CATALOG: AttackCategoryDefinition[] = [
     id: "prompt_injection",
     label: "Prompt Injection",
     description: "Instruction override via direct and indirect injection",
-    payloadCount: 28,
+    payloadCount: 29,
     mutatorCount: 3,
     tests: [
       { id: "pi-direct-override", name: "Direct instruction override" },
+      { id: "enc-ignore-rules", name: "Encoding probe base" },
       { id: "pi-force-output", name: "Force fixed output / compliance probe" },
       { id: "pi-indirect-task", name: "Indirect task injection" },
       { id: "pi-indirect-rag", name: "Indirect injection via retrieved content" },

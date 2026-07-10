@@ -42,4 +42,11 @@ export const RUNTIME_INFERENCE_SITES: RuntimeInferenceSite[] = [
     description:
       "AI Runtime summarizes scan findings and produces prioritized fix guidance. Falls back to rule-based text if runtime is unavailable.",
   },
+  {
+    id: "attack-factory-prompt",
+    title: "Attack Factory prompt generation",
+    location: "Advanced · Attack Factory",
+    description:
+      "Generate new prompt invents a novel adversarial probe for the selected technique from its metadata and current factory prompt. Review and save before it replaces the catalog entry.",
+  },
 ];

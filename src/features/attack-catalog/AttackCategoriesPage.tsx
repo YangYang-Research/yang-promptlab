@@ -5,11 +5,13 @@ import {
   PageHeader,
   RefreshButton,
 } from "@/shared/components";
+import { IconAi } from "@/shared/components/Icons";
 import { useAppStore } from "@/app/store/AppStore";
 import { toAppError } from "@/shared/errors";
 import {
   listAttackCatalog,
   listAttackCatalogCategories,
+  generateAttackCatalogPrompt,
   resetAttackCatalogTechnique,
   updateAttackCatalogTechnique,
   type AttackCatalogCategoryDto,
@@ -61,6 +63,7 @@ export function AttackCategoriesPage() {
   const [page, setPage] = useState(1);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedHint, setSavedHint] = useState<string | null>(null);
 
@@ -84,17 +87,6 @@ export function AttackCategoriesPage() {
       setTechniques([]);
     });
   }, [load]);
-
-  const stats = useMemo(() => {
-    const enabled = techniques.filter((row) => row.enabled).length;
-    const modified = techniques.filter((row) => row.userModified).length;
-    return {
-      total: techniques.length,
-      enabled,
-      modified,
-      categories: categories.length,
-    };
-  }, [techniques, categories.length]);
 
   const owaspCounts = useMemo(() => {
     const counts: Record<OwaspBrowseId, number> = {
@@ -231,7 +223,24 @@ export function AttackCategoriesPage() {
     }
   }
 
+  async function handleGeneratePrompt() {
+    if (!selected) return;
+    setGenerating(true);
+    setError(null);
+    setSavedHint(null);
+    try {
+      const generated = await generateAttackCatalogPrompt(selected.id);
+      setDraft(generated.content);
+      setSavedHint("AI generated a new prompt — review and save to apply");
+    } catch (err) {
+      setError(toAppError(err).message);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   const dirty = selected ? draft !== selected.content : false;
+  const actionsDisabled = busy || generating;
 
   return (
     <div className="page attack-categories-page">
@@ -257,25 +266,6 @@ export function AttackCategoriesPage() {
         </section>
       ) : (
         <div className="attack-catalog">
-          <section className="attack-catalog-summary" aria-label="Catalog summary">
-            <div className="attack-catalog-summary__stat">
-              <span className="attack-catalog-summary__label">Techniques</span>
-              <span className="attack-catalog-summary__value">{stats.total}</span>
-            </div>
-            <div className="attack-catalog-summary__stat">
-              <span className="attack-catalog-summary__label">Enabled</span>
-              <span className="attack-catalog-summary__value">{stats.enabled}</span>
-            </div>
-            <div className="attack-catalog-summary__stat">
-              <span className="attack-catalog-summary__label">Modified</span>
-              <span className="attack-catalog-summary__value">{stats.modified}</span>
-            </div>
-            <div className="attack-catalog-summary__stat">
-              <span className="attack-catalog-summary__label">Categories</span>
-              <span className="attack-catalog-summary__value">{stats.categories}</span>
-            </div>
-          </section>
-
           <section className="attack-catalog-filter" aria-label="Category filter">
             <div className="attack-catalog-filter__head">
               <h2 className="attack-catalog-filter__title">Browse by category</h2>
@@ -512,14 +502,28 @@ export function AttackCategoriesPage() {
                   <div className="attack-catalog-editor__prompt">
                     <div className="attack-catalog-editor__prompt-head">
                       <label htmlFor="attack-prompt">Default prompt</label>
-                      {dirty ? (
-                        <span className="attack-catalog-editor__dirty">Unsaved changes</span>
-                      ) : null}
+                      <div className="attack-catalog-editor__prompt-head-actions">
+                        {!generating && dirty ? (
+                          <span className="attack-catalog-editor__dirty">Unsaved changes</span>
+                        ) : null}
+                        <Button
+                          variant="primary"
+                          className="attack-catalog-generate-btn"
+                          disabled={!backendConnected || actionsDisabled}
+                          onClick={() => void handleGeneratePrompt()}
+                        >
+                          <span className="btn__content">
+                            <IconAi className="btn__icon" aria-hidden />
+                            {generating ? "Generating…" : "Generate new prompt"}
+                          </span>
+                        </Button>
+                      </div>
                     </div>
                     <textarea
                       id="attack-prompt"
                       className="attack-catalog-editor__textarea"
                       value={draft}
+                      disabled={generating}
                       onChange={(event) => {
                         setDraft(event.target.value);
                         setSavedHint(null);
@@ -537,21 +541,21 @@ export function AttackCategoriesPage() {
                     <div className="attack-catalog-editor__actions">
                       <Button
                         variant="ghost"
-                        disabled={busy}
+                        disabled={actionsDisabled}
                         onClick={() => void handleToggleEnabled()}
                       >
                         {selected.enabled ? "Disable" : "Enable"}
                       </Button>
                       <Button
                         variant="secondary"
-                        disabled={busy || !selected.userModified}
+                        disabled={actionsDisabled || !selected.userModified}
                         onClick={() => void handleReset()}
                       >
                         Reset default
                       </Button>
                       <Button
                         variant="primary"
-                        disabled={busy || !dirty}
+                        disabled={actionsDisabled || !dirty}
                         onClick={() => void handleSave()}
                       >
                         Save prompt

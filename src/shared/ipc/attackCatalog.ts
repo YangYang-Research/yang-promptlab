@@ -47,3 +47,14 @@ export function updateAttackCatalogTechnique(
 export function resetAttackCatalogTechnique(id: string): Promise<AttackCatalogTechniqueDto> {
   return invokeCommand<AttackCatalogTechniqueDto>("attack_catalog_reset", { id });
 }
+
+export type AttackCatalogGeneratePromptDto = {
+  id: string;
+  content: string;
+};
+
+export function generateAttackCatalogPrompt(
+  id: string,
+): Promise<AttackCatalogGeneratePromptDto> {
+  return invokeCommand<AttackCatalogGeneratePromptDto>("attack_catalog_generate_prompt", { id });
+}

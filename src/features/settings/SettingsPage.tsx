@@ -202,7 +202,7 @@ export function SettingsPage() {
 
               <SettingsSection
                 title="Runtime inference"
-                description="Where scans invoke your AI Runtime model — verification, planning, execution, and results."
+                description="Where the app invokes your AI Runtime model — verification, planning, execution, results, and Attack Factory."
               >
                 <RuntimeInferencePanel />
               </SettingsSection>

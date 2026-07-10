@@ -305,6 +305,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::attack_catalog::attack_catalog_categories,
             commands::attack_catalog::attack_catalog_update,
             commands::attack_catalog::attack_catalog_reset,
+            commands::attack_catalog::attack_catalog_generate_prompt,
         ])
         .manage(AsyncMutex::new(commands::auth::AuthRecordingState::new()))
         .build(tauri::generate_context!())?;
