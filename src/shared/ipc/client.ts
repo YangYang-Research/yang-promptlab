@@ -88,6 +88,7 @@ export type ScanStartRequest = {
   agentMode?: boolean;
   maxAgentAttempts?: number;
   reflectionEnabled?: boolean;
+  adaptivePlanning?: boolean;
   draftScanId?: string;
 };
 
@@ -219,6 +220,7 @@ export const startScan = (request: ScanStartRequest) =>
     agentMode: request.agentMode ?? false,
     maxAgentAttempts: request.maxAgentAttempts ?? 5,
     reflectionEnabled: request.reflectionEnabled ?? false,
+    adaptivePlanning: request.adaptivePlanning ?? false,
     draftScanId: request.draftScanId,
   });
 

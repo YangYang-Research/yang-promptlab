@@ -3,8 +3,27 @@ use serde::{Deserialize, Serialize};
 use crate::types::{TargetCapabilities, TargetProfile};
 
 const PAYLOAD_BUDGET_MIN: u32 = 1;
-const PAYLOAD_BUDGET_MAX: u32 = 100;
+const PAYLOAD_BUDGET_MAX: u32 = 50;
 const PAYLOAD_BUDGET_DEFAULT: u32 = 20;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MutationLevel {
+    Low,
+    Medium,
+    High,
+    Extreme,
+}
+
+impl MutationLevel {
+    pub fn escalate(self) -> Self {
+        match self {
+            Self::Low => Self::Medium,
+            Self::Medium => Self::High,
+            Self::High | Self::Extreme => Self::Extreme,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -14,13 +33,13 @@ pub enum PayloadGenerationStrategy {
     Adaptive,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MutationLevel {
-    Low,
-    Medium,
-    High,
-    Extreme,
+impl PayloadGenerationStrategy {
+    pub fn escalate(self) -> Self {
+        match self {
+            Self::Deterministic => Self::Mutation,
+            Self::Mutation | Self::Adaptive => Self::Adaptive,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

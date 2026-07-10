@@ -639,11 +639,12 @@ fn resolve_mode_disabled_tests(
     catalog: &HashMap<String, AttackCategory>,
 ) -> PlannerResult<Vec<String>> {
     let category_set: HashSet<_> = categories.iter().copied().collect();
-    let in_mode: Vec<(&str, AttackCategory)> = catalog
+    let mut in_mode: Vec<(&str, AttackCategory)> = catalog
         .iter()
         .filter(|(_, category)| category_set.contains(category))
         .map(|(id, category)| (id.as_str(), *category))
         .collect();
+    in_mode.sort_by(|a, b| a.0.cmp(b.0));
 
     if in_mode.is_empty() {
         return Err(PlannerError::Llm(format!(
@@ -656,27 +657,38 @@ fn resolve_mode_disabled_tests(
         let mut covered = HashSet::new();
         for id in enabled {
             let Some(category) = catalog.get(id) else {
-                return Err(PlannerError::Llm(format!(
-                    "modes.{profile_id}.enabledTests contains unknown technique id: {id}"
-                )));
+                // Soft-drop unknown IDs — local models often invent near-miss technique names.
+                continue;
             };
             if !category_set.contains(category) {
-                return Err(PlannerError::Llm(format!(
-                    "modes.{profile_id}.enabledTests id {id} is outside selected categories"
-                )));
+                // Soft-drop techniques whose category was not selected / was filtered out
+                // (e.g. memory techniques when memory_poisoning is not applicable).
+                continue;
             }
             enabled_set.insert(id.as_str());
             covered.insert(*category);
         }
+
+        // Ensure every selected category keeps at least one technique.
+        for category in categories {
+            if covered.contains(category) {
+                continue;
+            }
+            if let Some((id, _)) = in_mode.iter().find(|(_, cat)| *cat == *category) {
+                enabled_set.insert(*id);
+                covered.insert(*category);
+            }
+        }
+
         if enabled_set.is_empty() {
             return Err(PlannerError::Llm(format!(
-                "modes.{profile_id}.enabledTests must include at least one technique"
+                "modes.{profile_id}.enabledTests produced no techniques inside selected categories"
             )));
         }
         for category in categories {
             if !covered.contains(category) {
                 return Err(PlannerError::Llm(format!(
-                    "modes.{profile_id}.enabledTests missing technique for category {}",
+                    "modes.{profile_id}: no catalog technique available for category {}",
                     category.as_str()
                 )));
             }
@@ -694,14 +706,26 @@ fn resolve_mode_disabled_tests(
         let mut disabled_set = HashSet::new();
         for id in disabled {
             let Some(category) = catalog.get(id) else {
-                return Err(PlannerError::Llm(format!(
-                    "modes.{profile_id}.disabledTests contains unknown technique id: {id}"
-                )));
+                continue;
             };
             if !category_set.contains(category) {
                 continue;
             }
             disabled_set.insert(id.clone());
+        }
+        // Keep at least one technique per selected category.
+        for category in categories {
+            let has_enabled = in_mode.iter().any(|(id, cat)| {
+                *cat == *category && !disabled_set.contains(*id)
+            });
+            if has_enabled {
+                continue;
+            }
+            if let Some((id, _)) = in_mode.iter().find(|(id, cat)| {
+                *cat == *category && disabled_set.contains(*id)
+            }) {
+                disabled_set.remove(*id);
+            }
         }
         let enabled_count = in_mode
             .iter()
@@ -888,12 +912,16 @@ fn parse_payload_strategy_strict(
         }
     };
     let variants_per_test = if raw.variants_per_test == 0 {
-        default_variants_per_test(strategy)
+        return Err(PlannerError::Llm(format!(
+            "modes.{profile_id}.payloadStrategy.variantsPerTest is required (derive from enabledTests/mutationLevel; do not omit or use 0)"
+        )));
     } else {
         raw.variants_per_test
     };
     let max_total_payloads = if raw.max_total_payloads == 0 {
-        default_max_total_payloads(strategy)
+        return Err(PlannerError::Llm(format!(
+            "modes.{profile_id}.payloadStrategy.maxTotalPayloads is required (derive from enabledTests*variantsPerTest; do not omit or use 0)"
+        )));
     } else {
         raw.max_total_payloads
     };
@@ -909,22 +937,6 @@ fn parse_payload_strategy_strict(
         enable_payload_deduplication: raw.enable_payload_deduplication,
         enable_cross_category_mutation: raw.enable_cross_category_mutation,
     })
-}
-
-fn default_max_total_payloads(strategy: PayloadGenerationStrategy) -> u32 {
-    match strategy {
-        PayloadGenerationStrategy::Deterministic => 10,
-        PayloadGenerationStrategy::Mutation => 20,
-        PayloadGenerationStrategy::Adaptive => 100,
-    }
-}
-
-fn default_variants_per_test(strategy: PayloadGenerationStrategy) -> u32 {
-    match strategy {
-        PayloadGenerationStrategy::Deterministic => 2,
-        PayloadGenerationStrategy::Mutation => 5,
-        PayloadGenerationStrategy::Adaptive => 10,
-    }
 }
 
 fn extract_json_object(raw: &str) -> PlannerResult<String> {
@@ -1117,7 +1129,7 @@ mod tests {
                 "strategy": "adaptive",
                 "mutationLevel": "extreme",
                 "variantsPerTest": 10,
-                "maxTotalPayloads": 100,
+                "maxTotalPayloads": 50,
                 "enableContextAwareness": true,
                 "enableConversationMemory": true,
                 "enableResponseAdaptation": true,
@@ -1189,6 +1201,51 @@ mod tests {
     }
 
     #[test]
+    fn parse_wizard_llm_plan_soft_drops_out_of_category_techniques() {
+        let raw = r#"{
+          "recommendedProfileId": "standard",
+          "modes": {
+            "quick": {
+              "categories": ["prompt_injection", "jailbreak"],
+              "enabledTests": ["pi-direct-override", "jb-dan", "mp-false-fact", "dp-session-state"],
+              "executionStrategy": "sequential",
+              "payloadStrategy": { "strategy": "deterministic", "mutationLevel": "low", "variantsPerTest": 2, "maxTotalPayloads": 6 }
+            },
+            "standard": {
+              "categories": ["prompt_injection", "jailbreak"],
+              "enabledTests": ["pi-direct-override", "jb-dan", "mp-persist-instruction"],
+              "executionStrategy": "sequential",
+              "payloadStrategy": { "strategy": "mutation", "mutationLevel": "medium", "variantsPerTest": 4, "maxTotalPayloads": 18 }
+            },
+            "deep": {
+              "categories": ["prompt_injection", "jailbreak"],
+              "enabledTests": ["pi-direct-override", "jb-dan"],
+              "executionStrategy": "agentic",
+              "maxAttempts": 5,
+              "reflectionEnabled": true,
+              "adaptivePlanning": true,
+              "payloadStrategy": { "strategy": "adaptive", "mutationLevel": "extreme", "variantsPerTest": 8, "maxTotalPayloads": 40 }
+            }
+          }
+        }"#;
+        let profile = sample_profile();
+        let refinement = parse_wizard_llm_plan(raw, &profile).expect("soft-drop orphans");
+        let standard = find_profile_mode(&refinement.profile_modes, "standard").expect("standard");
+        assert!(!standard.categories.contains(&AttackCategory::MemoryPoisoning));
+        let catalog = technique_catalog_index().expect("catalog");
+        let enabled: Vec<_> = catalog
+            .iter()
+            .filter(|(id, cat)| {
+                standard.categories.contains(cat) && !standard.disabled_tests.contains(*id)
+            })
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert!(enabled.contains(&"pi-direct-override"));
+        assert!(enabled.contains(&"jb-dan"));
+        assert!(!enabled.iter().any(|id| id.starts_with("mp-") || *id == "dp-session-state"));
+    }
+
+    #[test]
     fn parse_wizard_llm_plan_accepts_numeric_enum_fields() {
         let raw = r#"{
           "recommendedProfileId": "standard",
@@ -1197,13 +1254,13 @@ mod tests {
               "categories": ["prompt_injection"],
               "enabledTests": ["pi-direct-override"],
               "executionStrategy": 1,
-              "payloadStrategy": { "strategy": 1, "mutationLevel": 1 }
+              "payloadStrategy": { "strategy": 1, "mutationLevel": 1, "variantsPerTest": 2, "maxTotalPayloads": 4 }
             },
             "standard": {
               "categories": ["prompt_injection", "jailbreak"],
               "enabledTests": ["pi-direct-override", "jb-dan"],
               "executionStrategy": "sequential",
-              "payloadStrategy": { "strategy": "mutation", "mutationLevel": 2 }
+              "payloadStrategy": { "strategy": "mutation", "mutationLevel": 2, "variantsPerTest": 4, "maxTotalPayloads": 12 }
             },
             "deep": {
               "categories": ["prompt_injection", "jailbreak"],
@@ -1212,7 +1269,7 @@ mod tests {
               "maxAttempts": 5,
               "reflectionEnabled": true,
               "adaptivePlanning": true,
-              "payloadStrategy": { "strategy": 3, "mutationLevel": 4, "maxTotalPayloads": 100 }
+              "payloadStrategy": { "strategy": 3, "mutationLevel": 4, "variantsPerTest": 9, "maxTotalPayloads": 48 }
             }
           }
         }"#;

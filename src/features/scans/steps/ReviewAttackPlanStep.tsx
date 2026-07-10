@@ -43,6 +43,19 @@ import { WizardRangeSlider } from "./WizardRangeSlider";
 
 const MAX_ATTEMPTS_MIN = 1;
 const MAX_ATTEMPTS_MAX = 20;
+const TEST_COLUMN_COUNT = 2;
+
+/** Split items into at most `maxColumns` columns (fill down, then next column). */
+function chunkIntoColumns<T>(items: T[], maxColumns: number): T[][] {
+  if (items.length === 0) return [];
+  const columnCount = Math.min(Math.max(1, maxColumns), items.length);
+  const perColumn = Math.ceil(items.length / columnCount);
+  const columns: T[][] = [];
+  for (let i = 0; i < items.length; i += perColumn) {
+    columns.push(items.slice(i, i + perColumn));
+  }
+  return columns;
+}
 
 type ReviewAttackPlanStepProps = {
   targetId: string;
@@ -456,24 +469,28 @@ export function ReviewAttackPlanStep({
                   </div>
 
                   {expanded && (
-                    <ul className="wizard-attack-test-list">
-                      {category.tests.map((test) => {
-                        const enabled = !disabledTestSet.has(test.id);
-                        return (
-                          <li key={test.id}>
-                            <label className="wizard-attack-test">
-                              <input
-                                type="checkbox"
-                                checked={enabled && included}
-                                disabled={!included}
-                                onChange={(e) => toggleTest(test.id, e.target.checked)}
-                              />
-                              <span>{test.name}</span>
-                            </label>
-                          </li>
-                        );
-                      })}
-                    </ul>
+                    <div className="wizard-attack-test-columns">
+                      {chunkIntoColumns(category.tests, TEST_COLUMN_COUNT).map((column, colIndex) => (
+                        <ul key={colIndex} className="wizard-attack-test-list">
+                          {column.map((test) => {
+                            const enabled = !disabledTestSet.has(test.id);
+                            return (
+                              <li key={test.id}>
+                                <label className="wizard-attack-test">
+                                  <input
+                                    type="checkbox"
+                                    checked={enabled && included}
+                                    disabled={!included}
+                                    onChange={(e) => toggleTest(test.id, e.target.checked)}
+                                  />
+                                  <span>{test.name}</span>
+                                </label>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ))}
+                    </div>
                   )}
                 </div>
               );
@@ -553,7 +570,10 @@ export function ReviewAttackPlanStep({
                 />
                 <span>Reflection enabled</span>
               </label>
-              <label className="wizard-checkbox">
+              <label
+                className="wizard-checkbox"
+                title="Between retries, rotate techniques and escalate mutation/strategy from judge outcomes."
+              >
                 <input
                   type="checkbox"
                   checked={attackPlan.adaptivePlanning}

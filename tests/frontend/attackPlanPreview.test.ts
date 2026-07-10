@@ -82,7 +82,7 @@ function samplePlan(): AttackPlanConfig {
         strategy: "adaptive" as const,
         mutationLevel: "extreme" as const,
         variantsPerTest: 10,
-        maxTotalPayloads: 100,
+        maxTotalPayloads: 50,
       },
     },
   ];

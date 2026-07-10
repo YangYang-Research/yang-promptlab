@@ -1,7 +1,13 @@
 import type { AttackPlanConfig } from "./attackPlan";
 import type { ScanStatusDto } from "@/shared/ipc";
 
-export type ExecutionPhaseId = "generate" | "attack" | "judge" | "reflection" | "retry";
+export type ExecutionPhaseId =
+  | "generate"
+  | "attack"
+  | "judge"
+  | "reflection"
+  | "adaptive"
+  | "retry";
 
 export type ExecutionStrategyStep = {
   id: ExecutionPhaseId;
@@ -12,7 +18,10 @@ export type ExecutionStrategyStep = {
 export type ExecutionStepState = "pending" | "active" | "done" | "failed";
 
 export function executionStrategySteps(
-  plan: Pick<AttackPlanConfig, "executionStrategy" | "reflectionEnabled" | "maxAttempts">,
+  plan: Pick<
+    AttackPlanConfig,
+    "executionStrategy" | "reflectionEnabled" | "adaptivePlanning" | "maxAttempts"
+  >,
 ): ExecutionStrategyStep[] {
   if (plan.executionStrategy === "sequential") {
     return [
@@ -60,6 +69,14 @@ export function executionStrategySteps(
     });
   }
 
+  if (plan.adaptivePlanning) {
+    steps.push({
+      id: "adaptive",
+      label: "Adaptive plan",
+      description: "Replan techniques and escalate payload strategy before the next attempt",
+    });
+  }
+
   steps.push({
     id: "retry",
     label: "Retry",
@@ -83,6 +100,7 @@ function normalizePhase(phase: string | null | undefined): ExecutionPhaseId | nu
     value === "attack" ||
     value === "judge" ||
     value === "reflection" ||
+    value === "adaptive" ||
     value === "retry"
   ) {
     return value;

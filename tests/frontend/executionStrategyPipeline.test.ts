@@ -10,6 +10,7 @@ describe("executionStrategySteps", () => {
     const steps = executionStrategySteps({
       executionStrategy: "sequential",
       reflectionEnabled: false,
+      adaptivePlanning: false,
       maxAttempts: 1,
     });
     expect(steps.map((step) => step.id)).toEqual(["generate", "attack", "judge"]);
@@ -19,6 +20,7 @@ describe("executionStrategySteps", () => {
     const steps = executionStrategySteps({
       executionStrategy: "agentic",
       reflectionEnabled: true,
+      adaptivePlanning: false,
       maxAttempts: 3,
     });
     expect(steps.map((step) => step.id)).toEqual([
@@ -29,12 +31,30 @@ describe("executionStrategySteps", () => {
       "retry",
     ]);
   });
+
+  it("includes adaptive plan between reflection and retry", () => {
+    const steps = executionStrategySteps({
+      executionStrategy: "agentic",
+      reflectionEnabled: true,
+      adaptivePlanning: true,
+      maxAttempts: 3,
+    });
+    expect(steps.map((step) => step.id)).toEqual([
+      "generate",
+      "attack",
+      "judge",
+      "reflection",
+      "adaptive",
+      "retry",
+    ]);
+  });
 });
 
 describe("resolveExecutionStepStates", () => {
   const sequential = executionStrategySteps({
     executionStrategy: "sequential",
     reflectionEnabled: false,
+    adaptivePlanning: false,
     maxAttempts: 1,
   });
 

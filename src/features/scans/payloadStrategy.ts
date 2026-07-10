@@ -31,7 +31,7 @@ export type PayloadStrategyDto = {
 export const VARIANTS_PER_TEST_MIN = 1;
 export const VARIANTS_PER_TEST_MAX = 20;
 export const PAYLOAD_BUDGET_MIN = 1;
-export const PAYLOAD_BUDGET_MAX = 100;
+export const PAYLOAD_BUDGET_MAX = 50;
 export const PAYLOAD_BUDGET_DEFAULT = 20;
 export const PAYLOAD_BUDGET_STEP = 1;
 

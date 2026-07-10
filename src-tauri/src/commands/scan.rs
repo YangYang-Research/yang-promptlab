@@ -375,6 +375,7 @@ pub async fn scan_start_op(
     agent_mode: Option<bool>,
     max_agent_attempts: Option<usize>,
     reflection_enabled: Option<bool>,
+    adaptive_planning: Option<bool>,
     draft_scan_id: Option<String>,
 ) -> CommandResult<ScanStartDto> {
     let parsed_categories: Vec<AttackCategory> = categories
@@ -409,6 +410,7 @@ pub async fn scan_start_op(
 
     let agentic = agent_mode.unwrap_or(false);
     let reflection_on = reflection_enabled.unwrap_or(agentic);
+    let adaptive_on = adaptive_planning.unwrap_or(false);
     let effective_generator_mode = payload_strategy
         .as_ref()
         .map(|s| s.generator_mode_str().to_string())
@@ -417,6 +419,7 @@ pub async fn scan_start_op(
         agentic,
         max_agent_attempts.unwrap_or(5),
         reflection_on,
+        adaptive_on,
         payload_strategy.clone(),
         effective_generator_mode.clone(),
     );
@@ -436,6 +439,7 @@ pub async fn scan_start_op(
             "generator_mode": effective_generator_mode,
             "agent_mode": agentic,
             "reflection_enabled": reflection_on,
+            "adaptive_planning": adaptive_on,
             "max_agent_attempts": max_attempts_per_category,
         });
         if let Some(ref strategy) = payload_strategy {
@@ -643,6 +647,7 @@ struct ScanPlaybookExecution {
     profile: String,
     agentic: bool,
     reflection_enabled: bool,
+    adaptive_planning: bool,
     generator_mode: Option<String>,
     max_agent_attempts: usize,
     payload_strategy: Option<PayloadStrategy>,
@@ -674,6 +679,10 @@ fn execution_params_from_playbook(
             .unwrap_or(false),
         reflection_enabled: value
             .get("reflection_enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        adaptive_planning: value
+            .get("adaptive_planning")
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
         generator_mode: value
@@ -720,6 +729,7 @@ async fn spawn_resumed_scan_job(
         params.agentic,
         params.max_agent_attempts,
         params.reflection_enabled,
+        params.adaptive_planning,
         params.payload_strategy.clone(),
         params.generator_mode.clone(),
     );
@@ -1022,6 +1032,7 @@ pub async fn scan_start(
     agent_mode: Option<bool>,
     max_agent_attempts: Option<usize>,
     reflection_enabled: Option<bool>,
+    adaptive_planning: Option<bool>,
     draft_scan_id: Option<String>,
 ) -> CommandResult<ScanStartDto> {
     let parsed_strategy = payload_strategy
@@ -1041,6 +1052,7 @@ pub async fn scan_start(
         agent_mode,
         max_agent_attempts,
         reflection_enabled,
+        adaptive_planning,
         draft_scan_id,
     )
     .await

@@ -11,14 +11,16 @@ use aisec_models::LocalModelManager;
 use aisec_planner::AttackPlan;
 use aisec_runtime::{RuntimeManager, SharedModelProvider};
 use aisec_storage::Repositories;
-use aisec_target_profile::PayloadStrategy;
+use aisec_target_profile::{MutationLevel, PayloadGenerationStrategy, PayloadStrategy};
 use aisec_target_profile::wizard_plan::{
     enabled_tests_for_category, estimate_scan_requests, ExecutionStrategy,
 };
 use tauri::async_runtime::Mutex as AsyncMutex;
 use tracing::{info, warn};
 
-use crate::commands::attack::{CategoryRunOptions, CategoryRunResult, run_category_on_target_profile};
+use crate::commands::attack::{
+    CategoryRunOptions, CategoryRunResult, JudgedAttemptSummary, run_category_on_target_profile,
+};
 use crate::commands::generator::{
     attack_plan_from_scan, generate_payloads_for_scan_job_with_options_and_catalog,
     generate_payloads_for_scan_job_with_strategy_context_and_catalog,
@@ -32,6 +34,7 @@ pub struct ScanExecutionConfig {
     pub execution: ExecutionStrategy,
     pub max_attempts: u32,
     pub reflection_enabled: bool,
+    pub adaptive_planning: bool,
     pub payload_strategy: Option<PayloadStrategy>,
     pub generator_mode: Option<String>,
     /// Delay before payload generation so the wizard attack screen can render.
@@ -43,6 +46,7 @@ impl ScanExecutionConfig {
         agentic: bool,
         max_attempts: usize,
         reflection_enabled: bool,
+        adaptive_planning: bool,
         payload_strategy: Option<PayloadStrategy>,
         generator_mode: Option<String>,
     ) -> Self {
@@ -54,6 +58,7 @@ impl ScanExecutionConfig {
             },
             max_attempts: max_attempts.max(1) as u32,
             reflection_enabled,
+            adaptive_planning: agentic && adaptive_planning,
             payload_strategy,
             generator_mode,
             pipeline_warmup_secs: 3,
@@ -122,12 +127,21 @@ pub fn scan_progress_total(
             } else {
                 0
             };
+            let adaptive_units = if config.adaptive_planning && attempts > 1 {
+                active_categories.saturating_mul(attempts - 1)
+            } else {
+                0
+            };
             let retry_units = if attempts > 1 {
                 active_categories.saturating_mul(attempts - 1)
             } else {
                 0
             };
-            1 + generate_units + attack_units.saturating_mul(2) + reflection_units + retry_units
+            1 + generate_units
+                + attack_units.saturating_mul(2)
+                + reflection_units
+                + adaptive_units
+                + retry_units
         }
     };
 
@@ -185,6 +199,130 @@ fn reflection_allows_retry(
     }
     emitter.info("Reflection: no confirmed vulnerability — preparing retry");
     true
+}
+
+fn technique_id_from_payload_id(payload_id: &str) -> &str {
+    payload_id.split(':').next().unwrap_or(payload_id)
+}
+
+fn escalate_payload_strategy(strategy: &PayloadStrategy) -> PayloadStrategy {
+    PayloadStrategy {
+        strategy: strategy.strategy.escalate(),
+        mutation_level: strategy.mutation_level.escalate(),
+        variants_per_test: (strategy.variants_per_test.saturating_add(2)).min(20),
+        max_total_payloads: strategy.max_total_payloads,
+        enable_context_awareness: true,
+        enable_conversation_memory: strategy.enable_conversation_memory,
+        enable_response_adaptation: true,
+        enable_payload_deduplication: strategy.enable_payload_deduplication,
+        enable_cross_category_mutation: strategy.enable_cross_category_mutation
+            || matches!(strategy.mutation_level, MutationLevel::High | MutationLevel::Extreme),
+    }
+    .clamp()
+}
+
+/// Replan technique selection + payload strategy for the next agentic attempt.
+fn adapt_plan_for_retry(
+    plan: &AttackPlan,
+    category: AttackCategory,
+    strategy: &PayloadStrategy,
+    last_result: &CategoryRunResult,
+    catalog: &aisec_payload::PayloadDatabase,
+) -> (AttackPlan, PayloadStrategy, Vec<String>) {
+    let mut notes = Vec::new();
+    let next_strategy = escalate_payload_strategy(strategy);
+    if next_strategy.mutation_level != strategy.mutation_level {
+        notes.push(format!(
+            "escalated mutationLevel {:?} → {:?}",
+            strategy.mutation_level, next_strategy.mutation_level
+        ));
+    }
+    if next_strategy.strategy != strategy.strategy {
+        notes.push(format!(
+            "escalated generation strategy {:?} → {:?}",
+            strategy.strategy, next_strategy.strategy
+        ));
+    }
+    if next_strategy.variants_per_test != strategy.variants_per_test {
+        notes.push(format!(
+            "raised variantsPerTest {} → {}",
+            strategy.variants_per_test, next_strategy.variants_per_test
+        ));
+    }
+    if !strategy.enable_response_adaptation {
+        notes.push("enabled responseAdaptation for judge-guided retries".into());
+    }
+
+    let payload_cat = aisec_generator::convert::attack_to_payload_category(category);
+    let catalog_ids: Vec<String> = catalog
+        .by_category(payload_cat)
+        .into_iter()
+        .map(|record| record.id.clone())
+        .collect();
+
+    let tried: std::collections::HashSet<String> = last_result
+        .judged
+        .iter()
+        .map(|item| technique_id_from_payload_id(&item.payload_id).to_string())
+        .collect();
+    let failed: std::collections::HashSet<String> = last_result
+        .judged
+        .iter()
+        .filter(|item| !item.vulnerable)
+        .map(|item| technique_id_from_payload_id(&item.payload_id).to_string())
+        .collect();
+
+    let mut disabled: std::collections::HashSet<String> =
+        plan.disabled_tests.iter().cloned().collect();
+    // Keep disables outside this category untouched; only rotate within category.
+    let untried: Vec<String> = catalog_ids
+        .iter()
+        .filter(|id| !tried.contains(*id) && !disabled.contains(*id))
+        .cloned()
+        .collect();
+
+    if !untried.is_empty() {
+        for id in &failed {
+            if catalog_ids.iter().any(|cid| cid == id) {
+                disabled.insert(id.clone());
+            }
+        }
+        for id in &untried {
+            disabled.remove(id);
+        }
+        // Ensure at least one technique remains enabled in this category.
+        let enabled_count = catalog_ids
+            .iter()
+            .filter(|id| !disabled.contains(*id))
+            .count();
+        if enabled_count == 0 {
+            if let Some(first) = catalog_ids.first() {
+                disabled.remove(first);
+            }
+        }
+        notes.push(format!(
+            "rotated techniques: prefer {} untried id(s), de-emphasize {} failed id(s)",
+            untried.len(),
+            failed.len()
+        ));
+    } else if !failed.is_empty() {
+        notes.push(
+            "all category techniques already tried — keeping selection and escalating payload strategy"
+                .into(),
+        );
+    }
+
+    let mut next_plan = plan.clone();
+    let mut disabled_list: Vec<String> = disabled.into_iter().collect();
+    disabled_list.sort();
+    next_plan.disabled_tests = disabled_list;
+    next_plan.summary = format!(
+        "{} | adaptive replan for {}",
+        plan.summary,
+        category.as_str()
+    );
+
+    (next_plan, next_strategy, notes)
 }
 
 pub async fn generate_scan_payloads(
@@ -557,11 +695,11 @@ async fn run_agentic_category(
     catalog: &aisec_payload::PayloadDatabase,
     run_options: Option<&CategoryRunOptions>,
 ) -> Result<CategoryRunResult, String> {
-    let strategy = config
+    let mut strategy = config
         .payload_strategy
         .clone()
         .ok_or_else(|| "agentic execution requires payload strategy".to_string())?;
-
+    let mut active_plan = plan.clone();
     let mut last_result: Option<CategoryRunResult> = None;
     let category_label = category.display_name();
 
@@ -586,7 +724,7 @@ async fn run_agentic_category(
         let payloads_for_run = if attempt == 1 {
             category_payload_map(generated_payloads, category)
         } else {
-            let feedback = if strategy.enable_response_adaptation {
+            let feedback = if strategy.enable_response_adaptation || config.adaptive_planning {
                 last_result.as_ref().map(|result| {
                     let judged: Vec<(bool, f32, &str)> = result
                         .judged
@@ -611,7 +749,7 @@ async fn run_agentic_category(
                 Arc::clone(&ctx.model_manager),
                 ctx.model_provider.clone(),
                 Arc::clone(&ctx.runtime_manager),
-                plan,
+                &active_plan,
                 category,
                 &strategy,
                 ctx.profile,
@@ -623,6 +761,17 @@ async fn run_agentic_category(
         };
 
         bump_scan_progress(&ctx.progress, 1);
+
+        let attempt_options = CategoryRunOptions::from_strategy(
+            category,
+            &active_plan.disabled_tests,
+            &strategy,
+        );
+        let options_ref = if attempt == 1 {
+            run_options
+        } else {
+            Some(&attempt_options)
+        };
 
         set_scan_phase(
             &ctx.progress,
@@ -648,7 +797,7 @@ async fn run_agentic_category(
             ctx.plugin_manager.clone(),
             Some(&payloads_for_run),
             Some(&ctx.emitter),
-            run_options,
+            options_ref,
             Some(&ctx.progress),
             ctx.job_controls.as_ref(),
         )
@@ -689,6 +838,31 @@ async fn run_agentic_category(
             break;
         }
 
+        if config.adaptive_planning {
+            set_scan_phase(
+                &ctx.progress,
+                "adaptive",
+                Some(&category_label),
+                Some(attempt + 1),
+                Some(attempt),
+            );
+            if let Some(ref prior) = last_result {
+                let (next_plan, next_strategy, notes) =
+                    adapt_plan_for_retry(&active_plan, category, &strategy, prior, catalog);
+                active_plan = next_plan;
+                strategy = next_strategy;
+                ctx.emitter.info(format!(
+                    "Adaptive planning for {category_label}: {}",
+                    if notes.is_empty() {
+                        "strategy refreshed for next attempt".into()
+                    } else {
+                        notes.join("; ")
+                    }
+                ));
+            }
+            bump_scan_progress(&ctx.progress, 1);
+        }
+
         set_scan_phase(
             &ctx.progress,
             "retry",
@@ -721,9 +895,48 @@ mod tests {
     }
 
     #[test]
+    fn adaptive_plan_rotates_failed_techniques_and_escalates_strategy() {
+        let catalog = aisec_payload::PayloadDatabase::builtin().expect("catalog");
+        let plan = AttackPlan {
+            mode: aisec_planner::PlannerMode::Deterministic,
+            profile_id: "standard".into(),
+            categories: vec![AttackCategory::PromptInjection],
+            disabled_tests: vec![],
+            rationales: vec![],
+            confidence: 0.8,
+            summary: "test".into(),
+            llm_rationale: None,
+        };
+        let strategy = sample_strategy();
+        let last = CategoryRunResult {
+            attempts: 1,
+            successes: 0,
+            findings: vec![],
+            judged: vec![JudgedAttemptSummary {
+                payload_id: "pi-direct-override".into(),
+                payload_name: "Direct".into(),
+                vulnerable: false,
+                confidence: 0.1,
+                summary: "refused".into(),
+            }],
+        };
+        let (next_plan, next_strategy, notes) = adapt_plan_for_retry(
+            &plan,
+            AttackCategory::PromptInjection,
+            &strategy,
+            &last,
+            &catalog,
+        );
+        assert!(next_plan.disabled_tests.iter().any(|id| id == "pi-direct-override"));
+        assert_ne!(next_strategy.mutation_level, strategy.mutation_level);
+        assert!(next_strategy.enable_response_adaptation);
+        assert!(!notes.is_empty());
+    }
+
+    #[test]
     fn sequential_progress_total_includes_pipeline_phases() {
         let categories = vec![AttackCategory::PromptInjection];
-        let config = ScanExecutionConfig::from_flags(false, 1, false, Some(sample_strategy()), None);
+        let config = ScanExecutionConfig::from_flags(false, 1, false, false, Some(sample_strategy()), None);
         let attack_units = estimate_scan_requests(
             &categories,
             &[],
@@ -738,7 +951,7 @@ mod tests {
     #[test]
     fn agentic_progress_total_includes_generate_reflection_and_retry() {
         let categories = vec![AttackCategory::PromptInjection];
-        let config = ScanExecutionConfig::from_flags(true, 3, true, Some(sample_strategy()), None);
+        let config = ScanExecutionConfig::from_flags(true, 3, true, false, Some(sample_strategy()), None);
         let attack_units = estimate_scan_requests(
             &categories,
             &[],
@@ -749,5 +962,21 @@ mod tests {
         let total = scan_progress_total(&categories, &[], &config);
         // 1 prepare + 3 generate + 2*attack + 3 reflection + 2 retry
         assert_eq!(total, 1 + 3 + attack_units * 2 + 3 + 2);
+    }
+
+    #[test]
+    fn agentic_progress_total_includes_adaptive_units() {
+        let categories = vec![AttackCategory::PromptInjection];
+        let config = ScanExecutionConfig::from_flags(true, 3, true, true, Some(sample_strategy()), None);
+        let attack_units = estimate_scan_requests(
+            &categories,
+            &[],
+            &sample_strategy(),
+            ExecutionStrategy::Agentic,
+            3,
+        ) as u64;
+        let total = scan_progress_total(&categories, &[], &config);
+        // 1 prepare + 3 generate + 2*attack + 3 reflection + 2 adaptive + 2 retry
+        assert_eq!(total, 1 + 3 + attack_units * 2 + 3 + 2 + 2);
     }
 }

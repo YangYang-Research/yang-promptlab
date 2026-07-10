@@ -1014,6 +1014,7 @@ export function ScanWizardPage() {
         agentMode: session.attackPlan.executionStrategy === "agentic",
         maxAgentAttempts: session.attackPlan.maxAttempts,
         reflectionEnabled: session.attackPlan.reflectionEnabled,
+        adaptivePlanning: session.attackPlan.adaptivePlanning,
         draftScanId: scanIdToReuse,
       });
       await actions.refresh();
