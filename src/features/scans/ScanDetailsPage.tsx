@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAppStore } from "@/app/store/AppStore";
 import {
   ActionsDropdown,
+  type ActionsDropdownItem,
   Badge,
   Button,
   Card,
@@ -35,8 +36,23 @@ import {
   profileLabel,
 } from "@/features/scans/scanPlaybook";
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
-import { buildScanProgressUrl, buildScanWizardUrl, isLiveScanStatus } from "@/features/scans/wizardState";
-import { getScan, getTarget, resumeScan, deleteScan, type ScanDetailDto, type TargetDto } from "@/shared/ipc";
+import {
+  buildScanProgressUrl,
+  buildScanWizardUrl,
+  isLiveScanStatus,
+  isRetryableScanStatus,
+  resolveScanOpenPath,
+} from "@/features/scans/wizardState";
+import {
+  getScan,
+  getTarget,
+  pauseScan,
+  resumeScan,
+  stopScan,
+  deleteScan,
+  type ScanDetailDto,
+  type TargetDto,
+} from "@/shared/ipc";
 import { toAppError } from "@/shared/errors";
 import { useToast } from "@/shared/notifications";
 import type { Finding, ScanRun, Severity } from "@/shared/types";
@@ -57,7 +73,7 @@ export function ScanDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
-  const [resumePending, setResumePending] = useState(false);
+  const [controlPending, setControlPending] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
 
   const scan = scans.find((item) => item.id === scanId) ?? (detail ? mapScanDetailToRun(detail) : null);
@@ -116,6 +132,7 @@ export function ScanDetailsPage() {
   const status = scan
     ? mergeScanStatus(scanId, scan.status, live, scanFindings.length)
     : null;
+  const effectiveStatus = status?.status ?? scan?.status ?? "pending";
 
   const estimates = playbook
     ? estimateAttackPlan(
@@ -134,29 +151,42 @@ export function ScanDetailsPage() {
       ? new Date(scan.completedAt).getTime() - new Date(scan.startedAt).getTime()
       : null;
 
-  async function handleResumeScan() {
-    setResumePending(true);
+  async function runControl(action: "pause" | "resume" | "stop") {
+    setControlPending(true);
     let pendingToastId: number | undefined;
     try {
-      pendingToastId = notify("Resuming scan…", "info");
-      await resumeScan(scanId);
-      dismiss(pendingToastId);
-      pendingToastId = undefined;
-      notify("Scan resumed", "success");
-      await actions.refresh();
-      if (scan?.projectId && scan.targetId) {
-        navigate(
-          buildScanWizardUrl(scan.projectId, scan.targetId, {
-            scanId: scan.id,
-            step: 5,
-          }),
-        );
+      if (action === "pause") {
+        pendingToastId = notify("Pausing scan…", "info");
+        await pauseScan(scanId);
+        dismiss(pendingToastId);
+        pendingToastId = undefined;
+        notify("Scan paused", "info");
+      } else if (action === "resume") {
+        pendingToastId = notify("Resuming scan…", "info");
+        await resumeScan(scanId);
+        dismiss(pendingToastId);
+        pendingToastId = undefined;
+        notify("Scan resumed", "success");
+        await actions.refresh();
+        if (scan?.projectId && scan.targetId) {
+          navigate(
+            buildScanWizardUrl(scan.projectId, scan.targetId, {
+              scanId: scan.id,
+              step: 5,
+            }),
+          );
+        }
+        return;
+      } else {
+        await stopScan(scanId);
+        notify("Scan stopped", "info");
       }
+      await actions.refresh();
     } catch (err) {
       if (pendingToastId !== undefined) dismiss(pendingToastId);
-      notify(toAppError(err).message || "Failed to resume scan", "error");
+      notify(toAppError(err).message || "Scan control failed", "error");
     } finally {
-      setResumePending(false);
+      setControlPending(false);
     }
   }
 
@@ -178,6 +208,73 @@ export function ScanDetailsPage() {
     } finally {
       setDeletePending(false);
     }
+  }
+
+  function openScanAction() {
+    if (!scan) return;
+    navigate(resolveScanOpenPath(scan, status?.status));
+  }
+
+  function buildScanActionItems(): ActionsDropdownItem[] {
+    if (!scan) return [];
+
+    const items: ActionsDropdownItem[] = [];
+    const openPath = resolveScanOpenPath(scan, status?.status);
+    const detailsPath = `/scans/${scan.id}`;
+
+    if (openPath !== detailsPath) {
+      items.push({
+        id: "open",
+        label:
+          scan.status === "draft"
+            ? "Continue Setup"
+            : isLiveScanStatus(effectiveStatus)
+              ? "View Scan Progress"
+              : isRetryableScanStatus(effectiveStatus)
+                ? "Retry Scan"
+                : "Open Scan",
+        onClick: openScanAction,
+      });
+    }
+
+    if (effectiveStatus === "running") {
+      items.push({
+        id: "pause",
+        label: "Pause Scan",
+        disabled: controlPending,
+        onClick: () => void runControl("pause"),
+      });
+    }
+    if (effectiveStatus === "paused") {
+      items.push({
+        id: "resume",
+        label: "Resume Scan",
+        disabled: controlPending,
+        onClick: () => void runControl("resume"),
+      });
+    }
+    if (
+      effectiveStatus === "running" ||
+      effectiveStatus === "paused" ||
+      effectiveStatus === "pending"
+    ) {
+      items.push({
+        id: "stop",
+        label: "Stop Scan",
+        disabled: controlPending,
+        onClick: () => void runControl("stop"),
+      });
+    }
+
+    items.push({
+      id: "delete",
+      label: "Delete Scan",
+      tone: "danger",
+      disabled: deletePending,
+      onClick: () => void handleDeleteScan(),
+    });
+
+    return items;
   }
 
   async function handleExport(format: ReportExportFormat) {
@@ -224,9 +321,8 @@ export function ScanDetailsPage() {
     scan &&
     scan.targetId &&
     isMonitorableAttackScan(scan) &&
-    isLiveScanStatus(status?.status ?? scan.status);
+    isLiveScanStatus(effectiveStatus);
 
-  const effectiveStatus = status?.status ?? scan?.status ?? "pending";
   const showResumeScan =
     scan &&
     scan.targetId &&
@@ -239,9 +335,7 @@ export function ScanDetailsPage() {
     scan.targetId &&
     playbook &&
     isAttackScanName(scan.name) &&
-    (effectiveStatus === "failed" ||
-      effectiveStatus === "cancelled" ||
-      effectiveStatus === "stopped");
+    isRetryableScanStatus(effectiveStatus);
 
   return (
     <div className="page scan-details">
@@ -254,10 +348,10 @@ export function ScanDetailsPage() {
             {showResumeScan && (
               <Button
                 variant="primary"
-                disabled={resumePending}
-                onClick={() => void handleResumeScan()}
+                disabled={controlPending}
+                onClick={() => void runControl("resume")}
               >
-                {resumePending ? "Resuming…" : "Resume Scan"}
+                {controlPending ? "Resuming…" : "Resume Scan"}
               </Button>
             )}
             {showRetryScan && (
@@ -288,16 +382,9 @@ export function ScanDetailsPage() {
               </Button>
             )}
             <ActionsDropdown
-              disabled={deletePending}
-              items={[
-                {
-                  id: "delete",
-                  label: "Delete Scan",
-                  tone: "danger",
-                  disabled: deletePending,
-                  onClick: () => void handleDeleteScan(),
-                },
-              ]}
+              label="Scan actions"
+              disabled={deletePending || controlPending}
+              items={buildScanActionItems()}
             />
           </div>
         }
