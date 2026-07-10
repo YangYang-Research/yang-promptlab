@@ -19,7 +19,7 @@ export const RUNTIME_INFERENCE_SITES: RuntimeInferenceSite[] = [
     title: "Attack plan generation",
     location: "Scan wizard · Step 4",
     description:
-      "AI Runtime reads the verified target profile and generates categories, execution strategy, and payload policy. Re-plan runs the same inference path.",
+      "AI Runtime reads the verified target profile and selects categories plus techniques, execution strategy, and payload policy. Re-plan runs the same inference path.",
   },
   {
     id: "payload-gen",

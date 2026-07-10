@@ -430,6 +430,7 @@ dependencies = [
  "aisec-attack",
  "aisec-harness",
  "aisec-inference",
+ "aisec-payload",
  "aisec-planner",
  "async-trait",
  "reqwest 0.12.28",

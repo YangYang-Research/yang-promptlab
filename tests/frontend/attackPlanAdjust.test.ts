@@ -62,6 +62,7 @@ describe("resolveCategoriesForAdjust", () => {
           profileModes: profileModes.map((mode) => ({
             ...mode,
             categories: [...mode.categories],
+            disabledTests: [],
           })),
         },
       ),

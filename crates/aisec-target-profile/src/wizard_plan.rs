@@ -1,6 +1,7 @@
 //! Wizard attack plan — capability-driven planning output for Scan Wizard Step 4.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 use aisec_attack::AttackCategory;
 use aisec_planner::types::{AttackPlan, CategoryRationale, PlannerMode};
@@ -11,7 +12,6 @@ use crate::payload_strategy::{
 };
 use crate::types::{TargetCapabilities, TargetProfile};
 
-const TESTS_PER_CATEGORY: u32 = 3;
 const SECONDS_PER_REQUEST: f32 = 2.5;
 const TOKENS_PER_REQUEST: u32 = 480;
 const CATALOG_SIZE: u32 = 9;
@@ -44,6 +44,9 @@ pub struct AttackProfileMode {
     pub reflection_enabled: bool,
     pub adaptive_planning: bool,
     pub payload_strategy: PayloadStrategy,
+    /// Technique IDs within `categories` that should not run for this mode.
+    #[serde(default)]
+    pub disabled_tests: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -129,6 +132,7 @@ pub fn build_deterministic_profile_modes(
                 reflection_enabled,
                 adaptive_planning,
                 payload_strategy: payload,
+                disabled_tests: vec![],
             }
         })
         .collect()
@@ -165,6 +169,7 @@ pub fn apply_profile_mode_settings(plan: &mut WizardAttackPlan, mode: &AttackPro
     plan.reflection_enabled = mode.reflection_enabled;
     plan.adaptive_planning = mode.adaptive_planning;
     plan.payload_strategy = mode.payload_strategy.clone();
+    plan.disabled_tests = mode.disabled_tests.clone();
 }
 
 pub fn build_wizard_attack_plan(profile: &TargetProfile) -> WizardAttackPlan {
@@ -257,7 +262,6 @@ pub fn adjust_wizard_attack_plan(
     payload_strategy: Option<PayloadStrategy>,
 ) -> WizardAttackPlan {
     plan.profile_id = profile_id.to_string();
-    plan.disabled_tests = disabled_tests.to_vec();
 
     let disabled_cats: HashSet<String> = disabled_graph_nodes
         .iter()
@@ -266,17 +270,24 @@ pub fn adjust_wizard_attack_plan(
 
     if profile_id.eq_ignore_ascii_case("custom") {
         plan.categories = categories.unwrap_or_else(|| plan.suggested_categories.clone());
+        plan.disabled_tests = disabled_tests.to_vec();
         if let Some(strategy) = payload_strategy {
             plan.payload_strategy = strategy.clamp();
         }
     } else if let Some(mode) = find_profile_mode(&plan.profile_modes, profile_id).cloned() {
         apply_profile_mode_settings(&mut plan, &mode);
+        // FE may pass the mode's disabled list; prefer explicit request when non-empty,
+        // otherwise keep mode selection from AI / preset.
+        if !disabled_tests.is_empty() {
+            plan.disabled_tests = disabled_tests.to_vec();
+        }
         if let Some(strategy) = payload_strategy {
             plan.payload_strategy = strategy.clamp();
         }
     } else {
         plan.categories =
             active_categories_for_profile(profile_id, &plan.suggested_categories, &plan.profile_modes);
+        plan.disabled_tests = disabled_tests.to_vec();
         if let Some(strategy) = payload_strategy {
             plan.payload_strategy = strategy.clamp();
         } else {
@@ -428,11 +439,48 @@ fn risk_level_label(score: u8) -> &'static str {
 }
 
 pub fn enabled_tests_for_category(category: AttackCategory, disabled_tests: &[String]) -> u32 {
-    let disabled_in_category = disabled_tests
+    let disabled: HashSet<&str> = disabled_tests.iter().map(String::as_str).collect();
+    catalog_technique_ids(category)
         .iter()
-        .filter(|id| id.starts_with(test_prefix_for_category(category)))
-        .count() as u32;
-    TESTS_PER_CATEGORY.saturating_sub(disabled_in_category)
+        .filter(|id| !disabled.contains(id.as_str()))
+        .count() as u32
+}
+
+fn catalog_technique_ids(category: AttackCategory) -> &'static [String] {
+    catalog_tests_by_category()
+        .get(&category)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+fn catalog_tests_by_category() -> &'static HashMap<AttackCategory, Vec<String>> {
+    static INDEX: OnceLock<HashMap<AttackCategory, Vec<String>>> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut map: HashMap<AttackCategory, Vec<String>> = HashMap::new();
+        let Ok(entries) = aisec_payload::PayloadDatabase::seed_entries() else {
+            return map;
+        };
+        for entry in entries {
+            let Some(category) = seed_category_to_attack(&entry.category) else {
+                continue;
+            };
+            map.entry(category).or_default().push(entry.id);
+        }
+        map
+    })
+}
+
+fn seed_category_to_attack(raw: &str) -> Option<AttackCategory> {
+    AttackCategory::all()
+        .iter()
+        .copied()
+        .find(|cat| cat.as_str() == raw)
+        .or_else(|| match raw {
+            "encoding" | "improper_output_handling" | "unbounded_consumption" => {
+                Some(AttackCategory::PromptInjection)
+            }
+            _ => None,
+        })
 }
 
 pub fn expected_payload_objects(
@@ -473,7 +521,6 @@ pub fn estimate_scan_requests(
 }
 
 pub fn recompute_estimates(plan: &mut WizardAttackPlan) {
-    let disabled: HashSet<&str> = plan.disabled_tests.iter().map(String::as_str).collect();
     let mut total_testcases = 0u32;
     for category in &plan.categories {
         let enabled_tests = enabled_tests_for_category(*category, &plan.disabled_tests);
@@ -514,21 +561,6 @@ pub fn recompute_estimates(plan: &mut WizardAttackPlan) {
         .sum::<u32>()
         .max(1);
     plan.risk_coverage = enabled_risk as f32 / total_risk as f32;
-    let _ = disabled; // reserved for per-test disable accounting
-}
-
-fn test_prefix_for_category(category: AttackCategory) -> &'static str {
-    match category {
-        AttackCategory::PromptInjection => "pi-",
-        AttackCategory::SystemPromptExtraction => "spe-",
-        AttackCategory::Jailbreak => "jb-",
-        AttackCategory::RagLeakage => "rag-",
-        AttackCategory::MemoryPoisoning => "mp-",
-        AttackCategory::CrossUserLeakage => "cul-",
-        AttackCategory::AgentGoalHijacking => "agh-",
-        AttackCategory::ToolAbuse => "ta-",
-        AttackCategory::McpAbuse => "mcp-",
-    }
 }
 
 impl From<WizardAttackPlan> for AttackPlan {

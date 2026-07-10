@@ -33,6 +33,8 @@ pub struct AttackProfileModeDto {
     pub reflection_enabled: bool,
     pub adaptive_planning: bool,
     pub payload_strategy: PayloadStrategyDto,
+    #[serde(default)]
+    pub disabled_tests: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -243,6 +245,7 @@ fn profile_mode_to_dto(mode: AttackProfileMode) -> AttackProfileModeDto {
         reflection_enabled: mode.reflection_enabled,
         adaptive_planning: mode.adaptive_planning,
         payload_strategy: payload_strategy_to_dto(mode.payload_strategy),
+        disabled_tests: mode.disabled_tests,
     }
 }
 
@@ -262,6 +265,7 @@ fn parse_profile_modes(modes: &[AttackProfileModeDto]) -> Vec<AttackProfileMode>
                 reflection_enabled: mode.reflection_enabled,
                 adaptive_planning: mode.adaptive_planning,
                 payload_strategy: parse_payload_strategy(mode.payload_strategy.clone()).ok()?,
+                disabled_tests: mode.disabled_tests.clone(),
             })
         })
         .collect()

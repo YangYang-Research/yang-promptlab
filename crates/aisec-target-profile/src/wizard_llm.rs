@@ -202,6 +202,10 @@ struct LlmWizardPayloadStrategy {
 struct LlmWizardMode {
     #[serde(default, deserialize_with = "flex::string_vec")]
     categories: Vec<String>,
+    #[serde(default, rename = "enabledTests", deserialize_with = "flex::optional_string_vec")]
+    enabled_tests: Option<Vec<String>>,
+    #[serde(default, rename = "disabledTests", deserialize_with = "flex::optional_string_vec")]
+    disabled_tests: Option<Vec<String>>,
     #[serde(default, rename = "executionStrategy", deserialize_with = "flex::string")]
     execution_strategy: String,
     #[serde(default, rename = "maxAttempts", deserialize_with = "flex::optional_u8")]
@@ -289,6 +293,7 @@ pub async fn build_wizard_attack_plan_with_llm(
         .model
         .as_deref()
         .unwrap_or("unknown");
+    let techniques_catalog = technique_catalog_for_prompt();
 
     let initial_prompt = aisec_inference::PromptRegistry::wizard_profile_user(
         profile.provider.as_str(),
@@ -296,6 +301,7 @@ pub async fn build_wizard_attack_plan_with_llm(
         &profile.full_url(),
         &format!("{allowed:?}"),
         &format!("{baseline_cats:?}"),
+        &techniques_catalog,
         &truncate_for_prompt(&request_body),
         &truncate_for_prompt(response_preview),
         detected_model,
@@ -310,6 +316,7 @@ pub async fn build_wizard_attack_plan_with_llm(
         } else {
             aisec_inference::PromptRegistry::wizard_profile_repair(
                 &format!("{allowed:?}"),
+                &techniques_catalog,
                 &truncate_for_repair(&last_raw),
                 &last_errors,
             )
@@ -447,6 +454,10 @@ fn parse_wizard_llm_plan(raw: &str, profile: &TargetProfile) -> PlannerResult<Wi
         ));
     }
 
+    let disabled_tests = find_profile_mode(&profile_modes, &recommended_profile_id)
+        .map(|mode| mode.disabled_tests.clone())
+        .unwrap_or_else(|| parsed.disabled_tests.unwrap_or_default());
+
     let mut rationales = parsed
         .rationales
         .unwrap_or_default()
@@ -496,7 +507,7 @@ fn parse_wizard_llm_plan(raw: &str, profile: &TargetProfile) -> PlannerResult<Wi
         recommended_profile_id,
         profile_modes,
         suggested_categories,
-        disabled_tests: parsed.disabled_tests.unwrap_or_default(),
+        disabled_tests,
         rationales,
         capabilities: Some(effective_capabilities(&enhanced)),
     })
@@ -524,6 +535,7 @@ fn build_modes_from_llm_strict(
     modes: &HashMap<String, LlmWizardMode>,
     applicable_set: &HashSet<AttackCategory>,
 ) -> PlannerResult<Vec<AttackProfileMode>> {
+    let catalog = technique_catalog_index()?;
     let mut out = Vec::with_capacity(PRESET_PROFILE_IDS.len());
     for profile_id in PRESET_PROFILE_IDS {
         let llm_mode = modes.get(profile_id).ok_or_else(|| {
@@ -541,6 +553,8 @@ fn build_modes_from_llm_strict(
                 "modes.{profile_id}.categories must contain at least one applicable category"
             )));
         }
+
+        let disabled_tests = resolve_mode_disabled_tests(profile_id, llm_mode, &categories, &catalog)?;
 
         let execution_strategy = parse_execution_strategy(&llm_mode.execution_strategy).ok_or_else(
             || {
@@ -570,9 +584,153 @@ fn build_modes_from_llm_strict(
             reflection_enabled,
             adaptive_planning,
             payload_strategy: payload_strategy.clamp(),
+            disabled_tests,
         });
     }
     Ok(out)
+}
+
+fn technique_catalog_for_prompt() -> String {
+    match aisec_payload::PayloadDatabase::seed_entries() {
+        Ok(entries) => {
+            let mut lines: Vec<String> = entries
+                .into_iter()
+                .filter_map(|entry| {
+                    let category = seed_category_to_attack(&entry.category)?;
+                    Some(format!("{} | {} | {}", entry.id, category.as_str(), entry.name))
+                })
+                .collect();
+            lines.sort();
+            lines.join("\n")
+        }
+        Err(_) => String::new(),
+    }
+}
+
+fn technique_catalog_index() -> PlannerResult<HashMap<String, AttackCategory>> {
+    let entries = aisec_payload::PayloadDatabase::seed_entries().map_err(|e| {
+        PlannerError::Llm(format!("technique catalog unavailable: {e}"))
+    })?;
+    let mut index = HashMap::new();
+    for entry in entries {
+        if let Some(category) = seed_category_to_attack(&entry.category) {
+            index.insert(entry.id, category);
+        }
+    }
+    if index.is_empty() {
+        return Err(PlannerError::Llm("technique catalog is empty".into()));
+    }
+    Ok(index)
+}
+
+fn seed_category_to_attack(raw: &str) -> Option<AttackCategory> {
+    parse_attack_category(raw).or_else(|| match raw {
+        "encoding" | "improper_output_handling" | "unbounded_consumption" => {
+            Some(AttackCategory::PromptInjection)
+        }
+        _ => None,
+    })
+}
+
+fn resolve_mode_disabled_tests(
+    profile_id: &str,
+    llm_mode: &LlmWizardMode,
+    categories: &[AttackCategory],
+    catalog: &HashMap<String, AttackCategory>,
+) -> PlannerResult<Vec<String>> {
+    let category_set: HashSet<_> = categories.iter().copied().collect();
+    let in_mode: Vec<(&str, AttackCategory)> = catalog
+        .iter()
+        .filter(|(_, category)| category_set.contains(category))
+        .map(|(id, category)| (id.as_str(), *category))
+        .collect();
+
+    if in_mode.is_empty() {
+        return Err(PlannerError::Llm(format!(
+            "modes.{profile_id}: no catalog techniques for selected categories"
+        )));
+    }
+
+    if let Some(enabled) = llm_mode.enabled_tests.as_ref() {
+        let mut enabled_set = HashSet::new();
+        let mut covered = HashSet::new();
+        for id in enabled {
+            let Some(category) = catalog.get(id) else {
+                return Err(PlannerError::Llm(format!(
+                    "modes.{profile_id}.enabledTests contains unknown technique id: {id}"
+                )));
+            };
+            if !category_set.contains(category) {
+                return Err(PlannerError::Llm(format!(
+                    "modes.{profile_id}.enabledTests id {id} is outside selected categories"
+                )));
+            }
+            enabled_set.insert(id.as_str());
+            covered.insert(*category);
+        }
+        if enabled_set.is_empty() {
+            return Err(PlannerError::Llm(format!(
+                "modes.{profile_id}.enabledTests must include at least one technique"
+            )));
+        }
+        for category in categories {
+            if !covered.contains(category) {
+                return Err(PlannerError::Llm(format!(
+                    "modes.{profile_id}.enabledTests missing technique for category {}",
+                    category.as_str()
+                )));
+            }
+        }
+        let mut disabled: Vec<String> = in_mode
+            .iter()
+            .filter(|(id, _)| !enabled_set.contains(*id))
+            .map(|(id, _)| (*id).to_string())
+            .collect();
+        disabled.sort();
+        return Ok(disabled);
+    }
+
+    if let Some(disabled) = llm_mode.disabled_tests.as_ref() {
+        let mut disabled_set = HashSet::new();
+        for id in disabled {
+            let Some(category) = catalog.get(id) else {
+                return Err(PlannerError::Llm(format!(
+                    "modes.{profile_id}.disabledTests contains unknown technique id: {id}"
+                )));
+            };
+            if !category_set.contains(category) {
+                continue;
+            }
+            disabled_set.insert(id.clone());
+        }
+        let enabled_count = in_mode
+            .iter()
+            .filter(|(id, _)| !disabled_set.contains(*id))
+            .count();
+        if enabled_count == 0 {
+            return Err(PlannerError::Llm(format!(
+                "modes.{profile_id}.disabledTests disables every technique in selected categories"
+            )));
+        }
+        for category in categories {
+            let has_enabled = in_mode.iter().any(|(id, cat)| {
+                *cat == *category && !disabled_set.contains(*id)
+            });
+            if !has_enabled {
+                return Err(PlannerError::Llm(format!(
+                    "modes.{profile_id}.disabledTests leaves no technique for category {}",
+                    category.as_str()
+                )));
+            }
+        }
+        let mut disabled: Vec<String> = disabled_set.into_iter().collect();
+        disabled.sort();
+        return Ok(disabled);
+    }
+
+    Err(PlannerError::Llm(format!(
+        "modes.{profile_id}.enabledTests is required (select techniques within categories)"
+    )))
 }
 
 fn validate_profile_modes(
@@ -920,9 +1078,11 @@ mod tests {
     fn valid_modes_json() -> String {
         r#"{
           "recommendedProfileId": "standard",
+          "capabilities": { "supportsTools": true },
           "modes": {
             "quick": {
               "categories": ["prompt_injection", "jailbreak"],
+              "enabledTests": ["pi-direct-override", "jb-dan"],
               "executionStrategy": "sequential",
               "maxAttempts": 3,
               "payloadStrategy": {
@@ -935,6 +1095,7 @@ mod tests {
             },
             "standard": {
               "categories": ["prompt_injection", "jailbreak", "tool_abuse"],
+              "enabledTests": ["pi-direct-override", "pi-indirect-tool", "jb-dan", "jb-developer-mode", "ta-exfil-tool"],
               "executionStrategy": "sequential",
               "payloadStrategy": {
                 "strategy": "mutation",
@@ -947,6 +1108,7 @@ mod tests {
             },
             "deep": {
               "categories": ["prompt_injection", "jailbreak", "tool_abuse"],
+              "enabledTests": ["pi-direct-override", "pi-indirect-tool", "pi-cot-bypass", "jb-dan", "jb-encoding-obfuscation", "ta-exfil-tool", "ta-shell"],
               "executionStrategy": "agentic",
               "maxAttempts": 5,
               "reflectionEnabled": true,
@@ -1033,16 +1195,19 @@ mod tests {
           "modes": {
             "quick": {
               "categories": ["prompt_injection"],
+              "enabledTests": ["pi-direct-override"],
               "executionStrategy": 1,
               "payloadStrategy": { "strategy": 1, "mutationLevel": 1 }
             },
             "standard": {
               "categories": ["prompt_injection", "jailbreak"],
+              "enabledTests": ["pi-direct-override", "jb-dan"],
               "executionStrategy": "sequential",
               "payloadStrategy": { "strategy": "mutation", "mutationLevel": 2 }
             },
             "deep": {
               "categories": ["prompt_injection", "jailbreak"],
+              "enabledTests": ["pi-direct-override", "pi-cot-bypass", "jb-dan", "jb-encoding-obfuscation"],
               "executionStrategy": 2,
               "maxAttempts": 5,
               "reflectionEnabled": true,
@@ -1055,6 +1220,9 @@ mod tests {
         let refinement = parse_wizard_llm_plan(raw, &profile).expect("numeric enums coerced");
         assert_eq!(refinement.recommended_profile_id, "standard");
         assert_eq!(refinement.profile_modes.len(), 3);
+        let quick = find_profile_mode(&refinement.profile_modes, "quick").expect("quick");
+        assert!(!quick.disabled_tests.is_empty());
+        assert!(!refinement.disabled_tests.is_empty());
     }
 
     #[test]

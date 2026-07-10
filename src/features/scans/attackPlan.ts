@@ -3,7 +3,7 @@ import type {
   AttackProfileId,
   ExecutionStrategy,
 } from "./attackProfiles";
-import { ALL_ATTACK_CATEGORY_IDS } from "./attackProfiles";
+import { ALL_ATTACK_CATEGORY_IDS, getCategory } from "./attackProfiles";
 import {
   payloadStrategyForAttackProfile,
   payloadStrategyFromDto,
@@ -40,6 +40,7 @@ export type AttackProfileMode = {
   reflectionEnabled: boolean;
   adaptivePlanning: boolean;
   payloadStrategy: PayloadStrategyConfig;
+  disabledTests: string[];
 };
 
 /** Planner output + user review overrides — persisted in wizard session. */
@@ -82,6 +83,7 @@ export type AttackProfileModeDto = {
   reflectionEnabled: boolean;
   adaptivePlanning: boolean;
   payloadStrategy: PayloadStrategyDto;
+  disabledTests?: string[];
 };
 
 export type WizardAttackPlanDto = {
@@ -238,6 +240,7 @@ function profileModeFromDto(dto: AttackProfileModeDto): AttackProfileMode | null
     reflectionEnabled: dto.reflectionEnabled,
     adaptivePlanning: dto.adaptivePlanning,
     payloadStrategy: payloadStrategyFromDto(dto.payloadStrategy),
+    disabledTests: Array.isArray(dto.disabledTests) ? [...dto.disabledTests] : [],
   };
 }
 
@@ -250,6 +253,7 @@ export function profileModeToDto(mode: AttackProfileMode): AttackProfileModeDto 
     reflectionEnabled: mode.reflectionEnabled,
     adaptivePlanning: mode.adaptivePlanning,
     payloadStrategy: payloadStrategyToDto(mode.payloadStrategy),
+    disabledTests: mode.disabledTests,
   };
 }
 
@@ -286,55 +290,57 @@ export function attackPlanFromDto(dto: WizardAttackPlanDto): AttackPlanConfig {
   const mapCategories = (values: string[]) =>
     values.map(asCategoryId).filter((id): id is AttackCategoryId => id !== null);
 
-  return normalizeAttackPlan({
-    profileId: asProfileId(dto.profileId),
-    recommendedProfileId: asProfileId(dto.recommendedProfileId ?? dto.profileId),
-    suggestedCategories: mapCategories(dto.suggestedCategories ?? []),
-    profileModes: (dto.profileModes ?? [])
-      .map(profileModeFromDto)
-      .filter((mode): mode is AttackProfileMode => mode !== null),
-    customCategories: mapCategories(dto.categories),
-    categories: mapCategories(dto.categories),
-    disabledTests: dto.disabledTests,
-    disabledGraphNodes: dto.attackGraph
-      .filter((node) => !node.enabled)
-      .map((node) => asCategoryId(node.category))
-      .filter((id): id is AttackCategoryId => id !== null),
-    capabilityGraph: dto.capabilityGraph,
-    attackGraph: dto.attackGraph
-      .map((node) => {
-        const category = asCategoryId(node.category);
-        if (!category) return null;
-        return {
-          category,
-          priority: node.priority,
-          risk: node.risk,
-          confidence: node.confidence,
-          dependencies: mapCategories(node.dependencies),
-          enabled: node.enabled,
-        };
-      })
-      .filter((node): node is AttackGraphNode => node !== null),
-    executionStrategy: dto.executionStrategy === "agentic" ? "agentic" : "sequential",
-    maxAttempts: dto.maxAttempts,
-    reflectionEnabled: dto.reflectionEnabled,
-    adaptivePlanning: dto.adaptivePlanning,
-    rationales: mapCategoryRationales(dto.rationales),
-    confidence: dto.confidence,
-    summary: dto.summary,
-    riskScore: dto.riskScore,
-    riskLevel: dto.riskLevel,
-    estimatedRequests: dto.estimatedRequests,
-    estimatedRuntimeSeconds: dto.estimatedRuntimeSeconds,
-    estimatedTokens: dto.estimatedTokens,
-    coverageScore: dto.coverageScore,
-    riskCoverage: dto.riskCoverage,
-    totalTestcases: dto.totalTestcases,
-    payloadStrategy: payloadStrategyFromDto(dto.payloadStrategy),
-    recommendedPayloadStrategy: payloadStrategyFromDto(dto.recommendedPayloadStrategy),
-    plannerSource:
-      dto.plannerSource === "ai_runtime" ? "ai_runtime" : "target_profile",
-  });
+  return recomputePlanPreview(
+    normalizeAttackPlan({
+      profileId: asProfileId(dto.profileId),
+      recommendedProfileId: asProfileId(dto.recommendedProfileId ?? dto.profileId),
+      suggestedCategories: mapCategories(dto.suggestedCategories ?? []),
+      profileModes: (dto.profileModes ?? [])
+        .map(profileModeFromDto)
+        .filter((mode): mode is AttackProfileMode => mode !== null),
+      customCategories: mapCategories(dto.categories),
+      categories: mapCategories(dto.categories),
+      disabledTests: dto.disabledTests,
+      disabledGraphNodes: dto.attackGraph
+        .filter((node) => !node.enabled)
+        .map((node) => asCategoryId(node.category))
+        .filter((id): id is AttackCategoryId => id !== null),
+      capabilityGraph: dto.capabilityGraph,
+      attackGraph: dto.attackGraph
+        .map((node) => {
+          const category = asCategoryId(node.category);
+          if (!category) return null;
+          return {
+            category,
+            priority: node.priority,
+            risk: node.risk,
+            confidence: node.confidence,
+            dependencies: mapCategories(node.dependencies),
+            enabled: node.enabled,
+          };
+        })
+        .filter((node): node is AttackGraphNode => node !== null),
+      executionStrategy: dto.executionStrategy === "agentic" ? "agentic" : "sequential",
+      maxAttempts: dto.maxAttempts,
+      reflectionEnabled: dto.reflectionEnabled,
+      adaptivePlanning: dto.adaptivePlanning,
+      rationales: mapCategoryRationales(dto.rationales),
+      confidence: dto.confidence,
+      summary: dto.summary,
+      riskScore: dto.riskScore,
+      riskLevel: dto.riskLevel,
+      estimatedRequests: dto.estimatedRequests,
+      estimatedRuntimeSeconds: dto.estimatedRuntimeSeconds,
+      estimatedTokens: dto.estimatedTokens,
+      coverageScore: dto.coverageScore,
+      riskCoverage: dto.riskCoverage,
+      totalTestcases: dto.totalTestcases,
+      payloadStrategy: payloadStrategyFromDto(dto.payloadStrategy),
+      recommendedPayloadStrategy: payloadStrategyFromDto(dto.recommendedPayloadStrategy),
+      plannerSource:
+        dto.plannerSource === "ai_runtime" ? "ai_runtime" : "target_profile",
+    }),
+  );
 }
 
 export { payloadStrategyToDto };
@@ -366,35 +372,9 @@ export function formatRiskLevel(level: string): string {
   return level;
 }
 
-const WIZARD_TESTS_PER_CATEGORY = 3;
 const WIZARD_SECONDS_PER_REQUEST = 2.5;
 const WIZARD_TOKENS_PER_REQUEST = 480;
 const WIZARD_CATALOG_SIZE = 9;
-
-function testPrefixForCategory(category: AttackCategoryId): string {
-  switch (category) {
-    case "prompt_injection":
-      return "pi-";
-    case "system_prompt_extraction":
-      return "spe-";
-    case "jailbreak":
-      return "jb-";
-    case "rag_leakage":
-      return "rag-";
-    case "memory_poisoning":
-      return "mp-";
-    case "cross_user_leakage":
-      return "cul-";
-    case "agent_goal_hijacking":
-      return "agh-";
-    case "tool_abuse":
-      return "ta-";
-    case "mcp_abuse":
-      return "mcp-";
-    default:
-      return "";
-  }
-}
 
 function categoryRisk(category: AttackCategoryId): number {
   switch (category) {
@@ -410,6 +390,17 @@ function categoryRisk(category: AttackCategoryId): number {
       return 70;
     default:
       return 60;
+  }
+}
+
+function enabledTestCountForCategory(
+  category: AttackCategoryId,
+  disabledTests: ReadonlySet<string>,
+): number {
+  try {
+    return getCategory(category).tests.filter((test) => !disabledTests.has(test.id)).length;
+  } catch {
+    return 0;
   }
 }
 
@@ -450,11 +441,10 @@ export function computeWizardPlanMetrics(
   let totalTestcases = 0;
   const variants = plan.payloadStrategy.variantsPerTest;
   const payloadsPerTestcase = plan.payloadStrategy.maxTotalPayloads;
+  const disabled = new Set(plan.disabledTests);
 
   for (const category of plan.categories) {
-    const prefix = testPrefixForCategory(category);
-    const disabledInCategory = plan.disabledTests.filter((id) => id.startsWith(prefix)).length;
-    const enabledTests = Math.max(0, WIZARD_TESTS_PER_CATEGORY - disabledInCategory);
+    const enabledTests = enabledTestCountForCategory(category, disabled);
     if (enabledTests === 0) continue;
     totalTestcases += enabledTests;
     requests += enabledTests * variants * payloadsPerTestcase;
@@ -534,7 +524,7 @@ export function previewPlanForProfile(
     profileId,
     categories,
     attackGraph,
-    disabledTests,
+    disabledTests: disabledTests.length > 0 ? disabledTests : mode.disabledTests,
     disabledGraphNodes: [],
     executionStrategy: mode.executionStrategy,
     maxAttempts: mode.maxAttempts,

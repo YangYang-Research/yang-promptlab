@@ -34,7 +34,8 @@ describe("verificationRequest", () => {
     expect(preview.requestLog).toContain("x-yang-api-token: Basic");
     expect(preview.requestLog).toContain("***");
     expect(preview.requestLog).not.toContain("x-yang-api-token: Basic abc123");
-    expect(preview.requestLog).toContain('"content": "Hello"');
+    expect(preview.requestLog).toContain("Authorized API capability inventory");
+    expect(preview.requestLog).not.toContain('"content": "Hello"');
     expect(preview.authDebug).toContain("api_key");
     expect(mergeVerificationHeaders(profile, authForm)["x-yang-api-token"]).toBe(
       "Basic abc123",

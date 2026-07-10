@@ -242,8 +242,8 @@ export function AuthVerificationStep({
 
       <section>
         <p className="text-muted text-sm">
-          Sends a real AI request (<code>Hello</code>) to your endpoint, then uses Yazg to
-          confirm the response is from a generative AI system.
+          Sends a capability-inventory probe to your endpoint, then uses Yazg to
+          confirm the response is from a generative AI system and capture signals for attack planning.
         </p>
         <Button variant="primary" disabled={verifying} onClick={() => void handleVerify()}>
           <span className="btn__content">

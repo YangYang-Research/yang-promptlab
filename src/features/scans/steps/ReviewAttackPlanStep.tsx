@@ -153,10 +153,12 @@ export function ReviewAttackPlanStep({
     const customUi = switchingToCustom
       ? planUiForCustomFromCategories(presetCategories)
       : null;
+    const nextMode = next !== "custom" ? getProfileMode(attackPlan, next) : null;
 
     const patch: Partial<AttackPlanUiState> = {
       profileId: next,
-      disabledTests: next !== "custom" ? [] : disabledTests,
+      disabledTests:
+        next !== "custom" ? (nextMode?.disabledTests ?? []) : disabledTests,
       disabledGraphNodes: switchingToCustom
         ? customUi!.disabledGraphNodes
         : next !== "custom"

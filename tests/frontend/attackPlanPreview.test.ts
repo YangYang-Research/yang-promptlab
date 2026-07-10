@@ -12,6 +12,7 @@ import {
   resolvePlannerSummaryBadge,
   type AttackPlanConfig,
 } from "@/features/scans/attackPlan";
+import { getCategory } from "@/features/scans/attackProfiles";
 import { createInitialAttackPlanUi } from "@/features/scans/wizardState";
 
 function samplePayload() {
@@ -98,6 +99,7 @@ function samplePlan(): AttackPlanConfig {
     profileModes: profileModes.map((mode) => ({
       ...mode,
       categories: [...mode.categories],
+      disabledTests: [],
     })),
     customCategories: [
       "prompt_injection",
@@ -257,9 +259,18 @@ describe("attack plan preview", () => {
   });
 
   it("estimates requests as enabledTests × variants × payloads per testcase per category", () => {
+    const categories = [
+      "prompt_injection",
+      "jailbreak",
+      "system_prompt_extraction",
+    ] as const;
+    const enabledTests = categories.reduce(
+      (sum, id) => sum + getCategory(id).tests.length,
+      0,
+    );
     const preview = recomputePlanPreview({
       ...samplePlan(),
-      categories: ["prompt_injection", "jailbreak", "system_prompt_extraction"],
+      categories: [...categories],
       disabledTests: [],
       payloadStrategy: {
         ...samplePlan().payloadStrategy,
@@ -267,10 +278,28 @@ describe("attack plan preview", () => {
         maxTotalPayloads: 10,
       },
     });
-    expect(preview.totalTestcases).toBe(9);
-    expect(preview.estimatedRequests).toBe(180);
-    expect(preview.estimatedRuntimeSeconds).toBe(450);
-    expect(preview.estimatedTokens).toBe(180 * 480);
+    expect(preview.totalTestcases).toBe(enabledTests);
+    expect(preview.estimatedRequests).toBe(enabledTests * 2 * 10);
+    expect(preview.estimatedRuntimeSeconds).toBe(Math.ceil(enabledTests * 2 * 10 * 2.5));
+    expect(preview.estimatedTokens).toBe(enabledTests * 2 * 10 * 480);
+  });
+
+  it("counts active tests from catalog minus disabled technique ids", () => {
+    const category = getCategory("prompt_injection");
+    const keep = category.tests.slice(0, 2).map((test) => test.id);
+    const disabled = category.tests.slice(2).map((test) => test.id);
+    const preview = recomputePlanPreview({
+      ...samplePlan(),
+      categories: ["prompt_injection"],
+      disabledTests: disabled,
+      payloadStrategy: {
+        ...samplePlan().payloadStrategy,
+        variantsPerTest: 1,
+        maxTotalPayloads: 1,
+      },
+    });
+    expect(preview.totalTestcases).toBe(keep.length);
+    expect(preview.estimatedRequests).toBe(keep.length);
   });
 
   it("ignores stale attack plan ui state", () => {
