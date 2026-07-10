@@ -7,7 +7,6 @@ import {
   Badge,
   Button,
   Card,
-  DataTable,
   EmptyState,
   PageHeader,
   ProgressBar,
@@ -20,14 +19,12 @@ import {
   reportExportLabel,
   type ReportExportFormat,
 } from "@/features/reports/reportDownloads";
-import { endpointSourceLabel } from "@/features/scans/endpointHelpers";
 import {
   extractAuthSummary,
   extractAuthType,
   extractTargetUrl,
   formatDurationMs,
   formatTimestamp,
-  isManualEndpoint,
   mapScanDetailToRun,
 } from "@/features/scans/scanDetailsHelpers";
 import {
@@ -42,7 +39,7 @@ import { buildScanProgressUrl, buildScanWizardUrl, isLiveScanStatus } from "@/fe
 import { getScan, getTarget, resumeScan, deleteScan, type ScanDetailDto, type TargetDto } from "@/shared/ipc";
 import { toAppError } from "@/shared/errors";
 import { useToast } from "@/shared/notifications";
-import type { DiscoveredEndpoint, Finding, ScanRun, Severity } from "@/shared/types";
+import type { Finding, ScanRun, Severity } from "@/shared/types";
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
 
@@ -54,7 +51,7 @@ export function ScanDetailsPage() {
   const { scanId = "" } = useParams();
   const navigate = useNavigate();
   const { notify, dismiss } = useToast();
-  const { scans, projects, targets, endpoints, findings, reports, actions } = useAppStore();
+  const { scans, projects, targets, findings, reports, actions } = useAppStore();
   const [detail, setDetail] = useState<ScanDetailDto | null>(null);
   const [targetDto, setTargetDto] = useState<TargetDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -106,16 +103,6 @@ export function ScanDetailsPage() {
     [reports, scanId],
   );
 
-  const selectedEndpoints = useMemo(() => {
-    if (!playbook) return [];
-    const ids = new Set(playbook.endpointIds);
-    return endpoints.filter((endpoint) => ids.has(endpoint.id));
-  }, [endpoints, playbook]);
-
-  const manualEndpoints = selectedEndpoints.filter((endpoint) =>
-    isManualEndpoint(endpoint.kind, endpoint.sourceUrl),
-  );
-
   const severityCounts = useMemo(() => countSeverities(scanFindings), [scanFindings]);
   const recentFindings = useMemo(
     () =>
@@ -132,7 +119,6 @@ export function ScanDetailsPage() {
 
   const estimates = playbook
     ? estimateAttackPlan(
-        playbook.endpointIds.length,
         playbook.profile,
         playbook.categories,
         playbook.disabledTests,
@@ -453,25 +439,7 @@ export function ScanDetailsPage() {
                   </div>
                 )}
               </div>
-
-              <div className="scan-details__endpoints-summary">
-                <h3 className="scan-details__subsection-title">Endpoints</h3>
-                <div className="detail-summary-grid detail-summary-grid--metrics">
-                  <ScanSummaryStat
-                    label="Selected"
-                    value={selectedEndpoints.length}
-                  />
-                  <ScanSummaryStat label="Manual" value={manualEndpoints.length} />
-                </div>
-              </div>
             </div>
-
-            {selectedEndpoints.length > 0 && (
-              <div className="scan-details__subsection">
-                <h3 className="scan-details__subsection-title">Endpoint inventory</h3>
-                <EndpointTable endpoints={selectedEndpoints} showSelected={false} />
-              </div>
-            )}
           </Card>
         </section>
       )}
@@ -636,61 +604,6 @@ function ScanSummaryStat({
         {value}
       </span>
     </div>
-  );
-}
-
-function EndpointTable({
-  endpoints,
-  showSelected,
-  selectedIds,
-}: {
-  endpoints: DiscoveredEndpoint[];
-  showSelected?: boolean;
-  selectedIds?: Set<string>;
-}) {
-  const columns = [
-    {
-      key: "method",
-      header: "Method",
-      width: "90px",
-      render: (row: DiscoveredEndpoint) => row.method ?? "—",
-    },
-    {
-      key: "url",
-      header: "Endpoint",
-      render: (row: DiscoveredEndpoint) => <span className="mono text-sm">{row.url}</span>,
-    },
-    {
-      key: "confidence",
-      header: "Confidence",
-      width: "100px",
-      render: (row: DiscoveredEndpoint) => `${Math.round(row.confidence * 100)}%`,
-    },
-    {
-      key: "source",
-      header: "Source",
-      width: "110px",
-      render: (row: DiscoveredEndpoint) => (
-        <Badge variant={isManualEndpoint(row.kind, row.sourceUrl) ? "info" : "muted"}>
-          {endpointSourceLabel(row.kind, row.sourceUrl)}
-        </Badge>
-      ),
-    },
-    ...(showSelected
-      ? [
-          {
-            key: "selected",
-            header: "Selected",
-            width: "90px",
-            render: (row: DiscoveredEndpoint) =>
-              selectedIds?.has(row.id) ? <Badge variant="success">Yes</Badge> : "No",
-          },
-        ]
-      : []),
-  ];
-
-  return (
-    <DataTable columns={columns} rows={endpoints} keyField="id" emptyMessage="No endpoints" />
   );
 }
 

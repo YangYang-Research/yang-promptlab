@@ -1,5 +1,4 @@
 import type {
-  EndpointDto,
   FindingDto,
   ProjectDto,
   ReportDto,
@@ -7,7 +6,6 @@ import type {
   TargetDto,
 } from "@/shared/ipc";
 import type {
-  DiscoveredEndpoint,
   Finding,
   JobStatus,
   Project,
@@ -158,30 +156,6 @@ export function mapScans(scans: ScanDto[]): ScanRun[] {
     startedAt: s.started_at,
     completedAt: s.completed_at,
     createdAt: s.created_at,
-  }));
-}
-
-export function mapEndpoints(endpoints: EndpointDto[]): DiscoveredEndpoint[] {
-  return endpoints.map((e) => ({
-    id: e.id,
-    scanId: e.scan_id,
-    targetId: e.target_id,
-    url: e.url,
-    kind: e.kind,
-    method: e.method,
-    confidence: e.confidence,
-    evidence: e.evidence,
-    sourceUrl: e.source_url,
-    discoveredAt: e.discovered_at,
-    endpointType: e.endpoint_type,
-    aiFramework: e.ai_framework,
-    riskScore: e.risk_score,
-    metadataConfidence: e.metadata_confidence,
-    discoverySource: e.discovery_source,
-    authRequired: e.auth_required,
-    metadata: e.metadata,
-    attackRecommendations: e.attack_recommendations,
-    fingerprint: null,
   }));
 }
 

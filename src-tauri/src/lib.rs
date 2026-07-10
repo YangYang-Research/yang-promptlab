@@ -14,11 +14,9 @@ pub mod inference_settings;
 pub mod model_registry;
 pub mod third_party_credentials;
 pub mod embedded_runtime;
-pub mod endpoint_pipeline;
 pub mod plugin_service;
 pub mod plugin_transport;
 pub mod playwright_runtime;
-pub mod agent_service;
 pub mod runtime_watch;
 pub mod session_auth;
 pub mod scan_console_log;
@@ -227,10 +225,6 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::domain::report_list_all,
             commands::domain::report_read,
             commands::domain::report_export,
-            commands::discovery::endpoint_list,
-            commands::discovery::endpoint_create,
-            commands::discovery::endpoint_update,
-            commands::attack::attack_run_prompt_injection,
             commands::scan::scan_start,
             commands::scan::scan_status,
             commands::scan::scan_pause,
@@ -278,7 +272,6 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::target_profile::planner_generate_from_profile,
             commands::scan_recommendations::scan_recommendations_generate,
             commands::planner::attack_planner_adjust,
-            commands::generator::generator_generate,
             commands::runtime::runtime_status,
             commands::runtime::runtime_install,
             commands::runtime::runtime_repair,

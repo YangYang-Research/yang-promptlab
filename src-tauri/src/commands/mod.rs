@@ -9,7 +9,6 @@ use crate::state::AppState;
 pub mod app;
 pub mod attack;
 pub mod auth;
-pub mod discovery;
 pub mod domain;
 pub mod environment;
 pub mod generator;

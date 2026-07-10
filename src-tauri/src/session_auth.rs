@@ -1,4 +1,4 @@
-//! Resolve browser session auth from target descriptors for discovery and attack.
+//! Resolve browser session auth from target descriptors for attack.
 
 use std::path::Path;
 
@@ -7,7 +7,6 @@ use aisec_auth::{
     auth_sessions_dir, AuthEngineConfig, AuthSessionManager, SessionAuthContext, SessionStore,
     SessionValidationStatus,
 };
-use aisec_discovery::SessionAuthMaterial;
 use aisec_harness::{HarnessFactory, HarnessKind, TargetDescriptor};
 
 use aisec_storage::Database;
@@ -69,17 +68,6 @@ pub fn uses_browser_session(descriptor_json: &str) -> bool {
     browser_session_id(descriptor_json).is_some()
 }
 
-pub fn session_auth_material(ctx: &SessionAuthContext, seed_url: &str) -> SessionAuthMaterial {
-    let mut headers = AuthSessionManager::auth_headers(ctx);
-    if let Some(cookie) = AuthSessionManager::cookie_header_for_url(ctx, seed_url) {
-        headers.insert("Cookie".into(), cookie);
-    }
-    SessionAuthMaterial {
-        headers,
-        storage_state_path: ctx.storage_state_path.clone(),
-    }
-}
-
 pub async fn validate_browser_session(
     state: &AppState,
     session_id: &str,
@@ -96,18 +84,6 @@ pub async fn validate_browser_session(
         ));
     }
     Ok(ctx)
-}
-
-pub async fn resolve_discovery_auth(
-    state: &AppState,
-    descriptor_json: &str,
-    seed_url: &str,
-) -> CommandResult<Option<SessionAuthMaterial>> {
-    let Some(session_id) = browser_session_id(descriptor_json) else {
-        return Ok(None);
-    };
-    let ctx = validate_browser_session(state, &session_id, seed_url).await?;
-    Ok(Some(session_auth_material(&ctx, seed_url)))
 }
 
 pub struct AttackRuntime {

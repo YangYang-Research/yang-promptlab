@@ -13,22 +13,18 @@ import { listen } from "@tauri-apps/api/event";
 
 import {
   createProject as createProjectCmd,
-  createScan as createScanCmd,
   createTarget as createTargetCmd,
   deleteProject as deleteProjectCmd,
   deleteTarget as deleteTargetCmd,
   updateProject as updateProjectCmd,
   generateReport as generateReportCmd,
-  listEndpoints,
   listFindingsAll,
   listReportsAll,
   listProjects,
   listScans,
   listTargets,
-  runPromptInjection as runPromptInjectionCmd,
   getScanStatus,
   listModels,
-  type EndpointDto,
   type FindingDto,
   type ModelEntryDto,
   type ScanDto,
@@ -42,7 +38,6 @@ import {
 } from "@/shared/dashboardDerived";
 
 import {
-  mapEndpoints,
   mapFindings,
   mapProjects,
   mapReports,
@@ -79,7 +74,6 @@ const initialState: AppDataState = {
   projects: [],
   targets: [],
   scans: [],
-  endpoints: [],
   attackRuns: [],
   findings: [],
   reports: [],
@@ -171,13 +165,11 @@ async function loadAll(): Promise<LoadedData> {
   const targetDtos = targetGroups.flat();
   const scanDtos: ScanDto[] = scanGroups.flat();
 
-  const [findingGroups, endpointGroups, modelEntries] = await Promise.all([
+  const [findingGroups, modelEntries] = await Promise.all([
     listFindingsAll(),
-    Promise.all(scanDtos.map((s) => listEndpoints(s.id))),
     listModels().catch(() => [] as ModelEntryDto[]),
   ]);
   const findingDtos: FindingDto[] = findingGroups;
-  const endpointDtos: EndpointDto[] = endpointGroups.flat();
 
   const projects = mapProjects(projectDtos, targetDtos, findingDtos);
   const targets = mapTargets(targetDtos);
@@ -200,7 +192,6 @@ async function loadAll(): Promise<LoadedData> {
     projects,
     targets,
     scans,
-    endpoints: mapEndpoints(endpointDtos),
     findings,
     reports: mapReports(reportDtos, projectDtos, scanDtos),
     models: mapLocalModels(modelEntries),
@@ -293,24 +284,10 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
         }
       },
       deleteTarget: (id) => runMutation("deleteTarget", () => deleteTargetCmd(id)),
-      createScan: (projectId, name, targetId, status) =>
-        runMutation("createScan", () => createScanCmd(projectId, name, targetId, status)),
       generateReport: (projectId, scanId, format, kind) =>
         runMutation("generateReport", () =>
           generateReportCmd(projectId, scanId, format, kind),
         ),
-      runPromptInjection: async (endpointId) => {
-        try {
-          const result = await runPromptInjectionCmd(endpointId);
-          await refresh();
-          return result;
-        } catch (error) {
-          const appError = toAppError(error);
-          log.error("mutation failed: runPromptInjection", { error: appError });
-          dispatch({ type: "SET_ERROR", error: appError.message });
-          throw appError;
-        }
-      },
     }),
     [refresh, runMutation],
   );

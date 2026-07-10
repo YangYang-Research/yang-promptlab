@@ -1,11 +1,4 @@
-//! Attack execution commands.
-//!
-//! `attack_run_prompt_injection` executes the real `aisec-attack` prompt
-//! injection attack (harness transport + built-in evaluation) against a previously
-//! discovered endpoint, persists every attempt as an `attack_result` and every
-//! successful attempt as a `finding`, and returns the run summary. No mocked
-//! findings: results come straight from the engine evaluating real target
-//! responses normalized by the harness layer.
+//! Attack execution commands for scan jobs and category runs.
 
 use aisec_attack::{
     apply_descriptor_auth, AttackCategory, AttackContext, AttackPayload, AttackTarget,
@@ -20,11 +13,10 @@ use aisec_plugin_host::evaluate_with_judge_plugins;
 use aisec_inference::InferenceRuntimeManager;
 use aisec_runtime::{RuntimeManager, SharedModelProvider};
 use aisec_storage::{
-    AttackResultRepository, CreateAttackResult, CreateFinding, CreateScan, Endpoint,
+    AttackResultRepository, CreateAttackResult, CreateFinding, Endpoint,
     EndpointRepository, FindingRepository, Repositories, ScanRepository, TargetRepository,
     UpdateScan,
 };
-use tauri::State;
 use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
 
@@ -38,7 +30,7 @@ use tokio::sync::mpsc;
 
 use tauri::async_runtime::Mutex as AsyncMutex;
 
-use crate::dto::{AttackRunDto, FindingDto, ScanDto};
+use crate::dto::FindingDto;
 use crate::error::{CommandError, CommandResult};
 use crate::events::{ScanProgressEmitter, ScanProgressLevel};
 use crate::inference_host::build_judge_engine_from_gateway;
@@ -1001,148 +993,6 @@ pub async fn run_category_on_target_profile(
     };
 
     execute_category_then_judge(executor, category, ctx, &judge_env).await
-}
-
-#[instrument(skip(state))]
-pub async fn attack_run_prompt_injection_op(
-    state: &AppState,
-    endpoint_id: String,
-) -> CommandResult<AttackRunDto> {
-    let repos = state.repositories();
-
-    let endpoint = repos
-        .endpoints()
-        .get(&endpoint_id)
-        .await
-        .map_err(CommandError::from)?;
-    let source_scan = repos
-        .scans()
-        .get(&endpoint.scan_id)
-        .await
-        .map_err(CommandError::from)?;
-    let project_id = source_scan.project_id.clone();
-    let target_id = endpoint.target_id.clone().or(source_scan.target_id.clone());
-
-    let descriptor_json = if let Some(tid) = &target_id {
-        repos
-            .targets()
-            .get(tid)
-            .await
-            .map(|t| t.descriptor_json)
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-    let runtime = build_attack_runtime(state, &descriptor_json, &endpoint.url).await?;
-
-    let scan = repos
-        .scans()
-        .create(CreateScan {
-            project_id: project_id.clone(),
-            target_id: target_id.clone(),
-            name: format!("Prompt Injection: {}", endpoint.url),
-            status: Some("running".into()),
-            playbook_json: Some(serde_json::json!({
-                "attack": "prompt_injection",
-                "endpoint_id": endpoint.id,
-                "endpoint_url": endpoint.url,
-            })),
-        })
-        .await
-        .map_err(CommandError::from)?;
-
-    let _ = repos
-        .scans()
-        .update(
-            &scan.id,
-            UpdateScan {
-                started_at: Some(Some(OffsetDateTime::now_utc())),
-                ..Default::default()
-            },
-        )
-        .await;
-
-    let category = AttackCategory::PromptInjection;
-    let run = match run_category_on_endpoint(
-        &repos,
-        &scan.id,
-        &project_id,
-        target_id.clone(),
-        &endpoint,
-        category,
-        runtime,
-        state.data_dir(),
-        Arc::clone(state.inference_manager()),
-        Arc::clone(state.model_manager()),
-        state.model_provider().clone(),
-        Arc::clone(state.runtime_manager()),
-        state.plugin_manager().clone(),
-        None,
-        None,
-        None,
-        None,
-    )
-    .await
-    {
-        Ok(run) => run,
-        Err(err) => {
-            warn!(scan_id = %scan.id, error = %err, "attack run failed");
-            let _ = repos
-                .scans()
-                .update(
-                    &scan.id,
-                    UpdateScan {
-                        status: Some("failed".into()),
-                        completed_at: Some(Some(OffsetDateTime::now_utc())),
-                        playbook_json: Some(serde_json::json!({ "error": err.to_string() })),
-                        ..Default::default()
-                    },
-                )
-                .await;
-            return Err(err);
-        }
-    };
-
-    let updated = repos
-        .scans()
-        .update(
-            &scan.id,
-            UpdateScan {
-                status: Some("completed".into()),
-                completed_at: Some(Some(OffsetDateTime::now_utc())),
-                ..Default::default()
-            },
-        )
-        .await
-        .map_err(CommandError::from)?;
-
-    info!(
-        scan_id = %scan.id,
-        attempts = run.attempts,
-        successes = run.successes,
-        findings = run.findings.len(),
-        "prompt injection attack completed"
-    );
-
-    Ok(AttackRunDto {
-        scan: ScanDto::from(updated),
-        category: category_id(category).into(),
-        attempts: run.attempts as u64,
-        successes: run.successes,
-        findings: run.findings,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Tauri command wrapper
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub async fn attack_run_prompt_injection(
-    state: State<'_, AppState>,
-    endpoint_id: String,
-) -> CommandResult<AttackRunDto> {
-    attack_run_prompt_injection_op(state.inner(), endpoint_id).await
 }
 
 #[cfg(test)]

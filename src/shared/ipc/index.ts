@@ -25,7 +25,6 @@ export {
   getAppInfo,
   listScans,
   getScan,
-  createScan,
   listFindings,
   listFindingsAll,
   generateReport,
@@ -33,10 +32,6 @@ export {
   listReportsAll,
   readReport,
   exportReport,
-  listEndpoints,
-  createEndpoint,
-  updateEndpoint,
-  runPromptInjection,
   startScan,
   getScanStatus,
   pauseScan,
@@ -52,8 +47,6 @@ export {
   type FindingDto,
   type ReportDto,
   type ReportContentDto,
-  type EndpointDto,
-  type AttackRunDto,
   type ScanStartDto,
   type ScanStartRequest,
   type ScanStatusDto,
@@ -75,10 +68,3 @@ export {
   type ModelInferenceTestResult,
   type ModelCapabilitiesDto,
 } from "./models";
-export {
-  generatePromptPayloads,
-  type GeneratorGenerateRequest,
-  type GeneratorMode,
-  type PromptPayloadsDto,
-  type PromptPayloadDto,
-} from "./generator";

@@ -16,7 +16,6 @@ use tauri::{AppHandle, State};
 use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
 
-use crate::agent_service::agent_config_from_scan;
 use crate::commands::scan_execution::{
     run_target_profile_attack_scan, scan_attack_requests_total, scan_progress_total,
     scan_testcases_total, ScanExecutionConfig, TargetProfileScanContext,
@@ -421,7 +420,7 @@ pub async fn scan_start_op(
         payload_strategy.clone(),
         effective_generator_mode.clone(),
     );
-    let config = agent_config_from_scan(effective_generator_mode.as_deref(), max_agent_attempts);
+    let max_attempts_per_category = max_agent_attempts.unwrap_or(5);
     let scan_name = if agentic {
         format!("Agent Scan ({profile})")
     } else {
@@ -437,7 +436,7 @@ pub async fn scan_start_op(
             "generator_mode": effective_generator_mode,
             "agent_mode": agentic,
             "reflection_enabled": reflection_on,
-            "max_agent_attempts": config.max_attempts_per_category,
+            "max_agent_attempts": max_attempts_per_category,
         });
         if let Some(ref strategy) = payload_strategy {
             playbook["payload_strategy"] = serde_json::to_value(strategy).unwrap_or_default();

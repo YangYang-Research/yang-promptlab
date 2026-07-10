@@ -22,9 +22,6 @@ const TargetDetailsPage = lazy(() =>
     default: m.TargetDetailsPage,
   })),
 );
-const AttacksPage = lazy(() =>
-  import("@/features/attacks/AttacksPage").then((m) => ({ default: m.AttacksPage })),
-);
 const FindingsPage = lazy(() =>
   import("@/features/findings/FindingsPage").then((m) => ({ default: m.FindingsPage })),
 );
@@ -128,14 +125,6 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <TargetsPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="attacks"
-            element={
-              <Suspense fallback={<PageLoader />}>
-                <AttacksPage />
               </Suspense>
             }
           />

@@ -2,7 +2,6 @@ import type {
   ActivityItem,
   AttackRun,
   DashboardStats,
-  DiscoveredEndpoint,
   Finding,
   LocalModel,
   Project,
@@ -10,7 +9,6 @@ import type {
   ScanRun,
   Target,
 } from "@/shared/types";
-import type { AttackRunDto } from "@/shared/ipc";
 
 export type AppSettings = {
   theme: "dark" | "light" | "system";
@@ -32,7 +30,6 @@ export type AppDataState = {
   projects: Project[];
   targets: Target[];
   scans: ScanRun[];
-  endpoints: DiscoveredEndpoint[];
   attackRuns: AttackRun[];
   findings: Finding[];
   reports: Report[];
@@ -51,7 +48,6 @@ export type LoadedData = Pick<
   | "projects"
   | "targets"
   | "scans"
-  | "endpoints"
   | "findings"
   | "reports"
   | "models"
@@ -83,19 +79,12 @@ export type AppActions = {
     descriptor?: unknown,
   ) => Promise<Target>;
   deleteTarget: (id: string) => Promise<void>;
-  createScan: (
-    projectId: string,
-    name: string,
-    targetId?: string | null,
-    status?: string | null,
-  ) => Promise<void>;
   generateReport: (
     projectId: string,
     scanId: string,
     format?: string,
     kind?: string,
   ) => Promise<void>;
-  runPromptInjection: (endpointId: string) => Promise<AttackRunDto>;
 };
 
 export type AppStoreValue = AppDataState & {

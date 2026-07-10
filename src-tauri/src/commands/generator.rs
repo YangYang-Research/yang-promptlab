@@ -1,57 +1,17 @@
-//! Payload generator IPC — build probes from attack plans.
+//! Payload generation helpers for scan execution.
 
 use aisec_attack::{AttackCategory, AttackPayload};
 use aisec_core::AisecError;
 use aisec_generator::{generate_from_plan, GeneratePayloadsInput, GeneratorMode, PromptPayloads};
 use aisec_planner::{AttackPlan, PlannerMode};
 use aisec_target_profile::{PayloadGenerationStrategy, PayloadStrategy};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::State;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::inference_host::{is_inference_ready, HostGeneratorLlm};
 use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GeneratorGenerateRequest {
-    pub profile_id: String,
-    pub categories: Vec<String>,
-    pub disabled_tests: Vec<String>,
-    pub mode: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PromptPayloadDto {
-    pub id: String,
-    pub name: String,
-    pub category: String,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GeneratorStatsDto {
-    pub category_count: usize,
-    pub source_count: usize,
-    pub payload_count: usize,
-    pub variant_count: usize,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PromptPayloadsDto {
-    pub mode: String,
-    pub payloads: Vec<PromptPayloadDto>,
-    pub payload_ids: Vec<String>,
-    pub stats: GeneratorStatsDto,
-    pub summary: String,
-    pub llm_note: Option<String>,
-}
 
 fn parse_generator_mode(raw: &str) -> GeneratorMode {
     match raw.trim().to_ascii_lowercase().as_str() {
@@ -186,70 +146,7 @@ pub fn validate_payload_map_per_testcase(
     Ok(())
 }
 
-fn parse_categories(raw: &[String]) -> Vec<AttackCategory> {
-    raw.iter()
-        .filter_map(|value| {
-            AttackCategory::all()
-                .iter()
-                .find(|c| c.as_str() == value.trim())
-                .copied()
-        })
-        .collect()
-}
-
-pub fn attack_plan_from_request(request: &GeneratorGenerateRequest) -> CommandResult<AttackPlan> {
-    let categories = parse_categories(&request.categories);
-    if categories.is_empty() {
-        return Err(CommandError::invalid_input(
-            "at least one valid attack category is required",
-        ));
-    }
-    Ok(AttackPlan {
-        mode: PlannerMode::Deterministic,
-        profile_id: request.profile_id.clone(),
-        categories,
-        disabled_tests: request.disabled_tests.clone(),
-        rationales: vec![],
-        confidence: 1.0,
-        summary: String::new(),
-        llm_rationale: None,
-    })
-}
-
-pub fn payloads_to_dto(pack: PromptPayloads) -> PromptPayloadsDto {
-    let payloads: Vec<PromptPayloadDto> = pack
-        .by_category
-        .values()
-        .flat_map(|items| {
-            items.iter().map(|p| PromptPayloadDto {
-                id: p.id.clone(),
-                name: p.name.clone(),
-                category: p.category.as_str().into(),
-                content: p.content.clone(),
-            })
-        })
-        .collect();
-
-    PromptPayloadsDto {
-        mode: match pack.mode {
-            GeneratorMode::StaticPack => "static_pack".into(),
-            GeneratorMode::TemplateMutation => "template_mutation".into(),
-            GeneratorMode::LocalLlm => "local_llm".into(),
-        },
-        payloads,
-        payload_ids: pack.payload_ids,
-        stats: GeneratorStatsDto {
-            category_count: pack.stats.category_count,
-            source_count: pack.stats.source_count,
-            payload_count: pack.stats.payload_count,
-            variant_count: pack.stats.variant_count,
-        },
-        summary: pack.summary,
-        llm_note: pack.llm_note,
-    }
-}
-
-pub fn prompt_payloads_map(pack: &PromptPayloads) -> HashMap<AttackCategory, Vec<aisec_attack::AttackPayload>> {
+pub fn prompt_payloads_map(pack: &PromptPayloads) -> HashMap<AttackCategory, Vec<AttackPayload>> {
     pack.by_category.clone()
 }
 
@@ -368,41 +265,6 @@ pub async fn generate_payloads_for_scan_job_with_strategy(
         Some(strategy.max_total_payloads),
     )
     .await
-}
-
-pub async fn generate_payloads_for_plan(
-    state: &AppState,
-    plan: &AttackPlan,
-    mode: GeneratorMode,
-) -> CommandResult<PromptPayloads> {
-    generate_payloads_for_scan_job(
-        state.data_dir(),
-        Arc::clone(state.inference_manager()),
-        Arc::clone(state.model_manager()),
-        state.model_provider().clone(),
-        Arc::clone(state.runtime_manager()),
-        plan,
-        mode,
-    )
-    .await
-}
-
-pub async fn generator_generate_op(
-    state: &AppState,
-    request: GeneratorGenerateRequest,
-) -> CommandResult<PromptPayloadsDto> {
-    let plan = attack_plan_from_request(&request)?;
-    let mode = parse_generator_mode(&request.mode);
-    let pack = generate_payloads_for_plan(state, &plan, mode).await?;
-    Ok(payloads_to_dto(pack))
-}
-
-#[tauri::command]
-pub async fn generator_generate(
-    state: State<'_, AppState>,
-    request: GeneratorGenerateRequest,
-) -> CommandResult<PromptPayloadsDto> {
-    generator_generate_op(state.inner(), request).await
 }
 
 #[cfg(test)]
