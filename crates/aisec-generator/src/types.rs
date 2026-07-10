@@ -87,6 +87,8 @@ pub struct GeneratePayloadsInput<'a> {
     pub target_context: Option<GeneratorTargetContext>,
     /// Prior judge/refusal summary for response adaptation (agentic retries).
     pub adaptation_feedback: Option<String>,
+    /// DB-backed catalog. When `None`, falls back to the embedded factory seed.
+    pub catalog: Option<&'a aisec_payload::PayloadDatabase>,
 }
 
 impl<'a> GeneratePayloadsInput<'a> {
@@ -98,6 +100,19 @@ impl<'a> GeneratePayloadsInput<'a> {
             advanced: GeneratorAdvancedOptions::default(),
             target_context: None,
             adaptation_feedback: None,
+            catalog: None,
         }
+    }
+
+    pub fn with_catalog(mut self, catalog: &'a aisec_payload::PayloadDatabase) -> Self {
+        self.catalog = Some(catalog);
+        self
+    }
+
+    pub(crate) fn resolve_catalog(&self) -> crate::error::GeneratorResult<aisec_payload::PayloadDatabase> {
+        if let Some(db) = self.catalog {
+            return Ok(db.clone());
+        }
+        Ok(aisec_payload::PayloadDatabase::builtin()?)
     }
 }

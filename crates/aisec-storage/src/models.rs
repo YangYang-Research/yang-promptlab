@@ -145,6 +145,25 @@ pub struct Plugin {
     pub updated_at: OffsetDateTime,
 }
 
+/// Global attack technique catalog row (editable default prompts).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct AttackCatalogTechnique {
+    pub id: String,
+    pub category_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub content: String,
+    pub default_content: String,
+    pub tags_json: String,
+    pub surface: Option<String>,
+    pub owasp: Option<String>,
+    pub enabled: bool,
+    pub user_modified: bool,
+    pub sort_order: i64,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
 // ---------------------------------------------------------------------------
 // Create / Update DTOs
 // ---------------------------------------------------------------------------
@@ -339,6 +358,33 @@ pub struct UpdatePlugin {
     pub enabled: Option<bool>,
     pub manifest_json: Option<serde_json::Value>,
     pub install_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpsertAttackCatalogTechnique {
+    pub id: String,
+    pub category_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub content: String,
+    pub default_content: String,
+    pub tags_json: String,
+    pub surface: Option<String>,
+    pub owasp: Option<String>,
+    pub enabled: bool,
+    pub sort_order: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UpdateAttackCatalogTechnique {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub content: Option<String>,
+    pub enabled: Option<bool>,
+    pub tags_json: Option<String>,
+    pub surface: Option<String>,
+    pub owasp: Option<String>,
+    pub sort_order: Option<i64>,
 }
 
 /// Helper for serializing optional JSON columns.

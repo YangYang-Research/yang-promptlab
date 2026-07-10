@@ -20,8 +20,8 @@ use tracing::{info, warn};
 
 use crate::commands::attack::{CategoryRunOptions, CategoryRunResult, run_category_on_target_profile};
 use crate::commands::generator::{
-    attack_plan_from_scan, generate_payloads_for_scan_job_with_options,
-    generate_payloads_for_scan_job_with_strategy_context,
+    attack_plan_from_scan, generate_payloads_for_scan_job_with_options_and_catalog,
+    generate_payloads_for_scan_job_with_strategy_context_and_catalog,
     parse_generator_mode_optional, prompt_payloads_map, validate_payload_map_budget,
 };
 use crate::events::ScanProgressEmitter;
@@ -196,11 +196,12 @@ pub async fn generate_scan_payloads(
     plan: &AttackPlan,
     config: &ScanExecutionConfig,
     profile: &aisec_target_profile::TargetProfile,
+    catalog: aisec_payload::PayloadDatabase,
     emitter: &ScanProgressEmitter,
 ) -> Result<HashMap<AttackCategory, Vec<AttackPayload>>, String> {
     emitter.info("Generating attack payloads from Yazg...");
     let pack = if let Some(ref strategy) = config.payload_strategy {
-        generate_payloads_for_scan_job_with_strategy_context(
+        generate_payloads_for_scan_job_with_strategy_context_and_catalog(
             data_dir,
             inference_manager,
             model_manager,
@@ -210,11 +211,12 @@ pub async fn generate_scan_payloads(
             strategy,
             Some(profile),
             None,
+            Some(catalog),
         )
         .await
         .map_err(|err| err.to_string())?
     } else if let Some(mode) = parse_generator_mode_optional(config.generator_mode.as_deref()) {
-        generate_payloads_for_scan_job_with_options(
+        generate_payloads_for_scan_job_with_options_and_catalog(
             data_dir,
             inference_manager,
             model_manager,
@@ -223,6 +225,7 @@ pub async fn generate_scan_payloads(
             plan,
             mode,
             None,
+            catalog,
         )
         .await
         .map_err(|err| err.to_string())?
@@ -252,6 +255,7 @@ async fn regenerate_category_payloads(
     category: AttackCategory,
     strategy: &PayloadStrategy,
     profile: &aisec_target_profile::TargetProfile,
+    catalog: aisec_payload::PayloadDatabase,
     adaptation_feedback: Option<String>,
     _retry: u32,
 ) -> Result<HashMap<AttackCategory, Vec<AttackPayload>>, String> {
@@ -259,7 +263,7 @@ async fn regenerate_category_payloads(
         categories: vec![category],
         ..plan.clone()
     };
-    let pack = generate_payloads_for_scan_job_with_strategy_context(
+    let pack = generate_payloads_for_scan_job_with_strategy_context_and_catalog(
         data_dir,
         inference_manager,
         model_manager,
@@ -269,6 +273,7 @@ async fn regenerate_category_payloads(
         strategy,
         Some(profile),
         adaptation_feedback,
+        Some(catalog),
     )
     .await
     .map_err(|err| err.to_string())?;
@@ -372,6 +377,19 @@ pub async fn run_target_profile_attack_scan(
 
     set_scan_phase(&ctx.progress, "generate", Some("all categories"), None, None);
 
+    let catalog = match crate::attack_catalog::load_payload_database_from_repos(ctx.repos).await {
+        Ok(db) => db,
+        Err(err) => {
+            warn!(scan_id = %ctx.scan_id, error = %err, "attack catalog load failed");
+            ctx.emitter
+                .error(format!("Attack catalog load failed: {err}"));
+            return TargetProfileScanOutcome {
+                findings_total: 0,
+                had_error: true,
+            };
+        }
+    };
+
     let generated_payloads = match generate_scan_payloads(
         ctx.data_dir,
         Arc::clone(&ctx.inference_manager),
@@ -381,6 +399,7 @@ pub async fn run_target_profile_attack_scan(
         &plan,
         &config,
         ctx.profile,
+        catalog.clone(),
         &ctx.emitter,
     )
     .await
@@ -460,6 +479,7 @@ pub async fn run_target_profile_attack_scan(
                 &plan,
                 *category,
                 &generated_payloads,
+                &catalog,
                 run_options.as_ref(),
             )
             .await
@@ -534,6 +554,7 @@ async fn run_agentic_category(
     plan: &AttackPlan,
     category: AttackCategory,
     generated_payloads: &HashMap<AttackCategory, Vec<AttackPayload>>,
+    catalog: &aisec_payload::PayloadDatabase,
     run_options: Option<&CategoryRunOptions>,
 ) -> Result<CategoryRunResult, String> {
     let strategy = config
@@ -594,6 +615,7 @@ async fn run_agentic_category(
                 category,
                 &strategy,
                 ctx.profile,
+                catalog.clone(),
                 feedback,
                 retry,
             )

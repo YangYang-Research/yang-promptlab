@@ -102,3 +102,19 @@ pub trait PluginRepository: Send + Sync {
     async fn update(&self, id: &str, input: UpdatePlugin) -> AisecResult<Plugin>;
     async fn delete(&self, id: &str) -> AisecResult<()>;
 }
+
+#[async_trait]
+pub trait AttackCatalogRepository: Send + Sync {
+    async fn get(&self, id: &str) -> AisecResult<AttackCatalogTechnique>;
+    async fn list(&self) -> AisecResult<Vec<AttackCatalogTechnique>>;
+    async fn list_enabled(&self) -> AisecResult<Vec<AttackCatalogTechnique>>;
+    async fn list_by_category(&self, category_id: &str) -> AisecResult<Vec<AttackCatalogTechnique>>;
+    /// Insert missing seed rows; refresh factory defaults without clobbering user edits.
+    async fn seed_from(&self, entries: Vec<UpsertAttackCatalogTechnique>) -> AisecResult<u64>;
+    async fn update(
+        &self,
+        id: &str,
+        input: UpdateAttackCatalogTechnique,
+    ) -> AisecResult<AttackCatalogTechnique>;
+    async fn reset_content(&self, id: &str) -> AisecResult<AttackCatalogTechnique>;
+}

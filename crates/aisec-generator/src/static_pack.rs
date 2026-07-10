@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use aisec_attack::{AttackCategory, AttackPayload};
-use aisec_payload::{GenerateRequest, MutationKind, PayloadDatabase, PayloadPipeline};
+use aisec_payload::{GenerateRequest, MutationKind, PayloadPipeline};
 use aisec_planner::AttackPlan;
 
 use crate::convert::{attack_to_payload_category, generated_to_attack_payload, record_to_attack_payload};
@@ -10,14 +10,14 @@ use crate::types::{GeneratePayloadsInput, GeneratorMode, GeneratorStats, PromptP
 
 pub fn generate_static_pack(input: &GeneratePayloadsInput<'_>) -> GeneratorResult<PromptPayloads> {
     let plan = input.plan;
-    let database = PayloadDatabase::builtin()?;
+    let database = input.resolve_catalog()?;
     let disabled: std::collections::HashSet<_> = plan.disabled_tests.iter().cloned().collect();
     let max_per_source = input.max_payloads_per_test.unwrap_or(1).max(1) as usize;
     let mut by_category: HashMap<AttackCategory, Vec<AttackPayload>> = HashMap::new();
     let mut source_count = 0usize;
 
     if max_per_source > 1 {
-        let pipeline = PayloadPipeline::for_variant_budget(max_per_source)?;
+        let pipeline = PayloadPipeline::for_variant_budget_with_db(database.clone(), max_per_source)?;
         for category in &plan.categories {
             let payload_cat = attack_to_payload_category(*category);
             let records: Vec<_> = database

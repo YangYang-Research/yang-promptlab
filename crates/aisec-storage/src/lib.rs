@@ -12,9 +12,10 @@ pub use error::{map_sqlx_error, StorageResultExt};
 pub use models::*;
 pub use pool::Database;
 pub use repositories::{
-    AttackResultRepository, AuthProfileRepository, AuthRecordingRepository, AuthSessionRepository,
-    EndpointRepository, FindingRepository, ModelRepository, PayloadRepository, PluginRepository,
-    ProjectRepository, ReportRepository, Repositories, ScanRepository, TargetRepository,
+    AttackCatalogRepository, AttackResultRepository, AuthProfileRepository,
+    AuthRecordingRepository, AuthSessionRepository, EndpointRepository, FindingRepository,
+    ModelRepository, PayloadRepository, PluginRepository, ProjectRepository, ReportRepository,
+    Repositories, ScanRepository, TargetRepository,
 };
 
 #[cfg(test)]

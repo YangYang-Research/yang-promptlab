@@ -37,9 +37,16 @@ impl PayloadPipeline {
 
     /// Pipeline tuned to produce up to `budget` variants per source testcase.
     pub fn for_variant_budget(budget: usize) -> PayloadResult<Self> {
-        let budget = budget.max(1);
+        Self::for_variant_budget_with_db(PayloadDatabase::builtin()?, budget)
+    }
+
+    pub fn for_variant_budget_with_db(
+        database: PayloadDatabase,
+        budget: usize,
+    ) -> PayloadResult<Self> {
+        let _budget = budget.max(1);
         Ok(Self {
-            database: PayloadDatabase::builtin()?,
+            database,
             mutator: MutationEngine::new(MutationConfig {
                 enabled: MutationKind::all().to_vec(),
                 max_per_payload: MutationKind::all().len(),

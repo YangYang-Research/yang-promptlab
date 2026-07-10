@@ -228,6 +228,8 @@ pub struct GenerateJobOptions {
     pub advanced: GeneratorAdvancedOptions,
     pub target_context: Option<GeneratorTargetContext>,
     pub adaptation_feedback: Option<String>,
+    /// DB-backed catalog; when `None`, uses embedded factory seed.
+    pub catalog: Option<aisec_payload::PayloadDatabase>,
 }
 
 impl GenerateJobOptions {
@@ -238,6 +240,7 @@ impl GenerateJobOptions {
             advanced: GeneratorAdvancedOptions::default(),
             target_context: None,
             adaptation_feedback: None,
+            catalog: None,
         }
     }
 
@@ -260,7 +263,13 @@ impl GenerateJobOptions {
             advanced: advanced_options_from_strategy(strategy),
             target_context: profile.map(target_context_from_profile),
             adaptation_feedback,
+            catalog: None,
         }
+    }
+
+    pub fn with_catalog(mut self, catalog: aisec_payload::PayloadDatabase) -> Self {
+        self.catalog = Some(catalog);
+        self
     }
 }
 
@@ -308,6 +317,29 @@ pub async fn generate_payloads_for_scan_job_with_options(
     .await
 }
 
+pub async fn generate_payloads_for_scan_job_with_options_and_catalog(
+    data_dir: &std::path::Path,
+    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
+    model_provider: aisec_runtime::SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
+    plan: &AttackPlan,
+    mode: GeneratorMode,
+    max_payloads_per_test: Option<u32>,
+    catalog: aisec_payload::PayloadDatabase,
+) -> CommandResult<PromptPayloads> {
+    generate_payloads_for_scan_job_with_job_options(
+        data_dir,
+        inference_manager,
+        model_manager,
+        model_provider,
+        runtime_manager,
+        plan,
+        GenerateJobOptions::from_mode(mode, max_payloads_per_test).with_catalog(catalog),
+    )
+    .await
+}
+
 pub async fn generate_payloads_for_scan_job_with_job_options(
     data_dir: &std::path::Path,
     inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
@@ -330,6 +362,12 @@ pub async fn generate_payloads_for_scan_job_with_job_options(
         }
     }
 
+    let catalog_owned = options
+        .catalog
+        .take()
+        .or_else(|| aisec_payload::PayloadDatabase::builtin().ok());
+    let catalog_ref = catalog_owned.as_ref();
+
     let input = GeneratePayloadsInput {
         plan,
         mode: options.mode,
@@ -337,6 +375,7 @@ pub async fn generate_payloads_for_scan_job_with_job_options(
         advanced: options.advanced.clone(),
         target_context: options.target_context.clone(),
         adaptation_feedback: options.adaptation_feedback.clone(),
+        catalog: catalog_ref,
     };
 
     let pack = if options.mode == GeneratorMode::LocalLlm {
@@ -397,6 +436,37 @@ pub async fn generate_payloads_for_scan_job_with_strategy_context(
     profile: Option<&TargetProfile>,
     adaptation_feedback: Option<String>,
 ) -> CommandResult<PromptPayloads> {
+    generate_payloads_for_scan_job_with_strategy_context_and_catalog(
+        data_dir,
+        inference_manager,
+        model_manager,
+        model_provider,
+        runtime_manager,
+        plan,
+        strategy,
+        profile,
+        adaptation_feedback,
+        None,
+    )
+    .await
+}
+
+pub async fn generate_payloads_for_scan_job_with_strategy_context_and_catalog(
+    data_dir: &std::path::Path,
+    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
+    model_provider: aisec_runtime::SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
+    plan: &AttackPlan,
+    strategy: &PayloadStrategy,
+    profile: Option<&TargetProfile>,
+    adaptation_feedback: Option<String>,
+    catalog: Option<aisec_payload::PayloadDatabase>,
+) -> CommandResult<PromptPayloads> {
+    let mut options = GenerateJobOptions::from_strategy(strategy, profile, adaptation_feedback);
+    if let Some(catalog) = catalog {
+        options = options.with_catalog(catalog);
+    }
     generate_payloads_for_scan_job_with_job_options(
         data_dir,
         inference_manager,
@@ -404,7 +474,7 @@ pub async fn generate_payloads_for_scan_job_with_strategy_context(
         model_provider,
         runtime_manager,
         plan,
-        GenerateJobOptions::from_strategy(strategy, profile, adaptation_feedback),
+        options,
     )
     .await
 }

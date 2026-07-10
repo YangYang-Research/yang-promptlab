@@ -34,6 +34,11 @@ const ModelsPage = lazy(() =>
 const PluginsPage = lazy(() =>
   import("@/features/plugins/PluginsPage").then((m) => ({ default: m.PluginsPage })),
 );
+const AttackCategoriesPage = lazy(() =>
+  import("@/features/attack-catalog/AttackCategoriesPage").then((m) => ({
+    default: m.AttackCategoriesPage,
+  })),
+);
 const AIRuntimePage = lazy(() =>
   import("@/features/runtime/AIRuntimePage").then((m) => ({ default: m.AIRuntimePage })),
 );
@@ -165,6 +170,14 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <PluginsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="attack-categories"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <AttackCategoriesPage />
               </Suspense>
             }
           />

@@ -126,6 +126,7 @@ dependencies = [
  "aisec-inference",
  "aisec-judge",
  "aisec-models",
+ "aisec-payload",
  "aisec-planner",
  "aisec-plugin-host",
  "aisec-report",

@@ -16,6 +16,13 @@ export const navItems: NavItem[] = [
   { id: "runtime", label: "AI Runtime", path: "/runtime", icon: "runtime", section: "ai" },
   { id: "models", label: "Models", path: "/models", icon: "models", section: "ai" },
   { id: "plugins", label: "Plugins", path: "/plugins", icon: "plugins", section: "advanced" },
+  {
+    id: "attack-categories",
+    label: "Attack Factory",
+    path: "/attack-categories",
+    icon: "attacks",
+    section: "advanced",
+  },
   { id: "settings", label: "Settings", path: "/settings", icon: "settings", section: "system" },
 ];
 

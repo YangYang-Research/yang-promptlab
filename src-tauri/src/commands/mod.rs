@@ -8,6 +8,7 @@ use crate::state::AppState;
 
 pub mod app;
 pub mod attack;
+pub mod attack_catalog;
 pub mod auth;
 pub mod domain;
 pub mod environment;

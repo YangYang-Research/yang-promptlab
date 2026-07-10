@@ -35,8 +35,11 @@ pub async fn generate_local_llm(
     input: &GeneratePayloadsInput<'_>,
     llm: &dyn GeneratorLlm,
 ) -> GeneratorResult<PromptPayloads> {
-    let baseline =
-        generate_static_pack(&GeneratePayloadsInput::new(plan, GeneratorMode::StaticPack))?;
+    let baseline = {
+        let mut baseline_input = GeneratePayloadsInput::new(plan, GeneratorMode::StaticPack);
+        baseline_input.catalog = input.catalog;
+        generate_static_pack(&baseline_input)?
+    };
     let mut by_category = baseline.by_category.clone();
     let mut llm_generated = 0usize;
 

@@ -32,6 +32,7 @@ aisec-judge = { workspace = true }
 aisec-models = { workspace = true }
 aisec-planner = { workspace = true }
 aisec-generator = { workspace = true }
+aisec-payload = { workspace = true }
 aisec-plugin-host = { workspace = true }
 aisec-target-profile = { workspace = true }
 serde = { workspace = true }

@@ -1,5 +1,6 @@
 use sqlx::SqlitePool;
 
+mod attack_catalog;
 mod attack_result;
 mod auth;
 mod endpoint;
@@ -12,6 +13,7 @@ mod report;
 mod scan;
 mod target;
 
+pub use attack_catalog::SqliteAttackCatalogRepository;
 pub use attack_result::SqliteAttackResultRepository;
 pub use auth::{
     SqliteAuthProfileRepository, SqliteAuthRecordingRepository, SqliteAuthSessionRepository,
@@ -75,6 +77,10 @@ impl Repositories {
 
     pub fn plugins(&self) -> SqlitePluginRepository {
         SqlitePluginRepository::new(self.pool.clone())
+    }
+
+    pub fn attack_catalog(&self) -> SqliteAttackCatalogRepository {
+        SqliteAttackCatalogRepository::new(self.pool.clone())
     }
 
     pub fn auth_profiles(&self) -> SqliteAuthProfileRepository {

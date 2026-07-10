@@ -1,5 +1,6 @@
 //! PromptLab desktop application library.
 
+pub mod attack_catalog;
 pub mod commands;
 pub mod db;
 pub mod dto;
@@ -89,6 +90,8 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
 
             let database = tauri::async_runtime::block_on(db::open_database(&db_path))
                 .map_err(crate::error::CommandError::from)?;
+
+            tauri::async_runtime::block_on(attack_catalog::seed_attack_catalog(&database))?;
 
             let vault_dir = environment.auth_sessions_dir();
             let auth_engine_config =
@@ -298,6 +301,10 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::plugins::plugins_enable,
             commands::plugins::plugins_disable,
             commands::plugins::plugins_info,
+            commands::attack_catalog::attack_catalog_list,
+            commands::attack_catalog::attack_catalog_categories,
+            commands::attack_catalog::attack_catalog_update,
+            commands::attack_catalog::attack_catalog_reset,
         ])
         .manage(AsyncMutex::new(commands::auth::AuthRecordingState::new()))
         .build(tauri::generate_context!())?;

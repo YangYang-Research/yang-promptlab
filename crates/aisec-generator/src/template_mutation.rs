@@ -18,7 +18,8 @@ pub fn generate_template_mutation(
         .max_payloads_per_test
         .unwrap_or(4)
         .max(1) as usize;
-    let pipeline = PayloadPipeline::for_variant_budget(max_per)?;
+    let database = input.resolve_catalog()?;
+    let pipeline = PayloadPipeline::for_variant_budget_with_db(database, max_per)?;
     let mut by_category: HashMap<AttackCategory, Vec<AttackPayload>> = HashMap::new();
     let mut source_count = 0usize;
     let mut variant_count = 0usize;
