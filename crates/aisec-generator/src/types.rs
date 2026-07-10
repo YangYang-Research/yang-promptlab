@@ -16,6 +16,36 @@ pub enum GeneratorMode {
     LocalLlm,
 }
 
+/// Advanced generation flags (mirrors payload-strategy UI options).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeneratorAdvancedOptions {
+    pub enable_context_awareness: bool,
+    pub enable_conversation_memory: bool,
+    pub enable_response_adaptation: bool,
+    pub enable_payload_deduplication: bool,
+    pub enable_cross_category_mutation: bool,
+}
+
+impl GeneratorAdvancedOptions {
+    pub fn any_enabled(&self) -> bool {
+        self.enable_context_awareness
+            || self.enable_conversation_memory
+            || self.enable_response_adaptation
+            || self.enable_payload_deduplication
+            || self.enable_cross_category_mutation
+    }
+}
+
+/// Target profile snapshot used when context-awareness is enabled.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeneratorTargetContext {
+    pub provider: String,
+    pub framework: String,
+    pub endpoint: String,
+    pub model: Option<String>,
+    pub capability_notes: Vec<String>,
+}
+
 /// Statistics from a generation run.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GeneratorStats {
@@ -53,6 +83,10 @@ pub struct GeneratePayloadsInput<'a> {
     pub mode: GeneratorMode,
     /// Max generated payload objects per testcase source (wizard budget per test).
     pub max_payloads_per_test: Option<u32>,
+    pub advanced: GeneratorAdvancedOptions,
+    pub target_context: Option<GeneratorTargetContext>,
+    /// Prior judge/refusal summary for response adaptation (agentic retries).
+    pub adaptation_feedback: Option<String>,
 }
 
 impl<'a> GeneratePayloadsInput<'a> {
@@ -61,6 +95,9 @@ impl<'a> GeneratePayloadsInput<'a> {
             plan,
             mode,
             max_payloads_per_test: None,
+            advanced: GeneratorAdvancedOptions::default(),
+            target_context: None,
+            adaptation_feedback: None,
         }
     }
 }

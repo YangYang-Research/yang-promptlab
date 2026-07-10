@@ -18,7 +18,7 @@ pub mod types;
 pub mod verification;
 pub mod verification_llm;
 
-pub use capabilities::default_capabilities_for_provider;
+pub use capabilities::{default_capabilities_for_provider, effective_capabilities};
 pub use harness::harness_kind_for_profile;
 pub use payload_strategy::{
     capability_influences_strategy, payload_strategy_for_attack_profile,

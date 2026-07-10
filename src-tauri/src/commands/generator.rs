@@ -2,16 +2,21 @@
 
 use aisec_attack::{AttackCategory, AttackPayload};
 use aisec_core::AisecError;
-use aisec_generator::{generate_from_plan, GeneratePayloadsInput, GeneratorMode, PromptPayloads};
+use aisec_generator::{
+    generate_prompt_payloads_with_llm, GeneratePayloadsInput, GeneratorAdvancedOptions,
+    GeneratorMode, GeneratorTargetContext, PromptPayloads,
+};
 use aisec_planner::{AttackPlan, PlannerMode};
-use aisec_target_profile::{PayloadGenerationStrategy, PayloadStrategy};
+use aisec_target_profile::{
+    capability_influences_strategy, effective_capabilities, PayloadGenerationStrategy,
+    PayloadStrategy, TargetProfile,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::inference_host::{is_inference_ready, HostGeneratorLlm};
 use crate::error::{CommandError, CommandResult};
-use crate::state::AppState;
+use crate::inference_host::{is_inference_ready, HostGeneratorLlm};
 
 fn parse_generator_mode(raw: &str) -> GeneratorMode {
     match raw.trim().to_ascii_lowercase().as_str() {
@@ -27,7 +32,46 @@ pub fn generator_mode_from_payload_strategy(strategy: &PayloadStrategy) -> Gener
     match strategy.strategy {
         PayloadGenerationStrategy::Deterministic => GeneratorMode::StaticPack,
         PayloadGenerationStrategy::Mutation => GeneratorMode::TemplateMutation,
+        // Adaptive uses mutation base; response-adaptation flag drives retry evolution.
         PayloadGenerationStrategy::Adaptive => GeneratorMode::TemplateMutation,
+    }
+}
+
+pub fn advanced_options_from_strategy(strategy: &PayloadStrategy) -> GeneratorAdvancedOptions {
+    GeneratorAdvancedOptions {
+        enable_context_awareness: strategy.enable_context_awareness,
+        enable_conversation_memory: strategy.enable_conversation_memory,
+        enable_response_adaptation: strategy.enable_response_adaptation,
+        enable_payload_deduplication: strategy.enable_payload_deduplication,
+        enable_cross_category_mutation: strategy.enable_cross_category_mutation,
+    }
+}
+
+pub fn target_context_from_profile(profile: &TargetProfile) -> GeneratorTargetContext {
+    let caps = effective_capabilities(profile);
+    let mut capability_notes =
+        capability_influences_strategy(&caps, profile.provider.as_str(), &profile.framework);
+    if caps.supports_tools {
+        capability_notes.push("tools".into());
+    }
+    if caps.supports_agent {
+        capability_notes.push("agent".into());
+    }
+    if caps.supports_memory {
+        capability_notes.push("memory".into());
+    }
+    if caps.supports_conversation {
+        capability_notes.push("conversation".into());
+    }
+    capability_notes.sort();
+    capability_notes.dedup();
+
+    GeneratorTargetContext {
+        provider: profile.provider.as_str().into(),
+        framework: profile.framework.clone(),
+        endpoint: profile.full_url(),
+        model: profile.verification.model.clone(),
+        capability_notes,
     }
 }
 
@@ -118,7 +162,10 @@ pub fn validate_payload_map_per_testcase(
             continue;
         }
 
-        let items = payloads.get(category).map(|values| values.as_slice()).unwrap_or(&[]);
+        let items = payloads
+            .get(category)
+            .map(|values| values.as_slice())
+            .unwrap_or(&[]);
         let mut per_source: HashMap<String, u32> = HashMap::new();
         for item in items {
             *per_source.entry(payload_source_key(item)).or_insert(0) += 1;
@@ -175,6 +222,48 @@ pub fn parse_generator_mode_optional(raw: Option<&str>) -> Option<GeneratorMode>
     Some(parse_generator_mode(value))
 }
 
+pub struct GenerateJobOptions {
+    pub mode: GeneratorMode,
+    pub max_payloads_per_test: Option<u32>,
+    pub advanced: GeneratorAdvancedOptions,
+    pub target_context: Option<GeneratorTargetContext>,
+    pub adaptation_feedback: Option<String>,
+}
+
+impl GenerateJobOptions {
+    pub fn from_mode(mode: GeneratorMode, max_payloads_per_test: Option<u32>) -> Self {
+        Self {
+            mode,
+            max_payloads_per_test,
+            advanced: GeneratorAdvancedOptions::default(),
+            target_context: None,
+            adaptation_feedback: None,
+        }
+    }
+
+    pub fn from_strategy(
+        strategy: &PayloadStrategy,
+        profile: Option<&TargetProfile>,
+        adaptation_feedback: Option<String>,
+    ) -> Self {
+        let mut mode = generator_mode_from_payload_strategy(strategy);
+        if strategy.enable_response_adaptation
+            && adaptation_feedback
+                .as_deref()
+                .is_some_and(|s| !s.trim().is_empty())
+        {
+            mode = GeneratorMode::LocalLlm;
+        }
+        Self {
+            mode,
+            max_payloads_per_test: Some(strategy.max_total_payloads),
+            advanced: advanced_options_from_strategy(strategy),
+            target_context: profile.map(target_context_from_profile),
+            adaptation_feedback,
+        }
+    }
+}
+
 pub async fn generate_payloads_for_scan_job(
     data_dir: &std::path::Path,
     inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
@@ -207,20 +296,50 @@ pub async fn generate_payloads_for_scan_job_with_options(
     mode: GeneratorMode,
     max_payloads_per_test: Option<u32>,
 ) -> CommandResult<PromptPayloads> {
-    let input = GeneratePayloadsInput {
+    generate_payloads_for_scan_job_with_job_options(
+        data_dir,
+        inference_manager,
+        model_manager,
+        model_provider,
+        runtime_manager,
         plan,
-        mode,
-        max_payloads_per_test,
-    };
+        GenerateJobOptions::from_mode(mode, max_payloads_per_test),
+    )
+    .await
+}
 
-    let pack = if mode == GeneratorMode::LocalLlm {
+pub async fn generate_payloads_for_scan_job_with_job_options(
+    data_dir: &std::path::Path,
+    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
+    model_provider: aisec_runtime::SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
+    plan: &AttackPlan,
+    mut options: GenerateJobOptions,
+) -> CommandResult<PromptPayloads> {
+    if options.mode == GeneratorMode::LocalLlm {
         let inference = inference_manager.lock().await;
         if !is_inference_ready(&inference) {
-            return Err(CommandError::invalid_input(
-                "AI runtime is not configured for local LLM generation",
-            ));
+            if options.adaptation_feedback.is_some() {
+                options.mode = GeneratorMode::TemplateMutation;
+            } else {
+                return Err(CommandError::invalid_input(
+                    "AI runtime is not configured for local LLM generation",
+                ));
+            }
         }
-        drop(inference);
+    }
+
+    let input = GeneratePayloadsInput {
+        plan,
+        mode: options.mode,
+        max_payloads_per_test: options.max_payloads_per_test,
+        advanced: options.advanced.clone(),
+        target_context: options.target_context.clone(),
+        adaptation_feedback: options.adaptation_feedback.clone(),
+    };
+
+    let pack = if options.mode == GeneratorMode::LocalLlm {
         let llm = Arc::new(HostGeneratorLlm::new(
             data_dir.to_path_buf(),
             Arc::clone(&inference_manager),
@@ -228,7 +347,7 @@ pub async fn generate_payloads_for_scan_job_with_options(
             model_provider,
             Arc::clone(&runtime_manager),
         ));
-        generate_from_plan(plan, mode, Some(llm.as_ref()))
+        generate_prompt_payloads_with_llm(&input, Some(llm.as_ref()))
             .await
             .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?
     } else {
@@ -237,7 +356,7 @@ pub async fn generate_payloads_for_scan_job_with_options(
             .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?
     };
 
-    Ok(if let Some(max_per_test) = max_payloads_per_test {
+    Ok(if let Some(max_per_test) = options.max_payloads_per_test {
         cap_payloads_per_testcase(pack, max_per_test)
     } else {
         pack
@@ -253,16 +372,39 @@ pub async fn generate_payloads_for_scan_job_with_strategy(
     plan: &AttackPlan,
     strategy: &PayloadStrategy,
 ) -> CommandResult<PromptPayloads> {
-    let mode = generator_mode_from_payload_strategy(strategy);
-    generate_payloads_for_scan_job_with_options(
+    generate_payloads_for_scan_job_with_strategy_context(
         data_dir,
         inference_manager,
         model_manager,
         model_provider,
         runtime_manager,
         plan,
-        mode,
-        Some(strategy.max_total_payloads),
+        strategy,
+        None,
+        None,
+    )
+    .await
+}
+
+pub async fn generate_payloads_for_scan_job_with_strategy_context(
+    data_dir: &std::path::Path,
+    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
+    model_provider: aisec_runtime::SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
+    plan: &AttackPlan,
+    strategy: &PayloadStrategy,
+    profile: Option<&TargetProfile>,
+    adaptation_feedback: Option<String>,
+) -> CommandResult<PromptPayloads> {
+    generate_payloads_for_scan_job_with_job_options(
+        data_dir,
+        inference_manager,
+        model_manager,
+        model_provider,
+        runtime_manager,
+        plan,
+        GenerateJobOptions::from_strategy(strategy, profile, adaptation_feedback),
     )
     .await
 }
@@ -281,5 +423,20 @@ mod tests {
             parse_generator_mode("template_mutation"),
             GeneratorMode::TemplateMutation
         ));
+    }
+
+    #[test]
+    fn advanced_options_map_from_strategy() {
+        let strategy = PayloadStrategy {
+            enable_context_awareness: true,
+            enable_payload_deduplication: true,
+            enable_cross_category_mutation: true,
+            ..PayloadStrategy::default()
+        };
+        let advanced = advanced_options_from_strategy(&strategy);
+        assert!(advanced.enable_context_awareness);
+        assert!(advanced.enable_payload_deduplication);
+        assert!(advanced.enable_cross_category_mutation);
+        assert!(!advanced.enable_conversation_memory);
     }
 }

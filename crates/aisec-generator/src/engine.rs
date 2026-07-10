@@ -1,5 +1,6 @@
 use aisec_planner::AttackPlan;
 
+use crate::advanced::apply_advanced_options;
 use crate::error::GeneratorResult;
 use crate::local_llm::{generate_local_llm, GeneratorLlm};
 use crate::static_pack::generate_static_pack;
@@ -18,18 +19,25 @@ pub async fn generate_prompt_payloads_with_llm(
     input: &GeneratePayloadsInput<'_>,
     llm: Option<&dyn GeneratorLlm>,
 ) -> GeneratorResult<PromptPayloads> {
-    match input.mode {
-        GeneratorMode::StaticPack => generate_static_pack(input),
-        GeneratorMode::TemplateMutation => generate_template_mutation(input.plan, input),
+    let pack = match input.mode {
+        GeneratorMode::StaticPack => generate_static_pack(input)?,
+        GeneratorMode::TemplateMutation => generate_template_mutation(input.plan, input)?,
         GeneratorMode::LocalLlm => {
             let backend = llm.ok_or_else(|| {
                 crate::error::GeneratorError::InvalidInput(
                     "local LLM generator requires a configured vault model".into(),
                 )
             })?;
-            generate_local_llm(input.plan, input, backend).await
+            generate_local_llm(input.plan, input, backend).await?
         }
-    }
+    };
+
+    Ok(apply_advanced_options(
+        pack,
+        &input.advanced,
+        input.target_context.as_ref(),
+        input.adaptation_feedback.as_deref(),
+    ))
 }
 
 /// Convenience wrapper accepting an attack plan directly.

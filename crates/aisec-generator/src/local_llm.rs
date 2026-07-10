@@ -26,12 +26,22 @@ pub async fn generate_with_local_llm(
     plan: &AttackPlan,
     llm: &dyn GeneratorLlm,
 ) -> GeneratorResult<PromptPayloads> {
-    let baseline = generate_static_pack(&GeneratePayloadsInput::new(plan, GeneratorMode::StaticPack))?;
+    let input = GeneratePayloadsInput::new(plan, GeneratorMode::LocalLlm);
+    generate_local_llm(plan, &input, llm).await
+}
+
+pub async fn generate_local_llm(
+    plan: &AttackPlan,
+    input: &GeneratePayloadsInput<'_>,
+    llm: &dyn GeneratorLlm,
+) -> GeneratorResult<PromptPayloads> {
+    let baseline =
+        generate_static_pack(&GeneratePayloadsInput::new(plan, GeneratorMode::StaticPack))?;
     let mut by_category = baseline.by_category.clone();
     let mut llm_generated = 0usize;
 
     for category in &plan.categories {
-        let prompt = build_category_prompt(plan, *category, &baseline);
+        let prompt = build_category_prompt(plan, *category, &baseline, input);
         let raw = match llm.complete(&prompt).await {
             Ok(text) => text,
             Err(err) => {
@@ -77,7 +87,9 @@ pub async fn generate_with_local_llm(
     let note = if llm_generated == 0 {
         Some("LLM produced no valid payloads; static pack baseline retained".into())
     } else {
-        Some(format!("merged {llm_generated} LLM-generated probes with static baseline"))
+        Some(format!(
+            "merged {llm_generated} LLM-generated probes with static baseline"
+        ))
     };
 
     let mut pack = finish_pack(
@@ -98,6 +110,7 @@ fn build_category_prompt(
     plan: &AttackPlan,
     category: AttackCategory,
     baseline: &PromptPayloads,
+    input: &GeneratePayloadsInput<'_>,
 ) -> String {
     let baseline_samples: Vec<_> = baseline
         .payloads_for(category)
@@ -107,13 +120,49 @@ fn build_category_prompt(
         .map(|p| serde_json::json!({ "id": p.id, "name": p.name, "content": p.content }))
         .collect();
 
-    aisec_inference::PromptRegistry::generator_user(
+    let mut prompt = aisec_inference::PromptRegistry::generator_user(
         &category.display_name(),
         category.as_str(),
         &plan.profile_id,
         &format!("{:?}", plan.disabled_tests),
         &serde_json::to_string_pretty(&baseline_samples).unwrap_or_default(),
-    )
+    );
+
+    if input.advanced.enable_context_awareness {
+        if let Some(ctx) = &input.target_context {
+            prompt.push_str("\n\nTarget context:\n");
+            prompt.push_str(&format!(
+                "Provider: {}\nFramework: {}\nEndpoint: {}\nModel: {}\nCapabilities: {}\n",
+                ctx.provider,
+                ctx.framework,
+                ctx.endpoint,
+                ctx.model.as_deref().unwrap_or("unknown"),
+                ctx.capability_notes.join(", ")
+            ));
+        }
+    }
+
+    if input.advanced.enable_conversation_memory {
+        prompt.push_str(
+            "\nPrefer multi-turn / conversation-state probes that reference prior dialogue.\n",
+        );
+    }
+
+    if input.advanced.enable_cross_category_mutation {
+        prompt.push_str("\nBlend techniques from neighboring attack categories when useful.\n");
+    }
+
+    if input.advanced.enable_response_adaptation {
+        if let Some(feedback) = input.adaptation_feedback.as_deref() {
+            if !feedback.trim().is_empty() {
+                prompt.push_str("\nPrior attempt feedback (adapt/evolve probes):\n");
+                prompt.push_str(feedback);
+                prompt.push('\n');
+            }
+        }
+    }
+
+    prompt
 }
 
 fn parse_llm_payloads(raw: &str) -> GeneratorResult<Vec<LlmPayloadEntry>> {
@@ -135,15 +184,6 @@ fn parse_llm_payloads(raw: &str) -> GeneratorResult<Vec<LlmPayloadEntry>> {
         ));
     }
     Ok(entries)
-}
-
-pub async fn generate_local_llm(
-    plan: &AttackPlan,
-    input: &GeneratePayloadsInput<'_>,
-    llm: &dyn GeneratorLlm,
-) -> GeneratorResult<PromptPayloads> {
-    let _ = input;
-    generate_with_local_llm(plan, llm).await
 }
 
 #[cfg(test)]

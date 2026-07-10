@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use aisec_attack::{AttackCategory, AttackPayload};
-use aisec_generator::GeneratorMode;
 use aisec_inference::InferenceRuntimeManager;
 use aisec_models::LocalModelManager;
 use aisec_planner::AttackPlan;
@@ -22,7 +21,7 @@ use tracing::{info, warn};
 use crate::commands::attack::{CategoryRunOptions, CategoryRunResult, run_category_on_target_profile};
 use crate::commands::generator::{
     attack_plan_from_scan, generate_payloads_for_scan_job_with_options,
-    generate_payloads_for_scan_job_with_strategy, generator_mode_from_payload_strategy,
+    generate_payloads_for_scan_job_with_strategy_context,
     parse_generator_mode_optional, prompt_payloads_map, validate_payload_map_budget,
 };
 use crate::events::ScanProgressEmitter;
@@ -152,14 +151,6 @@ fn set_scan_phase(
     }
 }
 
-fn escalated_generator_mode(strategy: &PayloadStrategy, retry: u32) -> GeneratorMode {
-    match retry {
-        0 => generator_mode_from_payload_strategy(strategy),
-        1 => GeneratorMode::TemplateMutation,
-        _ => GeneratorMode::LocalLlm,
-    }
-}
-
 fn category_payload_map(
     all: &HashMap<AttackCategory, Vec<AttackPayload>>,
     category: AttackCategory,
@@ -204,11 +195,12 @@ pub async fn generate_scan_payloads(
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
     plan: &AttackPlan,
     config: &ScanExecutionConfig,
+    profile: &aisec_target_profile::TargetProfile,
     emitter: &ScanProgressEmitter,
 ) -> Result<HashMap<AttackCategory, Vec<AttackPayload>>, String> {
     emitter.info("Generating attack payloads from Yazg...");
     let pack = if let Some(ref strategy) = config.payload_strategy {
-        generate_payloads_for_scan_job_with_strategy(
+        generate_payloads_for_scan_job_with_strategy_context(
             data_dir,
             inference_manager,
             model_manager,
@@ -216,6 +208,8 @@ pub async fn generate_scan_payloads(
             runtime_manager,
             plan,
             strategy,
+            Some(profile),
+            None,
         )
         .await
         .map_err(|err| err.to_string())?
@@ -257,22 +251,24 @@ async fn regenerate_category_payloads(
     plan: &AttackPlan,
     category: AttackCategory,
     strategy: &PayloadStrategy,
-    retry: u32,
+    profile: &aisec_target_profile::TargetProfile,
+    adaptation_feedback: Option<String>,
+    _retry: u32,
 ) -> Result<HashMap<AttackCategory, Vec<AttackPayload>>, String> {
-    let mode = escalated_generator_mode(strategy, retry);
     let category_plan = AttackPlan {
         categories: vec![category],
         ..plan.clone()
     };
-    let pack = generate_payloads_for_scan_job_with_options(
+    let pack = generate_payloads_for_scan_job_with_strategy_context(
         data_dir,
         inference_manager,
         model_manager,
         model_provider,
         runtime_manager,
         &category_plan,
-        mode,
-        Some(strategy.max_total_payloads),
+        strategy,
+        Some(profile),
+        adaptation_feedback,
     )
     .await
     .map_err(|err| err.to_string())?;
@@ -384,6 +380,7 @@ pub async fn run_target_profile_attack_scan(
         Arc::clone(&ctx.runtime_manager),
         &plan,
         &config,
+        ctx.profile,
         &ctx.emitter,
     )
     .await
@@ -568,6 +565,25 @@ async fn run_agentic_category(
         let payloads_for_run = if attempt == 1 {
             category_payload_map(generated_payloads, category)
         } else {
+            let feedback = if strategy.enable_response_adaptation {
+                last_result.as_ref().map(|result| {
+                    let judged: Vec<(bool, f32, &str)> = result
+                        .judged
+                        .iter()
+                        .map(|j| (j.vulnerable, j.confidence, j.summary.as_str()))
+                        .collect();
+                    aisec_generator::feedback_from_judged(&judged).unwrap_or_else(|| {
+                        format!(
+                            "attempt {} inconclusive: {} successes / {} attempts",
+                            attempt - 1,
+                            result.successes,
+                            result.attempts
+                        )
+                    })
+                })
+            } else {
+                None
+            };
             regenerate_category_payloads(
                 ctx.data_dir,
                 Arc::clone(&ctx.inference_manager),
@@ -577,6 +593,8 @@ async fn run_agentic_category(
                 plan,
                 category,
                 &strategy,
+                ctx.profile,
+                feedback,
                 retry,
             )
             .await?
