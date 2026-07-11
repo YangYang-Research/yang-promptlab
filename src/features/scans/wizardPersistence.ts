@@ -1,7 +1,11 @@
 import type { AttackPlanConfig } from "./attackPlan";
 import { attackPlanFromDto, normalizeAttackPlan, type WizardAttackPlanDto } from "./attackPlan";
-import type { AttackPlanUiState, ScanWizardSession } from "./wizardState";
+import type { AttackPlanSource, AttackPlanUiState, ScanWizardSession } from "./wizardState";
 import { createInitialAttackPlanUi } from "./wizardState";
+
+function parseAttackPlanSource(value: unknown): AttackPlanSource | null {
+  return value === "imported" || value === "generated" ? value : null;
+}
 import {
   createInitialTargetForm,
   migrateTargetForm,
@@ -57,6 +61,7 @@ export type WizardPersistedState = {
   verificationLog: ScanWizardSession["verificationLog"];
   attackPlanUi: AttackPlanUiState;
   attackPlan: AttackPlanConfig | null;
+  attackPlanSource: AttackPlanSource | null;
   submittedScanId: string | null;
   targetProfile: ScanWizardSession["targetProfile"];
   targetForm: ScanWizardSession["targetForm"];
@@ -72,6 +77,7 @@ export function wizardStateToPersisted(session: ScanWizardSession): WizardPersis
     verificationLog: session.verificationLog,
     attackPlanUi: session.attackPlanUi,
     attackPlan: session.attackPlan,
+    attackPlanSource: session.attackPlanSource,
     submittedScanId: session.submittedScanId,
     targetProfile: session.targetProfile,
     targetForm: session.targetForm,
@@ -102,6 +108,9 @@ export function sessionFromPersistedWizard(
     ),
     attackPlanUi: { ...createInitialAttackPlanUi(), ...persisted.attackPlanUi },
     attackPlan: persisted.attackPlan ? normalizeAttackPlan(persisted.attackPlan) : null,
+    attackPlanSource: persisted.attackPlan
+      ? persisted.attackPlanSource ?? "generated"
+      : null,
     submittedScanId: persisted.submittedScanId,
   };
 }
@@ -126,6 +135,9 @@ export function parsePersistedWizard(raw: unknown): WizardPersistedState | null 
     ),
     attackPlanUi: { ...createInitialAttackPlanUi(), ...(value.attackPlanUi ?? {}) },
     attackPlan: value.attackPlan ? normalizeAttackPlan(value.attackPlan as AttackPlanConfig) : null,
+    attackPlanSource: value.attackPlan
+      ? parseAttackPlanSource(value.attackPlanSource) ?? "generated"
+      : null,
     submittedScanId: typeof value.submittedScanId === "string" ? value.submittedScanId : null,
     targetProfile: {
       ...createInitialTargetProfile(),
@@ -174,6 +186,11 @@ export function mergeWizardSessions(
     attackPlan:
       remote.attackPlan || local.attackPlan
         ? normalizeAttackPlan((remote.attackPlan ?? local.attackPlan)!)
+        : null,
+    attackPlanSource: remote.attackPlan
+      ? remote.attackPlanSource
+      : local.attackPlan
+        ? local.attackPlanSource
         : null,
     attackPlanUi: remote.attackPlan ? remote.attackPlanUi : local.attackPlanUi,
     submittedScanId: remote.submittedScanId ?? local.submittedScanId,

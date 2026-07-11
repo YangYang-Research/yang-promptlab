@@ -428,6 +428,7 @@ export function ScanWizardPage() {
             ...prev,
             attackPlan: plan,
             attackPlanUi: attackPlanUiBaselineFromPlan(plan),
+            attackPlanSource: "generated" as const,
           };
           saveWizardSession(next);
           return next;
@@ -587,6 +588,7 @@ export function ScanWizardPage() {
               currentStep: entryStep ?? existing!.currentStep,
               submittedScanId: entryStep === 2 ? null : existing!.submittedScanId,
               attackPlan: entryStep === 2 ? null : existing!.attackPlan,
+              attackPlanSource: entryStep === 2 ? null : existing!.attackPlanSource,
               targetProfile: profileState,
               targetForm,
               savedTargetFingerprint: targetFormFingerprint(targetForm),
@@ -1085,7 +1087,20 @@ export function ScanWizardPage() {
             }}
             onVerifySuccess={() => {
               if (!store.savedTarget) return;
-              updateSession({ attackPlan: null, attackPlanUi: createInitialAttackPlanUi() });
+              setSession((prev) => {
+                // Imported plans must survive re-verify; only wipe generated plans.
+                if (prev.attackPlanSource === "imported" && prev.attackPlan) {
+                  return prev;
+                }
+                const next = {
+                  ...prev,
+                  attackPlan: null,
+                  attackPlanUi: createInitialAttackPlanUi(),
+                  attackPlanSource: null,
+                };
+                saveWizardSession(next);
+                return next;
+              });
               plannerRunRef.current = null;
             }}
           />
@@ -1244,6 +1259,7 @@ export function ScanWizardPage() {
                   updateSession({
                     attackPlan: null,
                     attackPlanUi: createInitialAttackPlanUi(),
+                    attackPlanSource: null,
                   });
                   void runAttackPlanner(store.savedTarget!.id, { replan: true });
                 }}

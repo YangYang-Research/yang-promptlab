@@ -111,10 +111,14 @@ export async function hydrateWizardSessionForScanResume(
     const detail = await getScan(scan.id);
     const rebuilt = attackPlanFromExecutionPlaybook(detail.playbook);
     if (rebuilt) {
-      next = { ...next, attackPlan: rebuilt };
+      next = { ...next, attackPlan: rebuilt, attackPlanSource: "generated" };
     }
   } else if (next.attackPlan) {
-    next = { ...next, attackPlan: normalizeAttackPlan(next.attackPlan) };
+    next = {
+      ...next,
+      attackPlan: normalizeAttackPlan(next.attackPlan),
+      attackPlanSource: next.attackPlanSource ?? "generated",
+    };
   }
 
   if (targetId && (entryStep === 4 || !next.targetProfile.verification.verified)) {

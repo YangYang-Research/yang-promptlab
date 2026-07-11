@@ -8,7 +8,7 @@ use tracing::warn;
 
 use crate::types::{TargetProfile, VerificationResult};
 use crate::verification::{
-    execute_verify_http, extract_model_from_response, VerifyHttpSuccess, VerificationAttempt,
+    execute_capability_probe, extract_model_from_response, VerifyHttpSuccess, VerificationAttempt,
     VerificationError,
 };
 

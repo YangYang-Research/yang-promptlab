@@ -256,14 +256,17 @@ describe("scanConfigExport", () => {
     expect(session.currentStep).toBe(2);
     expect(session.targetProfile.baseUrl).toBe("https://api.example.com");
     expect(session.attackPlan).not.toBeNull();
+    expect(session.attackPlanSource).toBe("imported");
     expect(session.attackPlan?.attackGraph.length).toBeGreaterThan(0);
 
     const remount = createSessionFromScanConfigImport("project-1", { consume: true });
     expect(remount.attackPlan).not.toBeNull();
+    expect(remount.attackPlanSource).toBe("imported");
     expect(remount.targetProfile.baseUrl).toBe("https://api.example.com");
 
     clearScanConfigImport();
     const blank = createSessionFromScanConfigImport("project-1", { consume: true });
     expect(blank.attackPlan).toBeNull();
+    expect(blank.attackPlanSource).toBeNull();
   });
 });

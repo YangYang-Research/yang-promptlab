@@ -468,6 +468,7 @@ export function applyScanConfigToSession(
     targetForm: patch.targetForm,
     attackPlan: patch.attackPlan,
     attackPlanUi: patch.attackPlanUi,
+    attackPlanSource: patch.attackPlan ? "imported" : null,
     currentStep: patch.currentStep,
     savedTargetId: null,
     savedTargetFingerprint: null,

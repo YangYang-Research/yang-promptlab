@@ -28,6 +28,9 @@ const STORAGE_VERSION = 7;
 
 export type PlannerSource = "ai_runtime" | "target_profile";
 
+/** Origin of the current attack plan — imported plans survive step-3 re-verify. */
+export type AttackPlanSource = "imported" | "generated";
+
 export type AttackPlanUiState = {
   profileId: AttackProfileId;
   customCategories: AttackCategoryId[];
@@ -51,6 +54,8 @@ export type ScanWizardSession = {
   verificationLog: VerificationLogLine[];
   attackPlanUi: AttackPlanUiState;
   attackPlan: AttackPlanConfig | null;
+  /** null when no plan; "imported" skips wipe on verify success. */
+  attackPlanSource: AttackPlanSource | null;
   submittedScanId: string | null;
 };
 
@@ -96,6 +101,7 @@ export function createInitialSession(lockedProjectId = ""): ScanWizardSession {
     verificationLog: [],
     attackPlanUi: createInitialAttackPlanUi(),
     attackPlan: null,
+    attackPlanSource: null,
     submittedScanId: null,
   };
 }
@@ -271,6 +277,7 @@ export function applyWizardEntryStep(
       draftScanId: null,
       submittedScanId: null,
       attackPlan: null,
+      attackPlanSource: null,
       attackPlanUi: createInitialAttackPlanUi(),
     };
   }
