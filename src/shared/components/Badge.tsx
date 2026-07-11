@@ -66,3 +66,25 @@ export function StatusBadge({ status }: { status: string }) {
 
   return <Badge variant={variant}>{status.replace(/_/g, " ")}</Badge>;
 }
+
+const AUTH_KIND_CLASS: Record<
+  "none" | "username_password" | "sso" | "basic" | "api_key" | "jwt",
+  string
+> = {
+  none: "badge--auth-none",
+  username_password: "badge--auth-username",
+  sso: "badge--auth-sso",
+  basic: "badge--auth-basic",
+  api_key: "badge--auth-api-key",
+  jwt: "badge--auth-jwt",
+};
+
+type AuthTypeBadgeProps = {
+  kind: "none" | "username_password" | "sso" | "basic" | "api_key" | "jwt";
+  label: string;
+};
+
+/** Badge colors aligned with Scan wizard Authentication Type buttons. */
+export function AuthTypeBadge({ kind, label }: AuthTypeBadgeProps) {
+  return <span className={["badge", "badge--auth", AUTH_KIND_CLASS[kind]].join(" ")}>{label}</span>;
+}

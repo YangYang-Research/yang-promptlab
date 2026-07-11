@@ -283,101 +283,99 @@ export function ProjectDetailsPage() {
       </section>
 
       <section className="project-details__primary" aria-label="Targets">
-        <div className="detail-section__header">
-          <div>
+        <Card className="detail-section project-details__targets-card">
+          <div className="detail-section__header">
             <h2 className="detail-section__title">Targets</h2>
+            <div className="detail-section__header-actions">
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => navigate(buildScanWizardUrl(project.id, undefined, { step: 2 }))}
+              >
+                Add target
+              </Button>
+            </div>
           </div>
-          <div className="detail-section__header-actions">
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => navigate(buildScanWizardUrl(project.id, undefined, { step: 2 }))}
-            >
-              Add target
-            </Button>
-          </div>
-        </div>
 
-        {projectTargets.length === 0 ? (
-          <Card className="detail-section">
+          {projectTargets.length === 0 ? (
             <EmptyState
               title="No targets yet"
               description="Add a target URL or API endpoint to include it in this project."
             />
-          </Card>
-        ) : (
-          <>
-            <ContentToolbar
-              pageSize={pageSize}
-              onPageSizeChange={setPageSize}
-              viewMode={viewMode}
-              onViewModeChange={setViewMode}
-            />
-            {viewMode === "table" ? (
-              <Card padding="none" className="project-details__targets-table">
-                <DataTable
-                  columns={targetColumns}
-                  rows={pagination.items}
-                  keyField="id"
-                  emptyMessage="No targets"
-                  onRowClick={(target) => navigate(`/targets/${target.id}`)}
-                />
-              </Card>
-            ) : (
-              <div className="list-card-grid">
-                {pagination.items.map((target) => {
-                  const scanContext = buildTargetScanContext(target.id, scans);
-                  return (
-                    <ListCard
-                      key={target.id}
-                      title={target.name}
-                      status={<Badge variant="info">{targetDisplayType(target)}</Badge>}
-                      metadata={[
-                        {
-                          label: "URL",
-                          value: <span className="mono text-sm">{target.url}</span>,
-                        },
-                        { label: "Auth", value: target.authType },
-                        { label: "Status", value: <StatusBadge status={target.status} /> },
-                        {
-                          label: "Scans",
-                          value: `${scanContext.scanCount} scan${scanContext.scanCount === 1 ? "" : "s"}`,
-                        },
-                      ]}
-                      footerMeta={
-                        scanContext.lastScanTime
-                          ? `Last scan: ${formatTargetTimestamp(scanContext.lastScanTime)}`
-                          : "No scans recorded"
-                      }
-                      actions={
-                        <span onClick={(event) => event.stopPropagation()}>
-                          <TargetActionsDropdown
-                            target={target}
-                            projectId={projectId}
-                            scans={scans}
-                            wizardSession={wizardSession}
-                            deleting={deletingTargetId === target.id}
-                            onNavigate={navigate}
-                            onDelete={handleDeleteTarget}
-                          />
-                        </span>
-                      }
-                      onClick={() => navigate(`/targets/${target.id}`)}
-                    />
-                  );
-                })}
-              </div>
-            )}
-            <Pagination
-              page={page}
-              totalItems={pagination.totalItems}
-              rangeStart={pagination.rangeStart}
-              rangeEnd={pagination.rangeEnd}
-              totalPages={pagination.totalPages}
-              onPageChange={setPage}
-            />
-          </>
-        )}
+          ) : (
+            <>
+              <ContentToolbar
+                pageSize={pageSize}
+                onPageSizeChange={setPageSize}
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
+              />
+              {viewMode === "table" ? (
+                <div className="project-details__targets-table">
+                  <DataTable
+                    columns={targetColumns}
+                    rows={pagination.items}
+                    keyField="id"
+                    emptyMessage="No targets"
+                    onRowClick={(target) => navigate(`/targets/${target.id}`)}
+                  />
+                </div>
+              ) : (
+                <div className="list-card-grid">
+                  {pagination.items.map((target) => {
+                    const scanContext = buildTargetScanContext(target.id, scans);
+                    return (
+                      <ListCard
+                        key={target.id}
+                        title={target.name}
+                        status={<Badge variant="info">{targetDisplayType(target)}</Badge>}
+                        metadata={[
+                          {
+                            label: "URL",
+                            value: <span className="mono text-sm">{target.url}</span>,
+                          },
+                          { label: "Auth", value: target.authType },
+                          { label: "Status", value: <StatusBadge status={target.status} /> },
+                          {
+                            label: "Scans",
+                            value: `${scanContext.scanCount} scan${scanContext.scanCount === 1 ? "" : "s"}`,
+                          },
+                        ]}
+                        footerMeta={
+                          scanContext.lastScanTime
+                            ? `Last scan: ${formatTargetTimestamp(scanContext.lastScanTime)}`
+                            : "No scans recorded"
+                        }
+                        actions={
+                          <span onClick={(event) => event.stopPropagation()}>
+                            <TargetActionsDropdown
+                              target={target}
+                              projectId={projectId}
+                              scans={scans}
+                              wizardSession={wizardSession}
+                              deleting={deletingTargetId === target.id}
+                              onNavigate={navigate}
+                              onDelete={handleDeleteTarget}
+                            />
+                          </span>
+                        }
+                        onClick={() => navigate(`/targets/${target.id}`)}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+              <Pagination
+                page={page}
+                totalItems={pagination.totalItems}
+                rangeStart={pagination.rangeStart}
+                rangeEnd={pagination.rangeEnd}
+                totalPages={pagination.totalPages}
+                onPageChange={setPage}
+              />
+            </>
+          )}
+        </Card>
       </section>
 
       <section className="project-details__insights" aria-label="Findings and reports">

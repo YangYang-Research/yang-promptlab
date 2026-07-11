@@ -69,7 +69,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-import { extractAuthType, extractTargetUrl } from "@/features/scans/scanDetailsHelpers";
+import { extractAuthKind, extractAuthType, extractTargetUrl } from "@/features/scans/scanDetailsHelpers";
 import { extractTargetProviderLabel } from "@/features/scans/targetProfile";
 
 function extractConfidence(evidence: unknown): number {
@@ -127,6 +127,7 @@ export function mapTargets(targets: TargetDto[], scans: ScanRun[] = []): Target[
     fingerprint: null,
     tags: [],
     authType: extractAuthType(t.descriptor),
+    authKind: extractAuthKind(t.descriptor),
   }));
 }
 

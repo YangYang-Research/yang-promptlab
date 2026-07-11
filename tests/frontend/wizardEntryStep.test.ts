@@ -21,6 +21,7 @@ function sampleTarget(): Target {
     fingerprint: null,
     tags: [],
     authType: "none",
+    authKind: "none",
   };
 }
 

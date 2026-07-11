@@ -50,6 +50,7 @@ export type Target = {
   fingerprint: string | null;
   tags: string[];
   authType: string;
+  authKind: "none" | "username_password" | "sso" | "basic" | "api_key" | "jwt";
 };
 
 export type AttackRun = {

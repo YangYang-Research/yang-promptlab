@@ -1,5 +1,5 @@
 export { ActionsDropdown, type ActionsDropdownItem } from "./ActionsDropdown";
-export { Badge, SeverityBadge, StatusBadge, TargetScanStatusBadge } from "./Badge";
+export { Badge, SeverityBadge, StatusBadge, TargetScanStatusBadge, AuthTypeBadge } from "./Badge";
 export { Button } from "./Button";
 export { Card, StatCard } from "./Card";
 export { ConnectivityStatus, connectivityStatusVariant } from "./ConnectivityStatus";

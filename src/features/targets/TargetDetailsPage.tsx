@@ -5,11 +5,17 @@ import { useAppStore } from "@/app/store/AppStore";
 import {
   ActionsDropdown,
   type ActionsDropdownItem,
+  AuthTypeBadge,
+  Badge,
   Button,
   Card,
+  ContentToolbar,
+  DataTable,
   EmptyState,
+  ListCard,
   PageHeader,
   PageLoadingSkeleton,
+  Pagination,
   StatusBadge,
   TargetScanStatusBadge,
 } from "@/shared/components";
@@ -26,6 +32,9 @@ import {
   formatTargetTimestamp,
 } from "@/shared/targetScanContext";
 import { resolveTargetScanAction } from "@/shared/targetScanAction";
+import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
+import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
+import { useViewPreference } from "@/shared/hooks/useViewPreference";
 import { useToast } from "@/shared/notifications";
 import type { ScanRun } from "@/shared/types";
 
@@ -43,6 +52,8 @@ export function TargetDetailsPage() {
   const { targets, projects, scans, loading, actions } = useAppStore();
   const { notify } = useToast();
   const [deleting, setDeleting] = useState(false);
+  const [pageSize, setPageSize] = usePageSizePreference("target-details-scans");
+  const [viewMode, setViewMode] = useViewPreference("target-details-scans");
 
   const target = targets.find((item) => item.id === targetId);
   const project = projects.find((item) => item.id === target?.projectId);
@@ -53,6 +64,41 @@ export function TargetDetailsPage() {
         .filter((scan) => scan.targetId === targetId)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [scans, targetId],
+  );
+
+  const attackScans = useMemo(
+    () => targetScans.filter(isAttackScan),
+    [targetScans],
+  );
+
+  const { page, setPage, pagination } = usePaginatedList(attackScans, pageSize);
+
+  const scanColumns = useMemo(
+    () => [
+      {
+        key: "name",
+        header: "Scan",
+        render: (scan: ScanRun) => (
+          <div>
+            <strong>{scan.name}</strong>
+            <div className="mono text-sm text-muted">{scan.id}</div>
+          </div>
+        ),
+      },
+      {
+        key: "status",
+        header: "Status",
+        width: "120px",
+        render: (scan: ScanRun) => <StatusBadge status={scan.status} />,
+      },
+      {
+        key: "started",
+        header: "Started",
+        width: "180px",
+        render: (scan: ScanRun) => formatTimestamp(scan.startedAt ?? scan.createdAt),
+      },
+    ],
+    [],
   );
 
   const scanContext = useMemo(
@@ -71,11 +117,6 @@ export function TargetDetailsPage() {
       wizardSession ? wizardResumeInputFromSession(wizardSession) : null,
     );
   }, [target, scans, wizardSession]);
-
-  const attackScans = useMemo(
-    () => targetScans.filter(isAttackScan),
-    [targetScans],
-  );
 
   const runningScan = useMemo(
     () => attackScans.find(isLiveScan) ?? null,
@@ -229,13 +270,13 @@ export function TargetDetailsPage() {
         }
       />
 
-      <p className="target-details__lead mono">{target.url}</p>
-
       <section className="target-details__overview" aria-label="Target overview">
         <Card className="detail-section target-details__meta">
-          <h2 className="detail-section__title">Target information</h2>
+          <div className="detail-section__header">
+            <h2 className="detail-section__title">Target information</h2>
+            <StatusBadge status={target.status} />
+          </div>
           <div className="detail-section__body">
-            <DetailRow label="Name" value={target.name} />
             <DetailRow
               label="Project"
               value={
@@ -248,15 +289,22 @@ export function TargetDetailsPage() {
                 )
               }
             />
-            <DetailRow label="Type" value={targetDisplayType(target)} />
-            <DetailRow label="Authentication" value={target.authType} capitalize />
-            <DetailRow label="Status" value={<StatusBadge status={target.status} />} />
+            <DetailRow label="Host" value={target.name} />
+            <DetailRow label="Endpoint" value={<span className="mono">{target.url}</span>} />
+            <DetailRow
+              label="Type"
+              value={<Badge variant="info">{targetDisplayType(target)}</Badge>}
+            />
+            <DetailRow
+              label="Authentication"
+              value={<AuthTypeBadge kind={target.authKind} label={target.authType} />}
+            />
           </div>
         </Card>
 
         <Card className="detail-section target-details__scan-panel">
-          <h2 className="detail-section__title">Scan status</h2>
-          <div className="target-details__scan-status">
+          <div className="detail-section__header">
+            <h2 className="detail-section__title">Scan status</h2>
             <TargetScanStatusBadge label={scanContext.scanStatusLabel} />
           </div>
           <div className="detail-summary-grid detail-summary-grid--metrics target-details__scan-metrics">
@@ -286,51 +334,67 @@ export function TargetDetailsPage() {
       </section>
 
       <section className="target-details__primary" aria-label="Attack scans">
-        <Card className="detail-section">
-          <div className="detail-section__header">
-            <div>
-              <h2 className="detail-section__title">Attack scans</h2>
-              <p className="detail-section__hint">
-                {attackScans.length === 0
-                  ? "Run a scan to test this target."
-                  : `${attackScans.length} scan${attackScans.length === 1 ? "" : "s"} for this target`}
-              </p>
-            </div>
-          </div>
+        <div className="detail-section__header">
+          <h2 className="detail-section__title">Attack scans</h2>
+        </div>
 
-          {attackScans.length === 0 ? (
+        {attackScans.length === 0 ? (
+          <Card className="detail-section">
             <EmptyState
               title="No attack scans yet"
               description="Start a scan to run security tests against this target."
-              action={
-                <Button variant="primary" size="sm" onClick={startNewScan}>
-                  Start scan
-                </Button>
-              }
             />
-          ) : (
-            <ul className="detail-list target-details__scan-list">
-              {attackScans.map((scan) => (
-                <li key={scan.id}>
-                  <button
-                    type="button"
-                    className="detail-list-row detail-list-row--scans target-details__scan-hit"
+          </Card>
+        ) : (
+          <>
+            <ContentToolbar
+              pageSize={pageSize}
+              onPageSizeChange={setPageSize}
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
+            />
+            {viewMode === "table" ? (
+              <Card padding="none" className="target-details__scans-table">
+                <DataTable
+                  columns={scanColumns}
+                  rows={pagination.items}
+                  keyField="id"
+                  emptyMessage="No attack scans"
+                  onRowClick={(scan) => navigate(`/scans/${scan.id}`)}
+                />
+              </Card>
+            ) : (
+              <div className="list-card-grid">
+                {pagination.items.map((scan) => (
+                  <ListCard
+                    key={scan.id}
+                    title={scan.name}
+                    status={<StatusBadge status={scan.status} />}
+                    metadata={[
+                      {
+                        label: "Scan ID",
+                        value: <span className="mono text-sm">{scan.id}</span>,
+                      },
+                      {
+                        label: "Started",
+                        value: formatTimestamp(scan.startedAt ?? scan.createdAt),
+                      },
+                    ]}
                     onClick={() => navigate(`/scans/${scan.id}`)}
-                  >
-                    <span className="detail-list-row__main">
-                      <span className="detail-list-row__title">{scan.name}</span>
-                      <span className="detail-list-row__id mono text-sm text-muted">{scan.id}</span>
-                    </span>
-                    <StatusBadge status={scan.status} />
-                    <span className="text-muted text-sm detail-list-row__meta">
-                      {formatTimestamp(scan.startedAt ?? scan.createdAt)}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+                  />
+                ))}
+              </div>
+            )}
+            <Pagination
+              page={page}
+              totalItems={pagination.totalItems}
+              rangeStart={pagination.rangeStart}
+              rangeEnd={pagination.rangeEnd}
+              totalPages={pagination.totalPages}
+              onPageChange={setPage}
+            />
+          </>
+        )}
       </section>
     </div>
   );

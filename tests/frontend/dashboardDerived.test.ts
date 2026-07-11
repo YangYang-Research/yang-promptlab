@@ -49,6 +49,7 @@ function target(partial: Partial<Target> & Pick<Target, "id">): Target {
     fingerprint: null,
     tags: [],
     authType: "none",
+    authKind: "none",
   };
 }
 
