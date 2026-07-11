@@ -29,7 +29,7 @@ pub async fn verify_target_profile_with_llm(
     auth_headers: std::collections::HashMap<String, String>,
     llm: &dyn PlannerLlm,
 ) -> VerificationAttempt {
-    let http = match execute_verify_http(profile, auth_headers).await {
+    let http = match execute_capability_probe(profile, auth_headers).await {
         Ok(success) => success,
         Err(attempt) => return attempt,
     };

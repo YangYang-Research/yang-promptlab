@@ -286,6 +286,49 @@ export function resolveCategoriesForAdjust(
   return ALL_ATTACK_CATEGORY_IDS.filter((id) => !planUi.disabledGraphNodes.includes(id));
 }
 
+export function attackPlanToDto(plan: AttackPlanConfig): WizardAttackPlanDto {
+  return {
+    profileId: plan.profileId,
+    recommendedProfileId: plan.recommendedProfileId,
+    suggestedCategories: [...plan.suggestedCategories],
+    profileModes: (plan.profileModes ?? []).map(profileModeToDto),
+    categories: [...plan.categories],
+    disabledTests: [...plan.disabledTests],
+    capabilityGraph: [...plan.capabilityGraph],
+    attackGraph: plan.attackGraph.map((node) => ({
+      category: node.category,
+      priority: node.priority,
+      risk: node.risk,
+      confidence: node.confidence,
+      dependencies: [...node.dependencies],
+      enabled: node.enabled && !plan.disabledGraphNodes.includes(node.category),
+    })),
+    executionStrategy: plan.executionStrategy,
+    maxAttempts: plan.maxAttempts,
+    reflectionEnabled: plan.reflectionEnabled,
+    adaptivePlanning: plan.adaptivePlanning,
+    rationales: plan.rationales.map((item) => ({
+      category: item.category,
+      reason: item.reason,
+      priority: item.priority,
+      source: item.source,
+    })),
+    confidence: plan.confidence,
+    summary: plan.summary,
+    riskScore: plan.riskScore,
+    riskLevel: plan.riskLevel,
+    estimatedRequests: plan.estimatedRequests,
+    estimatedRuntimeSeconds: plan.estimatedRuntimeSeconds,
+    estimatedTokens: plan.estimatedTokens,
+    coverageScore: plan.coverageScore,
+    riskCoverage: plan.riskCoverage,
+    totalTestcases: plan.totalTestcases,
+    payloadStrategy: payloadStrategyToDto(plan.payloadStrategy),
+    recommendedPayloadStrategy: payloadStrategyToDto(plan.recommendedPayloadStrategy),
+    plannerSource: plan.plannerSource,
+  };
+}
+
 export function attackPlanFromDto(dto: WizardAttackPlanDto): AttackPlanConfig {
   const mapCategories = (values: string[]) =>
     values.map(asCategoryId).filter((id): id is AttackCategoryId => id !== null);
@@ -746,7 +789,7 @@ export function attackPlanFromExecutionPlaybook(
       executionStrategy,
       maxAttempts: parsed.maxAgentAttempts ?? 5,
       reflectionEnabled: playbookRecord?.reflection_enabled === true,
-      adaptivePlanning: false,
+      adaptivePlanning: playbookRecord?.adaptive_planning === true,
       rationales: [],
       confidence: 0.85,
       summary: `Plan for ${endpoint}`,

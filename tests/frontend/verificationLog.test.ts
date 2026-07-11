@@ -47,7 +47,7 @@ describe("verificationLog", () => {
         responseTimeMs: 4126,
         responsePreview: longBody,
         success: true,
-        message: "Authentication and connectivity verified",
+        message: "Connection and authentication verified",
       },
       "connectivity",
     );

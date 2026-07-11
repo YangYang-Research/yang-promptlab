@@ -41,8 +41,9 @@ pub use prompt::{contains_prompt_placeholder, replace_prompt, PROMPT_PLACEHOLDER
 pub use templates::{list_provider_templates, template_for_provider};
 pub use types::*;
 pub use verification::{
-    execute_verify_http, verify_target_profile, VerificationAttempt, VerificationConsoleEntry,
-    VerificationError, VerifyHttpSuccess,
+    execute_capability_probe, execute_verify_http, execute_verify_http_with_prompt, has_ai_response,
+    verify_target_profile, CONNECT_PROBE_PROMPT, VERIFY_PROMPT, VerificationAttempt,
+    VerificationConsoleEntry, VerificationError, VerifyHttpSuccess,
 };
 pub use verification_llm::{
     validate_http_response_with_llm, verify_target_profile_with_llm,

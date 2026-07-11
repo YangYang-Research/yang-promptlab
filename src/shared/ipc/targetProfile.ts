@@ -9,6 +9,8 @@ export type TargetProfileVerifyResponse = {
   profile: TargetProfileDto;
   console: VerificationConsoleEntryDto;
   message: string;
+  /** Fresh Step 2 capability-probe HTTP console (before Yazg classification). */
+  probeConsole?: VerificationConsoleEntryDto | null;
 };
 
 export type VerifyHttpSnapshot = {
@@ -53,12 +55,16 @@ export const verifyTargetProfileConnect = (
 export const verifyTargetProfileAi = (
   targetId: string,
   profile: Record<string, unknown>,
-  connectSnapshot: VerifyHttpSnapshot,
+  options?: {
+    auth?: Record<string, unknown> | null;
+    authHeaders?: Record<string, string> | null;
+  },
 ) =>
   invokeCommand<TargetProfileVerifyResponse>("target_profile_verify_ai", {
     targetId,
     profile,
-    connectSnapshot,
+    auth: options?.auth ?? null,
+    authHeaders: options?.authHeaders ?? null,
   });
 
 export const verifyTargetProfile = (

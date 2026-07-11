@@ -4,9 +4,9 @@ use aisec_auth::{resolve_descriptor_for_wizard, SecretStore};
 use aisec_core::{AisecError, LogCategory};
 use aisec_storage::TargetRepository;
 use aisec_target_profile::{
-    build_wizard_attack_plan_with_llm, execute_verify_http, list_provider_templates,
-    validate_http_response_with_llm, TargetProfile,
-    VerifyHttpSuccess,
+    build_wizard_attack_plan_with_llm, execute_capability_probe, execute_verify_http,
+    has_ai_response, list_provider_templates, validate_http_response_with_llm, TargetProfile,
+    VerificationError, VerifyHttpSuccess,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -277,6 +277,8 @@ pub struct TargetProfileVerifyResponse {
     pub profile: TargetProfileDto,
     pub console: VerificationConsoleEntryDto,
     pub message: String,
+    /// Fresh Step 2 capability-probe HTTP console (before Yazg classification).
+    pub probe_console: Option<VerificationConsoleEntryDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -293,7 +295,10 @@ pub struct TargetProfileConnectVerifyResponse {
 pub struct TargetProfileVerifyAiRequest {
     pub target_id: String,
     pub profile: serde_json::Value,
-    pub connect_snapshot: VerifyHttpSuccess,
+    /// Inline auth from the wizard form — used to re-send the Step 2 capability probe.
+    pub auth: Option<serde_json::Value>,
+    /// Resolved auth headers from the wizard form (highest priority).
+    pub auth_headers: Option<std::collections::HashMap<String, String>>,
 }
 
 pub async fn target_profile_verify_connect_op(
@@ -347,8 +352,22 @@ pub async fn target_profile_verify_ai_op(
     let TargetProfileVerifyAiRequest {
         target_id,
         profile: profile_value,
-        connect_snapshot,
+        auth,
+        auth_headers: inline_auth_headers,
     } = request;
+
+    let target = state
+        .repositories()
+        .targets()
+        .get(&target_id)
+        .await
+        .map_err(CommandError::from)?;
+
+    let auth_headers = resolve_verify_auth_headers(
+        &target.descriptor_json,
+        auth.as_ref(),
+        inline_auth_headers.as_ref(),
+    )?;
 
     let mut profile: TargetProfile = serde_json::from_value(profile_value).map_err(|err| {
         CommandError::invalid_input(format!("invalid target profile: {err}"))
@@ -362,6 +381,84 @@ pub async fn target_profile_verify_ai_op(
     }
     drop(inference);
 
+    // Step 2 always re-sends the capability probe, then classifies that fresh response.
+    let http = match execute_capability_probe(&profile, auth_headers).await {
+        Ok(snapshot) => snapshot,
+        Err(attempt) => {
+            let message = attempt.console.message.clone();
+            profile.verification = aisec_target_profile::VerificationResult {
+                verified: false,
+                verified_at: None,
+                provider: profile.provider.as_str().into(),
+                model: None,
+                capabilities: profile.default_capabilities.clone(),
+                response_time_ms: attempt.console.response_time_ms,
+                status_code: attempt.console.status_code,
+                status: "failed".into(),
+                response_preview: attempt.console.response_preview.clone(),
+                error_message: Some(message.clone()),
+            };
+            let json = profile_to_json(&profile)?;
+            state
+                .repositories()
+                .targets()
+                .update_profile(&target_id, &json)
+                .await
+                .map_err(CommandError::from)?;
+
+            let probe_console = VerificationConsoleEntryDto::from(attempt.console.clone());
+            return Ok(TargetProfileVerifyResponse {
+                verified: false,
+                profile: TargetProfileDto::from(profile),
+                console: probe_console.clone(),
+                message,
+                probe_console: Some(probe_console),
+            });
+        }
+    };
+
+    let probe_console = VerificationConsoleEntryDto::from(http.console.clone());
+    let status = reqwest::StatusCode::from_u16(http.status_code).unwrap_or(reqwest::StatusCode::OK);
+    if !has_ai_response(&http.response_text, status) {
+        let message = if http.response_text.trim().is_empty() {
+            "capability probe returned an empty body — try again or increase model latency budget"
+                .into()
+        } else {
+            VerificationError::NoAiResponse.to_string()
+        };
+        profile.verification = aisec_target_profile::VerificationResult {
+            verified: false,
+            verified_at: None,
+            provider: profile.provider.as_str().into(),
+            model: None,
+            capabilities: profile.default_capabilities.clone(),
+            response_time_ms: http.response_time_ms,
+            status_code: http.status_code,
+            status: "failed".into(),
+            response_preview: http.console.response_preview.clone(),
+            error_message: Some(message.clone()),
+        };
+        let json = profile_to_json(&profile)?;
+        state
+            .repositories()
+            .targets()
+            .update_profile(&target_id, &json)
+            .await
+            .map_err(CommandError::from)?;
+
+        return Ok(TargetProfileVerifyResponse {
+            verified: false,
+            profile: TargetProfileDto::from(profile),
+            console: VerificationConsoleEntryDto {
+                success: false,
+                message: message.clone(),
+                ..probe_console.clone()
+            },
+            message,
+            probe_console: Some(probe_console),
+        });
+    }
+
     let llm_host = HostEndpointVerifyLlm::new(
         state.data_dir().to_path_buf(),
         state.inference_manager().clone(),
@@ -370,7 +467,7 @@ pub async fn target_profile_verify_ai_op(
         state.runtime_manager().clone(),
     );
 
-    let attempt = validate_http_response_with_llm(&profile, &connect_snapshot, &llm_host).await;
+    let attempt = validate_http_response_with_llm(&profile, &http, &llm_host).await;
     match attempt.result {
         Ok(verification) => {
             profile.verification = verification;
@@ -387,6 +484,7 @@ pub async fn target_profile_verify_ai_op(
                 profile: TargetProfileDto::from(profile),
                 console: VerificationConsoleEntryDto::from(attempt.console.clone()),
                 message: attempt.console.message,
+                probe_console: Some(probe_console),
             })
         }
         Err(err) => {
@@ -416,6 +514,7 @@ pub async fn target_profile_verify_ai_op(
                 profile: TargetProfileDto::from(profile),
                 console: VerificationConsoleEntryDto::from(attempt.console),
                 message,
+                probe_console: Some(probe_console),
             })
         }
     }
@@ -433,21 +532,19 @@ pub async fn target_profile_verify_op(
         return Ok(TargetProfileVerifyResponse {
             verified: false,
             profile: TargetProfileDto::from(profile),
-            console: connect.console,
+            console: connect.console.clone(),
             message: connect.message,
+            probe_console: Some(connect.console),
         });
     }
-
-    let snapshot = connect.connect_snapshot.ok_or_else(|| {
-        CommandError::invalid_input("connect verification succeeded without snapshot")
-    })?;
 
     target_profile_verify_ai_op(
         state,
         TargetProfileVerifyAiRequest {
             target_id: request.target_id,
             profile: request.profile,
-            connect_snapshot: snapshot,
+            auth: request.auth,
+            auth_headers: request.auth_headers,
         },
     )
     .await
@@ -588,14 +685,16 @@ pub async fn target_profile_verify_ai(
     state: State<'_, AppState>,
     target_id: String,
     profile: serde_json::Value,
-    connect_snapshot: VerifyHttpSuccess,
+    auth: Option<serde_json::Value>,
+    auth_headers: Option<std::collections::HashMap<String, String>>,
 ) -> CommandResult<TargetProfileVerifyResponse> {
     target_profile_verify_ai_op(
         state.inner(),
         TargetProfileVerifyAiRequest {
             target_id,
             profile,
-            connect_snapshot,
+            auth,
+            auth_headers,
         },
     )
     .await

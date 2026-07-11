@@ -4,7 +4,7 @@ import type { VerificationConsoleEntryDto } from "./targetProfile";
 export const VERIFICATION_LOG_START_AUTH = "Start verify authentication";
 export const VERIFICATION_LOG_START_AI = "Start Analyze Endpoint";
 
-export type VerificationLogResponseKind = "connectivity" | "ai_validation" | "error";
+export type VerificationLogResponseKind = "connectivity" | "ai_probe" | "ai_validation" | "error";
 
 export type VerificationLogLine = {
   id: string;
@@ -82,16 +82,22 @@ export function formatAuthenticationLogLines(headers: Record<string, string>): s
   return authLines;
 }
 
-export function formatSendRequestLogLine(requestLog: string): string {
+export function formatSendRequestLogLine(
+  requestLog: string,
+  step: 1 | 2 = 1,
+): string {
+  const prefix = `Step ${step} — Outbound probe request`;
   const trimmed = requestLog.trim();
-  if (!trimmed) return "Step 1 — Outbound probe request: (empty)";
-  return `Step 1 — Outbound probe request:\n${trimmed}`;
+  if (!trimmed) return `${prefix}: (empty)`;
+  return `${prefix}:\n${trimmed}`;
 }
 
 function responseLogPrefix(kind: VerificationLogResponseKind): string {
   switch (kind) {
     case "ai_validation":
       return "Step 2 — AI validation result";
+    case "ai_probe":
+      return "Step 2 — Capability probe result";
     case "error":
       return "Verification failed";
     default:
@@ -129,7 +135,8 @@ export function formatResponseLogLine(
   }
 
   if (console.message?.trim()) {
-    return `${prefix}: ${console.message.trim()}`;
+    const suffix = meta.length > 0 ? ` · ${meta.join(" · ")}` : "";
+    return `${prefix}: ${console.message.trim()}${suffix}`;
   }
 
   return meta.length > 0 ? `${prefix}: ${meta.join(" · ")}` : `${prefix}:`;

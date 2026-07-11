@@ -81,6 +81,7 @@ import {
   resolveOrCreateDraftScanId,
   storeDraftScanId,
 } from "./wizardDraftScan";
+import { createSessionFromScanConfigImport } from "./scanConfigExport";
 
 function withNormalizedAttackPlan(session: ScanWizardSession): ScanWizardSession {
   if (!session.attackPlan) return session;
@@ -108,7 +109,7 @@ export function ScanWizardPage() {
   const [session, setSession] = useState<ScanWizardSession>(() => {
     if (isFreshWizard) {
       clearWizardSession();
-      return createInitialSession(lockedProjectId);
+      return createSessionFromScanConfigImport(lockedProjectId);
     }
     return withNormalizedAttackPlan(loadWizardSession(lockedProjectId));
   });
@@ -227,7 +228,7 @@ export function ScanWizardPage() {
     setProfileStepError(null);
     setVerificationError(null);
     setScanSubmitError(null);
-    setSession(createInitialSession(lockedProjectId));
+    setSession(createSessionFromScanConfigImport(lockedProjectId, { consume: true }));
   }, [isFreshWizard, lockedProjectId, lockedTargetId, requestedStep, lockedScanId]);
 
   useEffect(() => {

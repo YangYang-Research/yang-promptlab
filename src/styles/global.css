@@ -3767,6 +3767,59 @@ a:hover {
   flex-wrap: wrap;
 }
 
+.new-scan-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.new-scan-chooser__lead {
+  margin: 0;
+}
+
+.new-scan-chooser__options {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.new-scan-chooser__option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+  background: var(--surface-raised, rgba(255, 255, 255, 0.03));
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.new-scan-chooser__option:hover {
+  border-color: var(--accent, #5b8def);
+  background: var(--surface-hover, rgba(255, 255, 255, 0.05));
+}
+
+.new-scan-chooser__option-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.new-scan-chooser__option-desc {
+  color: var(--text-muted, #9aa3b2);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.new-scan-chooser__actions {
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
 /* Scan wizard — step 1 (project) */
 .wizard-step {
   display: flex;

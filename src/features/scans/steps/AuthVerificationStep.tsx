@@ -25,7 +25,7 @@ import {
   profileToPayload,
   type TargetProfileFormState,
 } from "../targetProfile";
-import { buildVerificationRequestPreview, authHeadersFromForm } from "../verificationRequest";
+import { buildVerificationRequestPreview, authHeadersFromForm, CONNECT_PROBE_PROMPT, VERIFY_PROMPT } from "../verificationRequest";
 import {
   appendVerificationLogLine,
   appendVerificationLogLines,
@@ -57,6 +57,30 @@ function authMethodLabel(kind: TargetFormState["authKind"]): string {
   return AUTH_METHOD_OPTIONS.find((option) => option.value === kind)?.label ?? kind;
 }
 
+/** Fingerprint of inputs that affect connectivity/auth probes. */
+function connectProbeKey(profile: TargetProfileFormState, authForm: TargetFormState): string {
+  return JSON.stringify({
+    targetUrl: fullProfileUrl(profile),
+    method: profile.method,
+    headersJson: profile.headersJson,
+    requestTemplate: profile.requestTemplate,
+    promptPlaceholder: profile.promptPlaceholder,
+    authKind: authForm.authKind,
+    loginUrl: authForm.loginUrl,
+    loginUsername: authForm.loginUsername,
+    loginPassword: authForm.loginPassword,
+    basicUsername: authForm.basicUsername,
+    basicPassword: authForm.basicPassword,
+    apiKeyHeaderName: authForm.apiKeyHeaderName,
+    apiKeyValue: authForm.apiKeyValue,
+    apiKeyPrefix: authForm.apiKeyPrefix,
+    jwtToken: authForm.jwtToken,
+    jwtHeaderName: authForm.jwtHeaderName,
+    jwtPrefix: authForm.jwtPrefix,
+    browserSessionId: authForm.browserSessionId,
+  });
+}
+
 export function AuthVerificationStep({
   targetId,
   profile,
@@ -79,6 +103,10 @@ export function AuthVerificationStep({
   authFormRef.current = authForm;
   const onAuthChangeRef = useRef(onAuthChange);
   onAuthChangeRef.current = onAuthChange;
+  /** Step 1 passed for this probe key — retry after Step 2 failure skips Step 1. */
+  const step1PassedRef = useRef<{ key: string } | null>(null);
+  const verifyPhaseRef = useRef(verifyPhase);
+  verifyPhaseRef.current = verifyPhase;
 
   useEffect(() => {
     const current = authFormRef.current;
@@ -104,15 +132,32 @@ export function AuthVerificationStep({
     }
   }, [profile.headersJson, profile.baseUrl, profile.path, targetId]);
 
+  useEffect(() => {
+    const key = connectProbeKey(profile, authForm);
+    if (step1PassedRef.current && step1PassedRef.current.key !== key) {
+      step1PassedRef.current = null;
+    }
+  }, [profile, authForm]);
+
   async function handleVerify() {
-    const preview = buildVerificationRequestPreview(profile, authFormRef.current);
+    const connectPreview = buildVerificationRequestPreview(profile, authFormRef.current, {
+      prompt: CONNECT_PROBE_PROMPT,
+    });
+    const capabilityPreview = buildVerificationRequestPreview(profile, authFormRef.current, {
+      prompt: VERIFY_PROMPT,
+    });
+    const probeKey = connectProbeKey(profile, authFormRef.current);
+    const skipStep1 =
+      verifyPhaseRef.current === "failed_ai" &&
+      step1PassedRef.current?.key === probeKey;
+
     setVerifying(true);
-    let activePhase: VerificationPipelinePhase = "auth";
+    let activePhase: VerificationPipelinePhase = skipStep1 ? "ai" : "auth";
     setVerifyPhase(activePhase);
     setVerifyResultMessage(null);
     onError(null);
 
-    let log: VerificationLogLine[] = [];
+    let log: VerificationLogLine[] = skipStep1 ? [...verificationLog] : [];
     const publishLog = () => onVerificationLog([...log]);
     const append = (message: string) => {
       log = appendVerificationLogLine(log, message);
@@ -123,11 +168,25 @@ export function AuthVerificationStep({
       publishLog();
     };
 
-    appendMany([
-      VERIFICATION_LOG_START_AUTH,
-      ...formatAuthenticationLogLines(preview.headers),
-      formatSendRequestLogLine(preview.requestLog),
-    ]);
+    const profileUrl = fullProfileUrl(profile);
+    const descriptor = buildTargetDescriptor({
+      ...authFormRef.current,
+      url: profileUrl,
+    }) as { auth?: Record<string, unknown> };
+    const verifyOptions = {
+      auth: descriptor.auth ?? null,
+      authHeaders: authHeadersFromForm(authFormRef.current),
+    };
+
+    if (!skipStep1) {
+      appendMany([
+        VERIFICATION_LOG_START_AUTH,
+        ...formatAuthenticationLogLines(connectPreview.headers),
+        formatSendRequestLogLine(connectPreview.requestLog, 1),
+      ]);
+    } else {
+      append("Retrying Step 2 — Analyze Endpoint (skipping Step 1 connectivity check)");
+    }
 
     try {
       if (onBeforeVerify) {
@@ -141,47 +200,47 @@ export function AuthVerificationStep({
         }
       }
 
-      const profileUrl = fullProfileUrl(profile);
-      const descriptor = buildTargetDescriptor({
-        ...authFormRef.current,
-        url: profileUrl,
-      }) as { auth?: Record<string, unknown> };
-      const verifyOptions = {
-        auth: descriptor.auth ?? null,
-        authHeaders: authHeadersFromForm(authFormRef.current),
-      };
+      if (!skipStep1) {
+        const connect = await verifyTargetProfileConnect(
+          targetId,
+          profileToPayload(profile),
+          verifyOptions,
+        );
+        append(formatResponseLogLine(connect.console, "connectivity"));
 
-      const connect = await verifyTargetProfileConnect(
-        targetId,
-        profileToPayload(profile),
-        verifyOptions,
-      );
-      append(formatResponseLogLine(connect.console, "connectivity"));
+        if (!connect.success) {
+          step1PassedRef.current = null;
+          setVerifyPhase("failed_auth");
+          activePhase = "failed_auth";
+          onError(connect.message);
+          notify(connect.message, "error");
+          onProfileChange({
+            verification: {
+              ...profile.verification,
+              verified: false,
+              errorMessage: connect.message,
+            },
+          });
+          return;
+        }
 
-      if (!connect.success || !connect.connectSnapshot) {
-        setVerifyPhase("failed_auth");
-        activePhase = "failed_auth";
-        onError(connect.message);
-        notify(connect.message, "error");
-        onProfileChange({
-          verification: {
-            ...profile.verification,
-            verified: false,
-            errorMessage: connect.message,
-          },
-        });
-        return;
+        step1PassedRef.current = { key: probeKey };
       }
 
       activePhase = "ai";
       setVerifyPhase(activePhase);
       append(VERIFICATION_LOG_START_AI);
+      append(formatSendRequestLogLine(capabilityPreview.requestLog, 2));
 
+      // Step 2 re-sends the capability probe, then Yazg analyzes that fresh response.
       const result = await verifyTargetProfileAi(
         targetId,
         profileToPayload(profile),
-        connect.connectSnapshot,
+        verifyOptions,
       );
+      if (result.probeConsole) {
+        append(formatResponseLogLine(result.probeConsole, "ai_probe"));
+      }
       append(formatAiValidationLogLine(result.message));
 
       onProfileChange(profileFromDto(result.profile));

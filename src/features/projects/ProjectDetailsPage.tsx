@@ -23,6 +23,7 @@ import {
   severitySliceColor,
 } from "@/features/dashboard/SeverityDoughnutChart";
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
+import { NewScanChooserModal } from "@/features/scans/NewScanChooserModal";
 import {
   buildScanProgressUrl,
   buildScanWizardUrl,
@@ -54,6 +55,7 @@ export function ProjectDetailsPage() {
   const { projects, targets, scans, findings, loading, actions } = useAppStore();
   const { notify } = useToast();
   const [editOpen, setEditOpen] = useState(false);
+  const [chooserOpen, setChooserOpen] = useState(false);
   const [deletingTargetId, setDeletingTargetId] = useState<string | null>(null);
   const [pageSize, setPageSize] = usePageSizePreference("project-details-targets");
   const [viewMode, setViewMode] = useViewPreference("project-details-targets");
@@ -242,9 +244,9 @@ export function ProjectDetailsPage() {
         title={project.name}
         actions={
           <div className="page-actions">
-            <Link to={`/scans/new?projectId=${encodeURIComponent(project.id)}`}>
-              <Button variant="primary">New Scan</Button>
-            </Link>
+            <Button variant="primary" onClick={() => setChooserOpen(true)}>
+              New Scan
+            </Button>
             <ActionsDropdown
               items={[
                 { id: "edit", label: "Edit Project", onClick: () => setEditOpen(true) },
@@ -253,6 +255,12 @@ export function ProjectDetailsPage() {
             />
           </div>
         }
+      />
+
+      <NewScanChooserModal
+        open={chooserOpen}
+        onClose={() => setChooserOpen(false)}
+        projectId={project.id}
       />
 
       <section className="project-details__overview" aria-label="Project overview">

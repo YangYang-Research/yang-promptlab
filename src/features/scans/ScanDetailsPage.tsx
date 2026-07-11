@@ -60,9 +60,15 @@ import {
   type ScanDetailDto,
   type TargetDto,
 } from "@/shared/ipc";
+import { getTargetProfile } from "@/shared/ipc/targetProfile";
 import { toAppError } from "@/shared/errors";
 import { useToast } from "@/shared/notifications";
 import type { Finding, ScanRun, Severity } from "@/shared/types";
+
+import {
+  buildScanConfigExport,
+  downloadScanConfigJson,
+} from "./scanConfigExport";
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
 
@@ -82,6 +88,7 @@ export function ScanDetailsPage() {
   const [exporting, setExporting] = useState<string | null>(null);
   const [controlPending, setControlPending] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
+  const [exportConfigPending, setExportConfigPending] = useState(false);
 
   const scan = scans.find((item) => item.id === scanId) ?? (detail ? mapScanDetailToRun(detail) : null);
   const project = projects.find((item) => item.id === scan?.projectId);
@@ -224,6 +231,34 @@ export function ScanDetailsPage() {
     }
   }
 
+  async function handleExportScanConfig() {
+    if (!scan) return;
+    setExportConfigPending(true);
+    try {
+      const scanDetail = detail ?? (await getScan(scan.id));
+      const targetId = scanDetail.target_id ?? scan.targetId;
+      if (!targetId) {
+        throw new Error("Scan has no target to export.");
+      }
+      const [targetDetail, profile] = await Promise.all([
+        targetDto && targetDto.id === targetId ? Promise.resolve(targetDto) : getTarget(targetId),
+        getTargetProfile(targetId),
+      ]);
+      const config = buildScanConfigExport({
+        scanId: scan.id,
+        profile,
+        descriptor: targetDetail.descriptor,
+        playbook: scanDetail.playbook,
+      });
+      downloadScanConfigJson(config, `scan-config-${scan.id}.json`);
+      notify("Scan config exported", "success");
+    } catch (err) {
+      notify(toAppError(err).message || "Failed to export scan config", "error");
+    } finally {
+      setExportConfigPending(false);
+    }
+  }
+
   function openScanAction() {
     if (!scan) return;
     navigate(resolveScanOpenPath(scan, status?.status));
@@ -277,6 +312,15 @@ export function ScanDetailsPage() {
         label: "Stop Scan",
         disabled: controlPending,
         onClick: () => void runControl("stop"),
+      });
+    }
+
+    if (effectiveStatus === "completed") {
+      items.push({
+        id: "export-scan",
+        label: "Export Scan",
+        disabled: exportConfigPending,
+        onClick: () => void handleExportScanConfig(),
       });
     }
 

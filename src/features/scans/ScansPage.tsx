@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
@@ -25,6 +25,7 @@ import { formatDurationMs, formatTimestamp } from "@/features/scans/scanDetailsH
 import { isLiveScanStatus, isRetryableScanStatus, resolveScanNavigationStatus, resolveScanOpenPath } from "@/features/scans/wizardState";
 import type { ScanRun } from "@/shared/types";
 
+import { NewScanChooserModal } from "./NewScanChooserModal";
 import { ScanHistoryCard, ScanMonitorCard } from "./ScanMonitorCard";
 import { mergeScanStatus, useScanStatuses } from "./useScanStatuses";
 
@@ -53,6 +54,7 @@ export function ScansPage() {
   const [pageSize, setPageSize] = usePageSizePreference("scans");
   const [controlPending, setControlPending] = useState<string | null>(null);
   const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
+  const [chooserOpen, setChooserOpen] = useState(false);
 
   const findingsByScan = useMemo(() => {
     const map = new Map<string, number>();
@@ -291,12 +293,14 @@ export function ScansPage() {
         actions={
           <div className="page-actions">
             <RefreshButton loading={loading} error={error} onClick={() => void actions.refresh()} />
-            <Link to="/scans/new">
-              <Button variant="primary">New Scan</Button>
-            </Link>
+            <Button variant="primary" onClick={() => setChooserOpen(true)}>
+              New Scan
+            </Button>
           </div>
         }
       />
+
+      <NewScanChooserModal open={chooserOpen} onClose={() => setChooserOpen(false)} />
 
       {error && (
         <Card>
