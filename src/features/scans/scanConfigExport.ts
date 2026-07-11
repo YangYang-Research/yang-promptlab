@@ -469,7 +469,9 @@ export function applyScanConfigToSession(
     attackPlan: patch.attackPlan,
     attackPlanUi: patch.attackPlanUi,
     attackPlanSource: patch.attackPlan ? "imported" : null,
-    currentStep: patch.currentStep,
+    // Always land on step 1 so the import harness can auto-walk 1→2→3→4.
+    currentStep: 1,
+    importAutoAdvance: true,
     savedTargetId: null,
     savedTargetFingerprint: null,
     submittedScanId: null,

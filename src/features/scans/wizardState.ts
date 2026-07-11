@@ -56,6 +56,11 @@ export type ScanWizardSession = {
   attackPlan: AttackPlanConfig | null;
   /** null when no plan; "imported" skips wipe on verify success. */
   attackPlanSource: AttackPlanSource | null;
+  /**
+   * When true, wizard auto-advances steps 1→3 (countdown), auto-verifies with
+   * retries, then lands on step 4 for plan review.
+   */
+  importAutoAdvance: boolean;
   submittedScanId: string | null;
 };
 
@@ -102,6 +107,7 @@ export function createInitialSession(lockedProjectId = ""): ScanWizardSession {
     attackPlanUi: createInitialAttackPlanUi(),
     attackPlan: null,
     attackPlanSource: null,
+    importAutoAdvance: false,
     submittedScanId: null,
   };
 }
@@ -279,6 +285,7 @@ export function applyWizardEntryStep(
       attackPlan: null,
       attackPlanSource: null,
       attackPlanUi: createInitialAttackPlanUi(),
+      importAutoAdvance: false,
     };
   }
 

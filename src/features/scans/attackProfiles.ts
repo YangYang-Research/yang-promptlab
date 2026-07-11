@@ -219,17 +219,20 @@ export const ATTACK_PROFILES: AttackProfileDefinition[] = [
   {
     id: "quick",
     label: "Quick Assessment",
-    description: "Minimal Yazg-selected coverage — fast execution smoke test",
+    /** Fallback only — Step 4 prefers AI `profileModes[].description`. */
+    description: "Minimal coverage — fast smoke test",
   },
   {
     id: "standard",
     label: "Security Review",
-    description: "Balanced Yazg-selected coverage — recommended",
+    /** Fallback only — Step 4 prefers AI `profileModes[].description`. */
+    description: "Balanced coverage — recommended default",
   },
   {
     id: "deep",
     label: "Red Team",
-    description: "Maximum Yazg-selected coverage — long runtime",
+    /** Fallback only — Step 4 prefers AI `profileModes[].description`. */
+    description: "Maximum coverage — long runtime",
   },
   {
     id: "custom",

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Button, YazgBadge } from "@/shared/components";
+import { Button } from "@/shared/components";
 import { IconAi } from "@/shared/components/Icons";
 import {
   verifyTargetProfileAi,
@@ -25,7 +25,12 @@ import {
   profileToPayload,
   type TargetProfileFormState,
 } from "../targetProfile";
-import { buildVerificationRequestPreview, authHeadersFromForm, CONNECT_PROBE_PROMPT, VERIFY_PROMPT } from "../verificationRequest";
+import {
+  buildVerificationRequestPreview,
+  authHeadersFromForm,
+  CONNECT_PROBE_PROMPT,
+  VERIFY_PROMPT,
+} from "../verificationRequest";
 import {
   appendVerificationLogLine,
   appendVerificationLogLines,
@@ -38,6 +43,11 @@ import {
   VERIFICATION_LOG_START_AUTH,
   type VerificationLogLine,
 } from "../verificationLog";
+import {
+  IMPORT_VERIFY_MAX_ATTEMPTS,
+  IMPORT_VERIFY_RETRY_DELAY_MS,
+  sleep,
+} from "../importHarness";
 
 type AuthVerificationStepProps = {
   targetId: string;
@@ -51,10 +61,38 @@ type AuthVerificationStepProps = {
   onBeforeVerify?: () => Promise<boolean>;
   onVerifySuccess?: () => void;
   onVerifySettled?: () => void;
+  /** When true, start Verification automatically and retry on harness failures. */
+  autoVerify?: boolean;
+  autoVerifyMaxAttempts?: number;
+  onAutoVerifyAttempt?: (attempt: number, maxAttempts: number) => void;
+  onAutoVerifyComplete?: (result: {
+    ok: boolean;
+    attempts: number;
+    message: string | null;
+  }) => void;
 };
 
 function authMethodLabel(kind: TargetFormState["authKind"]): string {
   return AUTH_METHOD_OPTIONS.find((option) => option.value === kind)?.label ?? kind;
+}
+
+function phaseFromVerification(
+  verification: TargetProfileFormState["verification"],
+): VerificationPipelinePhase {
+  if (verification.verified) return "done";
+  if (verification.status === "failed" || verification.errorMessage) {
+    return "failed_ai";
+  }
+  return "idle";
+}
+
+function messageFromVerification(
+  verification: TargetProfileFormState["verification"],
+): string | null {
+  if (verification.verified) {
+    return verification.status?.trim() || "Endpoint verified";
+  }
+  return verification.errorMessage;
 }
 
 /** Fingerprint of inputs that affect connectivity/auth probes. */
@@ -93,11 +131,19 @@ export function AuthVerificationStep({
   onBeforeVerify,
   onVerifySuccess,
   onVerifySettled,
+  autoVerify = false,
+  autoVerifyMaxAttempts = IMPORT_VERIFY_MAX_ATTEMPTS,
+  onAutoVerifyAttempt,
+  onAutoVerifyComplete,
 }: AuthVerificationStepProps) {
   const { notify } = useToast();
   const [verifying, setVerifying] = useState(false);
-  const [verifyPhase, setVerifyPhase] = useState<VerificationPipelinePhase>("idle");
-  const [verifyResultMessage, setVerifyResultMessage] = useState<string | null>(null);
+  const [verifyPhase, setVerifyPhase] = useState<VerificationPipelinePhase>(() =>
+    phaseFromVerification(profile.verification),
+  );
+  const [verifyResultMessage, setVerifyResultMessage] = useState<string | null>(() =>
+    messageFromVerification(profile.verification),
+  );
   const [authDetectedFromProfile, setAuthDetectedFromProfile] = useState(false);
   const authFormRef = useRef(authForm);
   authFormRef.current = authForm;
@@ -107,6 +153,23 @@ export function AuthVerificationStep({
   const step1PassedRef = useRef<{ key: string } | null>(null);
   const verifyPhaseRef = useRef(verifyPhase);
   verifyPhaseRef.current = verifyPhase;
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+  const verificationLogRef = useRef(verificationLog);
+  verificationLogRef.current = verificationLog;
+
+  // Restore pipeline UI when returning to step 3 with a persisted verification result.
+  useEffect(() => {
+    if (verifying) return;
+    if (!profile.verification.verified) return;
+    setVerifyPhase("done");
+    setVerifyResultMessage(messageFromVerification(profile.verification));
+  }, [
+    verifying,
+    profile.verification.verified,
+    profile.verification.status,
+    profile.verification.errorMessage,
+  ]);
 
   useEffect(() => {
     const current = authFormRef.current;
@@ -139,17 +202,22 @@ export function AuthVerificationStep({
     }
   }, [profile, authForm]);
 
-  async function handleVerify() {
-    const connectPreview = buildVerificationRequestPreview(profile, authFormRef.current, {
+  async function runVerifyOnce(options?: {
+    quietToasts?: boolean;
+  }): Promise<{ ok: boolean; message: string }> {
+    const quietToasts = options?.quietToasts ?? false;
+    const currentProfile = profileRef.current;
+    const connectPreview = buildVerificationRequestPreview(currentProfile, authFormRef.current, {
       prompt: CONNECT_PROBE_PROMPT,
     });
-    const capabilityPreview = buildVerificationRequestPreview(profile, authFormRef.current, {
-      prompt: VERIFY_PROMPT,
-    });
-    const probeKey = connectProbeKey(profile, authFormRef.current);
+    const capabilityPreview = buildVerificationRequestPreview(
+      currentProfile,
+      authFormRef.current,
+      { prompt: VERIFY_PROMPT },
+    );
+    const probeKey = connectProbeKey(currentProfile, authFormRef.current);
     const skipStep1 =
-      verifyPhaseRef.current === "failed_ai" &&
-      step1PassedRef.current?.key === probeKey;
+      verifyPhaseRef.current === "failed_ai" && step1PassedRef.current?.key === probeKey;
 
     setVerifying(true);
     let activePhase: VerificationPipelinePhase = skipStep1 ? "ai" : "auth";
@@ -157,7 +225,7 @@ export function AuthVerificationStep({
     setVerifyResultMessage(null);
     onError(null);
 
-    let log: VerificationLogLine[] = skipStep1 ? [...verificationLog] : [];
+    let log: VerificationLogLine[] = skipStep1 ? [...verificationLogRef.current] : [];
     const publishLog = () => onVerificationLog([...log]);
     const append = (message: string) => {
       log = appendVerificationLogLine(log, message);
@@ -168,7 +236,7 @@ export function AuthVerificationStep({
       publishLog();
     };
 
-    const profileUrl = fullProfileUrl(profile);
+    const profileUrl = fullProfileUrl(currentProfile);
     const descriptor = buildTargetDescriptor({
       ...authFormRef.current,
       url: profileUrl,
@@ -194,16 +262,17 @@ export function AuthVerificationStep({
         if (!ready) {
           setVerifyPhase("failed_auth");
           activePhase = "failed_auth";
-          onError("Authentication was not saved — fix errors above and retry.");
-          append(formatErrorLogLine("Authentication was not saved — fix errors above and retry."));
-          return;
+          const message = "Authentication was not saved — fix errors above and retry.";
+          onError(message);
+          append(formatErrorLogLine(message));
+          return { ok: false, message };
         }
       }
 
       if (!skipStep1) {
         const connect = await verifyTargetProfileConnect(
           targetId,
-          profileToPayload(profile),
+          profileToPayload(currentProfile),
           verifyOptions,
         );
         append(formatResponseLogLine(connect.console, "connectivity"));
@@ -213,15 +282,15 @@ export function AuthVerificationStep({
           setVerifyPhase("failed_auth");
           activePhase = "failed_auth";
           onError(connect.message);
-          notify(connect.message, "error");
+          if (!quietToasts) notify(connect.message, "error");
           onProfileChange({
             verification: {
-              ...profile.verification,
+              ...currentProfile.verification,
               verified: false,
               errorMessage: connect.message,
             },
           });
-          return;
+          return { ok: false, message: connect.message };
         }
 
         step1PassedRef.current = { key: probeKey };
@@ -232,10 +301,9 @@ export function AuthVerificationStep({
       append(VERIFICATION_LOG_START_AI);
       append(formatSendRequestLogLine(capabilityPreview.requestLog, 2));
 
-      // Step 2 re-sends the capability probe, then Yazg analyzes that fresh response.
       const result = await verifyTargetProfileAi(
         targetId,
-        profileToPayload(profile),
+        profileToPayload(profileRef.current),
         verifyOptions,
       );
       if (result.probeConsole) {
@@ -250,32 +318,91 @@ export function AuthVerificationStep({
         setVerifyPhase("done");
         activePhase = "done";
         onError(null);
-        notify(result.message, "success");
+        if (!quietToasts) notify(result.message, "success");
         onVerifySuccess?.();
-      } else {
-        setVerifyPhase("failed_ai");
-        activePhase = "failed_ai";
-        onError(result.message);
-        notify(result.message, "error");
+        return { ok: true, message: result.message };
       }
+
+      setVerifyPhase("failed_ai");
+      activePhase = "failed_ai";
+      onError(result.message);
+      if (!quietToasts) notify(result.message, "error");
+      return { ok: false, message: result.message };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Verification failed";
       setVerifyResultMessage(message);
       setVerifyPhase(activePhase === "auth" ? "failed_auth" : "failed_ai");
       onError(message);
-      notify(message, "error");
+      if (!quietToasts) notify(message, "error");
       append(formatErrorLogLine(message));
       onProfileChange({
         verification: {
-          ...profile.verification,
+          ...profileRef.current.verification,
           verified: false,
           errorMessage: message,
         },
       });
+      return { ok: false, message };
     } finally {
       setVerifying(false);
     }
   }
+
+  async function handleVerify() {
+    await runVerifyOnce({ quietToasts: false });
+  }
+
+  useEffect(() => {
+    if (!autoVerify || profile.verification.verified) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      // Let auth inference from headers settle before first probe.
+      await sleep(400);
+      if (cancelled) return;
+
+      let lastMessage: string | null = null;
+      for (let attempt = 1; attempt <= autoVerifyMaxAttempts; attempt += 1) {
+        if (cancelled) return;
+        onAutoVerifyAttempt?.(attempt, autoVerifyMaxAttempts);
+        const result = await runVerifyOnce({ quietToasts: true });
+        lastMessage = result.message;
+        if (result.ok) {
+          if (!cancelled) {
+            onAutoVerifyComplete?.({ ok: true, attempts: attempt, message: result.message });
+          }
+          return;
+        }
+        if (attempt < autoVerifyMaxAttempts) {
+          if (!cancelled) {
+            const next = appendVerificationLogLine(
+              verificationLogRef.current,
+              `Import harness: verification failed (attempt ${attempt}/${autoVerifyMaxAttempts}) — retrying…`,
+            );
+            verificationLogRef.current = next;
+            onVerificationLog(next);
+          }
+          await sleep(IMPORT_VERIFY_RETRY_DELAY_MS);
+        }
+      }
+      if (!cancelled) {
+        onAutoVerifyComplete?.({
+          ok: false,
+          attempts: autoVerifyMaxAttempts,
+          message: lastMessage,
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally start once per autoVerify/target gate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- harness start gate
+  }, [autoVerify, targetId]);
 
   return (
     <div className="auth-verification-step">
@@ -302,15 +429,18 @@ export function AuthVerificationStep({
       <section>
         <div className="auth-verification-step__section-head">
           <p className="text-muted text-sm">
-            Sends a capability-inventory probe to your endpoint, then uses Yazg to
-            confirm the response is from a generative AI system and capture signals for attack planning.
+            Sends a capability-inventory probe to your endpoint, then uses Yazg to confirm the
+            response is from a generative AI system and capture signals for attack planning.
           </p>
-          {profile.verification.verified ? <YazgBadge /> : null}
         </div>
-        <Button variant="primary" disabled={verifying} onClick={() => void handleVerify()}>
+        <Button
+          variant="primary"
+          disabled={verifying || autoVerify}
+          onClick={() => void handleVerify()}
+        >
           <span className="btn__content">
             <IconAi className="btn__icon" aria-hidden />
-            {verifying ? "Verifying…" : "Verification"}
+            {verifying ? "Verifying…" : autoVerify ? "Auto-verifying…" : "Verification"}
           </span>
         </Button>
         <VerificationProgressPipeline phase={verifyPhase} resultMessage={verifyResultMessage} />

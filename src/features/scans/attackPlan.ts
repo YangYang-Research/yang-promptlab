@@ -34,6 +34,8 @@ export type CategoryRationale = {
 
 export type AttackProfileMode = {
   profileId: AttackProfileId;
+  /** AI-written card blurb for this mode (empty for legacy plans). */
+  description: string;
   categories: AttackCategoryId[];
   executionStrategy: ExecutionStrategy;
   maxAttempts: number;
@@ -77,6 +79,7 @@ export type AttackPlanConfig = {
 
 export type AttackProfileModeDto = {
   profileId: string;
+  description?: string;
   categories: string[];
   executionStrategy: string;
   maxAttempts: number;
@@ -234,6 +237,7 @@ function profileModeFromDto(dto: AttackProfileModeDto): AttackProfileMode | null
   if (categories.length === 0) return null;
   return {
     profileId,
+    description: typeof dto.description === "string" ? dto.description.trim() : "",
     categories,
     executionStrategy: dto.executionStrategy === "agentic" ? "agentic" : "sequential",
     maxAttempts: dto.maxAttempts,
@@ -247,6 +251,7 @@ function profileModeFromDto(dto: AttackProfileModeDto): AttackProfileMode | null
 export function profileModeToDto(mode: AttackProfileMode): AttackProfileModeDto {
   return {
     profileId: mode.profileId,
+    description: mode.description,
     categories: mode.categories,
     executionStrategy: mode.executionStrategy,
     maxAttempts: mode.maxAttempts,

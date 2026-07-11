@@ -5531,12 +5531,16 @@ a:hover {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 0.75rem;
+  /* Room for border-centered recommended badge */
+  padding-top: 0.65rem;
 }
 .wizard-attack-profile {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 0.25rem;
+  min-width: 0;
   padding: 0.875rem 1rem;
   text-align: left;
   background: var(--bg-elevated, rgba(255, 255, 255, 0.03));
@@ -5544,6 +5548,7 @@ a:hover {
   border-radius: var(--radius-sm, 6px);
   cursor: pointer;
   color: inherit;
+  overflow: visible;
   transition: border-color 0.15s, background 0.15s;
 }
 .wizard-attack-profile:hover {
@@ -5557,7 +5562,10 @@ a:hover {
 }
 .wizard-attack-profile--selected {
   border-color: var(--accent, #6ea8fe);
-  background: rgba(110, 168, 254, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-elevated));
+}
+.wizard-attack-profile--recommended {
+  padding-top: 1rem;
 }
 .wizard-attack-profile__top {
   display: flex;
@@ -5566,6 +5574,7 @@ a:hover {
   justify-content: space-between;
   gap: 0.5rem;
   width: 100%;
+  min-width: 0;
 }
 .wizard-attack-profile__mode-icon {
   flex-shrink: 0;
@@ -5574,13 +5583,45 @@ a:hover {
   color: var(--accent);
 }
 .wizard-attack-profile__mode-icon--human {
-  color: var(--text-muted);
+  color: var(--warning);
 }
 .wizard-attack-profile__label {
+  flex: 1 1 auto;
+  min-width: 0;
   align-self: stretch;
   font-weight: 600;
   font-size: 0.9375rem;
   text-align: left;
+}
+/* Recommended badge sits on the top border, right-aligned */
+.wizard-attack-profile__yazg-badge {
+  position: absolute;
+  top: 0;
+  left: auto;
+  right: 0.75rem;
+  z-index: 1;
+  transform: translateY(-50%);
+  max-width: calc(100% - 1.5rem);
+  box-sizing: border-box;
+  gap: 0.25rem;
+  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 999px;
+  box-shadow: none;
+  white-space: nowrap;
+  overflow: hidden;
+  font-size: 0.625rem;
+  line-height: 1.2;
+  padding: 0.18rem 0.55rem 0.18rem 0.4rem;
+  pointer-events: none;
+}
+.wizard-attack-profile--selected .wizard-attack-profile__yazg-badge {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-elevated));
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
+}
+.wizard-attack-profile__yazg-badge .yazg-badge__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .wizard-attack-profile__description {
   color: var(--text-muted);

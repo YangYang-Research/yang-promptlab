@@ -82,6 +82,10 @@ import {
   storeDraftScanId,
 } from "./wizardDraftScan";
 import { createSessionFromScanConfigImport } from "./scanConfigExport";
+import {
+  IMPORT_STEP_COUNTDOWN_SEC,
+  IMPORT_VERIFY_MAX_ATTEMPTS,
+} from "./importHarness";
 
 function withNormalizedAttackPlan(session: ScanWizardSession): ScanWizardSession {
   if (!session.attackPlan) return session;
@@ -128,6 +132,10 @@ export function ScanWizardPage() {
   const [dbVerification, setDbVerification] = useState<VerificationResultForm | null>(null);
   const [dbVerificationLoading, setDbVerificationLoading] = useState(false);
   const [importApiOpen, setImportApiOpen] = useState(false);
+  const [importStepCountdown, setImportStepCountdown] = useState<number | null>(null);
+  const [importVerifyAttempt, setImportVerifyAttempt] = useState(0);
+  const [importPostVerifyCountdown, setImportPostVerifyCountdown] = useState<number | null>(null);
+  const importAdvanceLock = useRef(false);
   const [scanControlPending, setScanControlPending] = useState(false);
   const [wizardResumeLoading, setWizardResumeLoading] = useState(() =>
     Boolean(lockedScanId && (entryStep === 4 || entryStep === 5)),
@@ -383,6 +391,8 @@ export function ScanWizardPage() {
 
   useEffect(() => {
     if (session.currentStep < 3 || !session.savedTargetId) return;
+    // Don't re-hydrate auth when returning from step 4+ — keeps verification process intact.
+    if (session.currentStep > 3) return;
     const hydrationKey = `${session.savedTargetId}:${session.draftScanId ?? ""}:${session.currentStep}`;
     if (authHydratedKeyRef.current === hydrationKey) return;
 
@@ -720,11 +730,36 @@ export function ScanWizardPage() {
   const hideBack =
     session.currentStep === 6 ||
     (session.currentStep === 5 && session.submittedScanId !== null);
+  const importHarnessBusy =
+    session.importAutoAdvance &&
+    session.currentStep <= 3 &&
+    (importStepCountdown !== null ||
+      importPostVerifyCountdown !== null ||
+      (session.currentStep === 3 && !session.targetProfile.verification.verified));
   const nextDisabled =
     !canProceedFromStep(session.currentStep, draft) ||
     plannerGenerating ||
-    planAdjusting;
+    planAdjusting ||
+    importHarnessBusy;
   const startScanDisabled = !canStartScan(draft) || startingScan;
+
+  function importFooterLabel(): string {
+    if (importPostVerifyCountdown !== null) {
+      return "Importing…";
+    }
+    if (session.importAutoAdvance && session.currentStep === 3) {
+      const attempt = Math.max(importVerifyAttempt, 1);
+      return `Verifying… (${attempt}/${IMPORT_VERIFY_MAX_ATTEMPTS})`;
+    }
+    if (importStepCountdown !== null && session.currentStep <= 2) {
+      return "Importing…";
+    }
+    if (session.currentStep === 4) {
+      return startingScan ? "Starting attack…" : "Start Attack";
+    }
+    if (persistingTarget) return "Saving target…";
+    return "Next";
+  }
 
   function patchTargetProfile(patch: Partial<typeof session.targetProfile>) {
     setProfileStepError(null);
@@ -831,6 +866,12 @@ export function ScanWizardPage() {
     }
 
     if (nextStep === 3) {
+      // Returning from a later step: keep auth + verification process as-is.
+      if (session.currentStep > 3) {
+        updateSession({ currentStep: nextStep });
+        return;
+      }
+
       try {
         const reinferFromProfile = session.currentStep === 2;
         const targetForm = await prepareAuthFormForStep3(
@@ -863,6 +904,9 @@ export function ScanWizardPage() {
   }
 
   function handleStepChange(step: WizardStepId) {
+    if (session.importAutoAdvance && session.currentStep <= 3) {
+      return;
+    }
     if (canNavigateToStep(step, draft, { scanStatus: submittedStatus?.status })) {
       void navigateToStep(step);
     }
@@ -924,10 +968,87 @@ export function ScanWizardPage() {
 
   function handleBack() {
     if (session.currentStep === 6) return;
+    if (session.importAutoAdvance) {
+      updateSession({ importAutoAdvance: false });
+      setImportStepCountdown(null);
+      setImportPostVerifyCountdown(null);
+      setImportVerifyAttempt(0);
+    }
     if (session.currentStep > 1) {
       void navigateToStep((session.currentStep - 1) as WizardStepId);
     }
   }
+
+  const importAutoActive = session.importAutoAdvance;
+  const canImportStepAdvance =
+    importAutoActive &&
+    (session.currentStep === 1 || session.currentStep === 2) &&
+    canProceedFromStep(session.currentStep, draft) &&
+    !persistingTarget &&
+    importPostVerifyCountdown === null;
+
+  // Import harness: countdown then auto Next on steps 1 and 2.
+  useEffect(() => {
+    if (!canImportStepAdvance) {
+      if (!importAutoActive || session.currentStep > 2) {
+        setImportStepCountdown(null);
+      }
+      return;
+    }
+
+    let remaining = IMPORT_STEP_COUNTDOWN_SEC;
+    setImportStepCountdown(remaining);
+    const timer = window.setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        window.clearInterval(timer);
+        setImportStepCountdown(0);
+        if (importAdvanceLock.current) return;
+        importAdvanceLock.current = true;
+        void handleNext().finally(() => {
+          importAdvanceLock.current = false;
+        });
+        return;
+      }
+      setImportStepCountdown(remaining);
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+    // handleNext closes over latest session; re-arm only when step/gates change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- import step gate
+  }, [canImportStepAdvance, session.currentStep, importAutoActive]);
+
+  // Import harness: after verify success, countdown then advance to step 4.
+  useEffect(() => {
+    if (importPostVerifyCountdown === null) return;
+
+    if (importPostVerifyCountdown <= 0) {
+      if (importAdvanceLock.current) return;
+      importAdvanceLock.current = true;
+      setImportPostVerifyCountdown(null);
+      void (async () => {
+        try {
+          updateSession({ importAutoAdvance: false });
+          await handleNext();
+          notify(
+            "Import successful. Review the attack plan, then start the attack.",
+            "success",
+          );
+        } finally {
+          importAdvanceLock.current = false;
+        }
+      })();
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setImportPostVerifyCountdown((prev) => (prev === null ? null : prev - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- post-verify gate
+  }, [importPostVerifyCountdown, updateSession, notify]);
 
   function handleCancel() {
     navigate("/scans");
@@ -1082,6 +1203,27 @@ export function ScanWizardPage() {
             onVerificationLog={(entries) => updateSession({ verificationLog: entries })}
             onError={setVerificationError}
             onBeforeVerify={persistAuthDescriptor}
+            autoVerify={
+              session.importAutoAdvance &&
+              !session.targetProfile.verification.verified &&
+              importPostVerifyCountdown === null
+            }
+            autoVerifyMaxAttempts={IMPORT_VERIFY_MAX_ATTEMPTS}
+            onAutoVerifyAttempt={(attempt) => setImportVerifyAttempt(attempt)}
+            onAutoVerifyComplete={(result) => {
+              if (result.ok) {
+                setImportPostVerifyCountdown(IMPORT_STEP_COUNTDOWN_SEC);
+                return;
+              }
+              updateSession({ importAutoAdvance: false });
+              setImportVerifyAttempt(0);
+              notify(
+                result.message
+                  ? `Import verification failed after ${result.attempts} attempts: ${result.message}`
+                  : `Import verification failed after ${result.attempts} attempts. Fix credentials and verify manually.`,
+                "error",
+              );
+            }}
             onVerifySettled={() => {
               if (store.savedTarget) void refreshDbVerification(store.savedTarget.id);
             }}
@@ -1333,13 +1475,7 @@ export function ScanWizardPage() {
                 disabled={nextDisabled || persistingTarget || startingScan}
                 onClick={() => void handleNext()}
               >
-                {session.currentStep === 4
-                  ? startingScan
-                    ? "Starting attack…"
-                    : "Start Attack"
-                  : persistingTarget
-                    ? "Saving target…"
-                    : "Next"}
+                {importFooterLabel()}
               </Button>
             )}
           </div>

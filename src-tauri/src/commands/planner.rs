@@ -27,6 +27,8 @@ pub struct AttackGraphNodeDto {
 #[serde(rename_all = "camelCase")]
 pub struct AttackProfileModeDto {
     pub profile_id: String,
+    #[serde(default)]
+    pub description: String,
     pub categories: Vec<String>,
     pub execution_strategy: String,
     pub max_attempts: u8,
@@ -236,6 +238,7 @@ pub fn wizard_plan_to_dto(plan: WizardAttackPlan) -> WizardAttackPlanDto {
 fn profile_mode_to_dto(mode: AttackProfileMode) -> AttackProfileModeDto {
     AttackProfileModeDto {
         profile_id: mode.profile_id,
+        description: mode.description,
         categories: mode.categories.iter().map(|c| c.as_str().into()).collect(),
         execution_strategy: match mode.execution_strategy {
             ExecutionStrategy::Sequential => "sequential".into(),
@@ -259,6 +262,7 @@ fn parse_profile_modes(modes: &[AttackProfileModeDto]) -> Vec<AttackProfileMode>
             }
             Some(AttackProfileMode {
                 profile_id: mode.profile_id.clone(),
+                description: mode.description.clone(),
                 categories,
                 execution_strategy: parse_execution_strategy(Some(&mode.execution_strategy)),
                 max_attempts: mode.max_attempts.clamp(1, 20),

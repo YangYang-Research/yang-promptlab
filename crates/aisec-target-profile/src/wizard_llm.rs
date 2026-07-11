@@ -200,6 +200,8 @@ struct LlmWizardPayloadStrategy {
 
 #[derive(Debug, Deserialize)]
 struct LlmWizardMode {
+    #[serde(default, deserialize_with = "flex::string")]
+    description: String,
     #[serde(default, deserialize_with = "flex::string_vec")]
     categories: Vec<String>,
     #[serde(default, rename = "enabledTests", deserialize_with = "flex::optional_string_vec")]
@@ -576,8 +578,18 @@ fn build_modes_from_llm_strict(
         let (max_attempts, reflection_enabled, adaptive_planning) =
             resolve_execution_options(llm_mode, profile_id, execution_strategy)?;
 
+        let description = llm_mode.description.trim().to_string();
+        let description = if description.is_empty() {
+            return Err(PlannerError::Llm(format!(
+                "modes.{profile_id}.description is required (one short sentence for this target)"
+            )));
+        } else {
+            description
+        };
+
         out.push(AttackProfileMode {
             profile_id: (*profile_id).into(),
+            description,
             categories,
             execution_strategy,
             max_attempts,
@@ -1093,6 +1105,7 @@ mod tests {
           "capabilities": { "supportsTools": true },
           "modes": {
             "quick": {
+              "description": "Quick smoke of prompt injection and jailbreak on this chat API.",
               "categories": ["prompt_injection", "jailbreak"],
               "enabledTests": ["pi-direct-override", "jb-dan"],
               "executionStrategy": "sequential",
@@ -1106,6 +1119,7 @@ mod tests {
               }
             },
             "standard": {
+              "description": "Balanced review including tool abuse signals from this response.",
               "categories": ["prompt_injection", "jailbreak", "tool_abuse"],
               "enabledTests": ["pi-direct-override", "pi-indirect-tool", "jb-dan", "jb-developer-mode", "ta-exfil-tool"],
               "executionStrategy": "sequential",
@@ -1119,6 +1133,7 @@ mod tests {
               }
             },
             "deep": {
+              "description": "Deep agentic coverage across injection, jailbreak, and tool abuse.",
               "categories": ["prompt_injection", "jailbreak", "tool_abuse"],
               "enabledTests": ["pi-direct-override", "pi-indirect-tool", "pi-cot-bypass", "jb-dan", "jb-encoding-obfuscation", "ta-exfil-tool", "ta-shell"],
               "executionStrategy": "agentic",
@@ -1206,18 +1221,21 @@ mod tests {
           "recommendedProfileId": "standard",
           "modes": {
             "quick": {
+              "description": "Quick injection and jailbreak smoke.",
               "categories": ["prompt_injection", "jailbreak"],
               "enabledTests": ["pi-direct-override", "jb-dan", "mp-false-fact", "dp-session-state"],
               "executionStrategy": "sequential",
               "payloadStrategy": { "strategy": "deterministic", "mutationLevel": "low", "variantsPerTest": 2, "maxTotalPayloads": 6 }
             },
             "standard": {
+              "description": "Standard curated injection and jailbreak set.",
               "categories": ["prompt_injection", "jailbreak"],
               "enabledTests": ["pi-direct-override", "jb-dan", "mp-persist-instruction"],
               "executionStrategy": "sequential",
               "payloadStrategy": { "strategy": "mutation", "mutationLevel": "medium", "variantsPerTest": 4, "maxTotalPayloads": 18 }
             },
             "deep": {
+              "description": "Deep agentic injection and jailbreak coverage.",
               "categories": ["prompt_injection", "jailbreak"],
               "enabledTests": ["pi-direct-override", "jb-dan"],
               "executionStrategy": "agentic",
@@ -1251,18 +1269,21 @@ mod tests {
           "recommendedProfileId": "standard",
           "modes": {
             "quick": {
+              "description": "Quick numeric-enum smoke.",
               "categories": ["prompt_injection"],
               "enabledTests": ["pi-direct-override"],
               "executionStrategy": 1,
               "payloadStrategy": { "strategy": 1, "mutationLevel": 1, "variantsPerTest": 2, "maxTotalPayloads": 4 }
             },
             "standard": {
+              "description": "Standard numeric-enum review.",
               "categories": ["prompt_injection", "jailbreak"],
               "enabledTests": ["pi-direct-override", "jb-dan"],
               "executionStrategy": "sequential",
               "payloadStrategy": { "strategy": "mutation", "mutationLevel": 2, "variantsPerTest": 4, "maxTotalPayloads": 12 }
             },
             "deep": {
+              "description": "Deep numeric-enum agentic pass.",
               "categories": ["prompt_injection", "jailbreak"],
               "enabledTests": ["pi-direct-override", "pi-cot-bypass", "jb-dan", "jb-encoding-obfuscation"],
               "executionStrategy": 2,

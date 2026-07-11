@@ -38,6 +38,9 @@ pub struct AttackGraphNode {
 #[serde(rename_all = "camelCase")]
 pub struct AttackProfileMode {
     pub profile_id: String,
+    /// Short AI-written blurb for the mode card (why this depth fits the target).
+    #[serde(default)]
+    pub description: String,
     pub categories: Vec<AttackCategory>,
     pub execution_strategy: ExecutionStrategy,
     pub max_attempts: u8,
@@ -126,6 +129,12 @@ pub fn build_deterministic_profile_modes(
                 };
             AttackProfileMode {
                 profile_id: profile_id.into(),
+                description: deterministic_mode_description(
+                    profile_id,
+                    &categories,
+                    execution_strategy,
+                    &payload,
+                ),
                 categories,
                 execution_strategy,
                 max_attempts,
@@ -136,6 +145,35 @@ pub fn build_deterministic_profile_modes(
             }
         })
         .collect()
+}
+
+fn deterministic_mode_description(
+    profile_id: &str,
+    categories: &[AttackCategory],
+    execution: ExecutionStrategy,
+    payload: &PayloadStrategy,
+) -> String {
+    let depth = match profile_id {
+        "quick" => "Fast, focused coverage",
+        "deep" => "Maximum depth coverage",
+        _ => "Balanced security coverage",
+    };
+    let exec = match execution {
+        ExecutionStrategy::Agentic => "agentic execution",
+        ExecutionStrategy::Sequential => "sequential execution",
+    };
+    let strategy = match payload.strategy {
+        crate::payload_strategy::PayloadGenerationStrategy::Deterministic => "deterministic",
+        crate::payload_strategy::PayloadGenerationStrategy::Mutation => "mutation",
+        crate::payload_strategy::PayloadGenerationStrategy::Adaptive => "adaptive",
+    };
+    format!(
+        "{depth} for this target — {} categor{}, {}, {} payloads.",
+        categories.len(),
+        if categories.len() == 1 { "y" } else { "ies" },
+        exec,
+        strategy,
+    )
 }
 
 pub fn union_mode_categories(modes: &[AttackProfileMode]) -> Vec<AttackCategory> {

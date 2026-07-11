@@ -34,6 +34,7 @@ function samplePlan(): AttackPlanConfig {
   const profileModes = [
     {
       profileId: "quick" as const,
+      description: "Quick smoke for this target.",
       categories: [
         "prompt_injection",
         "jailbreak",
@@ -50,9 +51,11 @@ function samplePlan(): AttackPlanConfig {
         variantsPerTest: 2,
         maxTotalPayloads: 10,
       },
+      disabledTests: [] as string[],
     },
     {
       profileId: "standard" as const,
+      description: "Balanced review for this target.",
       categories: [
         "prompt_injection",
         "jailbreak",
@@ -64,9 +67,11 @@ function samplePlan(): AttackPlanConfig {
       reflectionEnabled: false,
       adaptivePlanning: false,
       payloadStrategy: payload,
+      disabledTests: [] as string[],
     },
     {
       profileId: "deep" as const,
+      description: "Deep agentic coverage for this target.",
       categories: [
         "prompt_injection",
         "jailbreak",

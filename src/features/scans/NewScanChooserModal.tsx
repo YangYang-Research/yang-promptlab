@@ -102,7 +102,7 @@ export function NewScanChooserModal({
       stashScanConfigImport(parsed.config);
       onClose();
       navigate(newScanWizardPath(selectedProjectId));
-      notify("Scan config imported", "success");
+      notify("Starting import…", "info");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to import scan config";
       setError(message);

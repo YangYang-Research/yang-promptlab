@@ -256,14 +256,12 @@ export function ReviewAttackPlanStep({
         />
       );
     }
-    const recommended = attackPlan.recommendedProfileId === profile;
-    if (recommended) {
-      return <YazgBadge label="Recommended by Yazg" />;
-    }
     return (
       <IconAi
         className="wizard-attack-profile__mode-icon"
-        aria-label="AI planned"
+        aria-label={
+          attackPlan.recommendedProfileId === profile ? "Recommended AI plan" : "AI planned"
+        }
       />
     );
   }
@@ -361,14 +359,27 @@ export function ReviewAttackPlanStep({
         <div className="wizard-attack-profiles">
         {ATTACK_PROFILES.map((profile) => {
           const selected = profileId === profile.id;
+          const recommended = attackPlan.recommendedProfileId === profile.id;
           return (
             <button
               key={profile.id}
               type="button"
-              className={`wizard-attack-profile${selected ? " wizard-attack-profile--selected" : ""}`}
+              className={[
+                "wizard-attack-profile",
+                selected ? "wizard-attack-profile--selected" : "",
+                recommended ? "wizard-attack-profile--recommended" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
               onClick={() => selectProfile(profile.id)}
               aria-pressed={selected}
             >
+              {recommended ? (
+                <YazgBadge
+                  label="Recommended"
+                  className="wizard-attack-profile__yazg-badge"
+                />
+              ) : null}
               <div className="wizard-attack-profile__top">
                 <span className="wizard-attack-profile__label">{profile.label}</span>
                 {profileModeBadge(profile.id)}
@@ -377,7 +388,10 @@ export function ReviewAttackPlanStep({
                 {profileModeMeta(profile.id)}
               </span>
               <span className="wizard-attack-profile__description text-sm">
-                {profile.description}
+                {profile.id === "custom"
+                  ? profile.description
+                  : getProfileMode(attackPlan, profile.id)?.description?.trim() ||
+                    profile.description}
               </span>
             </button>
           );

@@ -59,6 +59,7 @@ const richWizardPlan = {
   profileModes: [
     {
       profileId: "deep",
+      description: "Deep agentic coverage for the exported target.",
       categories: ["prompt_injection", "jailbreak", "system_prompt_extraction"],
       executionStrategy: "agentic",
       maxAttempts: 5,
@@ -253,7 +254,8 @@ describe("scanConfigExport", () => {
 
     const session = createSessionFromScanConfigImport("project-1", { consume: true });
     expect(session.selectedProjectId).toBe("project-1");
-    expect(session.currentStep).toBe(2);
+    expect(session.currentStep).toBe(1);
+    expect(session.importAutoAdvance).toBe(true);
     expect(session.targetProfile.baseUrl).toBe("https://api.example.com");
     expect(session.attackPlan).not.toBeNull();
     expect(session.attackPlanSource).toBe("imported");
@@ -262,11 +264,14 @@ describe("scanConfigExport", () => {
     const remount = createSessionFromScanConfigImport("project-1", { consume: true });
     expect(remount.attackPlan).not.toBeNull();
     expect(remount.attackPlanSource).toBe("imported");
+    expect(remount.importAutoAdvance).toBe(true);
+    expect(remount.currentStep).toBe(1);
     expect(remount.targetProfile.baseUrl).toBe("https://api.example.com");
 
     clearScanConfigImport();
     const blank = createSessionFromScanConfigImport("project-1", { consume: true });
     expect(blank.attackPlan).toBeNull();
     expect(blank.attackPlanSource).toBeNull();
+    expect(blank.importAutoAdvance).toBe(false);
   });
 });
