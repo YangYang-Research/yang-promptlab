@@ -17,3 +17,4 @@ export { SearchInput } from "./SearchInput";
 export { PageLoadingSkeleton, Skeleton } from "./Skeleton";
 export { Select } from "./Select";
 export { ViewModeToggle } from "./ViewModeToggle";
+export { YazgBadge } from "./YazgBadge";

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 
 import { Badge } from "@/shared/components";
 import { IconAi, IconHuman } from "@/shared/components/Icons";
+import { YazgBadge } from "@/shared/components/YazgBadge";
 import { adjustAttackPlan } from "@/shared/ipc/attackPlanner";
 import { toAppError } from "@/shared/errors";
 
@@ -257,12 +258,7 @@ export function ReviewAttackPlanStep({
     }
     const recommended = attackPlan.recommendedProfileId === profile;
     if (recommended) {
-      return (
-        <span className="badge badge--info wizard-planner-summary-badge">
-          <IconAi className="wizard-planner-summary-badge__icon" aria-hidden />
-          AI Recommended
-        </span>
-      );
+      return <YazgBadge label="Recommended by Yazg" />;
     }
     return (
       <IconAi
@@ -274,12 +270,7 @@ export function ReviewAttackPlanStep({
 
   function plannerSummaryBadge() {
     if (plannerBadge.label === "AI Planned") {
-      return (
-        <span className={`badge badge--${plannerBadge.variant} wizard-planner-summary-badge`}>
-          <IconAi className="wizard-planner-summary-badge__icon" aria-hidden />
-          {plannerBadge.label}
-        </span>
-      );
+      return <YazgBadge />;
     }
     return <Badge variant={plannerBadge.variant}>{plannerBadge.label}</Badge>;
   }

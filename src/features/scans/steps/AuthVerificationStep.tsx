@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Button } from "@/shared/components";
+import { Button, YazgBadge } from "@/shared/components";
 import { IconAi } from "@/shared/components/Icons";
 import {
   verifyTargetProfileAi,
@@ -241,10 +241,13 @@ export function AuthVerificationStep({
       </section>
 
       <section>
-        <p className="text-muted text-sm">
-          Sends a capability-inventory probe to your endpoint, then uses Yazg to
-          confirm the response is from a generative AI system and capture signals for attack planning.
-        </p>
+        <div className="auth-verification-step__section-head">
+          <p className="text-muted text-sm">
+            Sends a capability-inventory probe to your endpoint, then uses Yazg to
+            confirm the response is from a generative AI system and capture signals for attack planning.
+          </p>
+          {profile.verification.verified ? <YazgBadge /> : null}
+        </div>
         <Button variant="primary" disabled={verifying} onClick={() => void handleVerify()}>
           <span className="btn__content">
             <IconAi className="btn__icon" aria-hidden />

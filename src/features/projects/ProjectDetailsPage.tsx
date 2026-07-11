@@ -8,12 +8,15 @@ import {
   Badge,
   Button,
   Card,
+  ContentToolbar,
   DataTable,
   EmptyState,
+  ListCard,
   PageHeader,
   PageLoadingSkeleton,
+  Pagination,
   SeverityBadge,
-  TargetScanStatusBadge,
+  StatusBadge,
 } from "@/shared/components";
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import {
@@ -23,8 +26,11 @@ import {
   wizardResumeInputFromSession,
 } from "@/features/scans/wizardState";
 import { targetDisplayType } from "@/features/scans/targetProfile";
-import { buildTargetScanContext } from "@/shared/targetScanContext";
+import { buildTargetScanContext, countAttackScans, formatTargetTimestamp } from "@/shared/targetScanContext";
 import { resolveTargetScanAction } from "@/shared/targetScanAction";
+import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
+import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
+import { useViewPreference } from "@/shared/hooks/useViewPreference";
 import { useToast } from "@/shared/notifications";
 import type { Severity, ScanRun, Target } from "@/shared/types";
 
@@ -43,6 +49,8 @@ export function ProjectDetailsPage() {
   const { notify } = useToast();
   const [editOpen, setEditOpen] = useState(false);
   const [deletingTargetId, setDeletingTargetId] = useState<string | null>(null);
+  const [pageSize, setPageSize] = usePageSizePreference("project-details-targets");
+  const [viewMode, setViewMode] = useViewPreference("project-details-targets");
 
   const project = projects.find((item) => item.id === projectId);
 
@@ -50,6 +58,8 @@ export function ProjectDetailsPage() {
     () => targets.filter((target) => target.projectId === projectId),
     [targets, projectId],
   );
+
+  const { page, setPage, pagination } = usePaginatedList(projectTargets, pageSize);
 
   const projectScans = useMemo(
     () => scans.filter((scan) => scan.projectId === projectId),
@@ -76,29 +86,23 @@ export function ProjectDetailsPage() {
   }, [projectFindings]);
 
   const targetSummary = useMemo(() => {
-    let scanned = 0;
     let running = 0;
+    let scannedTargets = 0;
     for (const target of projectTargets) {
+      if (target.status === "scanned") scannedTargets += 1;
       const context = buildTargetScanContext(target.id, projectScans);
       if (context.scanStatusLabel === "Running") running += 1;
-      if (context.scanStatusLabel === "Completed" || context.scanStatusLabel === "Failed") {
-        scanned += 1;
-      }
     }
+    const targetIds = projectTargets.map((target) => target.id);
     return {
       targetCount: projectTargets.length,
-      scanned,
-      unscanned: projectTargets.length - scanned,
+      scanned: countAttackScans(targetIds, projectScans),
+      unscanned: projectTargets.length - scannedTargets,
       running,
     };
   }, [projectTargets, projectScans]);
 
   const wizardSession = useMemo(() => peekWizardSession(), []);
-
-  const recentTargets = useMemo(
-    () => [...projectTargets].slice(0, 5),
-    [projectTargets],
-  );
 
   const recentFindings = useMemo(
     () =>
@@ -169,13 +173,9 @@ export function ProjectDetailsPage() {
       },
       {
         key: "status",
-        header: "Scan Status",
-        width: "140px",
-        render: (target: Target) => (
-          <TargetScanStatusBadge
-            label={buildTargetScanContext(target.id, projectScans).scanStatusLabel}
-          />
-        ),
+        header: "Status",
+        width: "120px",
+        render: (target: Target) => <StatusBadge status={target.status} />,
       },
       {
         key: "actions",
@@ -186,7 +186,7 @@ export function ProjectDetailsPage() {
             <TargetActionsDropdown
               target={target}
               projectId={projectId}
-              scans={projectScans}
+              scans={scans}
               wizardSession={wizardSession}
               deleting={deletingTargetId === target.id}
               onNavigate={navigate}
@@ -196,7 +196,7 @@ export function ProjectDetailsPage() {
         ),
       },
     ],
-    [projectScans, projectId, navigate, wizardSession, deletingTargetId, handleDeleteTarget],
+    [projectId, scans, navigate, wizardSession, deletingTargetId, handleDeleteTarget],
   );
 
   async function handleDelete() {
@@ -253,16 +253,15 @@ export function ProjectDetailsPage() {
         }
       />
 
-      {project.description ? (
-        <p className="project-details__lead">{project.description}</p>
-      ) : null}
-
       <section className="project-details__overview" aria-label="Project overview">
         <Card className="detail-section project-details__meta">
           <h2 className="detail-section__title">Project information</h2>
           <div className="detail-section__body">
             <DetailRow label="Name" value={project.name} />
-            <DetailRow label="Status" value={project.status} capitalize />
+            <DetailRow
+              label="Description"
+              value={project.description?.trim() ? project.description : "—"}
+            />
             <DetailRow label="Created" value={formatDate(project.createdAt)} />
             <DetailRow label="Last updated" value={formatDate(project.updatedAt)} />
           </div>
@@ -272,7 +271,7 @@ export function ProjectDetailsPage() {
           <h2 className="detail-section__title">Target coverage</h2>
           <div className="detail-summary-grid detail-summary-grid--metrics">
             <SummaryStat label="Targets" value={targetSummary.targetCount} />
-            <SummaryStat label="Scanned" value={targetSummary.scanned} accent="success" />
+            <SummaryStat label="Scans" value={targetSummary.scanned} accent="success" />
             <SummaryStat label="Unscanned" value={targetSummary.unscanned} />
             <SummaryStat
               label="Running"
@@ -284,41 +283,101 @@ export function ProjectDetailsPage() {
       </section>
 
       <section className="project-details__primary" aria-label="Targets">
-        <Card className="detail-section">
-          <div className="detail-section__header">
-            <div>
-              <h2 className="detail-section__title">Targets</h2>
-              <p className="detail-section__hint">
-                {projectTargets.length === 0
-                  ? "Add a target to start scanning this project."
-                  : `Showing ${Math.min(recentTargets.length, 5)} of ${projectTargets.length} targets`}
-              </p>
-            </div>
-            <div className="detail-section__header-actions">
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => navigate(buildScanWizardUrl(project.id, undefined, { step: 2 }))}
-              >
-                Add target
-              </Button>
-            </div>
+        <div className="detail-section__header">
+          <div>
+            <h2 className="detail-section__title">Targets</h2>
           </div>
-          {recentTargets.length === 0 ? (
+          <div className="detail-section__header-actions">
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => navigate(buildScanWizardUrl(project.id, undefined, { step: 2 }))}
+            >
+              Add target
+            </Button>
+          </div>
+        </div>
+
+        {projectTargets.length === 0 ? (
+          <Card className="detail-section">
             <EmptyState
               title="No targets yet"
               description="Add a target URL or API endpoint to include it in this project."
             />
-          ) : (
-            <DataTable
-              columns={targetColumns}
-              rows={recentTargets}
-              keyField="id"
-              emptyMessage="No targets"
-              onRowClick={(target) => navigate(`/targets/${target.id}`)}
+          </Card>
+        ) : (
+          <>
+            <ContentToolbar
+              pageSize={pageSize}
+              onPageSizeChange={setPageSize}
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
             />
-          )}
-        </Card>
+            {viewMode === "table" ? (
+              <Card padding="none" className="project-details__targets-table">
+                <DataTable
+                  columns={targetColumns}
+                  rows={pagination.items}
+                  keyField="id"
+                  emptyMessage="No targets"
+                  onRowClick={(target) => navigate(`/targets/${target.id}`)}
+                />
+              </Card>
+            ) : (
+              <div className="list-card-grid">
+                {pagination.items.map((target) => {
+                  const scanContext = buildTargetScanContext(target.id, scans);
+                  return (
+                    <ListCard
+                      key={target.id}
+                      title={target.name}
+                      status={<Badge variant="info">{targetDisplayType(target)}</Badge>}
+                      metadata={[
+                        {
+                          label: "URL",
+                          value: <span className="mono text-sm">{target.url}</span>,
+                        },
+                        { label: "Auth", value: target.authType },
+                        { label: "Status", value: <StatusBadge status={target.status} /> },
+                        {
+                          label: "Scans",
+                          value: `${scanContext.scanCount} scan${scanContext.scanCount === 1 ? "" : "s"}`,
+                        },
+                      ]}
+                      footerMeta={
+                        scanContext.lastScanTime
+                          ? `Last scan: ${formatTargetTimestamp(scanContext.lastScanTime)}`
+                          : "No scans recorded"
+                      }
+                      actions={
+                        <span onClick={(event) => event.stopPropagation()}>
+                          <TargetActionsDropdown
+                            target={target}
+                            projectId={projectId}
+                            scans={scans}
+                            wizardSession={wizardSession}
+                            deleting={deletingTargetId === target.id}
+                            onNavigate={navigate}
+                            onDelete={handleDeleteTarget}
+                          />
+                        </span>
+                      }
+                      onClick={() => navigate(`/targets/${target.id}`)}
+                    />
+                  );
+                })}
+              </div>
+            )}
+            <Pagination
+              page={page}
+              totalItems={pagination.totalItems}
+              rangeStart={pagination.rangeStart}
+              rangeEnd={pagination.rangeEnd}
+              totalPages={pagination.totalPages}
+              onPageChange={setPage}
+            />
+          </>
+        )}
       </section>
 
       <section className="project-details__insights" aria-label="Findings and reports">
@@ -500,12 +559,6 @@ function TargetActionsDropdown({
         onClick: () =>
           onNavigate(buildScanProgressUrl(projectId, action.scanId, target.id)),
       });
-    } else if (action.kind === "view_report") {
-      scanItems.push({
-        id: "view-report",
-        label: "View Scan Details",
-        onClick: () => onNavigate(`/scans/${action.scanId}`),
-      });
     } else if (action.kind === "retry") {
       scanItems.push({
         id: "retry",
@@ -518,7 +571,7 @@ function TargetActionsDropdown({
             }),
           ),
       });
-    } else {
+    } else if (action.kind !== "view_report") {
       scanItems.push({
         id: "setup",
         label: "Continue Setup",

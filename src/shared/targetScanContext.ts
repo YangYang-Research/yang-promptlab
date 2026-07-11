@@ -7,10 +7,19 @@ export type TargetScanContext = {
   scanStatusLabel: TargetScanStatusLabel;
   lastScanTime: string | null;
   latestScanResult: string;
+  scanCount: number;
 };
 
 function isAttackScan(scan: ScanRun): boolean {
   return scan.name.startsWith("Scan (") || scan.name.startsWith("Agent Scan (");
+}
+
+function isFinishedAttackScan(scan: ScanRun): boolean {
+  return (
+    scan.status === "completed" ||
+    scan.status === "failed" ||
+    scan.status === "cancelled"
+  );
 }
 
 function latestScan(scans: ScanRun[]): ScanRun | null {
@@ -23,13 +32,23 @@ function attackScansForTarget(targetId: string, scans: ScanRun[]): ScanRun[] {
 }
 
 function hasFinishedAttackScan(scans: ScanRun[]): boolean {
-  return scans.some(
-    (scan) =>
-      scan.status === "completed" ||
-      scan.status === "failed" ||
-      scan.status === "cancelled",
-  );
+  return scans.some(isFinishedAttackScan);
 }
+
+/** Attack scans for the given targets (project-scoped coverage). */
+export function countAttackScans(
+  targetIds: ReadonlySet<string> | string[],
+  scans: ScanRun[],
+): number {
+  const ids = targetIds instanceof Set ? targetIds : new Set(targetIds);
+  return scans.filter(
+    (scan) =>
+      Boolean(scan.targetId) && ids.has(scan.targetId) && isAttackScan(scan),
+  ).length;
+}
+
+/** @deprecated Use countAttackScans — kept for HMR/stale imports. */
+export const countFinishedAttackScans = countAttackScans;
 
 export function isTargetProfileVerified(profile: unknown): boolean {
   if (typeof profile !== "object" || profile === null || Array.isArray(profile)) {
@@ -74,12 +93,19 @@ export function deriveTargetLastScanAt(targetId: string, scans: ScanRun[]): stri
   return latest.completedAt ?? latest.startedAt ?? latest.createdAt;
 }
 
+function formatLatestScanResult(scan: ScanRun): string {
+  return `${scan.status} · ${scan.name}`;
+}
+
 export function buildTargetScanContext(targetId: string, scans: ScanRun[]): TargetScanContext {
   const attackScans = attackScansForTarget(targetId, scans);
+  const scanCount = attackScans.length;
 
-  const runningScan = attackScans.find(
-    (scan) =>
-      scan.status === "running" || scan.status === "paused" || scan.status === "pending",
+  const runningScan = latestScan(
+    attackScans.filter(
+      (scan) =>
+        scan.status === "running" || scan.status === "paused" || scan.status === "pending",
+    ),
   );
   const latestAttack = latestScan(attackScans);
 
@@ -87,7 +113,8 @@ export function buildTargetScanContext(targetId: string, scans: ScanRun[]): Targ
     return {
       scanStatusLabel: "Running",
       lastScanTime: runningScan.startedAt ?? runningScan.createdAt,
-      latestScanResult: `${runningScan.status} · ${runningScan.name}`,
+      latestScanResult: formatLatestScanResult(runningScan),
+      scanCount,
     };
   }
 
@@ -96,6 +123,7 @@ export function buildTargetScanContext(targetId: string, scans: ScanRun[]): Targ
       scanStatusLabel: "Never Scanned",
       lastScanTime: null,
       latestScanResult: "No scans recorded",
+      scanCount: 0,
     };
   }
 
@@ -109,7 +137,8 @@ export function buildTargetScanContext(targetId: string, scans: ScanRun[]): Targ
   return {
     scanStatusLabel,
     lastScanTime: latestAttack.completedAt ?? latestAttack.startedAt ?? latestAttack.createdAt,
-    latestScanResult: `${latestAttack.status} · ${latestAttack.name}`,
+    latestScanResult: formatLatestScanResult(latestAttack),
+    scanCount,
   };
 }
 

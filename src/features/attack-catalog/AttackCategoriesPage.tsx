@@ -4,6 +4,7 @@ import {
   Button,
   PageHeader,
   RefreshButton,
+  YazgBadge,
 } from "@/shared/components";
 import { IconAi } from "@/shared/components/Icons";
 import { useAppStore } from "@/app/store/AppStore";
@@ -64,6 +65,7 @@ export function AttackCategoriesPage() {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [yazgGenerated, setYazgGenerated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedHint, setSavedHint] = useState<string | null>(null);
 
@@ -151,10 +153,12 @@ export function AttackCategoriesPage() {
   useEffect(() => {
     if (!selected) {
       setDraft("");
+      setYazgGenerated(false);
       return;
     }
     setDraft(selected.content);
     setSavedHint(null);
+    setYazgGenerated(false);
   }, [selected]);
 
   useEffect(() => {
@@ -178,6 +182,7 @@ export function AttackCategoriesPage() {
       setTechniques((current) =>
         current.map((row) => (row.id === updated.id ? updated : row)),
       );
+      setYazgGenerated(false);
       setSavedHint("Prompt saved");
     } catch (err) {
       setError(toAppError(err).message);
@@ -196,6 +201,7 @@ export function AttackCategoriesPage() {
         current.map((row) => (row.id === updated.id ? updated : row)),
       );
       setDraft(updated.content);
+      setYazgGenerated(false);
       setSavedHint("Reset to factory default");
     } catch (err) {
       setError(toAppError(err).message);
@@ -231,6 +237,7 @@ export function AttackCategoriesPage() {
     try {
       const generated = await generateAttackCatalogPrompt(selected.id);
       setDraft(generated.content);
+      setYazgGenerated(true);
       setSavedHint("Yazg generated a new prompt — review and save to apply");
     } catch (err) {
       setError(toAppError(err).message);
@@ -501,7 +508,12 @@ export function AttackCategoriesPage() {
 
                   <div className="attack-catalog-editor__prompt">
                     <div className="attack-catalog-editor__prompt-head">
-                      <label htmlFor="attack-prompt">Default prompt</label>
+                      <label htmlFor="attack-prompt">
+                        Default prompt
+                        {yazgGenerated ? (
+                          <YazgBadge className="attack-catalog-editor__yazg-badge" />
+                        ) : null}
+                      </label>
                       <div className="attack-catalog-editor__prompt-head-actions">
                         {!generating && dirty ? (
                           <span className="attack-catalog-editor__dirty">Unsaved changes</span>

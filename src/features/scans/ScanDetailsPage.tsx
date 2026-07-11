@@ -13,6 +13,7 @@ import {
   ProgressBar,
   SeverityBadge,
   StatusBadge,
+  YazgBadge,
 } from "@/shared/components";
 import {
   exportStoredReport,
@@ -35,6 +36,7 @@ import {
   parseAttackPlaybook,
   profileLabel,
 } from "@/features/scans/scanPlaybook";
+import { categoryLabel } from "@/features/scans/categoryLabel";
 import { ScanRecommendationsPanel } from "@/features/scans/ScanRecommendationsPanel";
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
 import {
@@ -489,58 +491,98 @@ export function ScanDetailsPage() {
       </section>
 
       {playbook && (
-        <section className="scan-details__config" aria-label="Attack configuration">
-          <Card className="detail-section">
-            <div className="detail-section__header">
-              <div>
-                <h2 className="detail-section__title">Attack configuration</h2>
-                <p className="detail-section__hint">
-                  {profileLabel(playbook.profile)} profile · {playbook.categories.length}{" "}
+        <section className="scan-details__plan-section" aria-label="Attack plan">
+          <Card className="detail-section scan-details__plan-card">
+            <header className="scan-plan__header">
+              <div className="scan-plan__heading">
+                <h2 className="scan-plan__title">Attack plan</h2>
+                <p className="scan-plan__hint">
+                  {profileLabel(playbook.profile)}
+                  {" · "}
+                  {playbook.categories.length}{" "}
                   {playbook.categories.length === 1 ? "category" : "categories"}
+                  {selectedTests.length > 0
+                    ? ` · ${selectedTests.length} test${selectedTests.length === 1 ? "" : "s"}`
+                    : ""}
                 </p>
               </div>
+              {playbook.agentMode ? <Badge variant="info">Agentic</Badge> : null}
+            </header>
+
+            <div className="scan-plan__metrics" role="list">
+              <div className="scan-plan__metric" role="listitem">
+                <span className="scan-plan__metric-label">Profile</span>
+                <span className="scan-plan__metric-value">{profileLabel(playbook.profile)}</span>
+              </div>
+              <div className="scan-plan__metric" role="listitem">
+                <span className="scan-plan__metric-label">Categories</span>
+                <span className="scan-plan__metric-value">
+                  {playbook.categories.length.toLocaleString()}
+                </span>
+              </div>
+              <div className="scan-plan__metric" role="listitem">
+                <span className="scan-plan__metric-label">Est. requests</span>
+                <span className="scan-plan__metric-value">
+                  {estimates?.requests.toLocaleString() ?? "—"}
+                </span>
+              </div>
+              <div className="scan-plan__metric" role="listitem">
+                <span className="scan-plan__metric-label">Est. runtime</span>
+                <span className="scan-plan__metric-value">{estimates?.runtime ?? "—"}</span>
+              </div>
+              {playbook.agentMode && playbook.maxAgentAttempts != null ? (
+                <div className="scan-plan__metric" role="listitem">
+                  <span className="scan-plan__metric-label">Max attempts</span>
+                  <span className="scan-plan__metric-value">
+                    {playbook.maxAgentAttempts.toLocaleString()}
+                  </span>
+                </div>
+              ) : null}
             </div>
 
-            <div className="scan-details__config-grid">
-              <div className="scan-details__plan">
-                <h3 className="scan-details__subsection-title">Attack plan</h3>
-                <div className="detail-section__body">
-                  <DetailRow label="Profile" value={profileLabel(playbook.profile)} />
-                  <DetailRow
-                    label="Categories"
-                    value={playbook.categories.join(", ") || "—"}
-                  />
-                  <DetailRow
-                    label="Est. requests"
-                    value={estimates?.requests.toLocaleString() ?? "—"}
-                  />
-                  <DetailRow label="Est. runtime" value={estimates?.runtime ?? "—"} />
-                </div>
-                {selectedTests.length > 0 && (
-                  <div className="scan-details__subsection">
-                    <h3 className="scan-details__subsection-title">Selected tests</h3>
-                    <ul className="detail-list scan-details__test-list">
-                      {selectedTests.map((test) => (
-                        <li key={test}>{test}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+            {playbook.categories.length > 0 ? (
+              <div className="scan-plan__block">
+                <h3 className="scan-plan__block-title">Categories</h3>
+                <ul className="scan-plan__chips">
+                  {playbook.categories.map((categoryId) => (
+                    <li key={categoryId} className="scan-plan__chip">
+                      {categoryLabel(categoryId)}
+                    </li>
+                  ))}
+                </ul>
               </div>
-            </div>
+            ) : null}
+
+            {selectedTests.length > 0 ? (
+              <div className="scan-plan__block">
+                <h3 className="scan-plan__block-title">
+                  Selected tests
+                  <span className="scan-plan__block-count">{selectedTests.length}</span>
+                </h3>
+                <ol className="scan-plan__tests">
+                  {selectedTests.map((test, index) => (
+                    <li key={test} className="scan-plan__test">
+                      <span className="scan-plan__test-index" aria-hidden="true">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      <span className="scan-plan__test-name">{test}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            ) : null}
           </Card>
         </section>
       )}
 
       {scan && isMonitorableAttackScan(scan) && (
         <section className="scan-details__recommendations" aria-label="Recommendations">
-          <Card className="detail-section">
+          <Card className="detail-section scan-details__recommendations-card">
             <ScanRecommendationsPanel
               scanId={scanId}
               attackCategories={playbook?.categories ?? []}
               enabled={!loading && Boolean(detail)}
-              titleAs="h2"
-              className="scan-details__recommendations-panel"
+              variant="details"
             />
           </Card>
         </section>
@@ -557,11 +599,14 @@ export function ScanDetailsPage() {
                   : `${scanFindings.length} finding${scanFindings.length === 1 ? "" : "s"} across severity levels`}
               </p>
             </div>
-            {scanFindings.length > 0 ? (
-              <Link to={`/findings?scanId=${encodeURIComponent(scanId)}`} className="link">
-                View all
-              </Link>
-            ) : null}
+            <div className="detail-section__header-actions">
+              {scanFindings.length > 0 ? <YazgBadge /> : null}
+              {scanFindings.length > 0 ? (
+                <Link to={`/findings?scanId=${encodeURIComponent(scanId)}`} className="link">
+                  View all
+                </Link>
+              ) : null}
+            </div>
           </div>
 
           <div className="detail-summary-grid detail-summary-grid--severity">

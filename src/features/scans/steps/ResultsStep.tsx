@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Badge, Modal, RefreshButton } from "@/shared/components";
+import { Badge, Modal, RefreshButton, YazgBadge } from "@/shared/components";
 import { IconCheck } from "@/shared/components/Icons";
 import { FindingDetailPanel } from "@/features/findings/FindingDetailPanel";
 import { resolveAttackGraphStates } from "@/features/scans/attackGraphProgress";
@@ -168,7 +168,7 @@ export function ResultsStep({ scanId, attackCategories = [] }: ResultsStepProps)
         <ScanRecommendationsPanel
           scanId={scanId}
           attackCategories={attackCategories as string[]}
-          titleAs="h4"
+          variant="wizard"
         />
       </section>
 
@@ -234,7 +234,10 @@ export function ResultsStep({ scanId, attackCategories = [] }: ResultsStepProps)
       </section>
 
       <section className="wizard-results__section">
-        <h3 className="wizard-results__heading">Findings summary</h3>
+        <div className="wizard-results__heading-row">
+          <h3 className="wizard-results__heading">Findings summary</h3>
+          {scanFindings.length > 0 ? <YazgBadge /> : null}
+        </div>
         {scanFindings.length === 0 ? (
           <p className="text-muted">
             {scanRunning

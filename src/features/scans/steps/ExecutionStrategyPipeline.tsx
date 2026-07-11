@@ -6,8 +6,10 @@ import {
   executionStrategySteps,
   executionStrategyTitle,
   resolveExecutionStepStates,
+  type ExecutionPhaseId,
   type ExecutionStepState,
 } from "@/features/scans/executionStrategyPipeline";
+import { YazgBadge } from "@/shared/components";
 import type { ScanStatusDto } from "@/shared/ipc";
 
 type ExecutionStrategyPipelineProps = {
@@ -20,6 +22,19 @@ function stepMarker(state: ExecutionStepState, index: number): string {
   if (state === "done") return "✓";
   if (state === "failed") return "!";
   return String(index + 1);
+}
+
+function stepUsesYazg(
+  stepId: ExecutionPhaseId,
+  attackPlan: AttackPlanConfig,
+): boolean {
+  if (stepId === "judge" || stepId === "adaptive") {
+    return true;
+  }
+  if (stepId === "generate") {
+    return attackPlan.payloadStrategy.enableResponseAdaptation;
+  }
+  return false;
 }
 
 export function ExecutionStrategyPipeline({
@@ -46,6 +61,7 @@ export function ExecutionStrategyPipeline({
       >
         {steps.map((step, index) => {
           const state = states[index] ?? "pending";
+          const yazg = stepUsesYazg(step.id, attackPlan);
           return (
             <li
               key={step.id}
@@ -60,7 +76,10 @@ export function ExecutionStrategyPipeline({
                 {stepMarker(state, index)}
               </span>
               <div className="wizard-execution-pipeline__body">
-                <span className="wizard-execution-pipeline__label">{step.label}</span>
+                <span className="wizard-execution-pipeline__label-row">
+                  <span className="wizard-execution-pipeline__label">{step.label}</span>
+                  {yazg ? <YazgBadge /> : null}
+                </span>
                 {!compact && (
                   <span className="wizard-execution-pipeline__description text-sm text-muted">
                     {step.description}
