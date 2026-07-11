@@ -49,6 +49,10 @@ struct ProjectSummaryTarget {
     target_type: String,
     url: String,
     scan_count: usize,
+    /// Latest attack-scan status for this target (`none` when never scanned).
+    latest_scan_status: String,
+    /// Counts of attack-scan statuses on this target (e.g. completed/failed/running).
+    scan_status_counts: serde_json::Map<String, serde_json::Value>,
     finding_count: usize,
     severity_counts: serde_json::Map<String, serde_json::Value>,
 }
@@ -151,11 +155,12 @@ pub async fn project_summary_generate_op(
         }
     }
 
-    let mut scans_by_target: std::collections::HashMap<&str, usize> =
+    // Attack scans per target, newest first (list_by_project is created_at DESC).
+    let mut scans_by_target: std::collections::HashMap<&str, Vec<&aisec_storage::Scan>> =
         std::collections::HashMap::new();
     for scan in &attack_scans {
         if let Some(tid) = scan.target_id.as_deref() {
-            *scans_by_target.entry(tid).or_insert(0) += 1;
+            scans_by_target.entry(tid).or_default().push(scan);
         }
     }
 
@@ -185,11 +190,28 @@ pub async fn project_summary_generate_op(
                         }
                     }
                 }
+                let target_scans = scans_by_target.get(t.id.as_str());
+                let mut scan_status_counts = serde_json::Map::new();
+                if let Some(list) = target_scans {
+                    for scan in list {
+                        let key = scan.status.to_ascii_lowercase();
+                        let entry = scan_status_counts.entry(key).or_insert(json!(0));
+                        if let Some(n) = entry.as_u64() {
+                            *entry = json!(n + 1);
+                        }
+                    }
+                }
+                let latest_scan_status = target_scans
+                    .and_then(|list| list.first())
+                    .map(|scan| scan.status.to_ascii_lowercase())
+                    .unwrap_or_else(|| "none".into());
                 ProjectSummaryTarget {
                     name: t.name.clone(),
                     target_type: t.target_type.clone(),
                     url: extract_url(&t.descriptor_json),
-                    scan_count: scans_by_target.get(t.id.as_str()).copied().unwrap_or(0),
+                    scan_count: target_scans.map(|list| list.len()).unwrap_or(0),
+                    latest_scan_status,
+                    scan_status_counts,
                     finding_count: target_findings.map(|list| list.len()).unwrap_or(0),
                     severity_counts: target_severity,
                 }
@@ -416,6 +438,27 @@ fn fallback_summary(input: &ProjectSummaryInput) -> LlmProjectSummary {
             first.title, first.severity, first.target_name
         ));
     }
+
+    let failed_targets: Vec<&str> = input
+        .targets
+        .iter()
+        .filter(|t| {
+            t.latest_scan_status == "failed"
+                || t.scan_status_counts
+                    .get("failed")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0)
+                    > 0
+        })
+        .map(|t| t.name.as_str())
+        .collect();
+    if !failed_targets.is_empty() {
+        highlights.push(format!(
+            "Failed scan(s) on {} — investigate and re-run before trusting coverage",
+            failed_targets.join(", ")
+        ));
+    }
+
     highlights.push("Re-run attack scans after remediations to validate residual risk".into());
 
     LlmProjectSummary {

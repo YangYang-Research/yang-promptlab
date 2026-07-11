@@ -18,6 +18,15 @@ pub struct FindingSummaryInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttackResultsSummary {
     pub scan_status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_url: Option<String>,
+    /// Status counts for all attack scans on the same target.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub target_scan_status_counts: HashMap<String, usize>,
     pub total_findings: usize,
     pub severity_counts: HashMap<String, usize>,
     #[serde(default)]
@@ -65,6 +74,10 @@ pub fn build_attack_results_summary(
 
     AttackResultsSummary {
         scan_status: scan_status.into(),
+        scan_name: None,
+        target_name: None,
+        target_url: None,
+        target_scan_status_counts: HashMap::new(),
         total_findings: findings.len(),
         severity_counts,
         attack_categories: attack_categories.to_vec(),

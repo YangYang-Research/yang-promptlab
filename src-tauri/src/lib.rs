@@ -204,6 +204,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::environment::logs_list_files,
             commands::environment::logs_tail,
             commands::environment::logs_recent_events,
+            commands::environment::logs_emit,
             commands::environment::logs_open_folder,
             commands::db_health,
             commands::projects::project_create,

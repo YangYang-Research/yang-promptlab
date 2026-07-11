@@ -5,8 +5,10 @@ use std::path::PathBuf;
 use aisec_core::{
     ensure_environment, list_log_files, load_environment_config, read_log_tail, resolve_paths,
     save_environment_config, EnvironmentConfig, EnvironmentPaths, LogCategory, OcsfEvent,
+    OcsfSeverity,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use tauri::State;
 
 use crate::error::{CommandError, CommandResult};
@@ -178,6 +180,53 @@ pub async fn logs_recent_events(
     limit: Option<usize>,
 ) -> CommandResult<Vec<OcsfEvent>> {
     Ok(state.event_ring().recent(limit.unwrap_or(200)))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogsEmitRequest {
+    pub category: LogCategory,
+    pub severity: Option<OcsfSeverity>,
+    pub activity_name: String,
+    pub module: Option<String>,
+    pub component: Option<String>,
+    pub message: String,
+    pub project_id: Option<String>,
+    pub scan_id: Option<String>,
+    #[serde(default)]
+    pub attributes: Map<String, Value>,
+}
+
+/// Frontend → EventBus publish for Live logs (Settings → Troubleshooting).
+#[tauri::command]
+pub async fn logs_emit(
+    state: State<'_, AppState>,
+    request: LogsEmitRequest,
+) -> CommandResult<()> {
+    let activity = request.activity_name.trim();
+    let message = request.message.trim();
+    if activity.is_empty() || message.is_empty() {
+        return Err(CommandError::invalid_input(
+            "activityName and message are required",
+        ));
+    }
+
+    let mut event = OcsfEvent::new(
+        request.category,
+        request.severity.unwrap_or(OcsfSeverity::Informational),
+        activity,
+        request.module.unwrap_or_else(|| "promptlab-desktop".into()),
+        request.component.unwrap_or_else(|| "ui".into()),
+        message,
+    )
+    .with_context(None, request.project_id, request.scan_id);
+
+    for (key, value) in request.attributes {
+        event = event.attr(key, value);
+    }
+
+    state.event_bus().publish(event);
+    Ok(())
 }
 
 #[tauri::command]

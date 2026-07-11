@@ -48,6 +48,7 @@ import {
   IMPORT_VERIFY_RETRY_DELAY_MS,
   sleep,
 } from "../importHarness";
+import { logWizardEvent } from "../wizardLiveLog";
 
 type AuthVerificationStepProps = {
   targetId: string;
@@ -225,6 +226,16 @@ export function AuthVerificationStep({
     setVerifyResultMessage(null);
     onError(null);
 
+    logWizardEvent({
+      category: "authentication",
+      activityName: skipStep1 ? "verify_ai_start" : "verify_auth_start",
+      message: skipStep1
+        ? "Starting endpoint analysis (Yazg)"
+        : "Starting connectivity / authentication probe",
+      component: "AuthVerificationStep",
+      attributes: { targetId, skipStep1, quietToasts },
+    });
+
     let log: VerificationLogLine[] = skipStep1 ? [...verificationLogRef.current] : [];
     const publishLog = () => onVerificationLog([...log]);
     const append = (message: string) => {
@@ -290,10 +301,25 @@ export function AuthVerificationStep({
               errorMessage: connect.message,
             },
           });
+          logWizardEvent({
+            category: "authentication",
+            severity: "medium",
+            activityName: "verify_auth_fail",
+            message: connect.message,
+            component: "AuthVerificationStep",
+            attributes: { targetId },
+          });
           return { ok: false, message: connect.message };
         }
 
         step1PassedRef.current = { key: probeKey };
+        logWizardEvent({
+          category: "authentication",
+          activityName: "verify_auth_ok",
+          message: "Connectivity / authentication probe succeeded",
+          component: "AuthVerificationStep",
+          attributes: { targetId },
+        });
       }
 
       activePhase = "ai";
@@ -320,6 +346,13 @@ export function AuthVerificationStep({
         onError(null);
         if (!quietToasts) notify(result.message, "success");
         onVerifySuccess?.();
+        logWizardEvent({
+          category: "authentication",
+          activityName: "verify_ai_ok",
+          message: result.message || "Endpoint verified as an AI system",
+          component: "AuthVerificationStep",
+          attributes: { targetId },
+        });
         return { ok: true, message: result.message };
       }
 
@@ -327,6 +360,14 @@ export function AuthVerificationStep({
       activePhase = "failed_ai";
       onError(result.message);
       if (!quietToasts) notify(result.message, "error");
+      logWizardEvent({
+        category: "authentication",
+        severity: "medium",
+        activityName: "verify_ai_fail",
+        message: result.message,
+        component: "AuthVerificationStep",
+        attributes: { targetId },
+      });
       return { ok: false, message: result.message };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Verification failed";
@@ -384,6 +425,14 @@ export function AuthVerificationStep({
             );
             verificationLogRef.current = next;
             onVerificationLog(next);
+            logWizardEvent({
+              category: "harness",
+              severity: "low",
+              activityName: "import_verify_retry",
+              message: `Import verification retry ${attempt + 1}/${autoVerifyMaxAttempts}`,
+              component: "AuthVerificationStep",
+              attributes: { targetId, attempt, maxAttempts: autoVerifyMaxAttempts },
+            });
           }
           await sleep(IMPORT_VERIFY_RETRY_DELAY_MS);
         }

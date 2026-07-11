@@ -73,3 +73,59 @@ export const getRecentLogEvents = (limit?: number) =>
   invokeCommand<OcsfEventDto[]>("logs_recent_events", { limit: limit ?? null });
 
 export const openLogsFolder = () => invokeCommand<void>("logs_open_folder");
+
+export type LiveLogCategory =
+  | "application"
+  | "system"
+  | "runtime"
+  | "models"
+  | "authentication"
+  | "harness"
+  | "planner"
+  | "payload_generator"
+  | "attack_engine"
+  | "judge"
+  | "workspace"
+  | "projects"
+  | "plugins"
+  | "settings"
+  | "user_interface"
+  | "scan";
+
+export type LiveLogSeverity =
+  | "informational"
+  | "low"
+  | "medium"
+  | "high"
+  | "critical";
+
+export type EmitLiveLogRequest = {
+  category: LiveLogCategory;
+  severity?: LiveLogSeverity;
+  activityName: string;
+  message: string;
+  module?: string;
+  component?: string;
+  projectId?: string | null;
+  scanId?: string | null;
+  attributes?: Record<string, unknown>;
+};
+
+/** Fire-and-forget publish into Settings → Troubleshooting live logs. */
+export function emitLiveLog(request: EmitLiveLogRequest): void {
+  void invokeCommand<void>("logs_emit", {
+    request: {
+      category: request.category,
+      severity: request.severity ?? null,
+      activityName: request.activityName,
+      message: request.message,
+      module: request.module ?? null,
+      component: request.component ?? null,
+      projectId: request.projectId ?? null,
+      scanId: request.scanId ?? null,
+      attributes: request.attributes ?? {},
+    },
+  }).catch(() => {
+    // Live logs must never block wizard UX (mock mode / IPC unavailable).
+  });
+}

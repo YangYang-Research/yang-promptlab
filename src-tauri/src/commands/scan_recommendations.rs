@@ -1,7 +1,7 @@
 //! AI-backed remediation recommendations for scan results (wizard step 6).
 
 use aisec_report::{generate_recommendations, data::StorageFindingRow};
-use aisec_storage::{Finding, FindingRepository, ScanRepository, UpdateScan};
+use aisec_storage::{Finding, FindingRepository, ScanRepository, TargetRepository, UpdateScan};
 use aisec_target_profile::{
     build_attack_results_summary, generate_attack_recommendations_with_llm, AttackRecommendation,
     AttackRecommendationsBundle, FindingSummaryInput,
@@ -12,6 +12,7 @@ use tracing::warn;
 
 use crate::error::CommandResult;
 use crate::inference_host::{is_inference_ready, HostAttackRecommendLlm};
+use crate::session_auth::seed_url_from_descriptor;
 use crate::state::AppState;
 
 const PLAYBOOK_RECOMMENDATIONS_KEY: &str = "recommendations";
@@ -71,11 +72,31 @@ pub async fn scan_recommendations_generate_op(
 
     let summary_inputs: Vec<FindingSummaryInput> =
         findings.iter().map(finding_to_summary).collect();
-    let summary = build_attack_results_summary(
+    let mut summary = build_attack_results_summary(
         &scan.status,
         &request.attack_categories,
         &summary_inputs,
     );
+    summary.scan_name = Some(scan.name.clone());
+
+    if let Some(target_id) = scan.target_id.as_deref() {
+        if let Ok(target) = repos.targets().get(target_id).await {
+            summary.target_name = Some(target.name);
+            summary.target_url = seed_url_from_descriptor(&target.descriptor_json);
+        }
+
+        if let Ok(project_scans) = repos.scans().list_by_project(&scan.project_id).await {
+            for sibling in project_scans.iter().filter(|s| {
+                s.target_id.as_deref() == Some(target_id)
+                    && (s.name.starts_with("Scan (") || s.name.starts_with("Agent Scan ("))
+            }) {
+                *summary
+                    .target_scan_status_counts
+                    .entry(sibling.status.to_ascii_lowercase())
+                    .or_insert(0) += 1;
+            }
+        }
+    }
 
     let bundle = {
         let inference = state.inference_manager().lock().await;
