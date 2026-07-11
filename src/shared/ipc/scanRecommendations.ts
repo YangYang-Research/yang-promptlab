@@ -8,6 +8,7 @@ export type AttackRecommendationDto = {
 
 export type ScanRecommendationsResponse = {
   source: "ai" | "fallback";
+  overview: string;
   recommendations: AttackRecommendationDto[];
 };
 

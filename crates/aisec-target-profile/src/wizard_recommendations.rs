@@ -32,8 +32,15 @@ pub struct AttackRecommendation {
     pub priority: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttackRecommendationsBundle {
+    pub overview: String,
+    pub recommendations: Vec<AttackRecommendation>,
+}
+
 #[derive(Debug, Deserialize)]
 struct LlmRecommendationsResponse {
+    overview: String,
     recommendations: Vec<LlmRecommendationItem>,
 }
 
@@ -68,7 +75,7 @@ pub fn build_attack_results_summary(
 pub async fn generate_attack_recommendations_with_llm(
     summary: &AttackResultsSummary,
     llm: &impl PlannerLlm,
-) -> PlannerResult<Vec<AttackRecommendation>> {
+) -> PlannerResult<AttackRecommendationsBundle> {
     let summary_json = serde_json::to_string(summary)
         .map_err(|e| PlannerError::Llm(format!("failed to serialize findings summary: {e}")))?;
     let prompt = PromptRegistry::attack_results_recommend_user(&summary_json);
@@ -76,10 +83,17 @@ pub async fn generate_attack_recommendations_with_llm(
     parse_attack_recommendations(&raw)
 }
 
-fn parse_attack_recommendations(raw: &str) -> PlannerResult<Vec<AttackRecommendation>> {
+pub fn parse_attack_recommendations(raw: &str) -> PlannerResult<AttackRecommendationsBundle> {
     let json_str = extract_json_object(raw)?;
     let parsed: LlmRecommendationsResponse = serde_json::from_str(&json_str)
         .map_err(|e| PlannerError::Llm(format!("invalid recommendations JSON: {e}")))?;
+
+    let overview = parsed.overview.trim();
+    if overview.is_empty() {
+        return Err(PlannerError::Llm(
+            "recommendations overview must not be empty".into(),
+        ));
+    }
 
     if parsed.recommendations.is_empty() {
         return Err(PlannerError::Llm(
@@ -103,7 +117,10 @@ fn parse_attack_recommendations(raw: &str) -> PlannerResult<Vec<AttackRecommenda
         });
     }
 
-    Ok(out)
+    Ok(AttackRecommendationsBundle {
+        overview: overview.into(),
+        recommendations: out,
+    })
 }
 
 fn normalize_priority(raw: &str) -> String {
@@ -189,10 +206,11 @@ mod tests {
 
     #[test]
     fn parse_recommendations_from_json() {
-        let raw = r#"{"recommendations":[{"title":"Guardrails","description":"Add input filters.","priority":"critical"}]}"#;
-        let recs = parse_attack_recommendations(raw).unwrap();
-        assert_eq!(recs.len(), 1);
-        assert_eq!(recs[0].title, "Guardrails");
-        assert_eq!(recs[0].priority, "critical");
+        let raw = r#"{"overview":"Scan found critical injection risk.","recommendations":[{"title":"Guardrails","description":"Add input filters.","priority":"critical"}]}"#;
+        let bundle = parse_attack_recommendations(raw).unwrap();
+        assert_eq!(bundle.overview, "Scan found critical injection risk.");
+        assert_eq!(bundle.recommendations.len(), 1);
+        assert_eq!(bundle.recommendations[0].title, "Guardrails");
+        assert_eq!(bundle.recommendations[0].priority, "critical");
     }
 }

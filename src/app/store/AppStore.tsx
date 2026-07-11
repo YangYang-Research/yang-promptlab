@@ -1,5 +1,4 @@
 import {
-  createContext,
   useCallback,
   useContext,
   useEffect,
@@ -37,6 +36,7 @@ import {
   deriveAttackRuns,
 } from "@/shared/dashboardDerived";
 
+import { AppStoreContext } from "./AppStoreContext";
 import {
   mapFindings,
   mapProjects,
@@ -147,8 +147,6 @@ function appReducer(state: AppDataState, action: AppAction): AppDataState {
   }
 }
 
-const AppStoreContext = createContext<AppStoreValue | null>(null);
-
 type AppStoreProviderProps = {
   children: ReactNode;
 };
@@ -172,8 +170,8 @@ async function loadAll(): Promise<LoadedData> {
   const findingDtos: FindingDto[] = findingGroups;
 
   const projects = mapProjects(projectDtos, targetDtos, findingDtos);
-  const targets = mapTargets(targetDtos);
   const scans = mapScans(scanDtos);
+  const targets = mapTargets(targetDtos, scans);
   const findings = mapFindings(findingDtos, targetDtos);
 
   const runningIds = scans

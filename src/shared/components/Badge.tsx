@@ -44,22 +44,25 @@ export function TargetScanStatusBadge({ label }: { label: TargetScanStatusLabel 
 }
 
 export function StatusBadge({ status }: { status: string }) {
+  const normalized = status.toLowerCase();
   const variant =
-    status === "running"
+    normalized === "running"
       ? "info"
-      : status === "paused" || status === "draft"
+      : normalized === "paused" || normalized === "draft" || normalized === "pending"
         ? "warning"
-      : status === "completed" || status === "installed" || status === "registered"
+      : normalized === "completed" ||
+          normalized === "installed" ||
+          normalized === "registered" ||
+          normalized === "verified" ||
+          normalized === "scanned"
         ? "success"
-        : status === "failed" || status === "error"
+        : normalized === "failed" || normalized === "error"
           ? "danger"
-          : status === "cancelled"
+          : normalized === "cancelled"
             ? "muted"
-          : status === "pending"
-            ? "warning"
-          : status === "available"
+          : normalized === "available"
             ? "muted"
             : "default";
 
-  return <Badge variant={variant}>{status.replace("_", " ")}</Badge>;
+  return <Badge variant={variant}>{status.replace(/_/g, " ")}</Badge>;
 }

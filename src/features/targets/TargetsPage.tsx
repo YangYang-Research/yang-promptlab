@@ -13,6 +13,7 @@ import {
   PageHeader,
   Pagination,
   RefreshButton,
+  StatusBadge,
 } from "@/shared/components";
 import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
 import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
@@ -101,6 +102,12 @@ export function TargetsPage() {
     },
     {
       key: "status",
+      header: "Status",
+      width: "110px",
+      render: (target: FlatTargetRow) => <StatusBadge status={target.status} />,
+    },
+    {
+      key: "scanStatus",
       header: "Scan Status",
       width: "120px",
       render: (target: FlatTargetRow) => target.scanContext.scanStatusLabel,
@@ -175,6 +182,7 @@ export function TargetsPage() {
                     { label: "Project", value: target.projectName },
                     { label: "URL", value: <span className="mono text-sm">{target.url}</span> },
                     { label: "Authentication", value: target.authType },
+                    { label: "Status", value: <StatusBadge status={target.status} /> },
                     { label: "Scan Status", value: target.scanContext.scanStatusLabel },
                     { label: "Latest Result", value: target.scanContext.latestScanResult },
                   ]}

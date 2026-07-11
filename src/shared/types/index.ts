@@ -2,6 +2,9 @@ export type Severity = "critical" | "high" | "medium" | "low" | "info";
 
 export type JobStatus = "pending" | "draft" | "running" | "paused" | "completed" | "failed" | "cancelled";
 
+/** Lifecycle status for a target (derived from verification + scan history). */
+export type TargetStatus = "pending" | "verified" | "scanned";
+
 export type ProjectStatus = "active" | "archived" | "draft";
 
 export type TargetType = "web" | "api" | "llm" | "mobile";
@@ -41,7 +44,7 @@ export type Target = {
   type: TargetType;
   /** Human label from saved target profile provider (e.g. OpenRouter). */
   providerLabel: string | null;
-  status: JobStatus;
+  status: TargetStatus;
   createdAt: string;
   lastScanAt: string | null;
   fingerprint: string | null;

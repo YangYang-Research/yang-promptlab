@@ -255,11 +255,23 @@ export function applyWizardEntryStep(
   if (!step) return session;
 
   if (step === 2) {
-    const projectId = session.selectedProjectId;
+    // New-target flow: blank step 2.
+    if (!session.savedTargetId) {
+      const projectId = session.selectedProjectId;
+      return {
+        ...createInitialSession(projectId),
+        currentStep: 2,
+        selectedProjectId: projectId,
+      };
+    }
+    // Existing target (e.g. New Scan from target details): keep target, clear prior run state.
     return {
-      ...createInitialSession(projectId),
+      ...session,
       currentStep: 2,
-      selectedProjectId: projectId,
+      draftScanId: null,
+      submittedScanId: null,
+      attackPlan: null,
+      attackPlanUi: createInitialAttackPlanUi(),
     };
   }
 

@@ -35,6 +35,7 @@ import {
   parseAttackPlaybook,
   profileLabel,
 } from "@/features/scans/scanPlaybook";
+import { ScanRecommendationsPanel } from "@/features/scans/ScanRecommendationsPanel";
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
 import {
   buildScanProgressUrl,
@@ -527,6 +528,20 @@ export function ScanDetailsPage() {
                 )}
               </div>
             </div>
+          </Card>
+        </section>
+      )}
+
+      {scan && isMonitorableAttackScan(scan) && (
+        <section className="scan-details__recommendations" aria-label="Recommendations">
+          <Card className="detail-section">
+            <ScanRecommendationsPanel
+              scanId={scanId}
+              attackCategories={playbook?.categories ?? []}
+              enabled={!loading && Boolean(detail)}
+              titleAs="h2"
+              className="scan-details__recommendations-panel"
+            />
           </Card>
         </section>
       )}

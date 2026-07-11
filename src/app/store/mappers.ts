@@ -16,6 +16,10 @@ import type {
   Target,
   TargetType,
 } from "@/shared/types";
+import {
+  deriveTargetLastScanAt,
+  deriveTargetStatus,
+} from "@/shared/targetScanContext";
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
 const FINDING_STATUSES: Finding["status"][] = ["open", "confirmed", "false_positive", "fixed"];
@@ -109,7 +113,7 @@ export function mapProjects(
   }));
 }
 
-export function mapTargets(targets: TargetDto[]): Target[] {
+export function mapTargets(targets: TargetDto[], scans: ScanRun[] = []): Target[] {
   return targets.map((t) => ({
     id: t.id,
     projectId: t.project_id,
@@ -117,9 +121,9 @@ export function mapTargets(targets: TargetDto[]): Target[] {
     url: extractTargetUrl(t.descriptor),
     type: coerceTargetType(t.target_type),
     providerLabel: extractTargetProviderLabel(t.profile),
-    status: "pending",
+    status: deriveTargetStatus(t.profile, t.id, scans),
     createdAt: t.created_at,
-    lastScanAt: null,
+    lastScanAt: deriveTargetLastScanAt(t.id, scans),
     fingerprint: null,
     tags: [],
     authType: extractAuthType(t.descriptor),

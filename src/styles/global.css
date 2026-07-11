@@ -4283,22 +4283,28 @@ a:hover {
 .wizard-results__recommendations-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 .wizard-results__recommendations-title {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 0.625rem;
   margin: 0;
   font-size: var(--text-sm);
   font-weight: 600;
+  letter-spacing: 0.01em;
 }
 .wizard-results__recommendations-icon {
-  width: 1rem;
-  height: 1rem;
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
   color: var(--color-accent);
+}
+.wizard-results__recommendations-overview {
+  margin: 0 0 var(--space-3);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--text);
 }
 .wizard-results__recommendations-meta {
   margin: 0 0 var(--space-3);
@@ -4322,6 +4328,15 @@ a:hover {
   align-items: center;
   gap: var(--space-2);
   margin-bottom: var(--space-2);
+}
+.scan-details__recommendations-panel {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.scan-details__recommendations .detail-section__title,
+.scan-details__recommendations .wizard-results__recommendations-title {
+  font-size: inherit;
 }
 .wizard-results__recommendation-name {
   font-weight: 600;
@@ -6074,6 +6089,50 @@ a:hover {
 
 .detail-list-row--scans {
   grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.detail-list-row__main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.detail-list-row__id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.target-details__scan-list > li {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.target-details__scan-list > li:last-child {
+  border-bottom: none;
+}
+
+.target-details__scan-list .detail-list-row {
+  width: 100%;
+  margin: 0;
+  padding: 0.625rem 0;
+  border: none;
+  border-bottom: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.target-details__scan-list .detail-list-row:hover .detail-list-row__title {
+  color: var(--accent);
+}
+
+.target-details__scan-list .detail-list-row:focus-visible {
+  outline: 2px solid var(--accent, #6ea8fe);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .detail-section__header {

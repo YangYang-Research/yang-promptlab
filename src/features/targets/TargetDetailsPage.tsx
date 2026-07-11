@@ -25,12 +25,16 @@ import {
   buildTargetScanContext,
   formatTargetTimestamp,
 } from "@/shared/targetScanContext";
-import { resolveTargetScanAction, type TargetScanAction } from "@/shared/targetScanAction";
+import { resolveTargetScanAction } from "@/shared/targetScanAction";
 import { useToast } from "@/shared/notifications";
 import type { ScanRun } from "@/shared/types";
 
 function isAttackScan(scan: ScanRun): boolean {
-  return scan.name.startsWith("Scan (");
+  return scan.name.startsWith("Scan (") || scan.name.startsWith("Agent Scan (");
+}
+
+function isLiveScan(scan: ScanRun): boolean {
+  return scan.status === "running" || scan.status === "paused" || scan.status === "pending";
 }
 
 export function TargetDetailsPage() {
@@ -73,17 +77,15 @@ export function TargetDetailsPage() {
     [targetScans],
   );
 
-  const recentAttackScans = useMemo(
-    () => attackScans.slice(0, 5),
+  const runningScan = useMemo(
+    () => attackScans.find(isLiveScan) ?? null,
     [attackScans],
   );
 
   const handleDeleteTarget = useCallback(async () => {
     if (!target) return;
     const hasActiveScan = scans.some(
-      (scan) =>
-        scan.targetId === target.id &&
-        (scan.status === "running" || scan.status === "paused" || scan.status === "pending"),
+      (scan) => scan.targetId === target.id && isLiveScan(scan),
     );
     const confirmed = window.confirm(
       hasActiveScan
@@ -104,6 +106,11 @@ export function TargetDetailsPage() {
     }
   }, [actions, navigate, notify, scans, target]);
 
+  const startNewScan = useCallback(() => {
+    if (!target) return;
+    navigate(buildScanWizardUrl(target.projectId, target.id, { step: 2 }));
+  }, [navigate, target]);
+
   const actionItems = useMemo((): ActionsDropdownItem[] => {
     if (!target || !scanAction) return [];
 
@@ -111,16 +118,10 @@ export function TargetDetailsPage() {
 
     if (scanAction.kind === "view_scan") {
       items.push({
-        id: "view-scan",
+        id: "view-progress",
         label: "View Scan Progress",
         onClick: () =>
           navigate(buildScanProgressUrl(target.projectId, scanAction.scanId, target.id)),
-      });
-    } else if (scanAction.kind === "view_report") {
-      items.push({
-        id: "view-scan",
-        label: "View Scan Details",
-        onClick: () => navigate(`/scans/${scanAction.scanId}`),
       });
     } else if (scanAction.kind === "retry") {
       items.push({
@@ -134,7 +135,7 @@ export function TargetDetailsPage() {
             }),
           ),
       });
-    } else {
+    } else if (scanAction.kind === "setup") {
       items.push({
         id: "continue-setup",
         label: "Continue Setup",
@@ -147,13 +148,6 @@ export function TargetDetailsPage() {
           ),
       });
     }
-
-    items.push({
-      id: "new-scan",
-      label: "New Scan",
-      onClick: () =>
-        navigate(buildScanWizardUrl(target.projectId, target.id, { step: 2 })),
-    });
 
     if (project) {
       items.push({
@@ -192,9 +186,28 @@ export function TargetDetailsPage() {
     );
   }
 
-  const primaryScanCta = scanAction
-    ? primaryScanAction(scanAction, target, navigate, scanContext.scanStatusLabel)
-    : null;
+  const primaryCta =
+    runningScan != null
+      ? {
+          label: "View Scan Progress",
+          onClick: () =>
+            navigate(buildScanProgressUrl(target.projectId, runningScan.id, target.id)),
+        }
+      : scanAction?.kind === "setup" && scanContext.scanStatusLabel !== "Never Scanned"
+        ? {
+            label: "Continue setup",
+            onClick: () =>
+              navigate(
+                buildScanWizardUrl(target.projectId, target.id, {
+                  step: scanAction.step,
+                  scanId: scanAction.scanId,
+                }),
+              ),
+          }
+        : {
+            label: "New scan",
+            onClick: startNewScan,
+          };
 
   return (
     <div className="page target-details">
@@ -204,11 +217,9 @@ export function TargetDetailsPage() {
         title={target.name}
         actions={
           <div className="page-actions">
-            {primaryScanCta ? (
-              <Button variant="primary" onClick={primaryScanCta.onClick}>
-                {primaryScanCta.label}
-              </Button>
-            ) : null}
+            <Button variant="primary" onClick={primaryCta.onClick}>
+              {primaryCta.label}
+            </Button>
             <ActionsDropdown
               label="Target actions"
               disabled={deleting}
@@ -282,58 +293,39 @@ export function TargetDetailsPage() {
               <p className="detail-section__hint">
                 {attackScans.length === 0
                   ? "Run a scan to test this target."
-                  : `Showing ${Math.min(recentAttackScans.length, 5)} of ${attackScans.length} scans`}
+                  : `${attackScans.length} scan${attackScans.length === 1 ? "" : "s"} for this target`}
               </p>
-            </div>
-            <div className="detail-section__header-actions">
-              {attackScans.length > 0 ? (
-                <Link to="/scans" className="link">
-                  View all
-                </Link>
-              ) : null}
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() =>
-                  navigate(buildScanWizardUrl(target.projectId, target.id, { step: 2 }))
-                }
-              >
-                New scan
-              </Button>
             </div>
           </div>
 
-          {recentAttackScans.length === 0 ? (
+          {attackScans.length === 0 ? (
             <EmptyState
               title="No attack scans yet"
               description="Start a scan to run security tests against this target."
               action={
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() =>
-                    navigate(buildScanWizardUrl(target.projectId, target.id, { step: 2 }))
-                  }
-                >
+                <Button variant="primary" size="sm" onClick={startNewScan}>
                   Start scan
                 </Button>
               }
             />
           ) : (
-            <ul className="detail-list">
-              {recentAttackScans.map((scan) => (
-                <li key={scan.id} className="detail-list-row detail-list-row--scans">
+            <ul className="detail-list target-details__scan-list">
+              {attackScans.map((scan) => (
+                <li key={scan.id}>
                   <button
                     type="button"
-                    className="detail-list-link detail-list-row__title"
+                    className="detail-list-row detail-list-row--scans target-details__scan-hit"
                     onClick={() => navigate(`/scans/${scan.id}`)}
                   >
-                    {scan.name}
+                    <span className="detail-list-row__main">
+                      <span className="detail-list-row__title">{scan.name}</span>
+                      <span className="detail-list-row__id mono text-sm text-muted">{scan.id}</span>
+                    </span>
+                    <StatusBadge status={scan.status} />
+                    <span className="text-muted text-sm detail-list-row__meta">
+                      {formatTimestamp(scan.startedAt ?? scan.createdAt)}
+                    </span>
                   </button>
-                  <StatusBadge status={scan.status} />
-                  <span className="text-muted text-sm detail-list-row__meta">
-                    {formatTimestamp(scan.startedAt ?? scan.createdAt)}
-                  </span>
                 </li>
               ))}
             </ul>
@@ -361,62 +353,4 @@ function DetailRow({
       </span>
     </div>
   );
-}
-
-function primaryScanAction(
-  action: TargetScanAction,
-  target: { id: string; projectId: string },
-  navigate: (path: string) => void,
-  scanStatusLabel: string,
-): { label: string; onClick: () => void } {
-  if (action.kind === "view_scan") {
-    return {
-      label: "View Scan Progress",
-      onClick: () =>
-        navigate(buildScanProgressUrl(target.projectId, action.scanId, target.id)),
-    };
-  }
-  if (action.kind === "view_report") {
-    return {
-      label: "View Scan Details",
-      onClick: () => navigate(`/scans/${action.scanId}`),
-    };
-  }
-  if (action.kind === "retry") {
-    return {
-      label: "Retry scan",
-      onClick: () =>
-        navigate(
-          buildScanWizardUrl(target.projectId, target.id, {
-            step: action.step,
-            scanId: action.scanId,
-          }),
-        ),
-    };
-  }
-  if (action.kind === "setup" && scanStatusLabel === "Never Scanned") {
-    return {
-      label: "New scan",
-      onClick: () =>
-        navigate(buildScanWizardUrl(target.projectId, target.id, { step: 2 })),
-    };
-  }
-  if (action.kind === "setup") {
-    return {
-      label: "Continue setup",
-      onClick: () =>
-        navigate(
-          buildScanWizardUrl(target.projectId, target.id, {
-            step: action.step,
-            scanId: action.scanId,
-          }),
-        ),
-    };
-  }
-
-  return {
-    label: "New scan",
-    onClick: () =>
-      navigate(buildScanWizardUrl(target.projectId, target.id, { step: 2 })),
-  };
 }

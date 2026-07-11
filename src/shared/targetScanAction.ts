@@ -21,7 +21,7 @@ function findDraftScan(targetId: string, projectId: string, scans: ScanRun[]): S
 }
 
 function isAttackScan(scan: ScanRun): boolean {
-  return scan.name.startsWith("Scan (");
+  return scan.name.startsWith("Scan (") || scan.name.startsWith("Agent Scan (");
 }
 
 function latestAttackScan(targetId: string, scans: ScanRun[]): ScanRun | null {
