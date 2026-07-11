@@ -24,7 +24,7 @@ export const VERIFICATION_PIPELINE_STEPS: VerificationPipelineStep[] = [
   },
   {
     id: "ai",
-    label: "Verify AI API Endpoint",
+    label: "Analyze Endpoint",
     description: "Use Yazg to confirm the response is from a generative AI system",
   },
 ];
@@ -43,8 +43,8 @@ export function authSegmentLabel(state: VerificationSegmentState): string {
   return state === "active" ? AUTH_SEGMENT_ACTIVE_LABEL : AUTH_SEGMENT_LABEL;
 }
 
-export const AI_SEGMENT_LABEL = "Verify AI API Endpoint";
-export const AI_SEGMENT_ACTIVE_LABEL = "Analyzing AI API Endpoint with Yazg…";
+export const AI_SEGMENT_LABEL = "Analyze Endpoint";
+export const AI_SEGMENT_ACTIVE_LABEL = "Analyzing Endpoint with Yazg…";
 
 export function aiSegmentLabel(state: VerificationSegmentState): string {
   return state === "active" ? AI_SEGMENT_ACTIVE_LABEL : AI_SEGMENT_LABEL;

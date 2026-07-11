@@ -2,7 +2,7 @@ import { isLikelyAuthHeader } from "./targetDescriptor";
 import type { VerificationConsoleEntryDto } from "./targetProfile";
 
 export const VERIFICATION_LOG_START_AUTH = "Start verify authentication";
-export const VERIFICATION_LOG_START_AI = "Start verify AI API Endpoint";
+export const VERIFICATION_LOG_START_AI = "Start Analyze Endpoint";
 
 export type VerificationLogResponseKind = "connectivity" | "ai_validation" | "error";
 

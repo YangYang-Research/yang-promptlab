@@ -103,7 +103,7 @@ export function TargetProfileStep({
         </label>
 
         <label className="field wizard-target-form__endpoint">
-          <span className="field__label">AI API Endpoint</span>
+          <span className="field__label">Endpoint</span>
           <input
             className="input wizard-target-form__mono"
             type="url"

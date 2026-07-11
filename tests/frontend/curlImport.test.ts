@@ -4,6 +4,7 @@ import {
   bodyToRequestTemplate,
   curlToProfilePatch,
   parseCurl,
+  targetFormAuthFromHeaders,
   tokenizeCurl,
 } from "@/features/scans/curlImport";
 import { PROMPT_PLACEHOLDER } from "@/features/scans/targetProfile";
@@ -94,5 +95,28 @@ describe("curlToProfilePatch", () => {
     expect(result.patch.path).toBe("/api/v1/chat/completions");
     expect(result.patch.requestTemplate).toContain(PROMPT_PLACEHOLDER);
     expect(result.patch.requestTemplate).toContain("google/gemini-2.5-flash-lite");
+  });
+});
+
+describe("targetFormAuthFromHeaders", () => {
+  it("maps Bearer Authorization to JWT auth", () => {
+    expect(
+      targetFormAuthFromHeaders({
+        Authorization: "Bearer sk-test",
+        "Content-Type": "application/json",
+      }),
+    ).toMatchObject({
+      authKind: "jwt",
+      jwtToken: "sk-test",
+      jwtPrefix: "Bearer ",
+    });
+  });
+
+  it("maps x-api-key to API key auth", () => {
+    expect(targetFormAuthFromHeaders({ "x-api-key": "secret" })).toMatchObject({
+      authKind: "api_key",
+      apiKeyHeaderName: "x-api-key",
+      apiKeyValue: "secret",
+    });
   });
 });

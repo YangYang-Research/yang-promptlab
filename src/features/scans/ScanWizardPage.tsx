@@ -673,11 +673,11 @@ export function ScanWizardPage() {
   const pageHeaderDescription = showScanContextHeader ? (
     targetEndpointUrl ? (
       <span className="wizard-planner-summary page-header__endpoint-summary">
-        <strong>AI API Endpoint:</strong>{" "}
+        <strong>Endpoint:</strong>{" "}
         <span className="wizard-planner-summary__url mono">{targetEndpointUrl}</span>
       </span>
     ) : (
-      "AI API Endpoint"
+      "Endpoint"
     )
   ) : (
     "Configure a new security scan"

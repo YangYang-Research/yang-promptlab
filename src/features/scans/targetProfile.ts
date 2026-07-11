@@ -255,11 +255,11 @@ export function profileToPayload(form: TargetProfileFormState): Record<string, u
 
 export function validateTargetProfile(form: TargetProfileFormState): string | null {
   const endpoint = formatApiEndpoint(form);
-  if (!endpoint.trim()) return "AI API Endpoint is required.";
+  if (!endpoint.trim()) return "Endpoint is required.";
   try {
     new URL(endpoint);
   } catch {
-    return "Enter a valid AI API Endpoint URL (e.g. https://api.openai.com/v1/chat/completions).";
+    return "Enter a valid Endpoint URL (e.g. https://api.openai.com/v1/chat/completions).";
   }
   if (!form.requestTemplate.includes(form.promptPlaceholder || PROMPT_PLACEHOLDER)) {
     return `Request template must contain ${PROMPT_PLACEHOLDER}.`;

@@ -3755,6 +3755,18 @@ a:hover {
   margin-top: 0.25rem;
 }
 
+.add-target-modal__mode-toggle {
+  margin-bottom: 0;
+  align-self: flex-start;
+}
+
+.add-target-modal__import-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 /* Scan wizard — step 1 (project) */
 .wizard-step {
   display: flex;

@@ -30,13 +30,13 @@ export const WIZARD_STEPS: WizardStepDefinition[] = [
     id: 3,
     label: "Authentication",
     title: "Authentication & verification",
-    hint: "Configure credentials, then verify the AI API endpoint with Yazg",
+    hint: "Configure credentials, then verify the endpoint with Yazg",
   },
   {
     id: 4,
     label: "Attack Plan",
     title: "Attack Plan",
-    hint: "Yazg analyzes your AI API Endpoint and builds an attack plan — review and adjust before running.",
+    hint: "Yazg analyzes your Endpoint and builds an attack plan — review and adjust before running.",
   },
   {
     id: 5,

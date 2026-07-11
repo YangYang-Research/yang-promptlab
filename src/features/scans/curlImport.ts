@@ -1,3 +1,4 @@
+import type { TargetFormState } from "./targetDescriptor";
 import {
   PROMPT_PLACEHOLDER,
   applyApiEndpointToProfile,
@@ -403,6 +404,56 @@ function filterHeaders(headers: Record<string, string>): Record<string, string> 
     filtered["Content-Type"] = "application/json";
   }
   return filtered;
+}
+
+/** Map curl/profile headers into Add Target auth form fields. */
+export function targetFormAuthFromHeaders(
+  headers: Record<string, string>,
+): Partial<TargetFormState> {
+  const entries = Object.entries(headers);
+  const authorization = entries.find(([name]) => name.toLowerCase() === "authorization");
+  if (authorization) {
+    const value = authorization[1] ?? "";
+    if (/^bearer\s+/i.test(value)) {
+      return {
+        authKind: "jwt",
+        jwtToken: value.replace(/^bearer\s+/i, "").trim(),
+        jwtHeaderName: "Authorization",
+        jwtPrefix: "Bearer ",
+        jwtVaultMissing: false,
+      };
+    }
+    if (/^basic\s+/i.test(value)) {
+      try {
+        const decoded = atob(value.replace(/^basic\s+/i, "").trim());
+        const sep = decoded.indexOf(":");
+        return {
+          authKind: "basic",
+          basicUsername: sep >= 0 ? decoded.slice(0, sep) : decoded,
+          basicPassword: sep >= 0 ? decoded.slice(sep + 1) : "",
+          basicPasswordVaultMissing: false,
+        };
+      } catch {
+        /* fall through */
+      }
+    }
+  }
+
+  const apiKey = entries.find(([name]) => {
+    const lower = name.toLowerCase();
+    return lower === "x-api-key" || lower === "api-key" || lower === "x-goog-api-key";
+  });
+  if (apiKey) {
+    return {
+      authKind: "api_key",
+      apiKeyHeaderName: apiKey[0],
+      apiKeyValue: apiKey[1],
+      apiKeyPrefix: "",
+      apiKeyVaultMissing: false,
+    };
+  }
+
+  return { authKind: "none" };
 }
 
 function providerImportDefaults(
