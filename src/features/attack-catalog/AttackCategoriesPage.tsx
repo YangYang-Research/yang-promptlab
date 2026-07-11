@@ -231,7 +231,7 @@ export function AttackCategoriesPage() {
     try {
       const generated = await generateAttackCatalogPrompt(selected.id);
       setDraft(generated.content);
-      setSavedHint("AI generated a new prompt — review and save to apply");
+      setSavedHint("Yazg generated a new prompt — review and save to apply");
     } catch (err) {
       setError(toAppError(err).message);
     } finally {
@@ -514,7 +514,7 @@ export function AttackCategoriesPage() {
                         >
                           <span className="btn__content">
                             <IconAi className="btn__icon" aria-hidden />
-                            {generating ? "Generating…" : "Generate new prompt"}
+                            {generating ? "Yazg is generating…" : "Generate new prompt"}
                           </span>
                         </Button>
                       </div>

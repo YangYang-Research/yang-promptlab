@@ -219,17 +219,17 @@ export const ATTACK_PROFILES: AttackProfileDefinition[] = [
   {
     id: "quick",
     label: "Quick Assessment",
-    description: "Minimal AI-selected coverage — fast execution smoke test",
+    description: "Minimal Yazg-selected coverage — fast execution smoke test",
   },
   {
     id: "standard",
     label: "Security Review",
-    description: "Balanced AI-selected coverage — recommended",
+    description: "Balanced Yazg-selected coverage — recommended",
   },
   {
     id: "deep",
     label: "Red Team",
-    description: "Maximum AI-selected coverage — long runtime",
+    description: "Maximum Yazg-selected coverage — long runtime",
   },
   {
     id: "custom",

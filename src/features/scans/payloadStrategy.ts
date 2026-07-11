@@ -60,9 +60,9 @@ export const GENERATION_STRATEGIES: Array<{
   {
     id: "deterministic",
     label: "Deterministic",
-    description: "Curated templates only — repeatable, no AI generation.",
+    description: "Curated templates only — repeatable, no Yazg generation.",
     tooltip:
-      "Uses curated payload templates only. No AI generation. Repeatable across runs.",
+      "Uses curated payload templates only. No Yazg generation. Repeatable across runs.",
   },
   {
     id: "mutation",

@@ -110,7 +110,7 @@ export function formatResponseLogLine(
     if (message) {
       return `${prefix}: ${message}`;
     }
-    return `${prefix}: (no AI Runtime classification message)`;
+    return `${prefix}: (no Yazg classification message)`;
   }
 
   const meta: string[] = [];
@@ -138,7 +138,7 @@ export function formatResponseLogLine(
 export function formatAiValidationLogLine(message: string): string {
   const trimmed = message.trim();
   if (!trimmed) {
-    return "Step 2 — AI validation result: (no AI Runtime classification message)";
+    return "Step 2 — AI validation result: (no Yazg classification message)";
   }
   return `Step 2 — AI validation result: ${trimmed}`;
 }
