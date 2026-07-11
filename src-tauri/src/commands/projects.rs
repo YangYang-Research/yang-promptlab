@@ -92,6 +92,7 @@ pub async fn project_update_op(
             aisec_storage::UpdateProject {
                 name,
                 description,
+                ..Default::default()
             },
         )
         .await

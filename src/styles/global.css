@@ -6364,6 +6364,59 @@ a:hover {
   align-items: start;
 }
 
+.project-details__security-overview .category-doughnut {
+  margin-top: 0.25rem;
+}
+
+.project-details__summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+}
+
+.project-details__summary-panel {
+  width: 100%;
+  min-width: 0;
+}
+
+.project-details__summary .scan-rec,
+.project-details__summary .scan-rec__overview,
+.project-details__summary .scan-rec__item-desc,
+.project-details__summary .scan-rec__list,
+.project-details__summary .scan-rec__skeleton--lead {
+  max-width: none;
+  width: 100%;
+}
+
+.project-summary__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+  width: 100%;
+}
+
+.project-summary__action {
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent),
+    0 6px 16px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.project-summary__action .btn__icon {
+  color: inherit;
+}
+
+.project-summary__generated {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--text-subtle);
+  opacity: 0.72;
+  font-weight: 400;
+  font-style: italic;
+}
+
 .scan-details__config-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);

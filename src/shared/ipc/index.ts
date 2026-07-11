@@ -15,6 +15,10 @@ export {
   type ProjectDto,
 } from "./projects";
 export {
+  generateProjectSummary,
+  type ProjectSummaryResponse,
+} from "./projectSummary";
+export {
   getTarget,
   getTargetWizardDescriptor,
   updateTargetDescriptor,

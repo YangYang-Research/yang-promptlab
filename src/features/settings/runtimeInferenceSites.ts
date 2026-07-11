@@ -43,6 +43,13 @@ export const RUNTIME_INFERENCE_SITES: RuntimeInferenceSite[] = [
       "Yazg summarizes scan findings and produces prioritized fix guidance. Falls back to rule-based text if Yazg is unavailable.",
   },
   {
+    id: "project-summary",
+    title: "Project summary",
+    location: "Project details · Summary",
+    description:
+      "Yazg summarizes overall project posture across targets, scans, and findings. The result is persisted on the project and reused until regenerated.",
+  },
+  {
     id: "attack-factory-prompt",
     title: "Attack Factory prompt generation",
     location: "Advanced · Attack Factory",

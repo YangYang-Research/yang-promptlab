@@ -18,6 +18,10 @@ import {
   SeverityBadge,
   StatusBadge,
 } from "@/shared/components";
+import {
+  SeverityDoughnutChart,
+  severitySliceColor,
+} from "@/features/dashboard/SeverityDoughnutChart";
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import {
   buildScanProgressUrl,
@@ -26,6 +30,7 @@ import {
   wizardResumeInputFromSession,
 } from "@/features/scans/wizardState";
 import { targetDisplayType } from "@/features/scans/targetProfile";
+import { severityCountSeries } from "@/shared/stats";
 import { buildTargetScanContext, countAttackScans, formatTargetTimestamp } from "@/shared/targetScanContext";
 import { resolveTargetScanAction } from "@/shared/targetScanAction";
 import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
@@ -35,6 +40,7 @@ import { useToast } from "@/shared/notifications";
 import type { Severity, ScanRun, Target } from "@/shared/types";
 
 import { EditProjectModal } from "./EditProjectModal";
+import { ProjectSummaryPanel } from "./ProjectSummaryPanel";
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
 
@@ -45,7 +51,7 @@ function formatDate(iso: string) {
 export function ProjectDetailsPage() {
   const { projectId = "" } = useParams();
   const navigate = useNavigate();
-  const { projects, targets, scans, findings, reports, loading, actions } = useAppStore();
+  const { projects, targets, scans, findings, loading, actions } = useAppStore();
   const { notify } = useToast();
   const [editOpen, setEditOpen] = useState(false);
   const [deletingTargetId, setDeletingTargetId] = useState<string | null>(null);
@@ -69,11 +75,6 @@ export function ProjectDetailsPage() {
   const projectFindings = useMemo(
     () => findings.filter((finding) => finding.projectId === projectId),
     [findings, projectId],
-  );
-
-  const projectReports = useMemo(
-    () => reports.filter((report) => report.projectId === projectId),
-    [reports, projectId],
   );
 
   const severityCounts = useMemo(() => {
@@ -112,12 +113,13 @@ export function ProjectDetailsPage() {
     [projectFindings],
   );
 
-  const recentReports = useMemo(
+  const severitySlices = useMemo(
     () =>
-      [...projectReports]
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-        .slice(0, 5),
-    [projectReports],
+      severityCountSeries(projectFindings).map((slice) => ({
+        ...slice,
+        color: severitySliceColor(slice.severity),
+      })),
+    [projectFindings],
   );
 
   const handleDeleteTarget = useCallback(
@@ -378,7 +380,7 @@ export function ProjectDetailsPage() {
         </Card>
       </section>
 
-      <section className="project-details__insights" aria-label="Findings and reports">
+      <section className="project-details__insights" aria-label="Findings and security overview">
         <Card className="detail-section project-details__findings-panel">
           <div className="detail-section__header">
             <div>
@@ -422,41 +424,18 @@ export function ProjectDetailsPage() {
           </div>
         </Card>
 
-        <Card className="detail-section project-details__reports-panel">
-          <div className="detail-section__header">
-            <div>
-              <h2 className="detail-section__title">Reports</h2>
-              <p className="detail-section__hint">
-                {projectReports.length === 0
-                  ? "Export a scan to generate a report."
-                  : `${projectReports.length} stored report${projectReports.length === 1 ? "" : "s"}`}
-              </p>
-            </div>
-            {projectReports.length > 0 ? (
-              <Link to="/reports" className="link">
-                View all
-              </Link>
-            ) : null}
-          </div>
+        <Card className="detail-section project-details__security-overview">
+          <h2 className="detail-section__title">Security Overview</h2>
+          <SeverityDoughnutChart data={severitySlices} size={176} />
+        </Card>
+      </section>
 
-          {recentReports.length === 0 ? (
-            <EmptyState
-              title="No reports yet"
-              description="Complete a scan and export results to build a report archive."
-            />
-          ) : (
-            <ul className="detail-list">
-              {recentReports.map((report) => (
-                <li key={report.id} className="detail-list-row detail-list-row--reports">
-                  <span className="detail-list-row__title">{report.title}</span>
-                  <Badge variant="muted">{report.format.toUpperCase()}</Badge>
-                  <span className="text-muted text-sm detail-list-row__meta">
-                    {formatTimestamp(report.createdAt)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+      <section className="project-details__summary" aria-label="Project summary">
+        <Card className="detail-section project-details__summary-panel scan-details__recommendations-card">
+          <ProjectSummaryPanel
+            projectId={projectId}
+            enabled={projectTargets.length > 0}
+          />
         </Card>
       </section>
 

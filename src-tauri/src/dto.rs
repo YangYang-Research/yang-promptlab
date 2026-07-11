@@ -31,6 +31,7 @@ pub struct ProjectDto {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    pub summary: Option<serde_json::Value>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -41,6 +42,7 @@ impl From<Project> for ProjectDto {
             id: p.id,
             name: p.name,
             description: p.description,
+            summary: json_opt(p.summary_json),
             created_at: ts(p.created_at),
             updated_at: ts(p.updated_at),
         }

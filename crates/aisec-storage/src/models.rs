@@ -11,6 +11,7 @@ pub struct Project {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    pub summary_json: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -178,6 +179,7 @@ pub struct CreateProject {
 pub struct UpdateProject {
     pub name: Option<String>,
     pub description: Option<String>,
+    pub summary_json: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

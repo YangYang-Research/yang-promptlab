@@ -20,6 +20,7 @@ pub mod projects;
 pub mod runtime;
 pub mod scan;
 pub mod scan_execution;
+pub mod project_summary;
 pub mod scan_recommendations;
 pub mod security;
 pub mod target_profile;
