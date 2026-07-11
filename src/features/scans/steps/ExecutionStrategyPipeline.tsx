@@ -28,7 +28,10 @@ function stepUsesYazg(
   stepId: ExecutionPhaseId,
   attackPlan: AttackPlanConfig,
 ): boolean {
-  if (stepId === "judge" || stepId === "adaptive") {
+  if (stepId === "judge") {
+    return false;
+  }
+  if (stepId === "adaptive") {
     return true;
   }
   if (stepId === "generate") {
