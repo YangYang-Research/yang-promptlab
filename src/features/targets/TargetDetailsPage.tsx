@@ -273,7 +273,7 @@ export function TargetDetailsPage() {
       <section className="target-details__overview" aria-label="Target overview">
         <Card className="detail-section target-details__meta">
           <div className="detail-section__header">
-            <h2 className="detail-section__title">Target information</h2>
+            <h2 className="detail-section__title">Target Information</h2>
             <StatusBadge status={target.status} />
           </div>
           <div className="detail-section__body">
@@ -304,12 +304,12 @@ export function TargetDetailsPage() {
 
         <Card className="detail-section target-details__scan-panel">
           <div className="detail-section__header">
-            <h2 className="detail-section__title">Scan status</h2>
+            <h2 className="detail-section__title">Scan Status</h2>
             <TargetScanStatusBadge label={scanContext.scanStatusLabel} />
           </div>
           <div className="detail-summary-grid detail-summary-grid--metrics target-details__scan-metrics">
             <div className="summary-stat">
-              <span className="summary-stat__label">Attack scans</span>
+              <span className="summary-stat__label">Attack Scans</span>
               <span className="summary-stat__value">{attackScans.length}</span>
             </div>
             <div
@@ -333,68 +333,68 @@ export function TargetDetailsPage() {
         </Card>
       </section>
 
-      <section className="target-details__primary" aria-label="Attack scans">
-        <div className="detail-section__header">
-          <h2 className="detail-section__title">Attack scans</h2>
-        </div>
+      <section className="target-details__primary" aria-label="Attack Scans">
+        <Card className="detail-section target-details__scans-card">
+          <div className="detail-section__header">
+            <h2 className="detail-section__title">Attack Scans</h2>
+          </div>
 
-        {attackScans.length === 0 ? (
-          <Card className="detail-section">
+          {attackScans.length === 0 ? (
             <EmptyState
               title="No attack scans yet"
               description="Start a scan to run security tests against this target."
             />
-          </Card>
-        ) : (
-          <>
-            <ContentToolbar
-              pageSize={pageSize}
-              onPageSizeChange={setPageSize}
-              viewMode={viewMode}
-              onViewModeChange={setViewMode}
-            />
-            {viewMode === "table" ? (
-              <Card padding="none" className="target-details__scans-table">
-                <DataTable
-                  columns={scanColumns}
-                  rows={pagination.items}
-                  keyField="id"
-                  emptyMessage="No attack scans"
-                  onRowClick={(scan) => navigate(`/scans/${scan.id}`)}
-                />
-              </Card>
-            ) : (
-              <div className="list-card-grid">
-                {pagination.items.map((scan) => (
-                  <ListCard
-                    key={scan.id}
-                    title={scan.name}
-                    status={<StatusBadge status={scan.status} />}
-                    metadata={[
-                      {
-                        label: "Scan ID",
-                        value: <span className="mono text-sm">{scan.id}</span>,
-                      },
-                      {
-                        label: "Started",
-                        value: formatTimestamp(scan.startedAt ?? scan.createdAt),
-                      },
-                    ]}
-                    onClick={() => navigate(`/scans/${scan.id}`)}
+          ) : (
+            <>
+              <ContentToolbar
+                pageSize={pageSize}
+                onPageSizeChange={setPageSize}
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
+              />
+              {viewMode === "table" ? (
+                <div className="target-details__scans-table">
+                  <DataTable
+                    columns={scanColumns}
+                    rows={pagination.items}
+                    keyField="id"
+                    emptyMessage="No attack scans"
+                    onRowClick={(scan) => navigate(`/scans/${scan.id}`)}
                   />
-                ))}
-              </div>
-            )}
-            <Pagination
-              page={page}
-              totalItems={pagination.totalItems}
-              rangeStart={pagination.rangeStart}
-              rangeEnd={pagination.rangeEnd}
-              totalPages={pagination.totalPages}
-              onPageChange={setPage}
-            />
-          </>
-        )}
+                </div>
+              ) : (
+                <div className="list-card-grid">
+                  {pagination.items.map((scan) => (
+                    <ListCard
+                      key={scan.id}
+                      title={scan.name}
+                      status={<StatusBadge status={scan.status} />}
+                      metadata={[
+                        {
+                          label: "Scan ID",
+                          value: <span className="mono text-sm">{scan.id}</span>,
+                        },
+                        {
+                          label: "Started",
+                          value: formatTimestamp(scan.startedAt ?? scan.createdAt),
+                        },
+                      ]}
+                      onClick={() => navigate(`/scans/${scan.id}`)}
+                    />
+                  ))}
+                </div>
+              )}
+              <Pagination
+                page={page}
+                totalItems={pagination.totalItems}
+                rangeStart={pagination.rangeStart}
+                rangeEnd={pagination.rangeEnd}
+                totalPages={pagination.totalPages}
+                onPageChange={setPage}
+              />
+            </>
+          )}
+        </Card>
       </section>
     </div>
   );

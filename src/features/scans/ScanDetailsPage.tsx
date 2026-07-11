@@ -5,6 +5,7 @@ import { useAppStore } from "@/app/store/AppStore";
 import {
   ActionsDropdown,
   type ActionsDropdownItem,
+  AuthTypeBadge,
   Badge,
   Button,
   Card,
@@ -22,7 +23,7 @@ import {
   type ReportExportFormat,
 } from "@/features/reports/reportDownloads";
 import {
-  extractAuthSummary,
+  extractAuthKind,
   extractAuthType,
   extractTargetUrl,
   formatDurationMs,
@@ -30,13 +31,16 @@ import {
   mapScanDetailToRun,
 } from "@/features/scans/scanDetailsHelpers";
 import {
-  estimateAttackPlan,
+  formatExecutionStrategySummary,
+  attackPlanFromExecutionPlaybook,
+} from "@/features/scans/attackPlan";
+import { formatPayloadGenerationStrategy } from "@/features/scans/payloadStrategy";
+import {
   isAttackScanName,
-  listSelectedTests,
+  listSelectedTestsByCategory,
   parseAttackPlaybook,
   profileLabel,
 } from "@/features/scans/scanPlaybook";
-import { categoryLabel } from "@/features/scans/categoryLabel";
 import { ScanRecommendationsPanel } from "@/features/scans/ScanRecommendationsPanel";
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
 import {
@@ -137,17 +141,24 @@ export function ScanDetailsPage() {
     : null;
   const effectiveStatus = status?.status ?? scan?.status ?? "pending";
 
-  const estimates = playbook
-    ? estimateAttackPlan(
-        playbook.profile,
-        playbook.categories,
-        playbook.disabledTests,
-      )
-    : null;
-
-  const selectedTests = playbook
-    ? listSelectedTests(playbook.categories, playbook.disabledTests)
+  const selectedTestGroups = playbook
+    ? listSelectedTestsByCategory(playbook.categories, playbook.disabledTests)
     : [];
+
+  const reconstructedPlan = useMemo(
+    () => attackPlanFromExecutionPlaybook(detail?.playbook),
+    [detail?.playbook],
+  );
+
+  const executionLabel = reconstructedPlan
+    ? formatExecutionStrategySummary(reconstructedPlan)
+    : playbook?.agentMode
+      ? "Agentic"
+      : "Sequential";
+
+  const payloadStrategyLabel = reconstructedPlan
+    ? formatPayloadGenerationStrategy(reconstructedPlan.payloadStrategy)
+    : "—";
 
   const durationMs =
     scan?.startedAt && scan?.completedAt
@@ -399,19 +410,40 @@ export function ScanDetailsPage() {
         </Card>
       )}
 
-      {(targetUrl || project) && (
-        <p className="scan-details__lead">
-          {targetUrl ? <span className="mono">{targetUrl}</span> : null}
-          {targetUrl && project ? <span className="scan-details__lead-sep"> · </span> : null}
-          {project ? (
-            <Link to={`/projects/${project.id}`} className="link">
-              {project.name}
-            </Link>
-          ) : null}
-        </p>
-      )}
-
       <section className="scan-details__overview" aria-label="Scan overview">
+        <Card className="detail-section scan-details__context">
+          <h2 className="detail-section__title">Scan Information</h2>
+          <div className="detail-section__body">
+            <DetailRow
+              label="Project"
+              value={
+                project ? (
+                  <Link to={`/projects/${project.id}`} className="link">
+                    {project.name}
+                  </Link>
+                ) : (
+                  "—"
+                )
+              }
+            />
+            <DetailRow label="Scan ID" value={<code>{scanId}</code>} mono />
+            <DetailRow label="Scan name" value={scan?.name ?? "—"} />
+            <DetailRow
+              label="Endpoint"
+              value={targetUrl ? <span className="mono">{targetUrl}</span> : "—"}
+            />
+            <DetailRow
+              label="Authentication"
+              value={
+                <AuthTypeBadge
+                  kind={extractAuthKind(descriptor)}
+                  label={extractAuthType(descriptor)}
+                />
+              }
+            />
+          </div>
+        </Card>
+
         <Card className="detail-section scan-details__execution">
           <div className="detail-section__header">
             <div>
@@ -463,48 +495,14 @@ export function ScanDetailsPage() {
             </div>
           </div>
         </Card>
-
-        <Card className="detail-section scan-details__context">
-          <h2 className="detail-section__title">Scan context</h2>
-          <div className="detail-section__body">
-            <DetailRow label="Scan name" value={scan?.name ?? "—"} />
-            <DetailRow label="Scan ID" value={<code>{scanId}</code>} mono />
-            <DetailRow
-              label="Project"
-              value={
-                project ? (
-                  <Link to={`/projects/${project.id}`} className="link">
-                    {project.name}
-                  </Link>
-                ) : (
-                  "—"
-                )
-              }
-            />
-            <DetailRow label="Authentication" value={extractAuthType(descriptor)} />
-            <DetailRow
-              label="Auth configuration"
-              value={extractAuthSummary(descriptor)}
-            />
-          </div>
-        </Card>
       </section>
 
       {playbook && (
-        <section className="scan-details__plan-section" aria-label="Attack plan">
+        <section className="scan-details__plan-section" aria-label="Attack Plan">
           <Card className="detail-section scan-details__plan-card">
             <header className="scan-plan__header">
               <div className="scan-plan__heading">
-                <h2 className="scan-plan__title">Attack plan</h2>
-                <p className="scan-plan__hint">
-                  {profileLabel(playbook.profile)}
-                  {" · "}
-                  {playbook.categories.length}{" "}
-                  {playbook.categories.length === 1 ? "category" : "categories"}
-                  {selectedTests.length > 0
-                    ? ` · ${selectedTests.length} test${selectedTests.length === 1 ? "" : "s"}`
-                    : ""}
-                </p>
+                <h2 className="scan-plan__title">Attack Plan</h2>
               </div>
               {playbook.agentMode ? <Badge variant="info">Agentic</Badge> : null}
             </header>
@@ -521,14 +519,12 @@ export function ScanDetailsPage() {
                 </span>
               </div>
               <div className="scan-plan__metric" role="listitem">
-                <span className="scan-plan__metric-label">Est. requests</span>
-                <span className="scan-plan__metric-value">
-                  {estimates?.requests.toLocaleString() ?? "—"}
-                </span>
+                <span className="scan-plan__metric-label">Execution</span>
+                <span className="scan-plan__metric-value">{executionLabel}</span>
               </div>
               <div className="scan-plan__metric" role="listitem">
-                <span className="scan-plan__metric-label">Est. runtime</span>
-                <span className="scan-plan__metric-value">{estimates?.runtime ?? "—"}</span>
+                <span className="scan-plan__metric-label">Payload strategy</span>
+                <span className="scan-plan__metric-value">{payloadStrategyLabel}</span>
               </div>
               {playbook.agentMode && playbook.maxAgentAttempts != null ? (
                 <div className="scan-plan__metric" role="listitem">
@@ -540,50 +536,25 @@ export function ScanDetailsPage() {
               ) : null}
             </div>
 
-            {playbook.categories.length > 0 ? (
+            {selectedTestGroups.length > 0 ? (
               <div className="scan-plan__block">
-                <h3 className="scan-plan__block-title">Categories</h3>
-                <ul className="scan-plan__chips">
-                  {playbook.categories.map((categoryId) => (
-                    <li key={categoryId} className="scan-plan__chip">
-                      {categoryLabel(categoryId)}
-                    </li>
+                <h3 className="scan-plan__block-title">Attack Category</h3>
+                <div className="scan-plan__groups">
+                  {selectedTestGroups.map((group) => (
+                    <div key={group.categoryId} className="scan-plan__group">
+                      <h4 className="scan-plan__group-title">{group.label}</h4>
+                      <ul className="scan-plan__tests">
+                        {group.tests.map((test) => (
+                          <li key={test.id} className="scan-plan__test">
+                            <span className="scan-plan__test-name">{test.name}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   ))}
-                </ul>
+                </div>
               </div>
             ) : null}
-
-            {selectedTests.length > 0 ? (
-              <div className="scan-plan__block">
-                <h3 className="scan-plan__block-title">
-                  Selected tests
-                  <span className="scan-plan__block-count">{selectedTests.length}</span>
-                </h3>
-                <ol className="scan-plan__tests">
-                  {selectedTests.map((test, index) => (
-                    <li key={test} className="scan-plan__test">
-                      <span className="scan-plan__test-index" aria-hidden="true">
-                        {String(index + 1).padStart(2, "0")}
-                      </span>
-                      <span className="scan-plan__test-name">{test}</span>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            ) : null}
-          </Card>
-        </section>
-      )}
-
-      {scan && isMonitorableAttackScan(scan) && (
-        <section className="scan-details__recommendations" aria-label="Recommendations">
-          <Card className="detail-section scan-details__recommendations-card">
-            <ScanRecommendationsPanel
-              scanId={scanId}
-              attackCategories={playbook?.categories ?? []}
-              enabled={!loading && Boolean(detail)}
-              variant="details"
-            />
           </Card>
         </section>
       )}
@@ -692,6 +663,19 @@ export function ScanDetailsPage() {
           )}
         </Card>
       </section>
+
+      {scan && isMonitorableAttackScan(scan) && (
+        <section className="scan-details__recommendations" aria-label="Recommendations">
+          <Card className="detail-section scan-details__recommendations-card">
+            <ScanRecommendationsPanel
+              scanId={scanId}
+              attackCategories={playbook?.categories ?? []}
+              enabled={!loading && Boolean(detail)}
+              variant="details"
+            />
+          </Card>
+        </section>
+      )}
     </div>
   );
 }

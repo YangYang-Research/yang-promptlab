@@ -257,7 +257,7 @@ export function ProjectDetailsPage() {
 
       <section className="project-details__overview" aria-label="Project overview">
         <Card className="detail-section project-details__meta">
-          <h2 className="detail-section__title">Project information</h2>
+          <h2 className="detail-section__title">Project Information</h2>
           <div className="detail-section__body">
             <DetailRow label="Name" value={project.name} />
             <DetailRow
@@ -270,7 +270,7 @@ export function ProjectDetailsPage() {
         </Card>
 
         <Card className="detail-section project-details__target-stats">
-          <h2 className="detail-section__title">Target coverage</h2>
+          <h2 className="detail-section__title">Target Coverage</h2>
           <div className="detail-summary-grid detail-summary-grid--metrics">
             <SummaryStat label="Targets" value={targetSummary.targetCount} />
             <SummaryStat label="Scans" value={targetSummary.scanned} accent="success" />
