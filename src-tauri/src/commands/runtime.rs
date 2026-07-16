@@ -315,6 +315,21 @@ pub async fn runtime_health(state: State<'_, AppState>) -> CommandResult<Runtime
 }
 
 #[tauri::command]
+pub async fn runtime_traffic_stats(
+    state: State<'_, AppState>,
+    window_ms: Option<u64>,
+    bucket_ms: Option<u64>,
+) -> CommandResult<aisec_inference::TrafficSnapshot> {
+    crate::traffic_persist::traffic_snapshot_from_db(
+        &state.repositories(),
+        window_ms.unwrap_or(60_000),
+        bucket_ms.unwrap_or(1_000),
+    )
+    .await
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn runtime_benchmark(state: State<'_, AppState>) -> CommandResult<RuntimeBenchmarkResult> {
     let mut manager = state.runtime_manager().lock().await;
     manager
@@ -387,6 +402,73 @@ async fn run_third_party_connectivity_test_for_config(
             apply_third_party_health_check(config, &checked_at, false, 0);
             (false, err.to_string())
         }
+    }
+}
+
+/// Re-check AI Runtime connectivity when the desktop app starts.
+pub(crate) async fn startup_connectivity_check(state: &AppState) {
+    let models: Vec<ModelEntry> = {
+        let manager = state.model_manager().lock().await;
+        manager.list_models().into_iter().cloned().collect()
+    };
+
+    let mut config = {
+        let mut inference = state.inference_manager().lock().await;
+        let _ = inference.load().await;
+        inference.config().clone()
+    };
+
+    if !config.initialized {
+        return;
+    }
+
+    config = reconcile_config(config, &models);
+
+    match config.mode {
+        InferenceMode::ThirdParty => {
+            let Some(model_id) = config.selected_model_id.clone() else {
+                tracing::info!("startup connectivity check skipped: no selected third-party model");
+                return;
+            };
+            let (ok, detail) =
+                run_third_party_connectivity_test_for_config(state, &mut config, &model_id).await;
+            {
+                let mut inference = state.inference_manager().lock().await;
+                *inference.config_mut() = config;
+                if let Err(err) = inference.save().await {
+                    tracing::warn!(error = %err, "failed to persist startup connectivity result");
+                }
+            }
+            if ok {
+                tracing::info!(model_id = %model_id, "startup third-party connectivity check ok");
+            } else {
+                tracing::warn!(
+                    model_id = %model_id,
+                    detail = %detail,
+                    "startup third-party connectivity check failed"
+                );
+            }
+            if let Err(err) = runtime_configuration_for_state(state).await {
+                tracing::warn!(error = %err, "failed to refresh runtime cache after startup check");
+            }
+        }
+        InferenceMode::Local => {
+            let mut runtime = state.runtime_manager().lock().await;
+            match runtime.run_health_check().await {
+                Ok(report) => {
+                    tracing::info!(
+                        reachable = report.endpoint_reachable,
+                        model_loaded = report.model_loaded,
+                        "startup local runtime health check completed"
+                    );
+                    prime_runtime_configuration_cache(state, &runtime).await;
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "startup local runtime health check failed");
+                }
+            }
+        }
+        InferenceMode::Deterministic => {}
     }
 }
 

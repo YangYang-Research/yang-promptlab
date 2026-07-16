@@ -15,6 +15,8 @@ import { useViewPreference } from "@/shared/hooks/useViewPreference";
 import type { ModelEntryDto } from "@/shared/ipc/models";
 import { formatBytes } from "@/shared/utils/format";
 
+import { RegistryProviderIcon } from "./ProviderLogo";
+
 function isThirdPartyModel(model: ModelEntryDto): boolean {
   return model.format === "api" || model.id.startsWith("remote-");
 }
@@ -220,8 +222,10 @@ export function ModelRegistrySection({
     {
       key: "provider",
       header: "Provider",
-      width: "120px",
-      render: (model: ModelEntryDto) => model.provider,
+      width: "88px",
+      render: (model: ModelEntryDto) => (
+        <RegistryProviderIcon provider={model.provider} />
+      ),
     },
     {
       key: "size",
@@ -256,8 +260,8 @@ export function ModelRegistrySection({
           <h2 className="detail-section__title">Model registry</h2>
           <p className="detail-section__hint">
             {models.length === 0
-              ? "Add a catalog model, import a file, or register a remote provider."
-              : `${models.length} registered model${models.length === 1 ? "" : "s"}`}
+              ? "Register models for use with AI Runtime."
+              : `${models.length} model${models.length === 1 ? "" : "s"} available to AI Runtime`}
           </p>
         </div>
       </div>
@@ -284,7 +288,10 @@ export function ModelRegistrySection({
               title={registryDisplayName(model)}
               status={<ModelRegistryBadges model={model} />}
               metadata={[
-                { label: "Provider", value: model.provider },
+                {
+                  label: "Provider",
+                  value: <RegistryProviderIcon provider={model.provider} />,
+                },
                 { label: "Version", value: model.version || "N/A" },
                 { label: "Size", value: formatModelSize(model) },
                 { label: "Capabilities", value: formatModelCapabilities(model) },
@@ -296,7 +303,7 @@ export function ModelRegistrySection({
           {pagination.items.length === 0 && (
             <EmptyState
               title="No models yet"
-              description="Use Add Model to download from the catalog, import a GGUF file, or connect a remote provider."
+              description="Add a model for use with AI Runtime."
             />
           )}
         </div>

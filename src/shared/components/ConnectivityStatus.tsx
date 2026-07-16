@@ -1,4 +1,4 @@
-export type ConnectivityStatusVariant = "success" | "failed";
+export type ConnectivityStatusVariant = "success" | "warning" | "failed";
 
 export function connectivityStatusVariant(
   label: string | null | undefined,
@@ -10,14 +10,18 @@ export function connectivityStatusVariant(
     value.startsWith("Connected") ||
     value.startsWith("Reachable") ||
     value === "Running" ||
-    value === "Ready" ||
+    value === "Live" ||
     value.startsWith("In-process")
   ) {
     return "success";
   }
+  if (value === "Ready") {
+    return "warning";
+  }
   if (
     value === "Connection Failed" ||
     value === "Failed" ||
+    value === "Offline" ||
     value.startsWith("Unreachable")
   ) {
     return "failed";

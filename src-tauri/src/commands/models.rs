@@ -298,10 +298,10 @@ fn normalize_third_party_provider(
 }
 
 fn default_base_url_for_provider(provider: &str) -> Option<String> {
-    if provider == "openrouter" {
-        Some("https://openrouter.ai/api/v1".into())
-    } else {
-        None
+    match provider {
+        "openrouter" => Some("https://openrouter.ai/api/v1".into()),
+        "nvidia" => Some("https://integrate.api.nvidia.com/v1".into()),
+        _ => None,
     }
 }
 

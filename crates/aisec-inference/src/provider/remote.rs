@@ -35,6 +35,7 @@ impl RemoteProviderAdapter {
             InferenceProvider::Anthropic => "https://api.anthropic.com/v1".into(),
             InferenceProvider::Gemini => "https://generativelanguage.googleapis.com/v1beta".into(),
             InferenceProvider::OpenRouter => "https://openrouter.ai/api/v1".into(),
+            InferenceProvider::Nvidia => "https://integrate.api.nvidia.com/v1".into(),
             InferenceProvider::Azure => String::new(),
             InferenceProvider::Bedrock => {
                 let region = self

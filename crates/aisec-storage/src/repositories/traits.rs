@@ -118,3 +118,11 @@ pub trait AttackCatalogRepository: Send + Sync {
     ) -> AisecResult<AttackCatalogTechnique>;
     async fn reset_content(&self, id: &str) -> AisecResult<AttackCatalogTechnique>;
 }
+
+#[async_trait]
+pub trait RuntimeTrafficRepository: Send + Sync {
+    async fn insert_many(&self, events: Vec<CreateRuntimeTrafficEvent>) -> AisecResult<u64>;
+    async fn list_between(&self, start_ms: i64, end_ms: i64) -> AisecResult<Vec<RuntimeTrafficEvent>>;
+    async fn counters(&self) -> AisecResult<RuntimeTrafficCounters>;
+    async fn prune_before(&self, cutoff_ms: i64) -> AisecResult<u64>;
+}

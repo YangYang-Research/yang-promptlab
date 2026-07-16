@@ -26,6 +26,7 @@ pub enum RemoteProvider {
     Anthropic,
     Gemini,
     OpenRouter,
+    Nvidia,
     Azure,
     Bedrock,
 }

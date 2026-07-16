@@ -23,6 +23,7 @@ pub mod session_auth;
 pub mod scan_console_log;
 pub mod scan_playbook;
 pub mod state;
+pub mod traffic_persist;
 
 use aisec_models::ModelEntry;
 use state::AppState;
@@ -175,6 +176,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             }
 
             let app_handle = app.handle().clone();
+            aisec_inference::traffic_ensure_started();
             tauri::async_runtime::spawn(async move {
                 let state = app_handle.state::<AppState>();
                 {
@@ -182,6 +184,12 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                     let _ = inference.load().await;
                 }
                 embedded_runtime::resume_local_runtime_on_startup(&app_handle, state.inner()).await;
+                commands::runtime::startup_connectivity_check(state.inner()).await;
+            });
+
+            let traffic_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                traffic_persist::bootstrap_traffic_persistence(&traffic_app).await;
             });
 
             event_bus.info(
@@ -287,6 +295,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::runtime::runtime_unload_model,
             commands::runtime::runtime_restart,
             commands::runtime::runtime_health,
+            commands::runtime::runtime_traffic_stats,
             commands::runtime::runtime_benchmark,
             commands::runtime::runtime_logs,
             commands::runtime::runtime_hardware,

@@ -42,6 +42,7 @@ impl RemoteLlmBackend {
                 "https://generativelanguage.googleapis.com/v1beta".into()
             }
             RemoteProvider::OpenRouter => "https://openrouter.ai/api/v1".into(),
+            RemoteProvider::Nvidia => "https://integrate.api.nvidia.com/v1".into(),
             RemoteProvider::Azure => String::new(),
             RemoteProvider::Bedrock => {
                 let region = self
@@ -64,6 +65,7 @@ impl LlmBackend for RemoteLlmBackend {
             RemoteProvider::Anthropic => "anthropic",
             RemoteProvider::Gemini => "gemini",
             RemoteProvider::OpenRouter => "openrouter",
+            RemoteProvider::Nvidia => "nvidia",
             RemoteProvider::Azure => "azure",
             RemoteProvider::Bedrock => "bedrock",
         }
@@ -93,7 +95,10 @@ impl LlmBackend for RemoteLlmBackend {
                 self.complete_bedrock(system, prompt, max_tokens, temperature)
                     .await
             }
-            RemoteProvider::OpenAi | RemoteProvider::OpenRouter | RemoteProvider::Azure => {
+            RemoteProvider::OpenAi
+            | RemoteProvider::OpenRouter
+            | RemoteProvider::Nvidia
+            | RemoteProvider::Azure => {
                 self.complete_openai_compatible(system, prompt, max_tokens, temperature)
                     .await
             }

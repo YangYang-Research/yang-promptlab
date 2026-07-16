@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   ConnectivityStatus,
+  connectivityStatusVariant,
   EmptyState,
   Modal,
   PageHeader,
@@ -15,6 +16,7 @@ import {
 import { toAppError } from "@/shared/errors";
 import { useAiInferenceRoute } from "@/shared/hooks/useAiInferenceRoute";
 import { useRuntimeModelLoading } from "@/shared/hooks/useRuntimeModelLoading";
+import { isYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
 import {
   getRuntimeHardware,
   getRuntimeHealth,
@@ -39,6 +41,9 @@ import {
 } from "@/shared/ipc/runtime";
 import { useToast } from "@/shared/notifications";
 import { formatBytes } from "@/shared/utils/format";
+
+import { RegistryProviderIcon } from "@/features/models/ProviderLogo";
+import { RuntimeTrafficChart } from "@/features/runtime/RuntimeTrafficChart";
 
 const ENGINE_INIT_STEPS = [
   { id: "hardware", label: "Detect hardware" },
@@ -337,11 +342,32 @@ export function AIRuntimePage() {
   }, [refreshConfiguration, refreshLocalData]);
 
   const handleRefresh = useCallback(async () => {
-    if (!backendConnected || refreshing) return;
+    if (!backendConnected || refreshing || testingModelId !== null) return;
     setError(null);
     setRefreshing(true);
     try {
       await refreshAll();
+
+      if (mode === "third_party") {
+        const modelId = settings?.selectedModelId;
+        if (modelId) {
+          setTestingModelId(modelId);
+          try {
+            const result = await setRoute("third_party", modelId);
+            if (
+              result?.settings.connectivityTestOk === false &&
+              result.settings.connectivityTestDetail
+            ) {
+              notify(result.settings.connectivityTestDetail, "error");
+            }
+          } finally {
+            setTestingModelId(null);
+          }
+        }
+      } else if (mode === "local") {
+        await getRuntimeHealth();
+        await refreshAll();
+      }
     } catch (err) {
       const message = toAppError(err).message;
       setError(message);
@@ -349,7 +375,16 @@ export function AIRuntimePage() {
     } finally {
       setRefreshing(false);
     }
-  }, [backendConnected, refreshing, refreshAll, notify]);
+  }, [
+    backendConnected,
+    refreshing,
+    testingModelId,
+    refreshAll,
+    mode,
+    settings?.selectedModelId,
+    setRoute,
+    notify,
+  ]);
 
   useEffect(() => {
     void import("@/shared/ipc/client").then(({ healthCheck }) =>
@@ -619,6 +654,9 @@ export function AIRuntimePage() {
   const thirdPartyModels = settings?.thirdPartyModels ?? [];
   const showModePicker = backendConnected && mode === "not_configured" && !configLoading;
   const modeConfigured = mode === "third_party" || mode === "local";
+  const connectionDotVariant = testingModelId
+    ? null
+    : connectivityStatusVariant(configuration?.connectivity);
 
   return (
     <div className={`page runtime-page${showModePicker ? " page--runtime-setup" : ""}`}>
@@ -626,14 +664,14 @@ export function AIRuntimePage() {
         title="AI Runtime"
         description={
           showModePicker
-            ? "Set up how PromptLab interacts with AI models."
-            : "Configure third-party cloud providers or manage the embedded local llama.cpp runtime"
+            ? "Choose a cloud or local runtime for Yazg Agent"
+            : "Manage the AI Runtime for Yazg Agent"
         }
         actions={
           backendConnected ? (
             <div className="page-header__actions-row">
               <RefreshButton
-                loading={refreshing || configLoading}
+                loading={refreshing || configLoading || testingModelId !== null}
                 error={error}
                 disabled={!backendConnected}
                 onClick={() => void handleRefresh()}
@@ -703,24 +741,28 @@ export function AIRuntimePage() {
                     <div className="summary-stat">
                       <span className="summary-stat__label">Provider</span>
                       <span className="summary-stat__value summary-stat__value--sm">
-                        {configuration?.provider ?? "N/A"}
+                        {configuration?.provider ? (
+                          <RegistryProviderIcon provider={configuration.provider} />
+                        ) : (
+                          "N/A"
+                        )}
                       </span>
                     </div>
                     <div className="summary-stat">
-                      <span className="summary-stat__label">Model</span>
+                      <span className="summary-stat__label">Model ID</span>
                       <span className="summary-stat__value summary-stat__value--sm">
                         {configuration?.modelName ?? settings?.selectedModelName ?? "N/A"}
                       </span>
                     </div>
                     <div className="summary-stat">
-                      <span className="summary-stat__label">Connectivity</span>
+                      <span className="summary-stat__label">Yazg Agent</span>
                       <span className="summary-stat__value summary-stat__value--sm">
                         {testingModelId ? (
-                          "Testing…"
-                        ) : configuration?.connectivity ? (
-                          <ConnectivityStatus label={configuration.connectivity} />
+                          "Checking…"
                         ) : (
-                          "N/A"
+                          <ConnectivityStatus
+                            label={isYazgAgentLive(configuration) ? "Live" : "Offline"}
+                          />
                         )}
                       </span>
                     </div>
@@ -728,8 +770,24 @@ export function AIRuntimePage() {
                 </Card>
 
                 <Card className="detail-section runtime-page__meta">
-                  <h2 className="detail-section__title">Connection</h2>
+                  <h2 className="detail-section__title runtime-page__connection-title">
+                    Connection
+                    {connectionDotVariant ? (
+                      <span
+                        className={`connectivity-status__dot connectivity-status__dot--${connectionDotVariant}`}
+                        aria-hidden
+                      />
+                    ) : null}
+                  </h2>
                   <dl className="runtime-page__meta-list">
+                    <div>
+                      <dt>Connectivity</dt>
+                      <dd>
+                        {testingModelId
+                          ? "Testing…"
+                          : configuration?.connectivity ?? "N/A"}
+                      </dd>
+                    </div>
                     <div>
                       <dt>Last health check</dt>
                       <dd>
@@ -738,22 +796,17 @@ export function AIRuntimePage() {
                           : configuration?.lastHealthCheck ?? "Not checked"}
                       </dd>
                     </div>
-                    <div>
-                      <dt>Selected model</dt>
-                      <dd>
-                        {configuration?.modelName ?? settings?.selectedModelName ?? "None"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Registered models</dt>
-                      <dd>
-                        {thirdPartyModels.length} provider
-                        {thirdPartyModels.length === 1 ? "" : "s"}
-                      </dd>
-                    </div>
                   </dl>
                 </Card>
               </section>
+
+              <Card className="detail-section runtime-page__traffic">
+                <h2 className="detail-section__title">Traffic monitor</h2>
+                <RuntimeTrafficChart
+                  enabled={backendConnected && mode === "third_party"}
+                  defaultRangeId="1m"
+                />
+              </Card>
 
               <section className="runtime-page__primary" aria-label="Registered models">
                 <Card className="detail-section">

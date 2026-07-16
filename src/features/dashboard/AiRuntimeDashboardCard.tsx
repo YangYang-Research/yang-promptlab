@@ -1,7 +1,14 @@
 import { useNavigate } from "react-router-dom";
 
-import { Card, IconArrowRight, IconWarning } from "@/shared/components";
+import {
+  Card,
+  ConnectivityStatus,
+  connectivityStatusVariant,
+  IconArrowRight,
+  IconWarning,
+} from "@/shared/components";
 import type { RuntimeConfigurationDto } from "@/shared/ipc/runtime";
+import { isYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
 
 type AiRuntimeDashboardCardProps = {
   configuration: RuntimeConfigurationDto | null;
@@ -12,12 +19,12 @@ export function AiRuntimeDashboardCard({ configuration, loading }: AiRuntimeDash
   const navigate = useNavigate();
 
   const mode = configuration?.mode ?? "not_configured";
-
-  function modeLabel(): string {
-    if (mode === "third_party") return "Third-party";
-    if (mode === "local") return "Local Runtime";
-    return "—";
-  }
+  const yazgLive = isYazgAgentLive(configuration);
+  const statusDotVariant =
+    mode === "not_configured" || loading
+      ? null
+      : connectivityStatusVariant(configuration?.connectivity) ??
+        connectivityStatusVariant(configuration?.statusLabel);
 
   return (
     <button
@@ -27,7 +34,15 @@ export function AiRuntimeDashboardCard({ configuration, loading }: AiRuntimeDash
       aria-label="Open AI Runtime settings"
     >
       <Card className="stat-card stat-card--runtime">
-        <span className="stat-card__label">AI Runtime</span>
+        <span className="stat-card__label runtime-dashboard-card__label">
+          AI Runtime
+          {statusDotVariant ? (
+            <span
+              className={`connectivity-status__dot connectivity-status__dot--${statusDotVariant}`}
+              aria-hidden
+            />
+          ) : null}
+        </span>
 
         {loading ? (
           <span className="stat-card__value stat-card__value--sm">Loading…</span>
@@ -41,36 +56,28 @@ export function AiRuntimeDashboardCard({ configuration, loading }: AiRuntimeDash
           <div className="runtime-dashboard-card__body">
             <div className="runtime-dashboard-card__row">
               <span className="runtime-dashboard-card__key">Mode</span>
-              <span className="runtime-dashboard-card__val">{modeLabel()}</span>
+              <span className="runtime-dashboard-card__val">
+                {mode === "third_party"
+                  ? "Third-party"
+                  : mode === "local"
+                    ? "Local Runtime"
+                    : "—"}
+              </span>
             </div>
             <div className="runtime-dashboard-card__row">
-              <span className="runtime-dashboard-card__key">Status</span>
-              <span className="runtime-dashboard-card__val">{configuration?.statusLabel ?? "—"}</span>
+              <span className="runtime-dashboard-card__key">Provider</span>
+              <span className="runtime-dashboard-card__val">
+                {mode === "local"
+                  ? (configuration?.runtimeName ?? "Local")
+                  : (configuration?.provider ?? "—")}
+              </span>
             </div>
-            {mode === "local" && (
-              <>
-                <div className="runtime-dashboard-card__row">
-                  <span className="runtime-dashboard-card__key">Runtime</span>
-                  <span className="runtime-dashboard-card__val">
-                    {configuration?.runtimeName ?? "—"}
-                  </span>
-                </div>
-                <div className="runtime-dashboard-card__row">
-                  <span className="runtime-dashboard-card__key">Model</span>
-                  <span className="runtime-dashboard-card__val">
-                    {configuration?.modelName ?? "—"}
-                  </span>
-                </div>
-              </>
-            )}
-            {mode === "third_party" && (
-              <div className="runtime-dashboard-card__row">
-                <span className="runtime-dashboard-card__key">Provider</span>
-                <span className="runtime-dashboard-card__val">
-                  {configuration?.provider ?? "—"}
-                </span>
-              </div>
-            )}
+            <div className="runtime-dashboard-card__row">
+              <span className="runtime-dashboard-card__key">Yazg Agent</span>
+              <span className="runtime-dashboard-card__val">
+                <ConnectivityStatus label={yazgLive ? "Live" : "Offline"} />
+              </span>
+            </div>
           </div>
         )}
       </Card>

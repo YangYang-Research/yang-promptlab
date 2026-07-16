@@ -9,6 +9,7 @@ export type ThirdPartyProvider =
   | "azure"
   | "bedrock"
   | "openrouter"
+  | "nvidia"
   | "custom";
 
 export type ThirdPartyModelForm = {
@@ -53,6 +54,7 @@ const KNOWN_THIRD_PARTY_PROVIDERS = new Set<ThirdPartyProvider>([
   "azure",
   "bedrock",
   "openrouter",
+  "nvidia",
 ]);
 
 export const THIRD_PARTY_PROVIDERS: Array<{
@@ -63,27 +65,24 @@ export const THIRD_PARTY_PROVIDERS: Array<{
   requiresBaseUrl?: boolean;
   baseUrlPlaceholder?: string;
   regionPlaceholder?: string;
+  /** Provider model catalog / docs page opened from the Model ID field. */
+  modelsDocsUrl?: string;
 }> = [
-  {
-    value: "openai",
-    label: "OpenAI",
-    modelPlaceholder: "gpt-4o-mini",
-    apiKeyEnv: "OPENAI_API_KEY",
-    baseUrlPlaceholder: "https://api.openai.com/v1",
-  },
   {
     value: "anthropic",
     label: "Anthropic",
     modelPlaceholder: "claude-sonnet-4-20250514",
     apiKeyEnv: "ANTHROPIC_API_KEY",
     baseUrlPlaceholder: "https://api.anthropic.com/v1",
+    modelsDocsUrl: "https://platform.claude.com/docs/en/about-claude/models/overview",
   },
   {
-    value: "gemini",
-    label: "Google",
-    modelPlaceholder: "gemini-2.0-flash",
-    apiKeyEnv: "GOOGLE_API_KEY",
-    baseUrlPlaceholder: "https://generativelanguage.googleapis.com/v1beta",
+    value: "bedrock",
+    label: "AWS Bedrock",
+    modelPlaceholder: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+    apiKeyEnv: "AWS_ACCESS_KEY_ID",
+    regionPlaceholder: "us-east-1",
+    modelsDocsUrl: "https://docs.aws.amazon.com/bedrock/latest/userguide/model-cards.html",
   },
   {
     value: "azure",
@@ -92,13 +91,31 @@ export const THIRD_PARTY_PROVIDERS: Array<{
     apiKeyEnv: "AZURE_OPENAI_API_KEY",
     requiresBaseUrl: true,
     baseUrlPlaceholder: "https://{resource}.openai.azure.com/openai/deployments/{deployment}",
+    modelsDocsUrl: "https://ai.azure.com/catalog/models",
   },
   {
-    value: "bedrock",
-    label: "AWS Bedrock",
-    modelPlaceholder: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-    apiKeyEnv: "AWS_ACCESS_KEY_ID",
-    regionPlaceholder: "us-east-1",
+    value: "gemini",
+    label: "Google",
+    modelPlaceholder: "gemini-2.0-flash",
+    apiKeyEnv: "GOOGLE_API_KEY",
+    baseUrlPlaceholder: "https://generativelanguage.googleapis.com/v1beta",
+    modelsDocsUrl: "https://ai.google.dev/gemini-api/docs/models",
+  },
+  {
+    value: "nvidia",
+    label: "NVIDIA",
+    modelPlaceholder: "meta/llama-3.1-8b-instruct",
+    apiKeyEnv: "NVIDIA_API_KEY",
+    baseUrlPlaceholder: "https://integrate.api.nvidia.com/v1",
+    modelsDocsUrl: "https://build.nvidia.com/models",
+  },
+  {
+    value: "openai",
+    label: "OpenAI",
+    modelPlaceholder: "gpt-4o-mini",
+    apiKeyEnv: "OPENAI_API_KEY",
+    baseUrlPlaceholder: "https://api.openai.com/v1",
+    modelsDocsUrl: "https://developers.openai.com/api/docs/models",
   },
   {
     value: "openrouter",
@@ -106,6 +123,7 @@ export const THIRD_PARTY_PROVIDERS: Array<{
     modelPlaceholder: "google/gemma-3-27b-it:free",
     apiKeyEnv: "OPENROUTER_API_KEY",
     baseUrlPlaceholder: "https://openrouter.ai/api/v1",
+    modelsDocsUrl: "https://openrouter.ai/models",
   },
   {
     value: "custom",
@@ -133,7 +151,7 @@ export function thirdPartyModelTemplate(
     provider,
     customProviderName: "",
     model: "",
-    baseUrl: provider === "openrouter" ? "https://openrouter.ai/api/v1" : null,
+    baseUrl: null,
     apiKey: "",
     apiKeyEnv: meta?.apiKeyEnv ?? "OPENAI_API_KEY",
     awsSecretAccessKey: "",

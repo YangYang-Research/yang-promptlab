@@ -389,6 +389,27 @@ pub struct UpdateAttackCatalogTechnique {
     pub sort_order: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct RuntimeTrafficEvent {
+    pub id: String,
+    pub at_ms: i64,
+    pub direction: String,
+    pub created_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateRuntimeTrafficEvent {
+    pub at_ms: i64,
+    pub direction: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct RuntimeTrafficCounters {
+    pub id: i64,
+    pub lifetime_sent: i64,
+    pub lifetime_received: i64,
+}
+
 /// Helper for serializing optional JSON columns.
 pub(crate) fn json_string(value: &Option<serde_json::Value>) -> aisec_core::AisecResult<Option<String>> {
     match value {

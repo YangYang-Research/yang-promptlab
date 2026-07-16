@@ -15,7 +15,7 @@ pub use repositories::{
     AttackCatalogRepository, AttackResultRepository, AuthProfileRepository,
     AuthRecordingRepository, AuthSessionRepository, EndpointRepository, FindingRepository,
     ModelRepository, PayloadRepository, PluginRepository, ProjectRepository, ReportRepository,
-    Repositories, ScanRepository, TargetRepository,
+    Repositories, RuntimeTrafficRepository, ScanRepository, TargetRepository,
 };
 
 #[cfg(test)]

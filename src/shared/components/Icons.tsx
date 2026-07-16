@@ -227,6 +227,30 @@ export function IconAi({ className, "aria-label": ariaLabel }: IconProps) {
   );
 }
 
+/** External link / open-in-browser mark. */
+export function IconExternalLink({ className }: IconProps) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <path
+        d="M6 3.5H3.75A1.25 1.25 0 0 0 2.5 4.75v5.5A1.25 1.25 0 0 0 3.75 11.5h5.5A1.25 1.25 0 0 0 10.5 10.25V8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M7.5 2.5H11.5V6.5M11.5 2.5 6.5 7.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** Person mark for manual custom attack mode. */
 export function IconHuman({ className, "aria-label": ariaLabel }: IconProps) {
   return (

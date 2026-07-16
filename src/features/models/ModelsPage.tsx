@@ -497,7 +497,7 @@ export function ModelsPage() {
     <div className="page models-page">
       <PageHeader
         title="Models"
-        description="Local GGUF vault, cloud providers, and imports"
+        description="Manage local and cloud models for use with AI Runtime"
         actions={
           <>
             <RefreshButton

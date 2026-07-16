@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Badge, Button } from "@/shared/components";
 import type { ModelCatalogEntryDto } from "@/shared/ipc/models";
 import { openExternalUrl } from "@/shared/utils/openExternalUrl";
 
-import { huggingFaceModelIcon, huggingFaceRepoUrl } from "./huggingFace";
+import { IconHuggingFace, huggingFaceRepoUrl } from "./huggingFace";
 
 export const HF_CATALOG_IMPORT_ID = "__import__";
 
@@ -15,6 +15,12 @@ function formatCatalogCapabilities(entry: ModelCatalogEntryDto): string {
     entry.capabilities.embeddings && "Embeddings",
   ].filter(Boolean);
   return caps.length > 0 ? caps.join(", ") : "—";
+}
+
+function sortCatalogByName(catalog: ModelCatalogEntryDto[]): ModelCatalogEntryDto[] {
+  return [...catalog].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+  );
 }
 
 export type ImportModelFormProps = {
@@ -49,8 +55,9 @@ export function HuggingFaceModelCatalog({
   importForm,
   initialSelectImport = false,
 }: HuggingFaceModelCatalogProps) {
+  const sortedCatalog = useMemo(() => sortCatalogByName(catalog), [catalog]);
   const [selectedId, setSelectedId] = useState<string | null>(
-    initialSelectImport ? HF_CATALOG_IMPORT_ID : (catalog[0]?.id ?? null),
+    initialSelectImport ? HF_CATALOG_IMPORT_ID : (sortedCatalog[0]?.id ?? null),
   );
 
   useEffect(() => {
@@ -60,19 +67,19 @@ export function HuggingFaceModelCatalog({
     }
     setSelectedId((current) => {
       if (current === HF_CATALOG_IMPORT_ID) return current;
-      if (current && catalog.some((entry) => entry.id === current)) return current;
-      return catalog[0]?.id ?? null;
+      if (current && sortedCatalog.some((entry) => entry.id === current)) return current;
+      return sortedCatalog[0]?.id ?? null;
     });
-  }, [catalog, initialSelectImport]);
+  }, [sortedCatalog, initialSelectImport]);
 
-  const selected = catalog.find((entry) => entry.id === selectedId) ?? null;
+  const selected = sortedCatalog.find((entry) => entry.id === selectedId) ?? null;
   const importSelected = selectedId === HF_CATALOG_IMPORT_ID;
   const repoUrl = selected ? huggingFaceRepoUrl(selected.downloadUrl) : null;
 
   return (
     <div className="hf-catalog">
       <div className="hf-catalog__grid">
-        {catalog.map((entry) => {
+        {sortedCatalog.map((entry) => {
           const alreadyAdded = installedNames.has(entry.name);
           const isSelected = entry.id === selectedId;
           return (
@@ -83,7 +90,7 @@ export function HuggingFaceModelCatalog({
               onClick={() => setSelectedId(entry.id)}
             >
               <span className="hf-catalog__icon" aria-hidden="true">
-                {huggingFaceModelIcon(entry.name)}
+                <IconHuggingFace />
               </span>
               <span className="hf-catalog__name">{entry.name}</span>
               <span className="hf-catalog__desc">{entry.description}</span>

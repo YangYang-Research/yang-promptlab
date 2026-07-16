@@ -453,7 +453,11 @@ pub async fn test_remote_connectivity_only(
     let started = std::time::Instant::now();
     let latency_ms = || started.elapsed().as_millis() as u64;
 
+    aisec_inference::record_sent();
     let result = ProviderAdapter::health(&adapter).await;
+    if result.is_ok() {
+        aisec_inference::record_received();
+    }
 
     match result {
         Ok(true) => Ok(ConnectivityTestResult {

@@ -116,26 +116,38 @@ pub struct GatewaySession<'a> {
 
 impl<'a> GatewaySession<'a> {
     pub async fn complete(&mut self, request: CompleteRequest) -> InferenceResult<String> {
+        crate::traffic::record_sent();
         let adapter = DefaultAiInferenceGateway::adapter_for(&mut self.inner).await?;
         let config = self.inner.manager.config();
         let max_tokens = request.max_tokens.unwrap_or(config.max_tokens);
         let temperature = request.temperature.unwrap_or(config.temperature);
-        adapter
+        let result = adapter
             .complete(request.system.as_deref(), &request.prompt, max_tokens, temperature)
-            .await
+            .await;
+        if result.is_ok() {
+            crate::traffic::record_received();
+        }
+        result
     }
 
     pub async fn chat(&mut self, request: ChatRequest) -> InferenceResult<ChatResponse> {
+        crate::traffic::record_sent();
         let adapter = DefaultAiInferenceGateway::adapter_for(&mut self.inner).await?;
         let config = self.inner.manager.config();
         let max_tokens = request.max_tokens.unwrap_or(config.max_tokens);
         let temperature = request.temperature.unwrap_or(config.temperature);
-        let content = adapter.chat(&request.messages, max_tokens, temperature).await?;
-        Ok(ChatResponse {
-            content,
-            model: adapter.model_id().into(),
-            provider: adapter.provider_id().into(),
-        })
+        let content = adapter.chat(&request.messages, max_tokens, temperature).await;
+        match content {
+            Ok(content) => {
+                crate::traffic::record_received();
+                Ok(ChatResponse {
+                    content,
+                    model: adapter.model_id().into(),
+                    provider: adapter.provider_id().into(),
+                })
+            }
+            Err(err) => Err(err),
+        }
     }
 
     pub async fn generate_json(
@@ -155,8 +167,13 @@ impl<'a> GatewaySession<'a> {
     }
 
     pub async fn health(&mut self) -> InferenceResult<HealthStatus> {
+        crate::traffic::record_sent();
         let adapter = DefaultAiInferenceGateway::adapter_for(&mut self.inner).await?;
-        self.inner.manager.health_check(adapter.as_ref()).await
+        let result = self.inner.manager.health_check(adapter.as_ref()).await;
+        if result.is_ok() {
+            crate::traffic::record_received();
+        }
+        result
     }
 
     pub async fn capabilities(&mut self) -> InferenceResult<ModelCapabilities> {

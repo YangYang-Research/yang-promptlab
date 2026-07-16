@@ -10,6 +10,7 @@ mod payload;
 mod plugin;
 mod project;
 mod report;
+mod runtime_traffic;
 mod scan;
 mod target;
 
@@ -25,6 +26,7 @@ pub use payload::SqlitePayloadRepository;
 pub use plugin::SqlitePluginRepository;
 pub use project::SqliteProjectRepository;
 pub use report::SqliteReportRepository;
+pub use runtime_traffic::SqliteRuntimeTrafficRepository;
 pub use scan::SqliteScanRepository;
 pub use target::SqliteTargetRepository;
 
@@ -93,5 +95,9 @@ impl Repositories {
 
     pub fn auth_recordings(&self) -> SqliteAuthRecordingRepository {
         SqliteAuthRecordingRepository::new(self.pool.clone())
+    }
+
+    pub fn runtime_traffic(&self) -> SqliteRuntimeTrafficRepository {
+        SqliteRuntimeTrafficRepository::new(self.pool.clone())
     }
 }

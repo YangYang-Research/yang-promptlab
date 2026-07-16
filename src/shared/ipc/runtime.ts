@@ -195,6 +195,31 @@ export function getRuntimeHealth(): Promise<RuntimeHealthReport> {
   return invokeCommand<RuntimeHealthReport>("runtime_health");
 }
 
+export type RuntimeTrafficBucket = {
+  atMs: number;
+  sent: number;
+  received: number;
+};
+
+export type RuntimeTrafficSnapshot = {
+  windowMs: number;
+  bucketMs: number;
+  buckets: RuntimeTrafficBucket[];
+  totalSent: number;
+  totalReceived: number;
+  continuous: boolean;
+};
+
+export function getRuntimeTrafficStats(
+  windowMs = 60_000,
+  bucketMs = 1_000,
+): Promise<RuntimeTrafficSnapshot> {
+  return invokeCommand<RuntimeTrafficSnapshot>("runtime_traffic_stats", {
+    windowMs,
+    bucketMs,
+  });
+}
+
 export function runRuntimeBenchmark(): Promise<RuntimeBenchmarkResult> {
   return invokeCommand<RuntimeBenchmarkResult>("runtime_benchmark");
 }
