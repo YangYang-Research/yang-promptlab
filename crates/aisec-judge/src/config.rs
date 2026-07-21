@@ -190,6 +190,7 @@ impl JudgeProviderConfig {
             min_confidence: self.min_confidence,
             llm_max_tokens: self.llm_max_tokens,
             llm_temperature: self.llm_temperature,
+            role_weights: crate::types::RoleWeights::default(),
         }
     }
 

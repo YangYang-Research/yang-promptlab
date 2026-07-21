@@ -5,6 +5,7 @@ mod attack_result;
 mod auth;
 mod endpoint;
 mod finding;
+mod judge_role_weights;
 mod model;
 mod payload;
 mod plugin;
@@ -21,6 +22,7 @@ pub use auth::{
 };
 pub use endpoint::SqliteEndpointRepository;
 pub use finding::SqliteFindingRepository;
+pub use judge_role_weights::SqliteJudgeRoleWeightsRepository;
 pub use model::SqliteModelRepository;
 pub use payload::SqlitePayloadRepository;
 pub use plugin::SqlitePluginRepository;
@@ -99,5 +101,9 @@ impl Repositories {
 
     pub fn runtime_traffic(&self) -> SqliteRuntimeTrafficRepository {
         SqliteRuntimeTrafficRepository::new(self.pool.clone())
+    }
+
+    pub fn judge_role_weights(&self) -> SqliteJudgeRoleWeightsRepository {
+        SqliteJudgeRoleWeightsRepository::new(self.pool.clone())
     }
 }

@@ -27,6 +27,10 @@ impl JudgeEngine {
         &self.config
     }
 
+    pub fn set_role_weights(&mut self, role_weights: crate::types::RoleWeights) {
+        self.config.role_weights = role_weights;
+    }
+
     pub fn role_pool(&self) -> &ModelRolePool {
         &self.role_pool
     }
@@ -99,8 +103,9 @@ impl JudgeEngine {
         }
 
         let mode = self.config.mode;
-        let vulnerable = consensus_vulnerable(&results, self.config.consensus_threshold);
-        let mut confidence = aggregate_confidence(&results);
+        let vulnerable =
+            consensus_vulnerable(&results, self.config.consensus_threshold, &self.config.role_weights);
+        let mut confidence = aggregate_confidence(&results, &self.config.role_weights);
 
         if !vulnerable {
             confidence = confidence.min(1.0 - self.config.min_confidence);

@@ -9,16 +9,19 @@ use aisec_auth::{
 };
 use aisec_core::AisecError;
 use aisec_report::{
-    ReportDataBuilder, ReportFormat, ReportKind, ReportingEngine, StorageFindingRow,
+    parse_sarif_import, ReportDataBuilder, ReportFormat, ReportKind, ReportingEngine,
+    StorageFindingRow,
 };
 use aisec_storage::{
-    CreateReport, CreateScan, CreateTarget, FindingRepository, ProjectRepository, ReportRepository,
-    ScanRepository, TargetRepository,
+    CreateFinding, CreateReport, CreateScan, CreateTarget, FindingRepository, ProjectRepository,
+    ReportRepository, ScanRepository, TargetRepository, UpdateFinding,
 };
 use tauri::State;
 use tracing::{info, instrument};
 
-use crate::dto::{FindingDto, ReportContentDto, ReportDto, ScanDetailDto, ScanDto, TargetDto};
+use crate::dto::{
+    FindingDto, FindingImportDto, ReportContentDto, ReportDto, ScanDetailDto, ScanDto, TargetDto,
+};
 use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
 
@@ -31,6 +34,7 @@ fn parse_format(value: Option<&str>) -> ReportFormat {
         Some("pdf") => ReportFormat::Pdf,
         Some("json") => ReportFormat::Json,
         Some("sarif") => ReportFormat::Sarif,
+        Some("csv") => ReportFormat::Csv,
         _ => ReportFormat::Html,
     }
 }
@@ -273,6 +277,201 @@ pub async fn finding_list_all_op(state: &AppState) -> CommandResult<Vec<FindingD
     Ok(findings.into_iter().map(FindingDto::from).collect())
 }
 
+#[instrument(skip(state, path))]
+pub async fn finding_import_sarif_op(
+    state: &AppState,
+    project_id: Option<String>,
+    path: String,
+) -> CommandResult<FindingImportDto> {
+    let repos = state.repositories();
+
+    let raw = std::fs::read_to_string(&path).map_err(|err| {
+        CommandError::from(AisecError::invalid_input(format!(
+            "failed to read SARIF file: {err}"
+        )))
+    })?;
+
+    let bundle = parse_sarif_import(&raw).map_err(map_report_err)?;
+    let ctx = &bundle.context;
+
+    let resolved_project_id = resolve_import_project_id(&repos, ctx, project_id).await?;
+    let _project = repos
+        .projects()
+        .get(&resolved_project_id)
+        .await
+        .map_err(CommandError::from)?;
+
+    let file_stem = std::path::Path::new(&path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("sarif");
+
+    let scan_name = ctx
+        .scan_name
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("SARIF import — {file_stem}"));
+
+    let target_id = match ctx.target_id.as_deref() {
+        Some(tid) => match repos.targets().get(tid).await {
+            Ok(target) if target.project_id == resolved_project_id => Some(target.id),
+            _ => None,
+        },
+        None => None,
+    };
+
+    let scan = if let Some(existing_id) = ctx.scan_id.as_deref().filter(|s| !s.trim().is_empty()) {
+        match repos.scans().get(existing_id).await {
+            Ok(scan) if scan.project_id == resolved_project_id => scan,
+            Ok(_) => {
+                return Err(CommandError::from(AisecError::invalid_input(
+                    "SARIF scan_id belongs to a different project",
+                )));
+            }
+            Err(_) => {
+                repos
+                    .scans()
+                    .create(CreateScan {
+                        project_id: resolved_project_id.clone(),
+                        target_id: target_id.clone(),
+                        name: scan_name.clone(),
+                        status: Some("completed".into()),
+                        playbook_json: Some(serde_json::json!({
+                            "source": "sarif_import",
+                            "path": path,
+                            "original_scan_id": existing_id,
+                        })),
+                    })
+                    .await
+                    .map_err(CommandError::from)?
+            }
+        }
+    } else {
+        repos
+            .scans()
+            .create(CreateScan {
+                project_id: resolved_project_id.clone(),
+                target_id: target_id.clone(),
+                name: scan_name,
+                status: Some("completed".into()),
+                playbook_json: Some(serde_json::json!({
+                    "source": "sarif_import",
+                    "path": path,
+                })),
+            })
+            .await
+            .map_err(CommandError::from)?
+    };
+
+    let mut created = Vec::with_capacity(bundle.findings.len());
+    for item in bundle.findings {
+        let finding = repos
+            .findings()
+            .create(CreateFinding {
+                scan_id: scan.id.clone(),
+                project_id: resolved_project_id.clone(),
+                target_id: scan.target_id.clone(),
+                title: item.title,
+                severity: item.severity.as_str().to_string(),
+                category: Some(item.category),
+                description: Some(item.description),
+                evidence_json: Some(item.evidence_json),
+                status: Some(item.status),
+            })
+            .await
+            .map_err(CommandError::from)?;
+        created.push(FindingDto::from(finding));
+    }
+
+    info!(
+        project_id = %resolved_project_id,
+        scan_id = %scan.id,
+        imported = created.len(),
+        "SARIF findings imported"
+    );
+
+    Ok(FindingImportDto {
+        scan_id: scan.id,
+        imported_count: created.len() as u32,
+        findings: created,
+    })
+}
+
+fn normalize_finding_status(status: &str) -> CommandResult<String> {
+    let normalized = status.trim().to_ascii_lowercase().replace('-', "_");
+    match normalized.as_str() {
+        "open" | "confirmed" | "false_positive" | "fixed" => Ok(normalized),
+        _ => Err(CommandError::from(AisecError::invalid_input(
+            "status must be one of: open, confirmed, false_positive, fixed",
+        ))),
+    }
+}
+
+#[instrument(skip(state), fields(id = %id, status = %status))]
+pub async fn finding_update_op(
+    state: &AppState,
+    id: String,
+    status: String,
+) -> CommandResult<FindingDto> {
+    let status = normalize_finding_status(&status)?;
+    let finding = state
+        .repositories()
+        .findings()
+        .update(
+            &id,
+            UpdateFinding {
+                status: Some(status),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(CommandError::from)?;
+
+    info!(%id, status = %finding.status, "finding status updated");
+    Ok(FindingDto::from(finding))
+}
+
+#[instrument(skip(state), fields(id = %id))]
+pub async fn finding_delete_op(state: &AppState, id: String) -> CommandResult<()> {
+    state
+        .repositories()
+        .findings()
+        .delete(&id)
+        .await
+        .map_err(CommandError::from)?;
+
+    info!(%id, "finding deleted");
+    Ok(())
+}
+
+async fn resolve_import_project_id(
+    repos: &aisec_storage::Repositories,
+    ctx: &aisec_report::SarifRunContext,
+    override_project_id: Option<String>,
+) -> CommandResult<String> {
+    if let Some(id) = override_project_id.filter(|s| !s.trim().is_empty()) {
+        repos.projects().get(&id).await.map_err(CommandError::from)?;
+        return Ok(id);
+    }
+
+    if let Some(id) = ctx.project_id.as_deref().filter(|s| !s.trim().is_empty()) {
+        if repos.projects().get(id).await.is_ok() {
+            return Ok(id.to_string());
+        }
+    }
+
+    if let Some(name) = ctx.project_name.as_deref().filter(|s| !s.trim().is_empty()) {
+        let projects = repos.projects().list().await.map_err(CommandError::from)?;
+        if let Some(project) = projects.iter().find(|p| p.name.eq_ignore_ascii_case(name)) {
+            return Ok(project.id.clone());
+        }
+    }
+
+    Err(CommandError::from(AisecError::invalid_input(
+        "SARIF is missing a resolvable project_id/project_name; select a destination project",
+    )))
+}
+
 // ---------------------------------------------------------------------------
 // Reports
 // ---------------------------------------------------------------------------
@@ -314,11 +513,16 @@ pub async fn report_generate_op(
         .collect();
 
     let report_findings = ReportDataBuilder::from_storage_findings(&rows);
-    let input = ReportDataBuilder::build(
-        scan_id.clone(),
-        project.name.clone(),
-        target_name,
-        report_findings,
+    let input = ReportDataBuilder::with_context(
+        ReportDataBuilder::build(
+            scan_id.clone(),
+            project.name.clone(),
+            target_name,
+            report_findings,
+        ),
+        project_id.clone(),
+        scan.name.clone(),
+        scan.target_id.clone(),
     );
 
     let report_format = parse_format(format.as_deref());
@@ -511,6 +715,29 @@ pub async fn finding_list(
 #[tauri::command]
 pub async fn finding_list_all(state: State<'_, AppState>) -> CommandResult<Vec<FindingDto>> {
     finding_list_all_op(state.inner()).await
+}
+
+#[tauri::command]
+pub async fn finding_import_sarif(
+    state: State<'_, AppState>,
+    path: String,
+    project_id: Option<String>,
+) -> CommandResult<FindingImportDto> {
+    finding_import_sarif_op(state.inner(), project_id, path).await
+}
+
+#[tauri::command]
+pub async fn finding_update(
+    state: State<'_, AppState>,
+    id: String,
+    status: String,
+) -> CommandResult<FindingDto> {
+    finding_update_op(state.inner(), id, status).await
+}
+
+#[tauri::command]
+pub async fn finding_delete(state: State<'_, AppState>, id: String) -> CommandResult<()> {
+    finding_delete_op(state.inner(), id).await
 }
 
 #[tauri::command]

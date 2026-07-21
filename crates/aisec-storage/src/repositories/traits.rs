@@ -126,3 +126,9 @@ pub trait RuntimeTrafficRepository: Send + Sync {
     async fn counters(&self) -> AisecResult<RuntimeTrafficCounters>;
     async fn prune_before(&self, cutoff_ms: i64) -> AisecResult<u64>;
 }
+
+#[async_trait]
+pub trait JudgeRoleWeightsRepository: Send + Sync {
+    async fn get(&self) -> AisecResult<JudgeRoleWeights>;
+    async fn update(&self, input: UpdateJudgeRoleWeights) -> AisecResult<JudgeRoleWeights>;
+}

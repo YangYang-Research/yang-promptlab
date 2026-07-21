@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Badge, Modal, RefreshButton, YazgBadge } from "@/shared/components";
+import { Badge, RefreshButton, YazgBadge } from "@/shared/components";
 import { IconCheck } from "@/shared/components/Icons";
-import { FindingDetailPanel } from "@/features/findings/FindingDetailPanel";
 import { resolveAttackGraphStates } from "@/features/scans/attackGraphProgress";
 import { getCategory, type AttackCategoryId } from "@/features/scans/attackProfiles";
 import { buildSeverityBreakdown } from "@/features/scans/resultsSeverityBreakdown";
@@ -50,7 +50,7 @@ function severityVariantForStatus(
 
 export function ResultsStep({ scanId, attackCategories = [] }: ResultsStepProps) {
   const { scans, findings, actions, loading, error } = useAppStore();
-  const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
+  const navigate = useNavigate();
   const [selectedSeverity, setSelectedSeverity] = useState<Severity | null>(null);
 
   const scan = scans.find((s) => s.id === scanId);
@@ -89,11 +89,6 @@ export function ResultsStep({ scanId, attackCategories = [] }: ResultsStepProps)
     }
     return [...groups.entries()].sort((a, b) => categoryLabel(a[0]).localeCompare(categoryLabel(b[0])));
   }, [scanFindings]);
-
-  const selectedFinding = useMemo(
-    () => scanFindings.find((finding) => finding.id === selectedFindingId) ?? null,
-    [scanFindings, selectedFindingId],
-  );
 
   const categoryStates = useMemo(
     () => resolveAttackGraphStates(attackCategories, status),
@@ -258,7 +253,7 @@ export function ResultsStep({ scanId, attackCategories = [] }: ResultsStepProps)
                       <button
                         type="button"
                         className="wizard-results__finding-button"
-                        onClick={() => setSelectedFindingId(finding.id)}
+                        onClick={() => navigate(`/findings/${finding.id}`)}
                       >
                         <Badge variant={severityVariant(finding.severity)}>{finding.severity}</Badge>
                         <span className="wizard-results__finding-title">{finding.title}</span>
@@ -271,17 +266,6 @@ export function ResultsStep({ scanId, attackCategories = [] }: ResultsStepProps)
           </div>
         )}
       </section>
-
-      <Modal
-        open={selectedFinding !== null}
-        title={selectedFinding?.title ?? "Finding details"}
-        size="wide"
-        onClose={() => setSelectedFindingId(null)}
-      >
-        {selectedFinding ? (
-          <FindingDetailPanel finding={selectedFinding} onClose={() => setSelectedFindingId(null)} />
-        ) : null}
-      </Modal>
     </div>
   );
 }

@@ -1,12 +1,13 @@
 import { exportReport, generateReport } from "@/shared/ipc";
 import type { ReportFormat } from "@/shared/types";
 
-export type ReportExportFormat = Extract<ReportFormat, "html" | "pdf" | "sarif">;
+export type ReportExportFormat = Extract<ReportFormat, "html" | "pdf" | "sarif" | "csv">;
 
 const EXPORT_LABELS: Record<ReportExportFormat, string> = {
   html: "HTML",
   pdf: "PDF",
   sarif: "SARIF",
+  csv: "CSV",
 };
 
 export function reportExportLabel(format: ReportExportFormat): string {

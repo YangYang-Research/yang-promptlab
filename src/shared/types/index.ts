@@ -9,7 +9,7 @@ export type ProjectStatus = "active" | "archived" | "draft";
 
 export type TargetType = "web" | "api" | "llm" | "mobile";
 
-export type ReportFormat = "html" | "pdf" | "json" | "sarif" | "markdown";
+export type ReportFormat = "html" | "pdf" | "json" | "sarif" | "markdown" | "csv";
 
 export type ModelStatus = "installed" | "downloading" | "available" | "error";
 
@@ -72,6 +72,8 @@ export type Finding = {
   projectId: string;
   targetId: string;
   targetName: string;
+  /** Full endpoint URL from the linked target, when available. */
+  targetUrl: string;
   title: string;
   description: string;
   severity: Severity;

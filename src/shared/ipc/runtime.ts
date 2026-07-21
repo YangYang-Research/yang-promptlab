@@ -252,3 +252,35 @@ export function testRuntimeConnectivity(): Promise<RuntimeConnectivityResult> {
 export function testRuntimeInference(): Promise<RuntimeConnectivityResult> {
   return invokeCommand<RuntimeConnectivityResult>("runtime_test_inference");
 }
+
+export type JudgeRoleWeightsDto = {
+  judge: number;
+  classifier: number;
+  attacker: number;
+  defaultLlm: number;
+  updatedAt: string;
+};
+
+export type UpdateJudgeRoleWeightsRequest = {
+  judge: number;
+  classifier: number;
+  attacker: number;
+  defaultLlm: number;
+};
+
+export const DEFAULT_JUDGE_ROLE_WEIGHTS: Omit<JudgeRoleWeightsDto, "updatedAt"> = {
+  judge: 0.85,
+  classifier: 0.75,
+  attacker: 0.7,
+  defaultLlm: 0.65,
+};
+
+export function getJudgeRoleWeights(): Promise<JudgeRoleWeightsDto> {
+  return invokeCommand<JudgeRoleWeightsDto>("runtime_judge_role_weights");
+}
+
+export function setJudgeRoleWeights(
+  request: UpdateJudgeRoleWeightsRequest,
+): Promise<JudgeRoleWeightsDto> {
+  return invokeCommand<JudgeRoleWeightsDto>("runtime_set_judge_role_weights", { request });
+}

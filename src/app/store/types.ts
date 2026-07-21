@@ -79,6 +79,8 @@ export type AppActions = {
     descriptor?: unknown,
   ) => Promise<Target>;
   deleteTarget: (id: string) => Promise<void>;
+  updateFindingStatus: (id: string, status: Finding["status"]) => Promise<void>;
+  deleteFinding: (id: string) => Promise<void>;
   generateReport: (
     projectId: string,
     scanId: string,

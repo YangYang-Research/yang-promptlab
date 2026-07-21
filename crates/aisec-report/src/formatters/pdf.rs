@@ -214,35 +214,83 @@ fn write_finding(
         left,
         y,
         9.0,
-        &format!("Category: {} · Status: {}", finding.category, finding.status),
+        &format!("ID: {}", finding.id),
     );
     y -= 4.5;
 
+    let mut meta = format!("Category: {} · Status: {}", finding.category, finding.status);
+    if let Some(c) = finding.confidence {
+        meta.push_str(&format!(" · Confidence: {:.0}%", c * 100.0));
+    }
+    write_line(doc, page, layer, font, left, y, 9.0, &meta);
+    y -= 4.5;
+
     for line in wrap_text(&finding.description, 85) {
+        if y < 30.0 {
+            y = 280.0;
+        }
         write_line(doc, page, layer, font, left, y, 9.0, &line);
         y -= 4.5;
     }
 
     if kind != ReportKind::Executive {
-        if let Some(ev) = &finding.evidence {
-            let preview = if ev.len() > 120 {
-                format!("{}…", &ev[..120])
-            } else {
-                ev.clone()
-            };
-            write_line(doc, page, layer, font, left, y, 8.0, &format!("Evidence: {preview}"));
-            y -= 4.0;
-        }
+        y = write_labeled_block(doc, page, layer, font, left, y, "Payload", finding.payload.as_deref());
+        y = write_labeled_block(doc, page, layer, font, left, y, "Response", finding.response.as_deref());
+        y = write_labeled_block(doc, page, layer, font, left, y, "Evidence", finding.evidence.as_deref());
     }
 
     if let Some(rec) = &finding.recommendation {
         for line in wrap_text(&format!("Fix: {rec}"), 85) {
+            if y < 30.0 {
+                y = 280.0;
+            }
+            write_line(doc, page, layer, font, left, y, 8.0, &line);
+            y -= 4.0;
+        }
+    }
+
+    if !finding.compliance_refs.is_empty() {
+        for line in wrap_text(
+            &format!("Compliance: {}", finding.compliance_refs.join(", ")),
+            85,
+        ) {
+            if y < 30.0 {
+                y = 280.0;
+            }
             write_line(doc, page, layer, font, left, y, 8.0, &line);
             y -= 4.0;
         }
     }
 
     y - 3.0
+}
+
+fn write_labeled_block(
+    doc: &PdfDocumentReference,
+    page: PdfPageIndex,
+    layer: PdfLayerIndex,
+    font: &IndirectFontRef,
+    left: f32,
+    mut y: f32,
+    label: &str,
+    value: Option<&str>,
+) -> f32 {
+    let Some(value) = value.filter(|v| !v.is_empty()) else {
+        return y;
+    };
+    if y < 30.0 {
+        y = 280.0;
+    }
+    write_line(doc, page, layer, font, left, y, 8.0, &format!("{label}:"));
+    y -= 4.0;
+    for line in wrap_text(value, 85) {
+        if y < 30.0 {
+            y = 280.0;
+        }
+        write_line(doc, page, layer, font, left, y, 8.0, &line);
+        y -= 4.0;
+    }
+    y
 }
 
 fn write_line(
@@ -327,19 +375,21 @@ mod tests {
                 severity: Severity::High,
                 category: "test".into(),
                 description: "Description text".into(),
-                payload: None,
-                response: None,
-                confidence: None,
-                evidence: None,
+                payload: Some("ignore previous".into()),
+                response: Some("OK".into()),
+                confidence: Some(0.9),
+                evidence: Some(r#"{"indicators":["OK"]}"#.into()),
                 recommendation: Some("Fix it".into()),
-                compliance_refs: vec![],
+                compliance_refs: vec!["LLM01".into()],
                 status: "open".into(),
             }],
         );
         let out = PdfFormatter
-            .render(ReportKind::Executive, &input)
+            .render(ReportKind::Technical, &input)
             .await
             .unwrap();
         assert!(out.bytes.starts_with(b"%PDF"));
+        // PDF text is embedded; ensure generation succeeds with full finding fields.
+        assert!(!out.bytes.is_empty());
     }
 }

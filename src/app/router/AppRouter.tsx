@@ -25,6 +25,11 @@ const TargetDetailsPage = lazy(() =>
 const FindingsPage = lazy(() =>
   import("@/features/findings/FindingsPage").then((m) => ({ default: m.FindingsPage })),
 );
+const FindingDetailsPage = lazy(() =>
+  import("@/features/findings/FindingDetailsPage").then((m) => ({
+    default: m.FindingDetailsPage,
+  })),
+);
 const ReportsPage = lazy(() =>
   import("@/features/reports/ReportsPage").then((m) => ({ default: m.ReportsPage })),
 );
@@ -138,6 +143,14 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <FindingsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="findings/:findingId"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <FindingDetailsPage />
               </Suspense>
             }
           />

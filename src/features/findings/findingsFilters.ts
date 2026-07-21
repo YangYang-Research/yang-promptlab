@@ -2,10 +2,10 @@ import type { Finding, Project, ScanRun, Severity } from "@/shared/types";
 
 export type FindingFilters = {
   searchQuery: string;
-  projectId: string | null;
-  scanId: string | null;
-  severity: Severity | null;
-  status: Finding["status"] | null;
+  projectIds: string[];
+  scanIds: string[];
+  severities: Severity[];
+  statuses: Finding["status"][];
 };
 
 export function filterFindings(
@@ -15,18 +15,22 @@ export function filterFindings(
   scans: ScanRun[],
 ): Finding[] {
   const query = filters.searchQuery.toLowerCase().trim();
+  const projectIds = new Set(filters.projectIds);
+  const scanIds = new Set(filters.scanIds);
+  const severities = new Set(filters.severities);
+  const statuses = new Set(filters.statuses);
 
   return findings.filter((finding) => {
-    if (filters.projectId && finding.projectId !== filters.projectId) {
+    if (projectIds.size > 0 && !projectIds.has(finding.projectId)) {
       return false;
     }
-    if (filters.scanId && finding.scanId !== filters.scanId) {
+    if (scanIds.size > 0 && !scanIds.has(finding.scanId)) {
       return false;
     }
-    if (filters.severity && finding.severity !== filters.severity) {
+    if (severities.size > 0 && !severities.has(finding.severity)) {
       return false;
     }
-    if (filters.status && finding.status !== filters.status) {
+    if (statuses.size > 0 && !statuses.has(finding.status)) {
       return false;
     }
     if (!query) {

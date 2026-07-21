@@ -9,6 +9,7 @@ pub enum ReportFormat {
     Pdf,
     Json,
     Sarif,
+    Csv,
 }
 
 impl ReportFormat {
@@ -18,6 +19,7 @@ impl ReportFormat {
             Self::Pdf => "pdf",
             Self::Json => "json",
             Self::Sarif => "sarif",
+            Self::Csv => "csv",
         }
     }
 
@@ -27,6 +29,7 @@ impl ReportFormat {
             Self::Pdf => "pdf",
             Self::Json => "json",
             Self::Sarif => "sarif.json",
+            Self::Csv => "csv",
         }
     }
 
@@ -36,6 +39,7 @@ impl ReportFormat {
             Self::Pdf => "application/pdf",
             Self::Json => "application/json",
             Self::Sarif => "application/sarif+json",
+            Self::Csv => "text/csv",
         }
     }
 }
@@ -176,7 +180,13 @@ pub struct ChartData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReportInput {
     pub scan_id: String,
+    #[serde(default)]
+    pub scan_name: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
     pub project_name: String,
+    #[serde(default)]
+    pub target_id: Option<String>,
     pub target_name: Option<String>,
     pub generated_at: OffsetDateTime,
     pub findings: Vec<ReportFinding>,

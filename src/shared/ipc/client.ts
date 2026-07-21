@@ -73,6 +73,12 @@ export type FindingDto = {
   updated_at: string;
 };
 
+export type FindingImportDto = {
+  scan_id: string;
+  imported_count: number;
+  findings: FindingDto[];
+};
+
 export type ScanStartDto = {
   scan_id: string;
 };
@@ -187,6 +193,18 @@ export const listFindings = (scanId: string) =>
 
 export const listFindingsAll = () =>
   invokeCommand<FindingDto[]>("finding_list_all");
+
+export const importFindingsSarif = (path: string, projectId?: string | null) =>
+  invokeCommand<FindingImportDto>("finding_import_sarif", {
+    path,
+    projectId: projectId || null,
+  });
+
+export const updateFindingStatus = (id: string, status: string) =>
+  invokeCommand<FindingDto>("finding_update", { id, status });
+
+export const deleteFinding = (id: string) =>
+  invokeCommand<void>("finding_delete", { id });
 
 export const generateReport = (
   projectId: string,

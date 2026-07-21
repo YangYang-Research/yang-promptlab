@@ -182,6 +182,30 @@ export function IconCheck({ className }: IconProps) {
   );
 }
 
+export function IconCopy({ className }: IconProps) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <rect
+        x="5"
+        y="5"
+        width="6.5"
+        height="6.5"
+        rx="1.25"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <path
+        d="M3.25 9V3.75A1.25 1.25 0 0 1 4.5 2.5H9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function IconX({ className }: IconProps) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
@@ -222,6 +246,29 @@ export function IconAi({ className, "aria-label": ariaLabel }: IconProps) {
       <path
         d="M6.15 15.9 6.55 17.1 7.75 17.5 6.55 17.9 6.15 19.1 5.75 17.9 4.55 17.5 5.75 17.1Z"
         fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+/** Download / export mark. */
+export function IconDownload({ className }: IconProps) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <path
+        d="M7 1.5v7.25M7 8.75 4.5 6.25M7 8.75l2.5-2.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M2.5 11.5h9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
       />
     </svg>
   );

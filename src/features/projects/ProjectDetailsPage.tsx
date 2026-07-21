@@ -421,7 +421,12 @@ export function ProjectDetailsPage() {
                 {recentFindings.map((finding) => (
                   <li key={finding.id} className="detail-list-row">
                     <SeverityBadge severity={finding.severity} />
-                    <span className="detail-list-row__title">{finding.title}</span>
+                    <Link
+                      to={`/findings/${finding.id}`}
+                      className="detail-list-row__title link"
+                    >
+                      {finding.title}
+                    </Link>
                     <span className="text-muted text-sm detail-list-row__meta">
                       {formatTimestamp(finding.discoveredAt)}
                     </span>

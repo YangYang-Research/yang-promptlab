@@ -14,8 +14,9 @@ pub use pool::Database;
 pub use repositories::{
     AttackCatalogRepository, AttackResultRepository, AuthProfileRepository,
     AuthRecordingRepository, AuthSessionRepository, EndpointRepository, FindingRepository,
-    ModelRepository, PayloadRepository, PluginRepository, ProjectRepository, ReportRepository,
-    Repositories, RuntimeTrafficRepository, ScanRepository, TargetRepository,
+    JudgeRoleWeightsRepository, ModelRepository, PayloadRepository, PluginRepository,
+    ProjectRepository, ReportRepository, Repositories, RuntimeTrafficRepository, ScanRepository,
+    TargetRepository,
 };
 
 #[cfg(test)]

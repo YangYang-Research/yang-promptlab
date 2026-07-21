@@ -410,6 +410,24 @@ pub struct RuntimeTrafficCounters {
     pub lifetime_received: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct JudgeRoleWeights {
+    pub id: i64,
+    pub judge: f64,
+    pub classifier: f64,
+    pub attacker: f64,
+    pub default_llm: f64,
+    pub updated_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateJudgeRoleWeights {
+    pub judge: f64,
+    pub classifier: f64,
+    pub attacker: f64,
+    pub default_llm: f64,
+}
+
 /// Helper for serializing optional JSON columns.
 pub(crate) fn json_string(value: &Option<serde_json::Value>) -> aisec_core::AisecResult<Option<String>> {
     match value {

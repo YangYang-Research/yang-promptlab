@@ -15,6 +15,8 @@ import {
   createTarget as createTargetCmd,
   deleteProject as deleteProjectCmd,
   deleteTarget as deleteTargetCmd,
+  deleteFinding as deleteFindingCmd,
+  updateFindingStatus as updateFindingStatusCmd,
   updateProject as updateProjectCmd,
   generateReport as generateReportCmd,
   listFindingsAll,
@@ -282,6 +284,9 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
         }
       },
       deleteTarget: (id) => runMutation("deleteTarget", () => deleteTargetCmd(id)),
+      updateFindingStatus: (id, status) =>
+        runMutation("updateFindingStatus", () => updateFindingStatusCmd(id, status)),
+      deleteFinding: (id) => runMutation("deleteFinding", () => deleteFindingCmd(id)),
       generateReport: (projectId, scanId, format, kind) =>
         runMutation("generateReport", () =>
           generateReportCmd(projectId, scanId, format, kind),

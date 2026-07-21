@@ -14,8 +14,8 @@ use aisec_inference::InferenceRuntimeManager;
 use aisec_runtime::{RuntimeManager, SharedModelProvider};
 use aisec_storage::{
     AttackResultRepository, CreateAttackResult, CreateFinding, Endpoint,
-    EndpointRepository, FindingRepository, Repositories, ScanRepository, TargetRepository,
-    UpdateScan,
+    EndpointRepository, FindingRepository, JudgeRoleWeightsRepository, Repositories,
+    ScanRepository, TargetRepository, UpdateScan,
 };
 use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
@@ -215,18 +215,35 @@ async fn build_judge_for_category(
     model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
     model_provider: SharedModelProvider,
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+    repos: &Repositories,
 ) -> CommandResult<aisec_judge::JudgeEngine> {
     let inference = inference_manager.lock().await;
     let manager = model_manager.lock().await;
     let mut runtime_mgr = runtime_manager.lock().await;
-    build_judge_engine_from_gateway(
+    let mut judge = build_judge_engine_from_gateway(
         data_dir,
         &inference,
         &manager,
         model_provider,
         &mut runtime_mgr,
     )
-    .await
+    .await?;
+    drop(runtime_mgr);
+    drop(manager);
+    drop(inference);
+
+    let stored = repos
+        .judge_role_weights()
+        .get()
+        .await
+        .map_err(CommandError::from)?;
+    judge.set_role_weights(aisec_judge::RoleWeights {
+        judge: stored.judge as f32,
+        classifier: stored.classifier as f32,
+        attacker: stored.attacker as f32,
+        default_llm: stored.default_llm as f32,
+    });
+    Ok(judge)
 }
 
 struct CategoryJudgeAccum {
@@ -353,7 +370,11 @@ async fn judge_single_attempt(
                     &attempt,
                     &verdict.summary,
                     verdict.confidence,
-                    &eval.indicators,
+                    if verdict.evidence.is_empty() {
+                        &eval.indicators
+                    } else {
+                        &verdict.evidence
+                    },
                     &judge_json,
                     env.provider,
                 )),
@@ -852,6 +873,7 @@ pub async fn run_category_on_endpoint(
         model_manager,
         model_provider.clone(),
         runtime_manager,
+        repos,
     )
     .await?;
     let endpoint_metadata = metadata_from_endpoint(endpoint);
@@ -972,6 +994,7 @@ pub async fn run_category_on_target_profile(
         model_manager,
         model_provider.clone(),
         runtime_manager,
+        repos,
     )
     .await?;
     let judge_env = CategoryJudgeEnv {

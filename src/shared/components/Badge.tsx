@@ -67,6 +67,28 @@ export function StatusBadge({ status }: { status: string }) {
   return <Badge variant={variant}>{status.replace(/_/g, " ")}</Badge>;
 }
 
+const findingStatusVariant: Record<
+  "open" | "confirmed" | "false_positive" | "fixed",
+  BadgeProps["variant"]
+> = {
+  open: "info",
+  confirmed: "danger",
+  false_positive: "muted",
+  fixed: "success",
+};
+
+type FindingStatus = keyof typeof findingStatusVariant;
+
+type FindingStatusBadgeProps = {
+  status: FindingStatus | string;
+};
+
+export function FindingStatusBadge({ status }: FindingStatusBadgeProps) {
+  const key = status.toLowerCase().replace(/[\s-]/g, "_") as FindingStatus;
+  const variant = findingStatusVariant[key] ?? "default";
+  return <Badge variant={variant}>{status.replace(/_/g, " ")}</Badge>;
+}
+
 const AUTH_KIND_CLASS: Record<
   "none" | "username_password" | "sso" | "basic" | "api_key" | "jwt",
   string

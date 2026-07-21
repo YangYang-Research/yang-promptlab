@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 
 use aisec_storage::{Endpoint, Finding, Project, Report, Scan, Target};
 
-fn ts(dt: OffsetDateTime) -> String {
+pub(crate) fn ts(dt: OffsetDateTime) -> String {
     dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string())
 }
 
@@ -299,6 +299,13 @@ impl From<Finding> for FindingDto {
             updated_at: ts(f.updated_at),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FindingImportDto {
+    pub scan_id: String,
+    pub imported_count: u32,
+    pub findings: Vec<FindingDto>,
 }
 
 

@@ -27,7 +27,7 @@ import {
   type ScanExportRow,
 } from "./reportDownloads";
 
-const EXPORT_FORMATS: ReportExportFormat[] = ["html", "pdf", "sarif"];
+const EXPORT_FORMATS: ReportExportFormat[] = ["html", "pdf", "sarif", "csv"];
 
 export function ReportsPage() {
   const { reports, scans, findings, projects, loading, error, actions } = useAppStore();

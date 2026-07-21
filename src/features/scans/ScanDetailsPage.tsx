@@ -10,7 +10,10 @@ import {
   Button,
   Card,
   EmptyState,
+  IconButton,
+  IconDownload,
   PageHeader,
+  Pagination,
   ProgressBar,
   SeverityBadge,
   StatusBadge,
@@ -50,6 +53,7 @@ import {
   isRetryableScanStatus,
   resolveScanOpenPath,
 } from "@/features/scans/wizardState";
+import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
 import {
   getScan,
   getTarget,
@@ -71,6 +75,7 @@ import {
 } from "./scanConfigExport";
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
+const SCAN_REPORTS_PAGE_SIZE = 5;
 
 function isMonitorableAttackScan(scan: Pick<ScanRun, "name">): boolean {
   return scan.name.startsWith("Scan (") || scan.name.startsWith("Agent Scan (");
@@ -132,6 +137,11 @@ export function ScanDetailsPage() {
     () => reports.filter((report) => report.scanId === scanId),
     [reports, scanId],
   );
+  const {
+    page: reportsPage,
+    setPage: setReportsPage,
+    pagination: reportsPagination,
+  } = usePaginatedList(scanReports, SCAN_REPORTS_PAGE_SIZE);
 
   const severityCounts = useMemo(() => countSeverities(scanFindings), [scanFindings]);
   const recentFindings = useMemo(
@@ -641,7 +651,12 @@ export function ScanDetailsPage() {
                 {recentFindings.map((finding) => (
                   <li key={finding.id} className="detail-list-row">
                     <SeverityBadge severity={finding.severity} />
-                    <span className="detail-list-row__title">{finding.title}</span>
+                    <Link
+                      to={`/findings/${finding.id}`}
+                      className="detail-list-row__title link"
+                    >
+                      {finding.title}
+                    </Link>
                     <span className="text-muted text-sm detail-list-row__meta">
                       {formatTimestamp(finding.discoveredAt)}
                     </span>
@@ -667,31 +682,43 @@ export function ScanDetailsPage() {
           {scanReports.length === 0 ? (
             <p className="text-muted text-sm">No reports generated yet.</p>
           ) : (
-            <ul className="detail-list">
-              {scanReports.map((report) => (
-                <li key={report.id} className="detail-list-row detail-list-row--reports">
-                  <span className="detail-list-row__title">{report.title}</span>
-                  <Badge variant="muted">{report.format.toUpperCase()}</Badge>
-                  <span className="text-muted text-sm detail-list-row__meta">
-                    {formatTimestamp(report.createdAt)}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => void exportStoredReport(report.id)}
-                  >
-                    Download
-                  </Button>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="detail-list">
+                {reportsPagination.items.map((report) => (
+                  <li key={report.id} className="detail-list-row detail-list-row--reports">
+                    <span className="detail-list-row__title">{report.title}</span>
+                    <Badge variant="muted">{report.format.toUpperCase()}</Badge>
+                    <span className="text-muted text-sm detail-list-row__meta">
+                      {formatTimestamp(report.createdAt)}
+                    </span>
+                    <IconButton
+                      ariaLabel={`Download ${report.title}`}
+                      size="sm"
+                      onClick={() => void exportStoredReport(report.id)}
+                    >
+                      <IconDownload />
+                    </IconButton>
+                  </li>
+                ))}
+              </ul>
+              {reportsPagination.totalPages > 1 ? (
+                <Pagination
+                  page={reportsPage}
+                  totalPages={reportsPagination.totalPages}
+                  totalItems={reportsPagination.totalItems}
+                  rangeStart={reportsPagination.rangeStart}
+                  rangeEnd={reportsPagination.rangeEnd}
+                  onPageChange={setReportsPage}
+                />
+              ) : null}
+            </>
           )}
 
           {playbook && isAttackScanName(scan?.name ?? "") && (
             <div className="scan-details__subsection scan-details__report-actions">
               <h3 className="scan-details__subsection-title">Generate report</h3>
               <div className="scan-details__export-actions">
-                {(["html", "pdf", "sarif"] as ReportExportFormat[]).map((format) => (
+                {(["html", "pdf", "sarif", "csv"] as ReportExportFormat[]).map((format) => (
                   <Button
                     key={format}
                     variant="secondary"

@@ -1124,3 +1124,68 @@ fn map_runtime_err(err: aisec_runtime::RuntimeError) -> CommandError {
         other => CommandError::from(aisec_core::AisecError::internal(other.to_string())),
     }
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JudgeRoleWeightsDto {
+    pub judge: f64,
+    pub classifier: f64,
+    pub attacker: f64,
+    pub default_llm: f64,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateJudgeRoleWeightsRequest {
+    pub judge: f64,
+    pub classifier: f64,
+    pub attacker: f64,
+    pub default_llm: f64,
+}
+
+fn judge_weights_dto(row: aisec_storage::JudgeRoleWeights) -> JudgeRoleWeightsDto {
+    JudgeRoleWeightsDto {
+        judge: row.judge,
+        classifier: row.classifier,
+        attacker: row.attacker,
+        default_llm: row.default_llm,
+        updated_at: crate::dto::ts(row.updated_at),
+    }
+}
+
+#[tauri::command]
+pub async fn runtime_judge_role_weights(
+    state: State<'_, AppState>,
+) -> CommandResult<JudgeRoleWeightsDto> {
+    use aisec_storage::JudgeRoleWeightsRepository;
+
+    let row = state
+        .repositories()
+        .judge_role_weights()
+        .get()
+        .await
+        .map_err(CommandError::from)?;
+    Ok(judge_weights_dto(row))
+}
+
+#[tauri::command]
+pub async fn runtime_set_judge_role_weights(
+    state: State<'_, AppState>,
+    request: UpdateJudgeRoleWeightsRequest,
+) -> CommandResult<JudgeRoleWeightsDto> {
+    use aisec_storage::{JudgeRoleWeightsRepository, UpdateJudgeRoleWeights};
+
+    let row = state
+        .repositories()
+        .judge_role_weights()
+        .update(UpdateJudgeRoleWeights {
+            judge: request.judge,
+            classifier: request.classifier,
+            attacker: request.attacker,
+            default_llm: request.default_llm,
+        })
+        .await
+        .map_err(CommandError::from)?;
+    Ok(judge_weights_dto(row))
+}

@@ -23,7 +23,7 @@ import {
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
 const FINDING_STATUSES: Finding["status"][] = ["open", "confirmed", "false_positive", "fixed"];
-const REPORT_FORMATS: ReportFormat[] = ["html", "pdf", "json", "sarif", "markdown"];
+const REPORT_FORMATS: ReportFormat[] = ["html", "pdf", "json", "sarif", "markdown", "csv"];
 
 function coerceSeverity(value: string): Severity {
   const v = value.toLowerCase();
@@ -132,23 +132,35 @@ export function mapTargets(targets: TargetDto[], scans: ScanRun[] = []): Target[
 }
 
 export function mapFindings(findings: FindingDto[], targets: TargetDto[]): Finding[] {
-  const targetNames = new Map(targets.map((t) => [t.id, t.name]));
-  return findings.map((f) => ({
-    id: f.id,
-    scanId: f.scan_id,
-    projectId: f.project_id,
-    targetId: f.target_id ?? "",
-    targetName: f.target_id ? targetNames.get(f.target_id) ?? "" : "",
-    title: f.title,
-    description: f.description ?? "",
-    severity: coerceSeverity(f.severity),
-    category: f.category ?? "general",
-    status: coerceFindingStatus(f.status),
-    confidence: extractConfidence(f.evidence),
-    verdict: extractVerdict(f.evidence),
-    discoveredAt: f.created_at,
-    evidence: f.evidence,
-  }));
+  const targetById = new Map(
+    targets.map((t) => [
+      t.id,
+      {
+        name: t.name,
+        url: extractTargetUrl(t.descriptor),
+      },
+    ]),
+  );
+  return findings.map((f) => {
+    const target = f.target_id ? targetById.get(f.target_id) : undefined;
+    return {
+      id: f.id,
+      scanId: f.scan_id,
+      projectId: f.project_id,
+      targetId: f.target_id ?? "",
+      targetName: target?.name ?? "",
+      targetUrl: target?.url ?? "",
+      title: f.title,
+      description: f.description ?? "",
+      severity: coerceSeverity(f.severity),
+      category: f.category ?? "general",
+      status: coerceFindingStatus(f.status),
+      confidence: extractConfidence(f.evidence),
+      verdict: extractVerdict(f.evidence),
+      discoveredAt: f.created_at,
+      evidence: f.evidence,
+    };
+  });
 }
 
 export function mapScans(scans: ScanDto[]): ScanRun[] {

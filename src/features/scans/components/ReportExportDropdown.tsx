@@ -9,7 +9,7 @@ import {
 import { Button } from "@/shared/components";
 import { useToast } from "@/shared/notifications";
 
-const EXPORT_FORMATS: ReportExportFormat[] = ["html", "pdf", "sarif"];
+const EXPORT_FORMATS: ReportExportFormat[] = ["html", "pdf", "sarif", "csv"];
 
 type MenuPosition = {
   top: number;

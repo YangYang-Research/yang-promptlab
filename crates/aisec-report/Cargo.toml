@@ -1,6 +1,6 @@
 [package]
 name = "aisec-report"
-description = "AISec reporting engine — HTML, PDF, JSON, SARIF export"
+description = "AISec reporting engine — HTML, PDF, JSON, SARIF, CSV export"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

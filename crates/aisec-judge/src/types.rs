@@ -295,6 +295,28 @@ pub struct JudgeConfig {
     pub min_confidence: f32,
     pub llm_max_tokens: u32,
     pub llm_temperature: f32,
+    #[serde(default)]
+    pub role_weights: RoleWeights,
+}
+
+/// Per-role weights used in consensus confidence scoring.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RoleWeights {
+    pub judge: f32,
+    pub classifier: f32,
+    pub attacker: f32,
+    pub default_llm: f32,
+}
+
+impl Default for RoleWeights {
+    fn default() -> Self {
+        Self {
+            judge: 0.85,
+            classifier: 0.75,
+            attacker: 0.70,
+            default_llm: 0.65,
+        }
+    }
 }
 
 impl Default for JudgeConfig {
@@ -305,6 +327,7 @@ impl Default for JudgeConfig {
             min_confidence: 0.45,
             llm_max_tokens: 512,
             llm_temperature: 0.1,
+            role_weights: RoleWeights::default(),
         }
     }
 }
