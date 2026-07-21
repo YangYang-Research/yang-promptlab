@@ -128,9 +128,13 @@ export function verificationPipelineLiveDetail(
     case "ai":
       return null;
     case "failed_auth":
-      return "Authentication or connectivity check failed.";
+      return resultMessage
+        ? formatVerificationFailureMessage(resultMessage)
+        : "Result: Verification failed - Authentication or connectivity check failed.";
     case "failed_ai":
-      return "Yazg could not confirm an AI system response.";
+      return resultMessage
+        ? formatVerificationFailureMessage(resultMessage)
+        : "Result: Verification failed - Yazg could not confirm an AI system response.";
     case "done":
       return resultMessage
         ? formatVerificationResultMessage(resultMessage)

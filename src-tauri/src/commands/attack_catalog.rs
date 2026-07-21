@@ -215,7 +215,7 @@ pub async fn attack_catalog_generate_prompt_op(
         let inference = state.inference_manager().lock().await;
         if !is_inference_ready(&inference) {
             return Err(CommandError::invalid_input(
-                "AI runtime is not ready — configure and start AI Runtime first",
+                "Yazg Agent is offline. Configure and start AI Runtime so Yazg is Live before generating a prompt.",
             ));
         }
     }

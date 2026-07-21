@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge, Select } from "@/shared/components";
 import { listTargetProfileTemplates } from "@/shared/ipc/targetProfile";
@@ -28,7 +28,14 @@ export function TargetProfileStep({
   hasPersistedTarget = false,
 }: TargetProfileStepProps) {
   const [loadingTemplates, setLoadingTemplates] = useState(false);
-  const apiEndpoint = useMemo(() => formatApiEndpoint(profile), [profile.baseUrl, profile.path]);
+  // Keep a local draft while typing — round-tripping through split/format jumps the caret.
+  const [endpointDraft, setEndpointDraft] = useState(() => formatApiEndpoint(profile));
+  const endpointFocusedRef = useRef(false);
+
+  useEffect(() => {
+    if (endpointFocusedRef.current) return;
+    setEndpointDraft(formatApiEndpoint(profile));
+  }, [profile.baseUrl, profile.path]);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,7 +63,20 @@ export function TargetProfileStep({
   );
 
   function handleEndpointChange(value: string) {
+    setEndpointDraft(value);
     onChange(applyApiEndpointToProfile(value));
+  }
+
+  function handleEndpointBlur() {
+    endpointFocusedRef.current = false;
+    const patch = applyApiEndpointToProfile(endpointDraft);
+    onChange(patch);
+    setEndpointDraft(
+      formatApiEndpoint({
+        ...profile,
+        ...patch,
+      }),
+    );
   }
 
   function applyProvider(provider: TargetProfileFormState["provider"]) {
@@ -107,8 +127,12 @@ export function TargetProfileStep({
           <input
             className="input wizard-target-form__mono"
             type="url"
-            value={apiEndpoint}
+            value={endpointDraft}
+            onFocus={() => {
+              endpointFocusedRef.current = true;
+            }}
             onChange={(e) => handleEndpointChange(e.target.value)}
+            onBlur={handleEndpointBlur}
             placeholder="https://api.openai.com/v1/chat/completions"
             autoComplete="url"
             autoFocus

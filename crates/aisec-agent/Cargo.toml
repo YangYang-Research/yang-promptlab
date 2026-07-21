@@ -1,0 +1,20 @@
+[package]
+name = "aisec-agent"
+description = "Yazg supervisor and sub-agents (Plan, Verify, …)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+aisec-planner = { workspace = true }
+aisec-target-profile = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

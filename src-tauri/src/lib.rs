@@ -285,6 +285,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::target_profile::target_profile_verify_ai,
             commands::target_profile::target_profile_get,
             commands::target_profile::planner_generate_from_profile,
+            commands::yazg::yazg_chat,
             commands::scan_recommendations::scan_recommendations_generate,
             commands::project_summary::project_summary_generate,
             commands::planner::attack_planner_adjust,

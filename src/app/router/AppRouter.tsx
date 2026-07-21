@@ -47,6 +47,9 @@ const AttackCategoriesPage = lazy(() =>
 const AIRuntimePage = lazy(() =>
   import("@/features/runtime/AIRuntimePage").then((m) => ({ default: m.AIRuntimePage })),
 );
+const YazgChatPage = lazy(() =>
+  import("@/features/yazg/YazgChatPage").then((m) => ({ default: m.YazgChatPage })),
+);
 const SettingsPage = lazy(() =>
   import("@/features/settings/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 );
@@ -167,6 +170,14 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <AIRuntimePage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="yazg"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <YazgChatPage />
               </Suspense>
             }
           />

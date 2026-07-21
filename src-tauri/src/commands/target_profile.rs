@@ -4,10 +4,10 @@ use aisec_auth::{resolve_descriptor_for_wizard, SecretStore};
 use aisec_core::{AisecError, LogCategory};
 use aisec_storage::TargetRepository;
 use aisec_target_profile::{
-    build_wizard_attack_plan_with_llm, execute_capability_probe, execute_verify_http,
-    has_ai_response, list_provider_templates, validate_http_response_with_llm, TargetProfile,
-    VerificationError, VerifyHttpSuccess,
+    execute_capability_probe, execute_verify_http, has_ai_response, list_provider_templates,
+    TargetProfile, VerificationError, VerifyHttpSuccess,
 };
+use aisec_agent::{YazgDelegation, YazgSupervisor};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tracing::{info, warn};
@@ -193,7 +193,7 @@ fn merge_auth_headers(
     }
 }
 
-fn auth_headers_from_descriptor(
+pub(crate) fn auth_headers_from_descriptor(
     descriptor_json: &str,
 ) -> CommandResult<std::collections::HashMap<String, String>> {
     let secrets = SecretStore::new().map_err(CommandError::from)?;
@@ -376,7 +376,7 @@ pub async fn target_profile_verify_ai_op(
     let inference = state.inference_manager().lock().await;
     if !is_inference_ready(&inference) {
         return Err(CommandError::invalid_input(
-            "AI Runtime must be ready before verifying the endpoint. Configure and load a model in AI Runtime.",
+            "Yazg Agent is offline. Configure and start AI Runtime so Yazg is Live before verifying the endpoint.",
         ));
     }
     drop(inference);
@@ -466,11 +466,27 @@ pub async fn target_profile_verify_ai_op(
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
+    let supervisor_llm = crate::inference_host::HostYazgReactLlm::new(
+        state.data_dir().to_path_buf(),
+        state.inference_manager().clone(),
+        state.model_manager().clone(),
+        state.model_provider().clone(),
+        state.runtime_manager().clone(),
+    );
+    let plan_llm = HostWizardPlannerLlm::new(
+        state.data_dir().to_path_buf(),
+        state.inference_manager().clone(),
+        state.model_manager().clone(),
+        state.model_provider().clone(),
+        state.runtime_manager().clone(),
+    );
 
-    let attempt = validate_http_response_with_llm(&profile, &http, &llm_host).await;
-    match attempt.result {
-        Ok(verification) => {
-            profile.verification = verification;
+    let delegation =
+        YazgSupervisor::react_classify_probe(&profile, &http, &supervisor_llm, &llm_host, &plan_llm)
+            .await;
+    match delegation {
+        Ok(YazgDelegation::AnalyzedEndpoint { outcome, .. }) => {
+            profile.verification = outcome.verification;
             let json = profile_to_json(&profile)?;
             state
                 .repositories()
@@ -482,23 +498,32 @@ pub async fn target_profile_verify_ai_op(
             Ok(TargetProfileVerifyResponse {
                 verified: true,
                 profile: TargetProfileDto::from(profile),
-                console: VerificationConsoleEntryDto::from(attempt.console.clone()),
-                message: attempt.console.message,
+                console: VerificationConsoleEntryDto::from(outcome.console.clone()),
+                message: outcome.console.message,
                 probe_console: Some(probe_console),
             })
         }
-        Err(err) => {
-            let message = err.to_string();
+        Ok(other) => {
+            let message = match &other {
+                YazgDelegation::Chat { turn }
+                | YazgDelegation::Planned { turn, .. }
+                | YazgDelegation::AnalyzedEndpoint { turn, .. } => turn.reply.clone(),
+            };
+            let message = if message.trim().is_empty() {
+                "Yazg ReAct finished without AnalyzeEndpointAgent confirmation".into()
+            } else {
+                message
+            };
             profile.verification = aisec_target_profile::VerificationResult {
                 verified: false,
                 verified_at: None,
                 provider: profile.provider.as_str().into(),
                 model: None,
                 capabilities: profile.default_capabilities.clone(),
-                response_time_ms: attempt.console.response_time_ms,
-                status_code: attempt.console.status_code,
+                response_time_ms: probe_console.response_time_ms,
+                status_code: probe_console.status_code,
                 status: "failed".into(),
-                response_preview: attempt.console.response_preview.clone(),
+                response_preview: probe_console.response_preview.clone(),
                 error_message: Some(message.clone()),
             };
             let json = profile_to_json(&profile)?;
@@ -512,7 +537,45 @@ pub async fn target_profile_verify_ai_op(
             Ok(TargetProfileVerifyResponse {
                 verified: false,
                 profile: TargetProfileDto::from(profile),
-                console: VerificationConsoleEntryDto::from(attempt.console),
+                console: VerificationConsoleEntryDto {
+                    success: false,
+                    message: message.clone(),
+                    ..probe_console.clone()
+                },
+                message,
+                probe_console: Some(probe_console),
+            })
+        }
+        Err(err) => {
+            let message = err.to_string();
+            profile.verification = aisec_target_profile::VerificationResult {
+                verified: false,
+                verified_at: None,
+                provider: profile.provider.as_str().into(),
+                model: None,
+                capabilities: profile.default_capabilities.clone(),
+                response_time_ms: probe_console.response_time_ms,
+                status_code: probe_console.status_code,
+                status: "failed".into(),
+                response_preview: probe_console.response_preview.clone(),
+                error_message: Some(message.clone()),
+            };
+            let json = profile_to_json(&profile)?;
+            state
+                .repositories()
+                .targets()
+                .update_profile(&target_id, &json)
+                .await
+                .map_err(CommandError::from)?;
+
+            Ok(TargetProfileVerifyResponse {
+                verified: false,
+                profile: TargetProfileDto::from(profile),
+                console: VerificationConsoleEntryDto {
+                    success: false,
+                    message: message.clone(),
+                    ..probe_console.clone()
+                },
                 message,
                 probe_console: Some(probe_console),
             })
@@ -584,12 +647,26 @@ pub async fn planner_generate_from_profile_op(
     let inference = state.inference_manager().lock().await;
     if !is_inference_ready(&inference) {
         return Err(CommandError::invalid_input(
-            "AI Runtime must be ready before generating an attack plan. Configure and load a model in AI Runtime settings.",
+            "Yazg Agent is offline. Configure and start AI Runtime so Yazg is Live before generating an attack plan.",
         ));
     }
     drop(inference);
 
-    let llm_host = HostWizardPlannerLlm::new(
+    let plan_llm = HostWizardPlannerLlm::new(
+        state.data_dir().to_path_buf(),
+        state.inference_manager().clone(),
+        state.model_manager().clone(),
+        state.model_provider().clone(),
+        state.runtime_manager().clone(),
+    );
+    let supervisor_llm = crate::inference_host::HostYazgReactLlm::new(
+        state.data_dir().to_path_buf(),
+        state.inference_manager().clone(),
+        state.model_manager().clone(),
+        state.model_provider().clone(),
+        state.runtime_manager().clone(),
+    );
+    let analyze_llm = HostEndpointVerifyLlm::new(
         state.data_dir().to_path_buf(),
         state.inference_manager().clone(),
         state.model_manager().clone(),
@@ -600,11 +677,36 @@ pub async fn planner_generate_from_profile_op(
     info!(
         target_id = %target_id,
         endpoint = %profile.full_url(),
-        "wizard attack plan: starting AI Runtime planning"
+        "wizard attack plan: Yazg supervisor (soft AttackPlan hint)"
     );
 
-    let plan = match build_wizard_attack_plan_with_llm(&profile, &llm_host).await {
-        Ok(plan) => plan,
+    let plan = match YazgSupervisor::react_plan(
+        &profile,
+        &supervisor_llm,
+        &analyze_llm,
+        &plan_llm,
+    )
+    .await
+    {
+        Ok(YazgDelegation::Planned { outcome, .. }) => outcome.plan,
+        Ok(other) => {
+            let message = match other {
+                YazgDelegation::Chat { turn } | YazgDelegation::AnalyzedEndpoint { turn, .. } => {
+                    turn.reply
+                }
+                YazgDelegation::Planned { turn, .. } => turn.reply,
+            };
+            warn!(
+                target_id = %target_id,
+                endpoint = %profile.full_url(),
+                "wizard attack plan: ReAct finished without AttackPlanAgent"
+            );
+            return Err(CommandError::invalid_input(if message.trim().is_empty() {
+                "Yazg ReAct did not produce an attack plan".into()
+            } else {
+                message
+            }));
+        }
         Err(err) => {
             let message = err.to_string();
             warn!(

@@ -10,16 +10,16 @@ export const RUNTIME_INFERENCE_SITES: RuntimeInferenceSite[] = [
   {
     id: "auth-verify",
     title: "Endpoint verification",
-    location: "Scan wizard · Step 3",
+    location: "Scan wizard · Step 3 · AnalyzeEndpointAgent",
     description:
-      "After the HTTP probe succeeds, Yazg classifies whether the response is from a live AI API.",
+      "Yazg ReActs then delegates to AnalyzeEndpointAgent: after the HTTP probe succeeds, the agent classifies whether the response is from a live AI API.",
   },
   {
     id: "attack-plan",
     title: "Attack plan generation",
-    location: "Scan wizard · Step 4",
+    location: "Scan wizard · Step 4 · AttackPlanAgent",
     description:
-      "Yazg reads the verified target profile and selects categories plus techniques, execution strategy, and payload policy. Re-plan runs the same inference path.",
+      "Yazg ReActs then delegates to AttackPlanAgent: reads the verified target profile and selects categories, techniques, execution strategy, and payload policy. Re-plan uses the same path.",
   },
   {
     id: "payload-gen",

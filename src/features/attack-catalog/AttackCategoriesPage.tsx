@@ -18,6 +18,7 @@ import {
   type AttackCatalogCategoryDto,
   type AttackCatalogTechniqueDto,
 } from "@/shared/ipc/attackCatalog";
+import { assertYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
 import { paginateItems } from "@/shared/utils/pagination";
 
 const TECHNIQUES_PAGE_SIZE = 7;
@@ -235,6 +236,11 @@ export function AttackCategoriesPage() {
     setError(null);
     setSavedHint(null);
     try {
+      const yazg = await assertYazgAgentLive(true);
+      if (!yazg.live) {
+        setError(yazg.message);
+        return;
+      }
       const generated = await generateAttackCatalogPrompt(selected.id);
       setDraft(generated.content);
       setYazgGenerated(true);

@@ -5,7 +5,7 @@ type NavIconProps = {
 };
 
 export function NavIcon({ name }: NavIconProps) {
-  if (name === "runtime") {
+  if (name === "runtime" || name === "yazg") {
     return <IconAi className="nav-icon" />;
   }
 

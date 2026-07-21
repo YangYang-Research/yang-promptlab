@@ -14,6 +14,7 @@ members = [
     "crates/aisec-auth",
     "crates/aisec-discovery",
     "crates/aisec-endpoint-metadata",
+    "crates/aisec-agent",
     "crates/aisec-target-profile",
     "crates/aisec-harness",
     "crates/aisec-runtime",
@@ -47,6 +48,7 @@ aisec-runtime = { path = "crates/aisec-runtime" }
 aisec-core = { path = "crates/aisec-core" }
 aisec-discovery = { path = "crates/aisec-discovery" }
 aisec-endpoint-metadata = { path = "crates/aisec-endpoint-metadata" }
+aisec-agent = { path = "crates/aisec-agent" }
 aisec-target-profile = { path = "crates/aisec-target-profile" }
 aisec-storage = { path = "crates/aisec-storage" }
 serde = { version = "1", features = ["derive"] }

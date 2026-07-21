@@ -24,6 +24,7 @@ pub mod project_summary;
 pub mod scan_recommendations;
 pub mod security;
 pub mod target_profile;
+pub mod yazg;
 pub mod wizard_scan;
 
 #[derive(Debug, Serialize)]

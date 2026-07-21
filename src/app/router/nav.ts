@@ -3,7 +3,7 @@ export type NavItem = {
   label: string;
   path: string;
   icon: string;
-  section?: "main" | "ai" | "advanced" | "system";
+  section?: "main" | "assistant" | "ai" | "advanced" | "system";
 };
 
 export const navItems: NavItem[] = [
@@ -13,6 +13,7 @@ export const navItems: NavItem[] = [
   { id: "targets", label: "Targets", path: "/targets", icon: "targets", section: "main" },
   { id: "findings", label: "Findings", path: "/findings", icon: "findings", section: "main" },
   { id: "reports", label: "Reports", path: "/reports", icon: "reports", section: "main" },
+  { id: "yazg", label: "Yazg", path: "/yazg", icon: "yazg", section: "assistant" },
   { id: "runtime", label: "AI Runtime", path: "/runtime", icon: "runtime", section: "ai" },
   { id: "models", label: "Models", path: "/models", icon: "models", section: "ai" },
   { id: "plugins", label: "Plugins", path: "/plugins", icon: "plugins", section: "advanced" },

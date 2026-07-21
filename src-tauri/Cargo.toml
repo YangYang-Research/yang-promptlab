@@ -35,6 +35,7 @@ aisec-generator = { workspace = true }
 aisec-payload = { workspace = true }
 aisec-plugin-host = { workspace = true }
 aisec-target-profile = { workspace = true }
+aisec-agent = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 time = { workspace = true }

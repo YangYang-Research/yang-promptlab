@@ -48,6 +48,7 @@ function NavSection({
 export function Sidebar() {
   const { ui, stats, dispatch } = useAppStore();
   const mainItems = navItems.filter((i) => i.section === "main");
+  const assistantItems = navItems.filter((i) => i.section === "assistant");
   const aiItems = navItems.filter((i) => i.section === "ai");
   const advancedItems = navItems.filter((i) => i.section === "advanced");
   const systemItems = navItems.filter((i) => i.section === "system");
@@ -76,6 +77,12 @@ export function Sidebar() {
           items={mainItems}
           collapsed={collapsed}
           criticalFindings={stats.criticalFindings}
+        />
+        <NavSection
+          label="Assistant"
+          items={assistantItems}
+          collapsed={collapsed}
+          criticalFindings={0}
         />
         <NavSection label="AI Security Engine" items={aiItems} collapsed={collapsed} criticalFindings={0} />
         <NavSection label="Advanced" items={advancedItems} collapsed={collapsed} criticalFindings={0} />

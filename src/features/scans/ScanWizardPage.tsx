@@ -10,6 +10,7 @@ import { generateAttackPlanForTarget } from "@/shared/ipc/attackPlanner";
 import { getTargetProfile, saveTargetProfile } from "@/shared/ipc/targetProfile";
 import { toAppError } from "@/shared/errors";
 import { useToast } from "@/shared/notifications";
+import { assertYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
 import type { Project, Target } from "@/shared/types";
 
 import { ImportApiModal } from "./components/ImportApiModal";
@@ -427,6 +428,13 @@ export function ScanWizardPage() {
 
   const runAttackPlanner = useCallback(
     async (targetId: string, options?: { replan?: boolean }) => {
+      const yazg = await assertYazgAgentLive(true);
+      if (!yazg.live) {
+        setPlannerError(yazg.message);
+        notify(yazg.message, "error");
+        return null;
+      }
+
       const replan = options?.replan ?? false;
       setPlannerReplanning(replan);
       setPlannerGenerating(true);

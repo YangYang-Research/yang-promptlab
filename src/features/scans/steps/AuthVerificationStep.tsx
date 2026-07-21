@@ -7,6 +7,7 @@ import {
   verifyTargetProfileConnect,
 } from "@/shared/ipc/targetProfile";
 import { useToast } from "@/shared/notifications";
+import { assertYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
 
 import { TargetFormFields } from "../TargetFormFields";
 import { VerificationConsole } from "../components/VerificationConsole";
@@ -338,6 +339,16 @@ export function AuthVerificationStep({
         });
       }
 
+      const yazg = await assertYazgAgentLive(true);
+      if (!yazg.live) {
+        setVerifyPhase("failed_ai");
+        activePhase = "failed_ai";
+        setVerifyResultMessage(yazg.message);
+        onError(yazg.message);
+        append(formatErrorLogLine(yazg.message));
+        return { ok: false, message: yazg.message };
+      }
+
       activePhase = "ai";
       setVerifyPhase(activePhase);
       append(VERIFICATION_LOG_START_AI);
@@ -478,9 +489,11 @@ export function AuthVerificationStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- harness start gate
   }, [autoVerify, targetId]);
 
+  // Failure detail is shown once in the pipeline (uses verifyResultMessage).
+  // Avoid duplicating the same text under the Verification button.
   const verificationButtonError =
-    (verifyPhase === "failed_auth" || verifyPhase === "failed_ai") && verifyResultMessage
-      ? verifyResultMessage
+    verifyPhase === "failed_auth" || verifyPhase === "failed_ai"
+      ? null
       : error;
 
   return (

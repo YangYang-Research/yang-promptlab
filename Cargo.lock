@@ -53,6 +53,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "aisec-agent"
+version = "0.1.0"
+dependencies = [
+ "aisec-planner",
+ "aisec-target-profile",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "aisec-attack"
 version = "0.1.0"
 dependencies = [
@@ -117,6 +131,7 @@ dependencies = [
 name = "aisec-desktop"
 version = "0.1.0"
 dependencies = [
+ "aisec-agent",
  "aisec-attack",
  "aisec-auth",
  "aisec-core",
