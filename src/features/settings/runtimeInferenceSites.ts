@@ -52,8 +52,8 @@ export const RUNTIME_INFERENCE_SITES: RuntimeInferenceSite[] = [
   {
     id: "attack-factory-prompt",
     title: "Attack Factory prompt generation",
-    location: "Advanced · Attack Factory",
+    location: "Advanced · Attack Factory · GeneratePromptAgent",
     description:
-      "Yazg invents a novel adversarial probe for the selected technique from its metadata and current factory prompt. Review and save before it replaces the catalog entry.",
+      "Yazg ReActs then delegates to GeneratePromptAgent: invents a novel adversarial probe for the selected technique from its metadata and current factory prompt. Review and save before it replaces the catalog entry.",
   },
 ];

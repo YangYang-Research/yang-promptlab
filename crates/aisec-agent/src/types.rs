@@ -7,6 +7,7 @@ pub enum AgentId {
     Yazg,
     AnalyzeEndpoint,
     AttackPlan,
+    GeneratePrompt,
 }
 
 impl AgentId {
@@ -15,6 +16,7 @@ impl AgentId {
             Self::Yazg => "yazg",
             Self::AnalyzeEndpoint => "analyze_endpoint",
             Self::AttackPlan => "attack_plan",
+            Self::GeneratePrompt => "generate_prompt",
         }
     }
 
@@ -23,6 +25,7 @@ impl AgentId {
             Self::Yazg => "Yazg",
             Self::AnalyzeEndpoint => "AnalyzeEndpointAgent",
             Self::AttackPlan => "AttackPlanAgent",
+            Self::GeneratePrompt => "GeneratePromptAgent",
         }
     }
 }

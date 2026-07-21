@@ -3,11 +3,14 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use aisec_inference::PromptRegistry;
+use aisec_agent::{TechniquePromptContext, YazgDelegation, YazgSupervisor};
 use aisec_storage::{AttackCatalogRepository, AttackCatalogTechnique, UpdateAttackCatalogTechnique};
 
 use crate::error::{CommandError, CommandResult};
-use crate::inference_host::{gateway_complete, is_inference_ready};
+use crate::inference_host::{
+    is_inference_ready, HostEndpointVerifyLlm, HostGeneratePromptLlm, HostWizardPlannerLlm,
+    HostYazgReactLlm,
+};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,27 +181,6 @@ pub struct AttackCatalogGeneratePromptDto {
     pub content: String,
 }
 
-fn strip_generated_prompt(raw: &str) -> String {
-    let trimmed = raw.trim();
-    let without_fence = if trimmed.starts_with("```") {
-        let mut lines = trimmed.lines();
-        let _ = lines.next();
-        let body: Vec<&str> = lines.collect();
-        let mut joined = body.join("\n");
-        if let Some(idx) = joined.rfind("```") {
-            joined.truncate(idx);
-        }
-        joined.trim().to_string()
-    } else {
-        trimmed.to_string()
-    };
-    without_fence
-        .trim_start_matches('"')
-        .trim_end_matches('"')
-        .trim()
-        .to_string()
-}
-
 pub async fn attack_catalog_generate_prompt_op(
     state: &AppState,
     id: String,
@@ -220,42 +202,73 @@ pub async fn attack_catalog_generate_prompt_op(
         }
     }
 
-    let user = PromptRegistry::attack_catalog_prompt_user(
-        &row.id,
-        &row.name,
-        &row.category_id,
-        row.owasp.as_deref().unwrap_or("n/a"),
-        row.description.as_deref().unwrap_or("n/a"),
-        &row.content,
+    let technique = TechniquePromptContext {
+        id: row.id.clone(),
+        name: row.name.clone(),
+        category_id: row.category_id.clone(),
+        owasp: row.owasp.clone().unwrap_or_else(|| "n/a".into()),
+        description: row.description.clone().unwrap_or_else(|| "n/a".into()),
+        current_prompt: row.content.clone(),
+    };
+
+    let supervisor_llm = HostYazgReactLlm::new(
+        state.data_dir().to_path_buf(),
+        state.inference_manager().clone(),
+        state.model_manager().clone(),
+        state.model_provider().clone(),
+        state.runtime_manager().clone(),
+    );
+    let analyze_llm = HostEndpointVerifyLlm::new(
+        state.data_dir().to_path_buf(),
+        state.inference_manager().clone(),
+        state.model_manager().clone(),
+        state.model_provider().clone(),
+        state.runtime_manager().clone(),
+    );
+    let plan_llm = HostWizardPlannerLlm::new(
+        state.data_dir().to_path_buf(),
+        state.inference_manager().clone(),
+        state.model_manager().clone(),
+        state.model_provider().clone(),
+        state.runtime_manager().clone(),
+    );
+    let prompt_llm = HostGeneratePromptLlm::new(
+        state.data_dir().to_path_buf(),
+        state.inference_manager().clone(),
+        state.model_manager().clone(),
+        state.model_provider().clone(),
+        state.runtime_manager().clone(),
     );
 
-    let inference = state.inference_manager().lock().await;
-    let manager = state.model_manager().lock().await;
-    let mut runtime_mgr = state.runtime_manager().lock().await;
-    let raw = gateway_complete(
-        state.data_dir(),
-        &inference,
-        &manager,
-        state.model_provider().clone(),
-        &mut runtime_mgr,
-        Some(PromptRegistry::attack_catalog_prompt_system()),
-        &user,
-        1024,
-        0.35,
+    let delegation = YazgSupervisor::react_generate_prompt(
+        &technique,
+        &supervisor_llm,
+        &analyze_llm,
+        &plan_llm,
+        &prompt_llm,
     )
-    .await?;
+    .await
+    .map_err(|err| CommandError::invalid_input(err.to_string()))?;
 
-    let content = strip_generated_prompt(&raw);
-    if content.is_empty() {
-        return Err(CommandError::invalid_input(
-            "AI runtime returned an empty prompt",
-        ));
+    match delegation {
+        YazgDelegation::GeneratedPrompt { outcome, .. } => Ok(AttackCatalogGeneratePromptDto {
+            id: outcome.technique_id,
+            content: outcome.content,
+        }),
+        other => {
+            let message = match other {
+                YazgDelegation::Chat { turn }
+                | YazgDelegation::AnalyzedEndpoint { turn, .. }
+                | YazgDelegation::Planned { turn, .. }
+                | YazgDelegation::GeneratedPrompt { turn, .. } => turn.reply,
+            };
+            Err(CommandError::invalid_input(if message.trim().is_empty() {
+                "Yazg ReAct finished without GeneratePromptAgent output".into()
+            } else {
+                message
+            }))
+        }
     }
-
-    Ok(AttackCatalogGeneratePromptDto {
-        id: row.id,
-        content,
-    })
 }
 
 #[tauri::command]

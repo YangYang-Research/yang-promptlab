@@ -1,4 +1,4 @@
-//! Yazg supervisor — ReAct routing to AnalyzeEndpointAgent / AttackPlanAgent.
+//! Yazg supervisor — ReAct routing to AnalyzeEndpoint / AttackPlan / GeneratePrompt agents.
 
 use std::collections::HashMap;
 
@@ -10,6 +10,7 @@ use tracing::info;
 use crate::analyze_endpoint::AnalyzeEndpointAgentOutcome;
 use crate::attack_plan::AttackPlanAgentOutcome;
 use crate::error::AgentResult;
+use crate::generate_prompt::{GeneratePromptAgentOutcome, TechniquePromptContext};
 use crate::react::{run_react, ReactActionKind, ReactArtifacts, ReactRequest};
 use crate::types::{AgentEvent, AgentId};
 
@@ -22,6 +23,7 @@ pub enum SupervisorIntent {
     Chat,
     AnalyzeEndpoint,
     AttackPlan,
+    GeneratePrompt,
 }
 
 impl SupervisorIntent {
@@ -32,6 +34,10 @@ impl SupervisorIntent {
             | "verify"
             | "verification" => Self::AnalyzeEndpoint,
             "plan" | "planner" | "attack_plan" | "attack-plan" => Self::AttackPlan,
+            "generate_prompt"
+            | "generate-prompt"
+            | "factory_prompt"
+            | "attack_factory" => Self::GeneratePrompt,
             "chat" | "help" => Self::Chat,
             "auto" | "" => Self::Auto,
             _ => Self::Auto,
@@ -64,6 +70,10 @@ pub enum YazgDelegation {
         turn: YazgTurn,
         outcome: AttackPlanAgentOutcome,
     },
+    GeneratedPrompt {
+        turn: YazgTurn,
+        outcome: GeneratePromptAgentOutcome,
+    },
 }
 
 /// Yazg — top-level supervisor agent (ReAct).
@@ -79,6 +89,9 @@ impl YazgSupervisor {
             SupervisorIntent::AttackPlan => {
                 "User preference hint: attack planning may be appropriate."
             }
+            SupervisorIntent::GeneratePrompt => {
+                "User preference hint: Attack Factory prompt generation may be appropriate."
+            }
             SupervisorIntent::Chat => "User preference hint: conversational reply may be enough.",
             SupervisorIntent::Auto => "No forced action — choose freely via ReAct.",
         };
@@ -91,9 +104,11 @@ impl YazgSupervisor {
         supervisor_llm: &dyn PlannerLlm,
         analyze_llm: &dyn PlannerLlm,
         plan_llm: &dyn PlannerLlm,
+        prompt_llm: &dyn PlannerLlm,
     ) -> AgentResult<YazgDelegation> {
         info!(goal = %truncate(&request.goal, 120), "Yazg ReAct handle");
-        let artifacts = run_react(request, supervisor_llm, analyze_llm, plan_llm).await?;
+        let artifacts =
+            run_react(request, supervisor_llm, analyze_llm, plan_llm, prompt_llm).await?;
         Ok(delegation_from_artifacts(artifacts))
     }
 
@@ -106,12 +121,13 @@ impl YazgSupervisor {
         supervisor_llm: &dyn PlannerLlm,
         analyze_llm: &dyn PlannerLlm,
         plan_llm: &dyn PlannerLlm,
+        prompt_llm: &dyn PlannerLlm,
     ) -> AgentResult<YazgDelegation> {
         let goal = Self::build_goal(message, intent_hint);
         let request = ReactRequest::new(goal)
             .with_profile(profile)
             .with_auth(auth_headers);
-        Self::react(request, supervisor_llm, analyze_llm, plan_llm).await
+        Self::react(request, supervisor_llm, analyze_llm, plan_llm, prompt_llm).await
     }
 
     /// Wizard Verification AI step: probe already captured.
@@ -122,6 +138,7 @@ impl YazgSupervisor {
         supervisor_llm: &dyn PlannerLlm,
         analyze_llm: &dyn PlannerLlm,
         plan_llm: &dyn PlannerLlm,
+        prompt_llm: &dyn PlannerLlm,
     ) -> AgentResult<YazgDelegation> {
         let message = format!(
             "Scan wizard Verification: a capability probe already succeeded for {} (HTTP {}). \
@@ -134,7 +151,7 @@ impl YazgSupervisor {
             .with_profile(Some(profile))
             .with_capability_probe(Some(http))
             .with_max_steps(4);
-        Self::react(request, supervisor_llm, analyze_llm, plan_llm).await
+        Self::react(request, supervisor_llm, analyze_llm, plan_llm, prompt_llm).await
     }
 
     /// Wizard attack-plan step.
@@ -144,6 +161,7 @@ impl YazgSupervisor {
         supervisor_llm: &dyn PlannerLlm,
         analyze_llm: &dyn PlannerLlm,
         plan_llm: &dyn PlannerLlm,
+        prompt_llm: &dyn PlannerLlm,
     ) -> AgentResult<YazgDelegation> {
         Self::handle(
             "Scan wizard Attack Plan: generate an attack plan for the current verified target, \
@@ -154,8 +172,31 @@ impl YazgSupervisor {
             supervisor_llm,
             analyze_llm,
             plan_llm,
+            prompt_llm,
         )
         .await
+    }
+
+    /// Attack Factory: invent a novel technique probe.
+    /// Soft intent hint only — Yazg ReAct chooses the agent/action.
+    pub async fn react_generate_prompt(
+        technique: &TechniquePromptContext,
+        supervisor_llm: &dyn PlannerLlm,
+        analyze_llm: &dyn PlannerLlm,
+        plan_llm: &dyn PlannerLlm,
+        prompt_llm: &dyn PlannerLlm,
+    ) -> AgentResult<YazgDelegation> {
+        let message = format!(
+            "Attack Factory: invent an improved adversarial factory prompt for technique \
+             `{}` (id={}, category={}). No scan target is required — technique context is enough. \
+             Call generate_prompt, then finish with a short summary for the UI.",
+            technique.name, technique.id, technique.category_id
+        );
+        let goal = Self::build_goal(&message, SupervisorIntent::GeneratePrompt);
+        let request = ReactRequest::new(goal)
+            .with_technique(Some(technique))
+            .with_max_steps(4);
+        Self::react(request, supervisor_llm, analyze_llm, plan_llm, prompt_llm).await
     }
 
     /// Offline fallback when AI Runtime is unavailable (no ReAct).
@@ -178,7 +219,7 @@ impl YazgSupervisor {
             ) {
             format!(
                 "I am Yazg (offline). Start AI Runtime so I can ReAct-route to \
-                 AnalyzeEndpointAgent / AttackPlanAgent.\n\n{target_line}"
+                 AnalyzeEndpointAgent / AttackPlanAgent / GeneratePromptAgent.\n\n{target_line}"
             )
         } else {
             format!(
@@ -200,8 +241,11 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
     let intent = match artifacts.last_action {
         Some(ReactActionKind::AnalyzeEndpoint) => SupervisorIntent::AnalyzeEndpoint,
         Some(ReactActionKind::AttackPlan) => SupervisorIntent::AttackPlan,
+        Some(ReactActionKind::GeneratePrompt) => SupervisorIntent::GeneratePrompt,
         Some(ReactActionKind::Finish) | None => {
-            if artifacts.plan.is_some() {
+            if artifacts.generate_prompt.is_some() {
+                SupervisorIntent::GeneratePrompt
+            } else if artifacts.plan.is_some() {
                 SupervisorIntent::AttackPlan
             } else if artifacts.analyze.is_some() {
                 SupervisorIntent::AnalyzeEndpoint
@@ -215,11 +259,7 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
         .plan
         .as_ref()
         .map(|p| format_plan_summary(&p.plan));
-    let verified = artifacts
-        .analyze
-        .as_ref()
-        .map(|_| true)
-        .or_else(|| None);
+    let verified = artifacts.analyze.as_ref().map(|_| true);
 
     let turn = YazgTurn {
         reply: artifacts.final_reply.clone(),
@@ -228,6 +268,23 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
         verified: verified.or(artifacts.analyze.as_ref().map(|_| true)),
         plan_summary: plan_summary.clone(),
     };
+
+    if let Some(outcome) = artifacts.generate_prompt {
+        if matches!(intent, SupervisorIntent::GeneratePrompt)
+            || artifacts.last_action == Some(ReactActionKind::GeneratePrompt)
+        {
+            let mut turn = turn;
+            turn.intent = SupervisorIntent::GeneratePrompt;
+            if turn.reply.trim().is_empty() {
+                turn.reply = format!(
+                    "Factory prompt generated for {} ({} chars).",
+                    outcome.technique_id,
+                    outcome.content.chars().count()
+                );
+            }
+            return YazgDelegation::GeneratedPrompt { turn, outcome };
+        }
+    }
 
     if let Some(outcome) = artifacts.plan {
         if matches!(intent, SupervisorIntent::AttackPlan)
@@ -319,6 +376,18 @@ mod tests {
         assert!(goal.contains("User preference hint"));
         assert!(!goal.to_ascii_lowercase().contains("prefer generating"));
         assert!(!goal.contains("AttackPlanAgent"));
+    }
+
+    #[test]
+    fn parses_generate_prompt_intent_aliases() {
+        assert_eq!(
+            SupervisorIntent::parse("generate_prompt"),
+            SupervisorIntent::GeneratePrompt
+        );
+        assert_eq!(
+            SupervisorIntent::parse("attack_factory"),
+            SupervisorIntent::GeneratePrompt
+        );
     }
 
     #[test]

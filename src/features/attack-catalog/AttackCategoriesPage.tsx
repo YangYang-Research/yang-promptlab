@@ -20,6 +20,12 @@ import {
 } from "@/shared/ipc/attackCatalog";
 import { assertYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
 import { paginateItems } from "@/shared/utils/pagination";
+import {
+  matchesNistBrowse,
+  NIST_BROWSE,
+  nistRefsForTechnique,
+  type NistBrowseId,
+} from "./nistAiRmf";
 
 const TECHNIQUES_PAGE_SIZE = 7;
 
@@ -60,6 +66,7 @@ export function AttackCategoriesPage() {
   const [techniques, setTechniques] = useState<AttackCatalogTechniqueDto[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedOwasp, setSelectedOwasp] = useState<OwaspBrowseId>("all");
+  const [selectedNist, setSelectedNist] = useState<NistBrowseId>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -91,14 +98,43 @@ export function AttackCategoriesPage() {
     });
   }, [load]);
 
+  const nistCounts = useMemo(() => {
+    const inFamily = (row: AttackCatalogTechniqueDto) =>
+      !selectedCategory || row.categoryId === selectedCategory;
+    const counts: Record<NistBrowseId, number> = {
+      all: 0,
+      govern: 0,
+      map: 0,
+      measure: 0,
+      manage: 0,
+    };
+    for (const row of techniques) {
+      if (!inFamily(row)) continue;
+      if (!matchesOwaspBrowse(row, selectedOwasp)) continue;
+      const functions = new Set(
+        nistRefsForTechnique(row).map((ref) => ref.functionId),
+      );
+      if (functions.has("govern")) counts.govern += 1;
+      if (functions.has("map")) counts.map += 1;
+      if (functions.has("measure")) counts.measure += 1;
+      if (functions.has("manage")) counts.manage += 1;
+      counts.all += 1;
+    }
+    return counts;
+  }, [techniques, selectedOwasp, selectedCategory]);
+
   const owaspCounts = useMemo(() => {
+    const inFamily = (row: AttackCatalogTechniqueDto) =>
+      !selectedCategory || row.categoryId === selectedCategory;
     const counts: Record<OwaspBrowseId, number> = {
-      all: techniques.length,
+      all: 0,
       llm: 0,
       asi: 0,
       mcp: 0,
     };
     for (const row of techniques) {
+      if (!inFamily(row)) continue;
+      if (!matchesNistBrowse(row, selectedNist)) continue;
       const families = new Set(
         owaspFlags(row.owasp)
           .map(owaspFamily)
@@ -107,9 +143,10 @@ export function AttackCategoriesPage() {
       if (families.has("llm")) counts.llm += 1;
       if (families.has("asi")) counts.asi += 1;
       if (families.has("mcp")) counts.mcp += 1;
+      counts.all += 1;
     }
     return counts;
-  }, [techniques]);
+  }, [techniques, selectedNist, selectedCategory]);
 
   const activeCategory = useMemo(
     () => categories.find((cat) => cat.id === selectedCategory) ?? null,
@@ -120,16 +157,21 @@ export function AttackCategoriesPage() {
     const needle = query.trim().toLowerCase();
     return techniques.filter((row) => {
       if (!matchesOwaspBrowse(row, selectedOwasp)) return false;
+      if (!matchesNistBrowse(row, selectedNist)) return false;
       if (selectedCategory && row.categoryId !== selectedCategory) return false;
       if (!needle) return true;
+      const nistLabels = nistRefsForTechnique(row)
+        .map((ref) => ref.label.toLowerCase())
+        .join(" ");
       return (
         row.name.toLowerCase().includes(needle) ||
         row.id.toLowerCase().includes(needle) ||
         (row.owasp?.toLowerCase().includes(needle) ?? false) ||
+        nistLabels.includes(needle) ||
         (row.description?.toLowerCase().includes(needle) ?? false)
       );
     });
-  }, [techniques, selectedCategory, selectedOwasp, query]);
+  }, [techniques, selectedCategory, selectedOwasp, selectedNist, query]);
 
   const pagination = useMemo(
     () => paginateItems(filtered, page, TECHNIQUES_PAGE_SIZE),
@@ -138,7 +180,7 @@ export function AttackCategoriesPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [selectedCategory, selectedOwasp, query]);
+  }, [selectedCategory, selectedOwasp, selectedNist, query]);
 
   useEffect(() => {
     if (page > pagination.totalPages) {
@@ -255,6 +297,27 @@ export function AttackCategoriesPage() {
   const dirty = selected ? draft !== selected.content : false;
   const actionsDisabled = busy || generating;
 
+  const hasActiveFilters =
+    selectedCategory !== null || selectedOwasp !== "all" || selectedNist !== "all";
+
+  const owaspLabel =
+    OWASP_BROWSE.find((item) => item.id === selectedOwasp)?.label ?? "All";
+  const nistLabel =
+    NIST_BROWSE.find((item) => item.id === selectedNist)?.label ?? "All";
+
+  function clearBrowseFilters() {
+    setSelectedCategory(null);
+    setSelectedOwasp("all");
+    setSelectedNist("all");
+    setQuery("");
+    setPage(1);
+  }
+
+  const attackAllCount = techniques.filter(
+    (row) =>
+      matchesOwaspBrowse(row, selectedOwasp) && matchesNistBrowse(row, selectedNist),
+  ).length;
+
   return (
     <div className="page attack-categories-page">
       <PageHeader
@@ -279,56 +342,92 @@ export function AttackCategoriesPage() {
         </section>
       ) : (
         <div className="attack-catalog">
-          <section className="attack-catalog-filter" aria-label="Category filter">
+          <section className="attack-catalog-filter" aria-label="Browse techniques">
             <div className="attack-catalog-filter__head">
-              <h2 className="attack-catalog-filter__title">Browse by category</h2>
-              <p className="attack-catalog-filter__meta">
-                {filtered.length} shown
-                {activeCategory ? ` · ${activeCategory.label}` : ""}
-                {selectedOwasp !== "all"
-                  ? ` · ${OWASP_BROWSE.find((item) => item.id === selectedOwasp)?.label}`
-                  : ""}
+              <div className="attack-catalog-filter__intro">
+                <h2 className="attack-catalog-filter__title">Find techniques</h2>
+              </div>
+              <p className="attack-catalog-filter__meta" aria-live="polite">
+                Showing{" "}
+                <strong className="attack-catalog-filter__meta-count">{filtered.length}</strong>
+                {filtered.length === 1 ? " technique" : " techniques"}
               </p>
             </div>
 
-            <div className="attack-catalog-filter__group">
-              <p className="attack-catalog-filter__group-label">OWASP</p>
-              <div className="attack-catalog-filter__chips" role="tablist" aria-label="OWASP families">
-                {OWASP_BROWSE.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={item.id === selectedOwasp}
-                    className={
-                      item.id === selectedOwasp
-                        ? `filter-chip filter-chip--active filter-chip--owasp-${item.id}`
-                        : `filter-chip filter-chip--owasp-${item.id}`
-                    }
-                    onClick={() => {
-                      setSelectedOwasp(item.id);
-                      setQuery("");
-                      setPage(1);
-                    }}
-                  >
-                    {item.label}
-                    <span className="attack-catalog-filter__count">{owaspCounts[item.id]}</span>
-                  </button>
-                ))}
+            {hasActiveFilters ? (
+              <div className="attack-catalog-filter__active" aria-label="Active filters">
+                <div className="attack-catalog-filter__active-tags">
+                  {activeCategory ? (
+                    <button
+                      type="button"
+                      className="attack-catalog-filter__tag"
+                      onClick={() => {
+                        setSelectedCategory(null);
+                        setPage(1);
+                      }}
+                    >
+                      {activeCategory.label}
+                      <span aria-hidden="true">×</span>
+                      <span className="sr-only">Remove category filter</span>
+                    </button>
+                  ) : null}
+                  {selectedOwasp !== "all" ? (
+                    <button
+                      type="button"
+                      className="attack-catalog-filter__tag"
+                      onClick={() => {
+                        setSelectedOwasp("all");
+                        setPage(1);
+                      }}
+                    >
+                      OWASP · {owaspLabel}
+                      <span aria-hidden="true">×</span>
+                      <span className="sr-only">Remove OWASP filter</span>
+                    </button>
+                  ) : null}
+                  {selectedNist !== "all" ? (
+                    <button
+                      type="button"
+                      className="attack-catalog-filter__tag"
+                      onClick={() => {
+                        setSelectedNist("all");
+                        setPage(1);
+                      }}
+                    >
+                      NIST · {nistLabel}
+                      <span aria-hidden="true">×</span>
+                      <span className="sr-only">Remove NIST filter</span>
+                    </button>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className="attack-catalog-filter__clear"
+                  onClick={clearBrowseFilters}
+                >
+                  Clear filters
+                </button>
               </div>
-            </div>
+            ) : null}
 
-            <div className="attack-catalog-filter__group">
-              <p className="attack-catalog-filter__group-label">Attack</p>
-              <div className="attack-catalog-filter__chips" role="tablist" aria-label="Attack categories">
+            <div className="attack-catalog-filter__group attack-catalog-filter__group--primary">
+              <div className="attack-catalog-filter__group-head">
+                <p className="attack-catalog-filter__group-label">Attack family</p>
+                <p className="attack-catalog-filter__group-help">Primary browse</p>
+              </div>
+              <div
+                className="attack-catalog-filter__chips attack-catalog-filter__chips--primary"
+                role="tablist"
+                aria-label="Attack categories"
+              >
                 <button
                   type="button"
                   role="tab"
                   aria-selected={selectedCategory === null}
                   className={
                     selectedCategory === null
-                      ? "filter-chip filter-chip--active"
-                      : "filter-chip"
+                      ? "filter-chip filter-chip--active attack-catalog-filter__chip"
+                      : "filter-chip attack-catalog-filter__chip"
                   }
                   onClick={() => {
                     setSelectedCategory(null);
@@ -336,22 +435,16 @@ export function AttackCategoriesPage() {
                     setPage(1);
                   }}
                 >
-                  All
-                  <span className="attack-catalog-filter__count">
-                    {selectedOwasp === "all"
-                      ? techniques.length
-                      : techniques.filter((row) => matchesOwaspBrowse(row, selectedOwasp)).length}
-                  </span>
+                  All families
+                  <span className="attack-catalog-filter__count">{attackAllCount}</span>
                 </button>
                 {categories.map((cat) => {
-                  const count =
-                    selectedOwasp === "all"
-                      ? cat.techniqueCount
-                      : techniques.filter(
-                          (row) =>
-                            row.categoryId === cat.id &&
-                            matchesOwaspBrowse(row, selectedOwasp),
-                        ).length;
+                  const count = techniques.filter(
+                    (row) =>
+                      row.categoryId === cat.id &&
+                      matchesOwaspBrowse(row, selectedOwasp) &&
+                      matchesNistBrowse(row, selectedNist),
+                  ).length;
                   return (
                     <button
                       key={cat.id}
@@ -360,8 +453,8 @@ export function AttackCategoriesPage() {
                       aria-selected={cat.id === selectedCategory}
                       className={
                         cat.id === selectedCategory
-                          ? "filter-chip filter-chip--active"
-                          : "filter-chip"
+                          ? "filter-chip filter-chip--active attack-catalog-filter__chip"
+                          : "filter-chip attack-catalog-filter__chip"
                       }
                       onClick={() => {
                         setSelectedCategory(cat.id);
@@ -374,6 +467,76 @@ export function AttackCategoriesPage() {
                     </button>
                   );
                 })}
+              </div>
+            </div>
+
+            <div className="attack-catalog-filter__standards">
+              <div className="attack-catalog-filter__group">
+                <div className="attack-catalog-filter__group-head">
+                  <p className="attack-catalog-filter__group-label">OWASP</p>
+                  <p className="attack-catalog-filter__group-help">Risk taxonomy</p>
+                </div>
+                <div
+                  className="attack-catalog-filter__chips"
+                  role="tablist"
+                  aria-label="OWASP families"
+                >
+                  {OWASP_BROWSE.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={item.id === selectedOwasp}
+                      className={
+                        item.id === selectedOwasp
+                          ? `filter-chip filter-chip--active filter-chip--owasp-${item.id} attack-catalog-filter__chip attack-catalog-filter__chip--compact`
+                          : `filter-chip filter-chip--owasp-${item.id} attack-catalog-filter__chip attack-catalog-filter__chip--compact`
+                      }
+                      onClick={() => {
+                        setSelectedOwasp(item.id);
+                        setQuery("");
+                        setPage(1);
+                      }}
+                    >
+                      {item.label}
+                      <span className="attack-catalog-filter__count">{owaspCounts[item.id]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="attack-catalog-filter__group">
+                <div className="attack-catalog-filter__group-head">
+                  <p className="attack-catalog-filter__group-label">NIST AI RMF</p>
+                  <p className="attack-catalog-filter__group-help">Governance functions</p>
+                </div>
+                <div
+                  className="attack-catalog-filter__chips"
+                  role="tablist"
+                  aria-label="NIST AI RMF functions"
+                >
+                  {NIST_BROWSE.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={item.id === selectedNist}
+                      className={
+                        item.id === selectedNist
+                          ? `filter-chip filter-chip--active filter-chip--nist-${item.id} attack-catalog-filter__chip attack-catalog-filter__chip--compact`
+                          : `filter-chip filter-chip--nist-${item.id} attack-catalog-filter__chip attack-catalog-filter__chip--compact`
+                      }
+                      onClick={() => {
+                        setSelectedNist(item.id);
+                        setQuery("");
+                        setPage(1);
+                      }}
+                    >
+                      {item.label}
+                      <span className="attack-catalog-filter__count">{nistCounts[item.id]}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </section>
@@ -389,7 +552,7 @@ export function AttackCategoriesPage() {
                 <input
                   type="search"
                   value={query}
-                  placeholder="Search name, id, OWASP…"
+                  placeholder="Search name, id, OWASP, NIST…"
                   onChange={(event) => setQuery(event.target.value)}
                 />
               </label>
@@ -417,6 +580,15 @@ export function AttackCategoriesPage() {
                                 className={`attack-catalog-flag attack-catalog-flag--owasp attack-catalog-flag--${owaspFamily(tag)}`}
                               >
                                 {tag}
+                              </span>
+                            ))}
+                            {nistRefsForTechnique(row).map((ref) => (
+                              <span
+                                key={ref.label}
+                                className={`attack-catalog-flag attack-catalog-flag--nist attack-catalog-flag--nist-${ref.functionId}`}
+                                title={`NIST AI RMF: ${ref.label}`}
+                              >
+                                {ref.label}
                               </span>
                             ))}
                             {!row.enabled ? (
@@ -472,9 +644,6 @@ export function AttackCategoriesPage() {
                     <div className="attack-catalog-editor__identity-text">
                       <p className="attack-catalog-editor__eyebrow">
                         {activeCategory?.label ?? selected.categoryId}
-                        {owaspFlags(selected.owasp).length > 0
-                          ? ` · ${owaspFlags(selected.owasp).join(" · ")}`
-                          : ""}
                       </p>
                       <h2 className="attack-catalog-editor__title">{selected.name}</h2>
                       <p className="attack-catalog-editor__id">{selected.id}</p>
@@ -489,6 +658,15 @@ export function AttackCategoriesPage() {
                           className={`attack-catalog-flag attack-catalog-flag--owasp attack-catalog-flag--${owaspFamily(tag)}`}
                         >
                           {tag}
+                        </span>
+                      ))}
+                      {nistRefsForTechnique(selected).map((ref) => (
+                        <span
+                          key={ref.label}
+                          className={`attack-catalog-flag attack-catalog-flag--nist attack-catalog-flag--nist-${ref.functionId}`}
+                          title={`NIST AI RMF: ${ref.label}`}
+                        >
+                          {ref.label}
                         </span>
                       ))}
                       <span

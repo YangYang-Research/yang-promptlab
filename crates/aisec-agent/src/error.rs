@@ -8,6 +8,8 @@ pub enum AgentError {
     AnalyzeEndpoint(String),
     #[error("attack plan failed: {0}")]
     AttackPlan(String),
+    #[error("generate prompt failed: {0}")]
+    GeneratePrompt(String),
     #[error("supervisor: {0}")]
     Supervisor(String),
 }

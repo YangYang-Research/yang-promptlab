@@ -308,6 +308,55 @@ impl PlannerLlm for HostYazgReactLlm {
     }
 }
 
+/// Attack Factory GeneratePromptAgent LLM — invents novel technique probes.
+pub struct HostGeneratePromptLlm {
+    data_dir: PathBuf,
+    inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<LocalModelManager>>,
+    model_provider: SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+}
+
+impl HostGeneratePromptLlm {
+    pub fn new(
+        data_dir: PathBuf,
+        inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
+        model_manager: Arc<AsyncMutex<LocalModelManager>>,
+        model_provider: SharedModelProvider,
+        runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+    ) -> Self {
+        Self {
+            data_dir,
+            inference,
+            model_manager,
+            model_provider,
+            runtime_manager,
+        }
+    }
+}
+
+#[async_trait]
+impl PlannerLlm for HostGeneratePromptLlm {
+    async fn complete(&self, prompt: &str) -> aisec_planner::PlannerResult<String> {
+        let inference = self.inference.lock().await;
+        let manager = self.model_manager.lock().await;
+        let mut runtime_mgr = self.runtime_manager.lock().await;
+        gateway_complete(
+            &self.data_dir,
+            &inference,
+            &manager,
+            self.model_provider.clone(),
+            &mut runtime_mgr,
+            Some(PromptRegistry::attack_catalog_prompt_system()),
+            prompt,
+            1024,
+            0.35,
+        )
+        .await
+        .map_err(|e| aisec_planner::PlannerError::Llm(e.to_string()))
+    }
+}
+
 /// Attack results recommendation LLM — remediation guidance from scan findings.
 pub struct HostAttackRecommendLlm {
     data_dir: PathBuf,

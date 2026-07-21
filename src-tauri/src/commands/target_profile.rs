@@ -14,7 +14,9 @@ use tracing::{info, warn};
 
 use crate::dto::{TargetDto, TargetProfileDto, VerificationConsoleEntryDto};
 use crate::error::{CommandError, CommandResult};
-use crate::inference_host::{is_inference_ready, HostEndpointVerifyLlm, HostWizardPlannerLlm};
+use crate::inference_host::{
+    is_inference_ready, HostEndpointVerifyLlm, HostGeneratePromptLlm, HostWizardPlannerLlm,
+};
 use crate::state::AppState;
 
 fn profile_from_json(raw: &str) -> CommandResult<TargetProfile> {
@@ -480,9 +482,23 @@ pub async fn target_profile_verify_ai_op(
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
+    let prompt_llm = HostGeneratePromptLlm::new(
+        state.data_dir().to_path_buf(),
+        state.inference_manager().clone(),
+        state.model_manager().clone(),
+        state.model_provider().clone(),
+        state.runtime_manager().clone(),
+    );
 
     let delegation =
-        YazgSupervisor::react_classify_probe(&profile, &http, &supervisor_llm, &llm_host, &plan_llm)
+        YazgSupervisor::react_classify_probe(
+            &profile,
+            &http,
+            &supervisor_llm,
+            &llm_host,
+            &plan_llm,
+            &prompt_llm,
+        )
             .await;
     match delegation {
         Ok(YazgDelegation::AnalyzedEndpoint { outcome, .. }) => {
@@ -507,6 +523,7 @@ pub async fn target_profile_verify_ai_op(
             let message = match &other {
                 YazgDelegation::Chat { turn }
                 | YazgDelegation::Planned { turn, .. }
+                | YazgDelegation::GeneratedPrompt { turn, .. }
                 | YazgDelegation::AnalyzedEndpoint { turn, .. } => turn.reply.clone(),
             };
             let message = if message.trim().is_empty() {
@@ -673,6 +690,13 @@ pub async fn planner_generate_from_profile_op(
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
+    let prompt_llm = HostGeneratePromptLlm::new(
+        state.data_dir().to_path_buf(),
+        state.inference_manager().clone(),
+        state.model_manager().clone(),
+        state.model_provider().clone(),
+        state.runtime_manager().clone(),
+    );
 
     info!(
         target_id = %target_id,
@@ -685,16 +709,17 @@ pub async fn planner_generate_from_profile_op(
         &supervisor_llm,
         &analyze_llm,
         &plan_llm,
+        &prompt_llm,
     )
     .await
     {
         Ok(YazgDelegation::Planned { outcome, .. }) => outcome.plan,
         Ok(other) => {
             let message = match other {
-                YazgDelegation::Chat { turn } | YazgDelegation::AnalyzedEndpoint { turn, .. } => {
-                    turn.reply
-                }
-                YazgDelegation::Planned { turn, .. } => turn.reply,
+                YazgDelegation::Chat { turn }
+                | YazgDelegation::AnalyzedEndpoint { turn, .. }
+                | YazgDelegation::GeneratedPrompt { turn, .. }
+                | YazgDelegation::Planned { turn, .. } => turn.reply,
             };
             warn!(
                 target_id = %target_id,

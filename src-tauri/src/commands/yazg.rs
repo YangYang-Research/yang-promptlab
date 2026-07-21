@@ -13,7 +13,8 @@ use tauri::State;
 
 use crate::error::{CommandError, CommandResult};
 use crate::inference_host::{
-    is_inference_ready, HostEndpointVerifyLlm, HostWizardPlannerLlm, HostYazgReactLlm,
+    is_inference_ready, HostEndpointVerifyLlm, HostGeneratePromptLlm, HostWizardPlannerLlm,
+    HostYazgReactLlm,
 };
 use crate::state::AppState;
 
@@ -77,6 +78,7 @@ fn turn_to_response(turn: YazgTurn) -> YazgChatResponse {
             SupervisorIntent::Chat => "chat".into(),
             SupervisorIntent::AnalyzeEndpoint => "analyze_endpoint".into(),
             SupervisorIntent::AttackPlan => "attack_plan".into(),
+            SupervisorIntent::GeneratePrompt => "generate_prompt".into(),
         },
         events: turn.events.into_iter().map(event_dto).collect(),
         verified: turn.verified,
@@ -141,6 +143,13 @@ pub async fn yazg_chat_op(
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
+    let prompt_llm = HostGeneratePromptLlm::new(
+        state.data_dir().to_path_buf(),
+        state.inference_manager().clone(),
+        state.model_manager().clone(),
+        state.model_provider().clone(),
+        state.runtime_manager().clone(),
+    );
 
     let delegation = YazgSupervisor::handle(
         &request.message,
@@ -150,6 +159,7 @@ pub async fn yazg_chat_op(
         &supervisor_llm,
         &analyze_llm,
         &plan_llm,
+        &prompt_llm,
     )
     .await
     .map_err(map_agent_err)?;
@@ -175,7 +185,8 @@ pub async fn yazg_chat_op(
     let turn = match delegation {
         YazgDelegation::Chat { turn }
         | YazgDelegation::AnalyzedEndpoint { turn, .. }
-        | YazgDelegation::Planned { turn, .. } => turn,
+        | YazgDelegation::Planned { turn, .. }
+        | YazgDelegation::GeneratedPrompt { turn, .. } => turn,
     };
     Ok(turn_to_response(turn))
 }

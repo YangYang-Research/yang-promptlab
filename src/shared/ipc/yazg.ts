@@ -6,7 +6,8 @@ export type YazgIntent =
   | "analyze_endpoint"
   | "verify"
   | "attack_plan"
-  | "plan";
+  | "plan"
+  | "generate_prompt";
 
 export type YazgAgentEventDto = {
   agent: string;
