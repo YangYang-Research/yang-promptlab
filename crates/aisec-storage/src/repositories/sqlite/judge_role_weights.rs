@@ -51,7 +51,7 @@ impl JudgeRoleWeightsRepository for SqliteJudgeRoleWeightsRepository {
         sqlx::query(
             r#"
             INSERT INTO judge_role_weights (id, judge, classifier, attacker, default_llm, updated_at)
-            VALUES (1, 0.85, 0.75, 0.70, 0.65, ?)
+            VALUES (1, 0.85, 0.80, 0.75, 0.65, ?)
             "#,
         )
         .bind(timestamp)
@@ -62,8 +62,8 @@ impl JudgeRoleWeightsRepository for SqliteJudgeRoleWeightsRepository {
         Ok(JudgeRoleWeights {
             id: 1,
             judge: 0.85,
-            classifier: 0.75,
-            attacker: 0.70,
+            classifier: 0.80,
+            attacker: 0.75,
             default_llm: 0.65,
             updated_at: timestamp,
         })

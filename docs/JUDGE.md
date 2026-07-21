@@ -77,11 +77,11 @@ let verdict = engine.judge(request).await?;
 | Evaluator | Default weight |
 |-----------|----------------|
 | LLM Judge | 0.85 |
-| LLM Classifier | 0.75 |
-| LLM Attacker | 0.70 |
+| LLM Classifier | 0.80 |
+| LLM Attacker | 0.75 |
 | LLM (no role) | 0.65 |
 
-Weights are stored in SQLite (`judge_role_weights`) and editable from **AI Runtime → Judge role weights**.
+Weights are stored in SQLite (`judge_role_weights`) and editable from **Settings → AI Runtime → Judge role weights**.
 
 - Weighted confidence aggregation
 - +0.08 agreement boost when ≥66% evaluators agree

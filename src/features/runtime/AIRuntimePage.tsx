@@ -43,7 +43,6 @@ import { useToast } from "@/shared/notifications";
 import { formatBytes } from "@/shared/utils/format";
 
 import { RegistryProviderIcon } from "@/features/models/ProviderLogo";
-import { JudgeRoleWeightsPanel } from "@/features/runtime/JudgeRoleWeightsPanel";
 import { RuntimeTrafficChart } from "@/features/runtime/RuntimeTrafficChart";
 
 const ENGINE_INIT_STEPS = [
@@ -1140,9 +1139,6 @@ export function AIRuntimePage() {
             </>
           )}
 
-          <section className="runtime-page__weights-section" aria-label="Judge role weights">
-            <JudgeRoleWeightsPanel disabled={disabled} />
-          </section>
         </>
       )}
 
