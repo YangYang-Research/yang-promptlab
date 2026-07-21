@@ -270,8 +270,8 @@ export type UpdateJudgeRoleWeightsRequest = {
 
 export const DEFAULT_JUDGE_ROLE_WEIGHTS: Omit<JudgeRoleWeightsDto, "updatedAt"> = {
   judge: 0.85,
-  classifier: 0.75,
-  attacker: 0.7,
+  classifier: 0.8,
+  attacker: 0.75,
   defaultLlm: 0.65,
 };
 

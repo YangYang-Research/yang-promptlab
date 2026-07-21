@@ -9,6 +9,7 @@ import { toAppError } from "@/shared/errors";
 import { clearAllAppData } from "@/shared/ipc/app";
 
 import { EnvironmentsPanel } from "./EnvironmentsPanel";
+import { JudgeRoleWeightsPanel } from "./JudgeRoleWeightsPanel";
 import { RuntimeInferencePanel } from "./RuntimeInferencePanel";
 import { TroubleshootingPanel } from "./TroubleshootingPanel";
 
@@ -198,6 +199,13 @@ export function SettingsPage() {
                     </Link>
                   </div>
                 </Card>
+              </SettingsSection>
+
+              <SettingsSection
+                title="Judge role weights"
+                description="Relative influence of each Yazg role when aggregating scan confidence."
+              >
+                <JudgeRoleWeightsPanel disabled={!backendConnected} />
               </SettingsSection>
 
               <SettingsSection

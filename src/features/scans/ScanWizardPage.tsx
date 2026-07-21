@@ -739,6 +739,7 @@ export function ScanWizardPage() {
     (submittedStatus.status === "failed" ||
       submittedStatus.status === "stopped" ||
       submittedStatus.status === "cancelled");
+  const showDone = session.currentStep === 6;
   const attackScanActive =
     session.currentStep === 5 &&
     session.submittedScanId !== null &&
@@ -1626,6 +1627,11 @@ export function ScanWizardPage() {
                 onClick={() => void handleRetryScan()}
               >
                 {startingScan ? "Retrying…" : "Retry Attack"}
+              </Button>
+            )}
+            {showDone && (
+              <Button variant="primary" onClick={handleCancel}>
+                Done
               </Button>
             )}
             {showFooterNext && (

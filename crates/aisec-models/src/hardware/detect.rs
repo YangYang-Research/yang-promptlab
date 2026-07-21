@@ -75,9 +75,54 @@ fn detect_total_memory() -> ModelResult<u64> {
                 return Ok(kb * 1024);
             }
         }
+        return Err(ModelError::Hardware(
+            "MemTotal not found in /proc/meminfo".into(),
+        ));
     }
 
-    Ok(8 * 1024 * 1024 * 1024)
+    #[cfg(target_os = "windows")]
+    {
+        return detect_total_memory_windows();
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        Err(ModelError::Hardware(
+            "unsupported platform for memory detection".into(),
+        ))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn detect_total_memory_windows() -> ModelResult<u64> {
+    #[repr(C)]
+    struct MemoryStatusEx {
+        length: u32,
+        memory_load: u32,
+        total_phys: u64,
+        avail_phys: u64,
+        total_page_file: u64,
+        avail_page_file: u64,
+        total_virtual: u64,
+        avail_virtual: u64,
+        avail_extended_virtual: u64,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GlobalMemoryStatusEx(buffer: *mut MemoryStatusEx) -> i32;
+    }
+
+    unsafe {
+        let mut status = std::mem::zeroed::<MemoryStatusEx>();
+        status.length = std::mem::size_of::<MemoryStatusEx>() as u32;
+        if GlobalMemoryStatusEx(&mut status) == 0 || status.total_phys == 0 {
+            return Err(ModelError::Hardware(
+                "GlobalMemoryStatusEx failed to report physical memory".into(),
+            ));
+        }
+        Ok(status.total_phys)
+    }
 }
 
 fn detect_gpus() -> Vec<GpuDevice> {

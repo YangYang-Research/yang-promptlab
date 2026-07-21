@@ -42,7 +42,6 @@ export function ScanRecommendationsPanel({
   useEffect(() => {
     if (!enabled || !scanId) return;
     if (fetchedRef.current === scanId) return;
-    fetchedRef.current = scanId;
 
     let cancelled = false;
     setLoading(true);
@@ -51,6 +50,7 @@ export function ScanRecommendationsPanel({
     void generateScanRecommendations(scanId, attackCategories)
       .then((response) => {
         if (cancelled) return;
+        fetchedRef.current = scanId;
         setRecommendations(response.recommendations);
         setOverview(response.overview?.trim() || null);
         setSource(response.source);

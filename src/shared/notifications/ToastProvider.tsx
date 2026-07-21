@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 
-export type ToastType = "success" | "error" | "info";
+export type ToastType = "success" | "error" | "info" | "warning";
 
 export type Toast = {
   id: number;
@@ -24,6 +24,7 @@ type ToastContextValue = {
 const ToastContext = createContext<ToastContextValue | null>(null);
 
 const DEFAULT_DURATION_MS = 4000;
+const WARNING_DURATION_MS = 7000;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -37,7 +38,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (message: string, type: ToastType = "info") => {
       const id = nextId.current++;
       setToasts((prev) => [...prev, { id, type, message }]);
-      window.setTimeout(() => dismiss(id), DEFAULT_DURATION_MS);
+      const duration = type === "warning" ? WARNING_DURATION_MS : DEFAULT_DURATION_MS;
+      window.setTimeout(() => dismiss(id), duration);
       return id;
     },
     [dismiss],
