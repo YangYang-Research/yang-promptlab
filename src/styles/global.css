@@ -7035,6 +7035,7 @@ a:hover {
 .toast--success { border-left-color: var(--success); }
 .toast--error { border-left-color: var(--danger); }
 .toast--info { border-left-color: var(--info); }
+.toast--warning { border-left-color: var(--warning); }
 .toast__message {
   font-size: 0.875rem;
   color: var(--text);
@@ -7824,6 +7825,12 @@ a:hover {
   color: var(--danger);
   font-size: 0.875rem;
   line-height: 1.5;
+}
+
+.runtime-page__alert--warning {
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--border-subtle));
+  background: color-mix(in srgb, var(--warning) 12%, var(--bg-elevated));
+  color: color-mix(in srgb, var(--warning) 75%, var(--text));
 }
 
 .runtime-page__banner {

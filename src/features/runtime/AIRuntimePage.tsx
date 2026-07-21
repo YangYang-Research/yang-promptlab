@@ -22,6 +22,7 @@ import {
   getRuntimeHealth,
   getRuntimeLogs,
   loadRuntimeModel,
+  refreshRuntimeHardware,
   reinitializeRuntimeEngine,
   resetRuntimeConfig,
   restartRuntime,
@@ -134,6 +135,9 @@ type RuntimeModeOption = {
   highlights: string[];
   notes: RuntimeModeNote[];
 };
+
+/** Soft recommendation for Local runtime; does not block switching. */
+const LOCAL_RUNTIME_MIN_RAM_BYTES = 8 * 1024 * 1024 * 1024;
 
 const RUNTIME_MODE_OPTIONS: RuntimeModeOption[] = [
   {
@@ -307,6 +311,7 @@ export function AIRuntimePage() {
     modelName: string;
   } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [localRamWarning, setLocalRamWarning] = useState<string | null>(null);
 
   const {
     configuration,
@@ -436,6 +441,18 @@ export function AIRuntimePage() {
     void refreshConfiguration().catch(() => undefined);
   }, [backendConnected, runtimeModelLoading, refreshConfiguration]);
 
+  useEffect(() => {
+    if (!backendConnected || mode !== "local") {
+      if (mode !== "local") setLocalRamWarning(null);
+      return;
+    }
+    void evaluateLocalRamWarning().then((warning) => {
+      setLocalRamWarning(warning);
+    });
+    // Only re-check when entering/staying on local after connect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional gate on mode/backend
+  }, [backendConnected, mode]);
+
   async function runAction(label: string, fn: () => Promise<unknown>) {
     setError(null);
     setBusy(label);
@@ -452,6 +469,33 @@ export function AIRuntimePage() {
     }
   }
 
+  async function evaluateLocalRamWarning(): Promise<string | null> {
+    let profile: RuntimeHardwareDto | null = hardware;
+    try {
+      profile = await refreshRuntimeHardware();
+      setHardware(profile);
+    } catch {
+      try {
+        profile = await getRuntimeHardware();
+        setHardware(profile);
+      } catch {
+        return null;
+      }
+    }
+    if (!profile || profile.ramBytes >= LOCAL_RUNTIME_MIN_RAM_BYTES) return null;
+
+    const detectedGb = (profile.ramBytes / (1024 * 1024 * 1024)).toFixed(1);
+    return `Local runtime recommends at least 8 GB RAM. This device reports ${detectedGb} GB — you can continue, but models may run slowly or fail to load.`;
+  }
+
+  async function warnIfLocalRamBelowRecommendation() {
+    const warning = await evaluateLocalRamWarning();
+    setLocalRamWarning(warning);
+    if (warning) {
+      notify(warning, "warning");
+    }
+  }
+
   async function handleModeChange(route: AiInferenceRoute) {
     if (routeBusy || busy !== null || engineInitializing) return;
     if (modelLoadInProgress) return;
@@ -459,6 +503,13 @@ export function AIRuntimePage() {
       return;
     }
     try {
+      if (route === "local") {
+        if (mode !== "local") {
+          await warnIfLocalRamBelowRecommendation();
+        }
+      } else {
+        setLocalRamWarning(null);
+      }
       await setRoute(route);
       await refreshLocalData();
     } catch (err) {
@@ -694,6 +745,12 @@ export function AIRuntimePage() {
       {error ? (
         <div className="runtime-page__alert" role="alert">
           {error}
+        </div>
+      ) : null}
+
+      {localRamWarning ? (
+        <div className="runtime-page__alert runtime-page__alert--warning" role="status">
+          {localRamWarning}
         </div>
       ) : null}
 
