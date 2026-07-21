@@ -53,24 +53,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aisec-agent"
-version = "0.1.0"
-dependencies = [
- "aisec-attack",
- "aisec-core",
- "aisec-fingerprint",
- "aisec-generator",
- "aisec-planner",
- "async-trait",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "aisec-attack"
 version = "0.1.0"
 dependencies = [
@@ -135,18 +117,16 @@ dependencies = [
 name = "aisec-desktop"
 version = "0.1.0"
 dependencies = [
- "aisec-agent",
  "aisec-attack",
  "aisec-auth",
  "aisec-core",
- "aisec-discovery",
  "aisec-endpoint-metadata",
- "aisec-fingerprint",
  "aisec-generator",
  "aisec-harness",
  "aisec-inference",
  "aisec-judge",
  "aisec-models",
+ "aisec-payload",
  "aisec-planner",
  "aisec-plugin-host",
  "aisec-report",
@@ -369,16 +349,9 @@ name = "aisec-planner"
 version = "0.1.0"
 dependencies = [
  "aisec-attack",
- "aisec-core",
- "aisec-endpoint-metadata",
- "aisec-fingerprint",
- "aisec-inference",
  "async-trait",
  "serde",
- "serde_json",
  "thiserror 2.0.18",
- "time",
- "tracing",
 ]
 
 [[package]]
@@ -457,6 +430,7 @@ dependencies = [
  "aisec-attack",
  "aisec-harness",
  "aisec-inference",
+ "aisec-payload",
  "aisec-planner",
  "async-trait",
  "reqwest 0.12.28",

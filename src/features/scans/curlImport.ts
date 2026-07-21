@@ -1,3 +1,4 @@
+import type { TargetFormState } from "./targetDescriptor";
 import {
   PROMPT_PLACEHOLDER,
   applyApiEndpointToProfile,
@@ -243,6 +244,7 @@ function inferProvider(url: string, body: string | null): TargetProviderId {
   const b = (body ?? "").toLowerCase();
 
   if (u.includes("api.anthropic.com")) return "anthropic_claude";
+  if (u.includes("openrouter.ai")) return "openrouter";
   if (u.includes("generativelanguage.googleapis.com")) return "google_gemini";
   if (u.includes(".openai.azure.com")) return "azure_openai";
   if (u.includes("bedrock-runtime")) return "aws_bedrock";
@@ -404,6 +406,67 @@ function filterHeaders(headers: Record<string, string>): Record<string, string> 
   return filtered;
 }
 
+/** Map curl/profile headers into Add Target auth form fields. */
+export function targetFormAuthFromHeaders(
+  headers: Record<string, string>,
+): Partial<TargetFormState> {
+  const entries = Object.entries(headers);
+  const authorization = entries.find(([name]) => name.toLowerCase() === "authorization");
+  if (authorization) {
+    const value = authorization[1] ?? "";
+    if (/^bearer\s+/i.test(value)) {
+      return {
+        authKind: "jwt",
+        jwtToken: value.replace(/^bearer\s+/i, "").trim(),
+        jwtHeaderName: "Authorization",
+        jwtPrefix: "Bearer ",
+        jwtVaultMissing: false,
+      };
+    }
+    if (/^basic\s+/i.test(value)) {
+      try {
+        const decoded = atob(value.replace(/^basic\s+/i, "").trim());
+        const sep = decoded.indexOf(":");
+        return {
+          authKind: "basic",
+          basicUsername: sep >= 0 ? decoded.slice(0, sep) : decoded,
+          basicPassword: sep >= 0 ? decoded.slice(sep + 1) : "",
+          basicPasswordVaultMissing: false,
+        };
+      } catch {
+        /* fall through */
+      }
+    }
+  }
+
+  const apiKey = entries.find(([name]) => {
+    const lower = name.toLowerCase();
+    return lower === "x-api-key" || lower === "api-key" || lower === "x-goog-api-key";
+  });
+  if (apiKey) {
+    return {
+      authKind: "api_key",
+      apiKeyHeaderName: apiKey[0],
+      apiKeyValue: apiKey[1],
+      apiKeyPrefix: "",
+      apiKeyVaultMissing: false,
+    };
+  }
+
+  return { authKind: "none" };
+}
+
+function providerImportDefaults(
+  provider: TargetProviderId,
+): Pick<TargetProfileFormState, "framework" | "verificationStrategy"> | null {
+  switch (provider) {
+    case "openrouter":
+      return { framework: "openrouter", verificationStrategy: "openai_chat_completion" };
+    default:
+      return null;
+  }
+}
+
 export function curlToProfilePatch(raw: string): CurlImportResult {
   const parsedResult = parseCurl(raw);
   if (!parsedResult.ok) {
@@ -416,6 +479,7 @@ export function curlToProfilePatch(raw: string): CurlImportResult {
   const provider = inferProvider(url, body);
   const requestTemplate = bodyToRequestTemplate(body);
   const fieldMapping = inferFieldMapping(body);
+  const providerDefaults = providerImportDefaults(provider);
 
   if (!requestTemplate.includes(PROMPT_PLACEHOLDER)) {
     return {
@@ -429,6 +493,7 @@ export function curlToProfilePatch(raw: string): CurlImportResult {
     patch: {
       ...endpointPatch,
       ...fieldMapping,
+      ...providerDefaults,
       provider,
       method,
       headersJson: JSON.stringify(filteredHeaders, null, 2),

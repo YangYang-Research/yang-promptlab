@@ -12,7 +12,6 @@ const project: Project = {
   updatedAt: "2026-01-01T00:00:00Z",
   targetCount: 1,
   findingCount: 1,
-  owner: "team",
 };
 
 const scan: ScanRun = {
@@ -32,6 +31,7 @@ const finding: Finding = {
   projectId: "proj-1",
   targetId: "target-1",
   targetName: "Chat API",
+  targetUrl: "https://api.example.com/v1/chat",
   title: "Prompt injection detected",
   description: "System prompt leak via delimiter attack",
   severity: "high",
@@ -46,16 +46,23 @@ const finding: Finding = {
   },
 };
 
+const mediumFinding: Finding = {
+  ...finding,
+  id: "finding-2",
+  severity: "medium",
+  status: "confirmed",
+};
+
 describe("filterFindings", () => {
   it("filters by severity and search query", () => {
     const results = filterFindings(
       [finding],
       {
         searchQuery: "delimiter",
-        projectId: null,
-        scanId: null,
-        severity: "high",
-        status: null,
+        projectIds: [],
+        scanIds: [],
+        severities: ["high"],
+        statuses: [],
       },
       [project],
       [scan],
@@ -63,15 +70,31 @@ describe("filterFindings", () => {
     expect(results).toHaveLength(1);
   });
 
+  it("supports multiple severities", () => {
+    const results = filterFindings(
+      [finding, mediumFinding],
+      {
+        searchQuery: "",
+        projectIds: [],
+        scanIds: [],
+        severities: ["high", "medium"],
+        statuses: [],
+      },
+      [project],
+      [scan],
+    );
+    expect(results).toHaveLength(2);
+  });
+
   it("excludes findings that do not match project filter", () => {
     const results = filterFindings(
       [finding],
       {
         searchQuery: "",
-        projectId: "other-project",
-        scanId: null,
-        severity: null,
-        status: null,
+        projectIds: ["other-project"],
+        scanIds: [],
+        severities: [],
+        statuses: [],
       },
       [project],
       [scan],
@@ -84,10 +107,10 @@ describe("filterFindings", () => {
       [finding],
       {
         searchQuery: "acme",
-        projectId: null,
-        scanId: null,
-        severity: null,
-        status: null,
+        projectIds: [],
+        scanIds: [],
+        severities: [],
+        statuses: [],
       },
       [project],
       [scan],

@@ -52,6 +52,7 @@ impl ReportingEngine {
             ReportFormat::Pdf,
             ReportFormat::Json,
             ReportFormat::Sarif,
+            ReportFormat::Csv,
         ] {
             reports.push(self.generate(kind, format, input).await?);
         }
@@ -134,7 +135,7 @@ mod tests {
             .generate_all_formats(ReportKind::Technical, &sample_input())
             .await
             .unwrap();
-        assert_eq!(reports.len(), 4);
+        assert_eq!(reports.len(), 5);
     }
 
     #[tokio::test]

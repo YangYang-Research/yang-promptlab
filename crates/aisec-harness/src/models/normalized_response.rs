@@ -38,6 +38,15 @@ impl NormalizedResponse {
             ]),
         }
     }
+
+    /// Text passed to the judge LLM — prefers extracted assistant content, falls back to raw body.
+    pub fn judge_text(&self) -> String {
+        let trimmed = self.content.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+        extract_display_content(self.raw_response.trim())
+    }
 }
 
 fn extract_display_content(body: &str) -> String {
@@ -48,8 +57,26 @@ fn extract_display_content(body: &str) -> String {
         {
             return content.to_string();
         }
+        if let Some(text) = text_from_content_array(json.pointer("/choices/0/message/content")) {
+            return text;
+        }
+        if let Some(text) = text_from_content_array(json.get("content")) {
+            return text;
+        }
         if let Some(content) = json.pointer("/content/0/text").and_then(|v| v.as_str()) {
             return content.to_string();
+        }
+        if let Some(text) = json
+            .pointer("/candidates/0/content/parts/0/text")
+            .and_then(|v| v.as_str())
+        {
+            return text.to_string();
+        }
+        if let Some(text) = json.pointer("/data/answer").and_then(|v| v.as_str()) {
+            return text.to_string();
+        }
+        if let Some(text) = json.get("answer").and_then(|v| v.as_str()) {
+            return text.to_string();
         }
         if let Some(text) = json.get("response").and_then(|v| v.as_str()) {
             return text.to_string();
@@ -61,6 +88,24 @@ fn extract_display_content(body: &str) -> String {
     body.to_string()
 }
 
+fn text_from_content_array(value: Option<&serde_json::Value>) -> Option<String> {
+    let blocks = value?.as_array()?;
+    let parts: Vec<&str> = blocks
+        .iter()
+        .filter_map(|block| {
+            block
+                .get("text")
+                .and_then(|v| v.as_str())
+                .or_else(|| block.as_str())
+        })
+        .collect();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,5 +115,24 @@ mod tests {
         let body = r#"{"choices":[{"message":{"content":"hello"}}]}"#;
         let normalized = NormalizedResponse::from_http(200, body.into(), "openai");
         assert_eq!(normalized.content, "hello");
+        assert_eq!(normalized.judge_text(), "hello");
+    }
+
+    #[test]
+    fn extracts_openai_multimodal_content_array() {
+        let body = r#"{"choices":[{"message":{"content":[{"type":"text","text":"hello array"}]}}]}"#;
+        let normalized = NormalizedResponse::from_http(200, body.into(), "openai");
+        assert_eq!(normalized.judge_text(), "hello array");
+    }
+
+    #[test]
+    fn judge_text_falls_back_to_raw_body() {
+        let normalized = NormalizedResponse {
+            content: String::new(),
+            raw_response: "plain text response".into(),
+            status_code: Some(200),
+            metadata: Default::default(),
+        };
+        assert_eq!(normalized.judge_text(), "plain text response");
     }
 }

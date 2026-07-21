@@ -1,5 +1,3 @@
-import { Badge } from "@/shared/components";
-
 import {
   ADVANCED_OPTIONS,
   clampPayloadBudget,
@@ -9,30 +7,24 @@ import {
   PAYLOAD_BUDGET_MAX,
   PAYLOAD_BUDGET_MIN,
   PAYLOAD_BUDGET_STEP,
-  payloadStrategyMatchesRecommendation,
   VARIANTS_PER_TEST_MAX,
   VARIANTS_PER_TEST_MIN,
   type PayloadStrategyConfig,
 } from "../payloadStrategy";
+import { YazgBadge } from "@/shared/components";
 import { WizardRangeSlider } from "./WizardRangeSlider";
 
 type PayloadStrategySectionProps = {
   strategy: PayloadStrategyConfig;
-  recommendedStrategy: PayloadStrategyConfig;
   onChange: (patch: Partial<PayloadStrategyConfig>) => void;
-  onAcceptRecommended: () => void;
   readOnly?: boolean;
 };
 
 export function PayloadStrategySection({
   strategy,
-  recommendedStrategy,
   onChange,
-  onAcceptRecommended,
   readOnly = false,
 }: PayloadStrategySectionProps) {
-  const matchesRecommendation = payloadStrategyMatchesRecommendation(strategy, recommendedStrategy);
-
   const applyChange = (patch: Partial<PayloadStrategyConfig>) => {
     if (readOnly) return;
     onChange(patch);
@@ -42,28 +34,11 @@ export function PayloadStrategySection({
     <section className="wizard-fingerprint-summary">
       <div className="wizard-attack-categories__header">
         <h4 className="wizard-endpoints__title">Payload strategy</h4>
-        {!readOnly && !matchesRecommendation && (
-          <button
-            type="button"
-            className="wizard-attack-category__expand text-sm"
-            onClick={onAcceptRecommended}
-            title="Apply planner-recommended payload strategy"
-          >
-            Use recommended
-          </button>
-        )}
+        {strategy.enableResponseAdaptation ? <YazgBadge /> : null}
       </div>
       <p className="text-muted text-sm">
         Configures how payloads are generated during Step 5 execution. No probes are built here.
       </p>
-      {!readOnly && !matchesRecommendation && (
-        <p className="text-sm wizard-planner-summary">
-          <Badge variant="info">Planner recommendation</Badge>{" "}
-          {GENERATION_STRATEGIES.find((s) => s.id === recommendedStrategy.strategy)?.label} ·{" "}
-          {MUTATION_LEVELS.find((m) => m.id === recommendedStrategy.mutationLevel)?.label} ·{" "}
-          {recommendedStrategy.variantsPerTest} variants
-        </p>
-      )}
 
       <div className="wizard-attack-profiles">
         {GENERATION_STRATEGIES.map((item) => (

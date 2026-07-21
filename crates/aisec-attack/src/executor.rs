@@ -1,17 +1,21 @@
 use std::sync::Arc;
 
 use time::OffsetDateTime;
+use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 use tracing::{info, instrument};
 
 use crate::error::{AttackError, AttackResult};
 use crate::lifecycle::{AttackLifecycle, AttackPhase};
-use crate::payload::{PayloadMutator, PayloadRunner};
+use crate::payload::{MutatorKind, PayloadMutator, PayloadRunner};
 use crate::registry::AttackRegistry;
 use crate::traits::Attack;
 use crate::transport::TargetTransport;
 use crate::types::{
     AttackContext, AttackExecutionResult, AttackPayload, PayloadAttempt,
 };
+
+pub type AttemptStreamItem = (usize, PayloadAttempt);
 
 /// Runs a single attack through the full lifecycle.
 pub struct AttackExecutor<T: TargetTransport> {
@@ -20,7 +24,7 @@ pub struct AttackExecutor<T: TargetTransport> {
     mutator: PayloadMutator,
 }
 
-impl<T: TargetTransport> AttackExecutor<T> {
+impl<T: TargetTransport + Clone + 'static> AttackExecutor<T> {
     pub fn new(registry: AttackRegistry, transport: T) -> Self {
         Self {
             registry,
@@ -46,7 +50,7 @@ impl<T: TargetTransport> AttackExecutor<T> {
         ctx: &AttackContext,
     ) -> AttackResult<AttackExecutionResult> {
         let attack = self.registry.get(attack_id)?;
-        self.execute_attack(attack, ctx).await
+        self.execute_attack(attack, ctx, None).await
     }
 
     /// Execute by category.
@@ -56,13 +60,25 @@ impl<T: TargetTransport> AttackExecutor<T> {
         ctx: &AttackContext,
     ) -> AttackResult<AttackExecutionResult> {
         let attack = self.registry.get_by_category(category)?;
-        self.execute_attack(attack, ctx).await
+        self.execute_attack(attack, ctx, None).await
+    }
+
+    /// Execute by category, emitting each completed attempt as HTTP finishes (pool-limited).
+    pub async fn execute_category_streaming(
+        &self,
+        category: crate::category::AttackCategory,
+        ctx: &AttackContext,
+        attempt_tx: mpsc::Sender<AttemptStreamItem>,
+    ) -> AttackResult<AttackExecutionResult> {
+        let attack = self.registry.get_by_category(category)?;
+        self.execute_attack(attack, ctx, Some(attempt_tx)).await
     }
 
     async fn execute_attack(
         &self,
         attack: Arc<dyn Attack>,
         ctx: &AttackContext,
+        attempt_tx: Option<mpsc::Sender<AttemptStreamItem>>,
     ) -> AttackResult<AttackExecutionResult> {
         let started_at = OffsetDateTime::now_utc();
         let mut lifecycle = AttackLifecycle::new(&ctx.probe_id, attack.id());
@@ -72,43 +88,16 @@ impl<T: TargetTransport> AttackExecutor<T> {
 
         lifecycle.transition(AttackPhase::Preparing, Some("preparing payloads".into()))?;
         let payloads = select_payloads(attack.as_ref(), &plan, ctx);
+        let work_items = build_work_items(&self.mutator, &plan, &payloads, ctx)?;
 
         lifecycle.transition(AttackPhase::Executing, None)?;
-        let runner = PayloadRunner::new(&self.transport);
-        let mut attempts = Vec::new();
 
-        for payload in payloads {
-            if attempts.len() >= ctx.budget.max_payloads {
-                break;
-            }
-
-            let variants = self.mutator.expand(
-                &payload.content,
-                &plan.mutators,
-            )?;
-
-            for (content, mutators) in variants {
-                if attempts.len() >= ctx.budget.max_payloads {
-                    break;
-                }
-
-                let response = runner.execute(ctx, &payload, &content).await?;
-                lifecycle.transition(AttackPhase::Evaluating, None)?;
-
-                let evaluation = attack.evaluate(ctx, &payload, &response).await?;
-
-                attempts.push(PayloadAttempt {
-                    payload_id: payload.id.clone(),
-                    payload_name: payload.name.clone(),
-                    mutated_content: content,
-                    mutators_applied: mutators,
-                    response,
-                    evaluation: evaluation.clone(),
-                });
-
-                lifecycle.transition(AttackPhase::Executing, None)?;
-            }
-        }
+        let attempts = if work_items.is_empty() {
+            Vec::new()
+        } else {
+            self.execute_work_pool(attack.clone(), ctx, work_items, attempt_tx)
+                .await?
+        };
 
         if lifecycle.phase() == AttackPhase::Executing {
             lifecycle.transition(AttackPhase::Evaluating, None)?;
@@ -147,6 +136,120 @@ impl<T: TargetTransport> AttackExecutor<T> {
             error: None,
         })
     }
+
+    async fn execute_work_pool(
+        &self,
+        attack: Arc<dyn Attack>,
+        ctx: &AttackContext,
+        work_items: Vec<WorkItem>,
+        attempt_tx: Option<mpsc::Sender<AttemptStreamItem>>,
+    ) -> AttackResult<Vec<PayloadAttempt>> {
+        let concurrency = ctx.budget.concurrent_limit();
+        let ctx = Arc::new(ctx.clone());
+        let transport = self.transport.clone();
+        let mut join_set = JoinSet::new();
+        let mut items = work_items.into_iter();
+        let mut indexed = Vec::new();
+
+        loop {
+            while join_set.len() < concurrency {
+                let Some(item) = items.next() else {
+                    break;
+                };
+                let attack = attack.clone();
+                let ctx = ctx.clone();
+                let transport = transport.clone();
+
+                join_set.spawn(async move {
+                    run_work_item(&transport, attack.as_ref(), &ctx, item).await
+                });
+            }
+
+            if join_set.is_empty() {
+                break;
+            }
+
+            let (seq, attempt) = join_set
+                .join_next()
+                .await
+                .ok_or_else(|| AttackError::invalid_state("attack worker pool ended unexpectedly"))?
+                .map_err(|err| AttackError::invalid_state(format!("attack worker failed: {err}")))?
+                .map_err(|err| AttackError::invalid_state(format!("attack attempt failed: {err}")))?;
+
+            if let Some(ref tx) = attempt_tx {
+                let _ = tx.send((seq, attempt.clone())).await;
+            }
+            indexed.push((seq, attempt));
+        }
+
+        indexed.sort_by_key(|(seq, _)| *seq);
+        Ok(indexed.into_iter().map(|(_, attempt)| attempt).collect())
+    }
+}
+
+struct WorkItem {
+    seq: usize,
+    payload: AttackPayload,
+    content: String,
+    mutators: Vec<MutatorKind>,
+}
+
+fn build_work_items(
+    mutator: &PayloadMutator,
+    plan: &crate::types::AttackPlan,
+    payloads: &[AttackPayload],
+    ctx: &AttackContext,
+) -> AttackResult<Vec<WorkItem>> {
+    let mut work_items = Vec::new();
+    let mut seq = 0usize;
+
+    for payload in payloads {
+        if work_items.len() >= ctx.budget.max_payloads {
+            break;
+        }
+
+        let variants = mutator.expand(&payload.content, &plan.mutators)?;
+        for (content, mutators) in variants {
+            if work_items.len() >= ctx.budget.max_payloads {
+                break;
+            }
+            work_items.push(WorkItem {
+                seq,
+                payload: payload.clone(),
+                content,
+                mutators,
+            });
+            seq += 1;
+        }
+    }
+
+    Ok(work_items)
+}
+
+async fn run_work_item<T: TargetTransport>(
+    transport: &T,
+    attack: &dyn Attack,
+    ctx: &AttackContext,
+    item: WorkItem,
+) -> AttackResult<(usize, PayloadAttempt)> {
+    let runner = PayloadRunner::new(transport);
+    let response = runner
+        .execute(ctx, &item.payload, &item.content)
+        .await?;
+    let evaluation = attack
+        .evaluate(ctx, &item.payload, &response)
+        .await?;
+
+    let attempt = PayloadAttempt {
+        payload_id: item.payload.id.clone(),
+        payload_name: item.payload.name.clone(),
+        mutated_content: item.content,
+        mutators_applied: item.mutators,
+        response,
+        evaluation,
+    };
+
+    Ok((item.seq, attempt))
 }
 
 fn select_payloads(
@@ -194,7 +297,7 @@ mod tests {
     use super::*;
     use crate::category::AttackCategory;
     use crate::transport::MockTransport;
-    use crate::types::AttackTarget;
+    use crate::types::{AttackBudget, AttackTarget, DEFAULT_ATTACK_CONCURRENCY};
 
     #[tokio::test]
     async fn executes_prompt_injection_lifecycle() {
@@ -215,5 +318,39 @@ mod tests {
 
         assert_eq!(result.phase, AttackPhase::Completed);
         assert!(!result.attempts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn pooled_execution_streams_attempts_in_order() {
+        let transport = MockTransport::ok(r#"{"choices":[{"message":{"content":"ok"}}]}"#);
+        let executor = AttackExecutor::new(AttackRegistry::with_builtins(), transport);
+        let mut budget = AttackBudget::default();
+        budget.max_payloads = 4;
+        budget.max_concurrent_requests = 2;
+        let mut ctx = AttackContext::new(
+            "scan-1",
+            "probe-pi",
+            AttackTarget::llm_api("https://api.example.com/v1/chat/completions"),
+        );
+        ctx.budget = budget;
+
+        let (tx, mut rx) = mpsc::channel(8);
+        let exec = executor.execute_category_streaming(AttackCategory::PromptInjection, &ctx, tx);
+        let mut streamed = Vec::new();
+        let drain = async {
+            while let Some((seq, attempt)) = rx.recv().await {
+                streamed.push((seq, attempt.payload_id));
+            }
+        };
+
+        let (result, ()) = tokio::join!(exec, drain);
+        let result = result.unwrap();
+
+        assert!(!result.attempts.is_empty());
+        assert_eq!(streamed.len(), result.attempts.len());
+        let mut seqs: Vec<_> = streamed.iter().map(|(seq, _)| *seq).collect();
+        seqs.sort_unstable();
+        assert_eq!(seqs, (0..result.attempts.len()).collect::<Vec<_>>());
+        assert_eq!(DEFAULT_ATTACK_CONCURRENCY, 10);
     }
 }

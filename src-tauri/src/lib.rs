@@ -1,5 +1,6 @@
 //! PromptLab desktop application library.
 
+pub mod attack_catalog;
 pub mod commands;
 pub mod db;
 pub mod dto;
@@ -14,14 +15,15 @@ pub mod inference_settings;
 pub mod model_registry;
 pub mod third_party_credentials;
 pub mod embedded_runtime;
-pub mod endpoint_pipeline;
 pub mod plugin_service;
 pub mod plugin_transport;
 pub mod playwright_runtime;
-pub mod agent_service;
 pub mod runtime_watch;
 pub mod session_auth;
+pub mod scan_console_log;
+pub mod scan_playbook;
 pub mod state;
+pub mod traffic_persist;
 
 use aisec_models::ModelEntry;
 use state::AppState;
@@ -40,6 +42,14 @@ pub fn run() {
         if let RunEvent::Exit = event {
             if let Some(state) = app_handle.try_state::<AppState>() {
                 tauri::async_runtime::block_on(async {
+                    let reconciled =
+                        commands::scan::reconcile_interrupted_scans(state.inner(), true).await;
+                    if reconciled > 0 {
+                        tracing::info!(
+                            reconciled,
+                            "marked interrupted scans as failed on shutdown"
+                        );
+                    }
                     let mut manager = state.runtime_manager().lock().await;
                     let _ = manager.stop_runtime().await;
                     tracing::info!("embedded runtime stopped (graceful shutdown)");
@@ -81,6 +91,8 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
 
             let database = tauri::async_runtime::block_on(db::open_database(&db_path))
                 .map_err(crate::error::CommandError::from)?;
+
+            tauri::async_runtime::block_on(attack_catalog::seed_attack_catalog(&database))?;
 
             let vault_dir = environment.auth_sessions_dir();
             let auth_engine_config =
@@ -155,7 +167,16 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 model_catalog_meta,
             ));
 
+            let startup_state = app.state::<AppState>();
+            let reconciled = tauri::async_runtime::block_on(
+                commands::scan::reconcile_interrupted_scans(startup_state.inner(), false),
+            );
+            if reconciled > 0 {
+                tracing::info!(reconciled, "marked interrupted scans as failed on startup");
+            }
+
             let app_handle = app.handle().clone();
+            aisec_inference::traffic_ensure_started();
             tauri::async_runtime::spawn(async move {
                 let state = app_handle.state::<AppState>();
                 {
@@ -163,6 +184,12 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                     let _ = inference.load().await;
                 }
                 embedded_runtime::resume_local_runtime_on_startup(&app_handle, state.inner()).await;
+                commands::runtime::startup_connectivity_check(state.inner()).await;
+            });
+
+            let traffic_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                traffic_persist::bootstrap_traffic_persistence(&traffic_app).await;
             });
 
             event_bus.info(
@@ -185,6 +212,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::environment::logs_list_files,
             commands::environment::logs_tail,
             commands::environment::logs_recent_events,
+            commands::environment::logs_emit,
             commands::environment::logs_open_folder,
             commands::db_health,
             commands::projects::project_create,
@@ -197,25 +225,27 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::domain::target_get,
             commands::domain::target_wizard_descriptor,
             commands::domain::target_update_descriptor,
+            commands::domain::target_delete,
             commands::domain::scan_create,
             commands::domain::scan_list,
             commands::domain::scan_get,
+            commands::domain::scan_delete,
             commands::domain::finding_list,
             commands::domain::finding_list_all,
+            commands::domain::finding_import_sarif,
+            commands::domain::finding_update,
+            commands::domain::finding_delete,
             commands::domain::report_generate,
             commands::domain::report_list,
             commands::domain::report_list_all,
             commands::domain::report_read,
             commands::domain::report_export,
-            commands::discovery::endpoint_list,
-            commands::discovery::endpoint_create,
-            commands::discovery::endpoint_update,
-            commands::attack::attack_run_prompt_injection,
             commands::scan::scan_start,
             commands::scan::scan_status,
             commands::scan::scan_pause,
             commands::scan::scan_resume,
             commands::scan::scan_stop,
+            commands::scan::scan_console_tail,
             commands::wizard_scan::scan_wizard_create,
             commands::wizard_scan::scan_wizard_save,
             commands::wizard_scan::scan_wizard_load,
@@ -251,11 +281,13 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::target_profile::target_profile_list_templates,
             commands::target_profile::target_profile_save,
             commands::target_profile::target_profile_verify,
+            commands::target_profile::target_profile_verify_connect,
+            commands::target_profile::target_profile_verify_ai,
             commands::target_profile::target_profile_get,
             commands::target_profile::planner_generate_from_profile,
-            commands::planner::planner_generate,
+            commands::scan_recommendations::scan_recommendations_generate,
+            commands::project_summary::project_summary_generate,
             commands::planner::attack_planner_adjust,
-            commands::generator::generator_generate,
             commands::runtime::runtime_status,
             commands::runtime::runtime_install,
             commands::runtime::runtime_repair,
@@ -266,6 +298,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::runtime::runtime_unload_model,
             commands::runtime::runtime_restart,
             commands::runtime::runtime_health,
+            commands::runtime::runtime_traffic_stats,
             commands::runtime::runtime_benchmark,
             commands::runtime::runtime_logs,
             commands::runtime::runtime_hardware,
@@ -273,6 +306,8 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::runtime::runtime_configuration,
             commands::runtime::runtime_inference_settings,
             commands::runtime::runtime_set_inference_route,
+            commands::runtime::runtime_judge_role_weights,
+            commands::runtime::runtime_set_judge_role_weights,
             commands::runtime::runtime_test_connectivity,
             commands::runtime::runtime_test_inference,
             commands::security::security_audit,
@@ -282,6 +317,11 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::plugins::plugins_enable,
             commands::plugins::plugins_disable,
             commands::plugins::plugins_info,
+            commands::attack_catalog::attack_catalog_list,
+            commands::attack_catalog::attack_catalog_categories,
+            commands::attack_catalog::attack_catalog_update,
+            commands::attack_catalog::attack_catalog_reset,
+            commands::attack_catalog::attack_catalog_generate_prompt,
         ])
         .manage(AsyncMutex::new(commands::auth::AuthRecordingState::new()))
         .build(tauri::generate_context!())?;

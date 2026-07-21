@@ -1,5 +1,4 @@
 import {
-  createContext,
   useCallback,
   useContext,
   useEffect,
@@ -13,21 +12,20 @@ import { listen } from "@tauri-apps/api/event";
 
 import {
   createProject as createProjectCmd,
-  createScan as createScanCmd,
   createTarget as createTargetCmd,
   deleteProject as deleteProjectCmd,
+  deleteTarget as deleteTargetCmd,
+  deleteFinding as deleteFindingCmd,
+  updateFindingStatus as updateFindingStatusCmd,
   updateProject as updateProjectCmd,
   generateReport as generateReportCmd,
-  listEndpoints,
   listFindingsAll,
   listReportsAll,
   listProjects,
   listScans,
   listTargets,
-  runPromptInjection as runPromptInjectionCmd,
   getScanStatus,
   listModels,
-  type EndpointDto,
   type FindingDto,
   type ModelEntryDto,
   type ScanDto,
@@ -40,8 +38,8 @@ import {
   deriveAttackRuns,
 } from "@/shared/dashboardDerived";
 
+import { AppStoreContext } from "./AppStoreContext";
 import {
-  mapEndpoints,
   mapFindings,
   mapProjects,
   mapReports,
@@ -56,6 +54,7 @@ import type {
   LoadedData,
 } from "./types";
 import type { LocalModel, ModelStatus } from "@/shared/types";
+import { loadThemePreference } from "@/shared/theme/theme";
 
 function mapLocalModels(entries: ModelEntryDto[]): LocalModel[] {
   return entries.map((entry) => ({
@@ -77,14 +76,13 @@ const initialState: AppDataState = {
   projects: [],
   targets: [],
   scans: [],
-  endpoints: [],
   attackRuns: [],
   findings: [],
   reports: [],
   models: [],
   activity: [],
   settings: {
-    theme: "dark",
+    theme: loadThemePreference(),
     pluginsDir: "~/.promptlab/plugins",
     modelsDir: "~/.promptlab/models",
     offlineMode: true,
@@ -151,8 +149,6 @@ function appReducer(state: AppDataState, action: AppAction): AppDataState {
   }
 }
 
-const AppStoreContext = createContext<AppStoreValue | null>(null);
-
 type AppStoreProviderProps = {
   children: ReactNode;
 };
@@ -169,17 +165,15 @@ async function loadAll(): Promise<LoadedData> {
   const targetDtos = targetGroups.flat();
   const scanDtos: ScanDto[] = scanGroups.flat();
 
-  const [findingGroups, endpointGroups, modelEntries] = await Promise.all([
+  const [findingGroups, modelEntries] = await Promise.all([
     listFindingsAll(),
-    Promise.all(scanDtos.map((s) => listEndpoints(s.id))),
     listModels().catch(() => [] as ModelEntryDto[]),
   ]);
   const findingDtos: FindingDto[] = findingGroups;
-  const endpointDtos: EndpointDto[] = endpointGroups.flat();
 
   const projects = mapProjects(projectDtos, targetDtos, findingDtos);
-  const targets = mapTargets(targetDtos);
   const scans = mapScans(scanDtos);
+  const targets = mapTargets(targetDtos, scans);
   const findings = mapFindings(findingDtos, targetDtos);
 
   const runningIds = scans
@@ -198,7 +192,6 @@ async function loadAll(): Promise<LoadedData> {
     projects,
     targets,
     scans,
-    endpoints: mapEndpoints(endpointDtos),
     findings,
     reports: mapReports(reportDtos, projectDtos, scanDtos),
     models: mapLocalModels(modelEntries),
@@ -290,24 +283,14 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
           throw appError;
         }
       },
-      createScan: (projectId, name, targetId, status) =>
-        runMutation("createScan", () => createScanCmd(projectId, name, targetId, status)),
+      deleteTarget: (id) => runMutation("deleteTarget", () => deleteTargetCmd(id)),
+      updateFindingStatus: (id, status) =>
+        runMutation("updateFindingStatus", () => updateFindingStatusCmd(id, status)),
+      deleteFinding: (id) => runMutation("deleteFinding", () => deleteFindingCmd(id)),
       generateReport: (projectId, scanId, format, kind) =>
         runMutation("generateReport", () =>
           generateReportCmd(projectId, scanId, format, kind),
         ),
-      runPromptInjection: async (endpointId) => {
-        try {
-          const result = await runPromptInjectionCmd(endpointId);
-          await refresh();
-          return result;
-        } catch (error) {
-          const appError = toAppError(error);
-          log.error("mutation failed: runPromptInjection", { error: appError });
-          dispatch({ type: "SET_ERROR", error: appError.message });
-          throw appError;
-        }
-      },
     }),
     [refresh, runMutation],
   );

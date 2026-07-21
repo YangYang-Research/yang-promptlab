@@ -27,7 +27,7 @@ import {
   type ScanExportRow,
 } from "./reportDownloads";
 
-const EXPORT_FORMATS: ReportExportFormat[] = ["html", "pdf", "sarif"];
+const EXPORT_FORMATS: ReportExportFormat[] = ["html", "pdf", "sarif", "csv"];
 
 export function ReportsPage() {
   const { reports, scans, findings, projects, loading, error, actions } = useAppStore();
@@ -258,6 +258,7 @@ export function ReportsPage() {
               rows={exportPagination.items}
               keyField="scanId"
               emptyMessage={loading ? "Loading scans…" : "No exportable scans"}
+              loading={loading && exportPagination.items.length === 0}
             />
           </Card>
         )}
@@ -300,6 +301,7 @@ export function ReportsPage() {
               rows={archivePagination.items}
               keyField="id"
               emptyMessage={loading ? "Loading reports…" : "No stored reports"}
+              loading={loading && archivePagination.items.length === 0}
             />
           </Card>
         )}

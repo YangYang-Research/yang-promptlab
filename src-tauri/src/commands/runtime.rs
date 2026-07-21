@@ -315,6 +315,21 @@ pub async fn runtime_health(state: State<'_, AppState>) -> CommandResult<Runtime
 }
 
 #[tauri::command]
+pub async fn runtime_traffic_stats(
+    state: State<'_, AppState>,
+    window_ms: Option<u64>,
+    bucket_ms: Option<u64>,
+) -> CommandResult<aisec_inference::TrafficSnapshot> {
+    crate::traffic_persist::traffic_snapshot_from_db(
+        &state.repositories(),
+        window_ms.unwrap_or(60_000),
+        bucket_ms.unwrap_or(1_000),
+    )
+    .await
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn runtime_benchmark(state: State<'_, AppState>) -> CommandResult<RuntimeBenchmarkResult> {
     let mut manager = state.runtime_manager().lock().await;
     manager
@@ -387,6 +402,73 @@ async fn run_third_party_connectivity_test_for_config(
             apply_third_party_health_check(config, &checked_at, false, 0);
             (false, err.to_string())
         }
+    }
+}
+
+/// Re-check AI Runtime connectivity when the desktop app starts.
+pub(crate) async fn startup_connectivity_check(state: &AppState) {
+    let models: Vec<ModelEntry> = {
+        let manager = state.model_manager().lock().await;
+        manager.list_models().into_iter().cloned().collect()
+    };
+
+    let mut config = {
+        let mut inference = state.inference_manager().lock().await;
+        let _ = inference.load().await;
+        inference.config().clone()
+    };
+
+    if !config.initialized {
+        return;
+    }
+
+    config = reconcile_config(config, &models);
+
+    match config.mode {
+        InferenceMode::ThirdParty => {
+            let Some(model_id) = config.selected_model_id.clone() else {
+                tracing::info!("startup connectivity check skipped: no selected third-party model");
+                return;
+            };
+            let (ok, detail) =
+                run_third_party_connectivity_test_for_config(state, &mut config, &model_id).await;
+            {
+                let mut inference = state.inference_manager().lock().await;
+                *inference.config_mut() = config;
+                if let Err(err) = inference.save().await {
+                    tracing::warn!(error = %err, "failed to persist startup connectivity result");
+                }
+            }
+            if ok {
+                tracing::info!(model_id = %model_id, "startup third-party connectivity check ok");
+            } else {
+                tracing::warn!(
+                    model_id = %model_id,
+                    detail = %detail,
+                    "startup third-party connectivity check failed"
+                );
+            }
+            if let Err(err) = runtime_configuration_for_state(state).await {
+                tracing::warn!(error = %err, "failed to refresh runtime cache after startup check");
+            }
+        }
+        InferenceMode::Local => {
+            let mut runtime = state.runtime_manager().lock().await;
+            match runtime.run_health_check().await {
+                Ok(report) => {
+                    tracing::info!(
+                        reachable = report.endpoint_reachable,
+                        model_loaded = report.model_loaded,
+                        "startup local runtime health check completed"
+                    );
+                    prime_runtime_configuration_cache(state, &runtime).await;
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "startup local runtime health check failed");
+                }
+            }
+        }
+        InferenceMode::Deterministic => {}
     }
 }
 
@@ -833,15 +915,22 @@ pub(crate) async fn load_model_with_loading_cache(
 }
 
 async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<RuntimeConfigurationDto> {
-    let models: Vec<ModelEntry> = {
-        let manager = state.model_manager().lock().await;
+    let loading_model_id = runtime_model_loading_id(state).await;
+    let testing_model_id = runtime_model_testing_id(state).await;
+
+    let models: Vec<ModelEntry> = if let Ok(manager) = state.model_manager().try_lock() {
         manager.list_models().into_iter().cloned().collect()
+    } else if let Some(cached) = state.runtime_config_cache().lock().await.clone() {
+        let mut response = cached;
+        apply_model_loading_overlay(&mut response, loading_model_id.as_deref());
+        apply_model_testing_overlay(&mut response, testing_model_id.as_deref());
+        return Ok(response);
+    } else {
+        Vec::new()
     };
 
     let (config, _) = reconcile_inference_config(state, &models).await?;
     let inference = config_to_dto(&config, &models);
-    let loading_model_id = runtime_model_loading_id(state).await;
-    let testing_model_id = runtime_model_testing_id(state).await;
 
     let base = if let Ok(runtime_manager) = state.runtime_manager().try_lock() {
         let dto =
@@ -1034,4 +1123,69 @@ fn map_runtime_err(err: aisec_runtime::RuntimeError) -> CommandError {
         }
         other => CommandError::from(aisec_core::AisecError::internal(other.to_string())),
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JudgeRoleWeightsDto {
+    pub judge: f64,
+    pub classifier: f64,
+    pub attacker: f64,
+    pub default_llm: f64,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateJudgeRoleWeightsRequest {
+    pub judge: f64,
+    pub classifier: f64,
+    pub attacker: f64,
+    pub default_llm: f64,
+}
+
+fn judge_weights_dto(row: aisec_storage::JudgeRoleWeights) -> JudgeRoleWeightsDto {
+    JudgeRoleWeightsDto {
+        judge: row.judge,
+        classifier: row.classifier,
+        attacker: row.attacker,
+        default_llm: row.default_llm,
+        updated_at: crate::dto::ts(row.updated_at),
+    }
+}
+
+#[tauri::command]
+pub async fn runtime_judge_role_weights(
+    state: State<'_, AppState>,
+) -> CommandResult<JudgeRoleWeightsDto> {
+    use aisec_storage::JudgeRoleWeightsRepository;
+
+    let row = state
+        .repositories()
+        .judge_role_weights()
+        .get()
+        .await
+        .map_err(CommandError::from)?;
+    Ok(judge_weights_dto(row))
+}
+
+#[tauri::command]
+pub async fn runtime_set_judge_role_weights(
+    state: State<'_, AppState>,
+    request: UpdateJudgeRoleWeightsRequest,
+) -> CommandResult<JudgeRoleWeightsDto> {
+    use aisec_storage::{JudgeRoleWeightsRepository, UpdateJudgeRoleWeights};
+
+    let row = state
+        .repositories()
+        .judge_role_weights()
+        .update(UpdateJudgeRoleWeights {
+            judge: request.judge,
+            classifier: request.classifier,
+            attacker: request.attacker,
+            default_llm: request.default_llm,
+        })
+        .await
+        .map_err(CommandError::from)?;
+    Ok(judge_weights_dto(row))
 }

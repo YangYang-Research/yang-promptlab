@@ -1,8 +1,10 @@
 import { useCallback, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
+  ActionsDropdown,
+  type ActionsDropdownItem,
   Button,
   Card,
   ContentToolbar,
@@ -16,12 +18,14 @@ import {
 import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
 import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
 import { useViewPreference } from "@/shared/hooks/useViewPreference";
-import { pauseScan, resumeScan, stopScan } from "@/shared/ipc";
+import { pauseScan, resumeScan, stopScan, deleteScan } from "@/shared/ipc";
+import { toAppError } from "@/shared/errors/AppError";
 import { useToast } from "@/shared/notifications";
 import { formatDurationMs, formatTimestamp } from "@/features/scans/scanDetailsHelpers";
-import { buildScanWizardUrl } from "@/features/scans/wizardState";
+import { isLiveScanStatus, isRetryableScanStatus, resolveScanNavigationStatus, resolveScanOpenPath } from "@/features/scans/wizardState";
 import type { ScanRun } from "@/shared/types";
 
+import { NewScanChooserModal } from "./NewScanChooserModal";
 import { ScanHistoryCard, ScanMonitorCard } from "./ScanMonitorCard";
 import { mergeScanStatus, useScanStatuses } from "./useScanStatuses";
 
@@ -45,10 +49,12 @@ function scanDuration(scan: ScanRun): string {
 export function ScansPage() {
   const navigate = useNavigate();
   const { scans, targets, projects, findings, loading, error, actions } = useAppStore();
-  const { notify } = useToast();
+  const { notify, dismiss } = useToast();
   const [viewMode, setViewMode] = useViewPreference("scans");
   const [pageSize, setPageSize] = usePageSizePreference("scans");
   const [controlPending, setControlPending] = useState<string | null>(null);
+  const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
+  const [chooserOpen, setChooserOpen] = useState(false);
 
   const findingsByScan = useMemo(() => {
     const map = new Map<string, number>();
@@ -71,15 +77,17 @@ export function ScansPage() {
   const activeScanIds = useMemo(
     () =>
       pagination.items
-        .filter(
-          (scan) =>
-            scan.status === "running" || scan.status === "paused" || scan.status === "pending",
-        )
+        .filter((scan) => isLiveScanStatus(scan.status))
         .map((scan) => scan.id),
     [pagination.items],
   );
 
   const liveStatuses = useScanStatuses(activeScanIds, activeScanIds.length > 0);
+
+  const effectiveScanStatus = useCallback(
+    (scan: ScanRun) => resolveScanNavigationStatus(scan.status, liveStatuses.get(scan.id)?.status),
+    [liveStatuses],
+  );
 
   const targetLabel = (targetId: string | null) => {
     if (!targetId) return "—";
@@ -93,12 +101,19 @@ export function ScansPage() {
   const runControl = useCallback(
     async (scanId: string, action: "pause" | "resume" | "stop") => {
       setControlPending(scanId);
+      let pendingToastId: number | undefined;
       try {
         if (action === "pause") {
+          pendingToastId = notify("Pausing scan…", "info");
           await pauseScan(scanId);
+          dismiss(pendingToastId);
+          pendingToastId = undefined;
           notify("Scan paused", "info");
         } else if (action === "resume") {
+          pendingToastId = notify("Resuming scan…", "info");
           await resumeScan(scanId);
+          dismiss(pendingToastId);
+          pendingToastId = undefined;
           notify("Scan resumed", "success");
         } else {
           await stopScan(scanId);
@@ -106,29 +121,112 @@ export function ScansPage() {
         }
         await actions.refresh();
       } catch (err) {
+        if (pendingToastId !== undefined) dismiss(pendingToastId);
         const message = err instanceof Error ? err.message : "Scan control failed";
         notify(message, "error");
       } finally {
         setControlPending(null);
       }
     },
-    [actions, notify],
+    [actions, dismiss, notify],
   );
 
-  const openScan = useCallback(
+  const openScanDetails = useCallback(
     (scan: ScanRun) => {
-      if (scan.status === "draft") {
-        navigate(
-          buildScanWizardUrl(scan.projectId, scan.targetId ?? undefined, { scanId: scan.id }),
-        );
-        return;
-      }
       navigate(`/scans/${scan.id}`);
     },
     [navigate],
   );
 
-  const tableColumns = [
+  const openScanAction = useCallback(
+    (scan: ScanRun) => {
+      navigate(resolveScanOpenPath(scan, liveStatuses.get(scan.id)?.status));
+    },
+    [navigate, liveStatuses],
+  );
+
+  const handleDeleteScan = useCallback(
+    async (scan: ScanRun) => {
+      const confirmed = window.confirm(
+        `Delete scan "${scan.name}"? This permanently removes findings and reports linked to this scan.`,
+      );
+      if (!confirmed) return;
+
+      setDeletingScanId(scan.id);
+      try {
+        await deleteScan(scan.id);
+        await actions.refresh();
+        notify("Scan deleted", "success");
+      } catch (err) {
+        notify(toAppError(err).message || "Failed to delete scan", "error");
+      } finally {
+        setDeletingScanId(null);
+      }
+    },
+    [actions, notify],
+  );
+
+  const buildScanActionItems = useCallback(
+    (scan: ScanRun): ActionsDropdownItem[] => {
+      const items: ActionsDropdownItem[] = [
+        {
+          id: "open",
+          label:
+            scan.status === "draft"
+              ? "Continue Setup"
+              : isLiveScanStatus(effectiveScanStatus(scan))
+                ? "View Scan Progress"
+                : isRetryableScanStatus(effectiveScanStatus(scan))
+                  ? "Retry Scan"
+                  : "View Scan Details",
+          onClick: () => openScanAction(scan),
+        },
+      ];
+
+      if (scan.status === "running") {
+        items.push({
+          id: "pause",
+          label: "Pause Scan",
+          disabled: controlPending === scan.id,
+          onClick: () => void runControl(scan.id, "pause"),
+        });
+      }
+      if (scan.status === "paused") {
+        items.push({
+          id: "resume",
+          label: "Resume Scan",
+          disabled: controlPending === scan.id,
+          onClick: () => void runControl(scan.id, "resume"),
+        });
+      }
+      if (
+        scan.status === "running" ||
+        scan.status === "paused" ||
+        scan.status === "pending"
+      ) {
+        items.push({
+          id: "stop",
+          label: "Stop Scan",
+          disabled: controlPending === scan.id,
+          onClick: () => void runControl(scan.id, "stop"),
+        });
+      }
+
+      items.push({
+        id: "delete",
+        label: "Delete Scan",
+        tone: "danger",
+        disabled: deletingScanId === scan.id,
+        onClick: () => void handleDeleteScan(scan),
+      });
+
+      return items;
+    },
+    [controlPending, deletingScanId, effectiveScanStatus, handleDeleteScan, openScanAction, runControl],
+  );
+
+  const tableColumns = useMemo(
+    () => [
     {
       key: "id",
       header: "Scan ID",
@@ -148,7 +246,7 @@ export function ScansPage() {
       key: "status",
       header: "Status",
       width: "110px",
-      render: (scan: ScanRun) => <StatusBadge status={scan.status} />,
+      render: (scan: ScanRun) => <StatusBadge status={effectiveScanStatus(scan)} />,
     },
     {
       key: "findings",
@@ -168,22 +266,41 @@ export function ScansPage() {
       width: "100px",
       render: (scan: ScanRun) => scanDuration(scan),
     },
-  ];
+    {
+      key: "actions",
+      header: "",
+      width: "56px",
+      align: "right",
+      render: (scan: ScanRun) => (
+        <span className="table-actions" onClick={(event) => event.stopPropagation()}>
+          <ActionsDropdown
+            label="Scan actions"
+            disabled={deletingScanId === scan.id}
+            items={buildScanActionItems(scan)}
+          />
+        </span>
+      ),
+    },
+  ],
+    [buildScanActionItems, deletingScanId, effectiveScanStatus, findingsByScan, projectName, targetLabel],
+  );
 
   return (
     <div className="page">
       <PageHeader
         title="Scans"
-        description="Monitor background security scans"
+        description="Track progress and results for your security test runs"
         actions={
           <div className="page-actions">
             <RefreshButton loading={loading} error={error} onClick={() => void actions.refresh()} />
-            <Link to="/scans/new">
-              <Button variant="primary">New Scan</Button>
-            </Link>
+            <Button variant="primary" onClick={() => setChooserOpen(true)}>
+              New Scan
+            </Button>
           </div>
         }
       />
+
+      <NewScanChooserModal open={chooserOpen} onClose={() => setChooserOpen(false)} />
 
       {error && (
         <Card>
@@ -194,12 +311,7 @@ export function ScansPage() {
       {attackScans.length === 0 && !loading ? (
         <EmptyState
           title="No scans yet"
-          description="Configure a new scan in the wizard to start a background attack job."
-          action={
-            <Link to="/scans/new">
-              <Button variant="primary">New Scan</Button>
-            </Link>
-          }
+          description="Use the scan wizard to configure a target and start your first test."
         />
       ) : (
         <>
@@ -216,8 +328,9 @@ export function ScansPage() {
                 columns={tableColumns}
                 rows={pagination.items}
                 keyField="id"
-                onRowClick={openScan}
+                onRowClick={openScanDetails}
                 emptyMessage={loading ? "Loading scans…" : "No scans found"}
+                loading={loading && pagination.items.length === 0}
               />
             </Card>
           ) : (
@@ -230,18 +343,15 @@ export function ScansPage() {
                   live,
                   findingsByScan.get(scan.id) ?? 0,
                 );
-                const isActive =
-                  scan.status === "running" ||
-                  scan.status === "paused" ||
-                  scan.status === "pending";
+                const isActive = isLiveScanStatus(effectiveScanStatus(scan));
 
                 return (
                   <div
                     key={scan.id}
                     className="scan-card-link"
-                    onClick={() => openScan(scan)}
+                    onClick={() => openScanDetails(scan)}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") openScan(scan);
+                      if (event.key === "Enter" || event.key === " ") openScanDetails(scan);
                     }}
                     role="link"
                     tabIndex={0}
@@ -257,6 +367,13 @@ export function ScansPage() {
                           onPause={() => void runControl(scan.id, "pause")}
                           onResume={() => void runControl(scan.id, "resume")}
                           onStop={() => void runControl(scan.id, "stop")}
+                          actions={
+                            <ActionsDropdown
+                              label="Scan actions"
+                              disabled={deletingScanId === scan.id}
+                              items={buildScanActionItems(scan)}
+                            />
+                          }
                         />
                       ) : (
                         <ScanHistoryCard
@@ -264,6 +381,13 @@ export function ScansPage() {
                           findingsCount={findingsByScan.get(scan.id) ?? 0}
                           projectName={projectName(scan.projectId)}
                           targetName={targetLabel(scan.targetId)}
+                          actions={
+                            <ActionsDropdown
+                              label="Scan actions"
+                              disabled={deletingScanId === scan.id}
+                              items={buildScanActionItems(scan)}
+                            />
+                          }
                         />
                       )}
                     </Card>

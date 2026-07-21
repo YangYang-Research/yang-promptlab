@@ -35,6 +35,14 @@ fn parse_playbook(raw: Option<String>) -> serde_json::Value {
         .unwrap_or_else(|| serde_json::json!({}))
 }
 
+/// Wizard UI state — after `scan_start`, the live copy moves to `wizard_snapshot`.
+fn wizard_state_from_playbook(playbook: &serde_json::Value) -> Option<serde_json::Value> {
+    playbook
+        .get("wizard")
+        .cloned()
+        .or_else(|| playbook.get("wizard_snapshot").cloned())
+}
+
 fn wizard_scan_display_name(target_name: Option<&str>) -> String {
     match target_name {
         Some(name) if !name.trim().is_empty() => format!("{WIZARD_SCAN_NAME} — {name}"),
@@ -197,11 +205,36 @@ pub async fn scan_wizard_load_op(state: &AppState, scan_id: String) -> CommandRe
         .await
         .map_err(CommandError::from)?;
     let playbook = parse_playbook(scan.playbook_json.clone());
-    let wizard = playbook.get("wizard").cloned();
+    let wizard = wizard_state_from_playbook(&playbook);
     Ok(ScanWizardLoadDto {
         scan: scan.into(),
         wizard,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wizard_state_prefers_live_wizard_over_snapshot() {
+        let playbook = serde_json::json!({
+            "wizard": { "version": 7, "currentStep": 5 },
+            "wizard_snapshot": { "version": 7, "currentStep": 4 }
+        });
+        let wizard = wizard_state_from_playbook(&playbook).expect("wizard");
+        assert_eq!(wizard["currentStep"], 5);
+    }
+
+    #[test]
+    fn wizard_state_falls_back_to_snapshot_after_scan_start() {
+        let playbook = serde_json::json!({
+            "profile": "standard",
+            "wizard_snapshot": { "version": 7, "currentStep": 5, "submittedScanId": "scan-1" }
+        });
+        let wizard = wizard_state_from_playbook(&playbook).expect("wizard");
+        assert_eq!(wizard["submittedScanId"], "scan-1");
+    }
 }
 
 #[tauri::command]

@@ -494,10 +494,10 @@ export function ModelsPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page models-page">
       <PageHeader
         title="Models"
-        description="Manage local GGUF models, cloud providers, and imports"
+        description="Manage local and cloud models for use with AI Runtime"
         actions={
           <>
             <RefreshButton
@@ -513,96 +513,130 @@ export function ModelsPage() {
         }
       />
 
-      {!backendConnected && (
-        <p className="text-muted">Connect to the Tauri backend to manage local models.</p>
-      )}
+      {error ? (
+        <div className="models-page__alert" role="alert">
+          {error}
+        </div>
+      ) : null}
 
-      {vaultPath && (
-        <p className="text-muted text-sm model-vault-path">
-          Model vault: <span className="mono">{vaultPath}</span>
-        </p>
-      )}
+      {!backendConnected ? (
+        <Card className="models-page__banner detail-section">
+          <p className="models-page__banner-text">
+            Connect to the Tauri backend to manage local models and downloads.
+          </p>
+        </Card>
+      ) : null}
 
-      {backendConnected && vaultStats && (
-        <div className="models-summary-grid">
-          <Card className="models-summary-card">
-            <span className="models-summary-card__label">Registered models</span>
-            <strong className="models-summary-card__value">{vaultStats.registeredCount}</strong>
-            <p className="text-muted text-sm">Local catalog, cloud, and import</p>
-          </Card>
-          <Card className="models-summary-card">
-            <span className="models-summary-card__label">Installed models</span>
-            <strong className="models-summary-card__value">{vaultStats.installedLocalCount}</strong>
-            <p className="text-muted text-sm">Local catalog and file import</p>
-          </Card>
-          <Card className="models-summary-card">
-            <span className="models-summary-card__label">Installed size</span>
-            <strong className="models-summary-card__value">
-              {vaultStats.installedGb.toFixed(2)} GB
-            </strong>
-            <p className="text-muted text-sm">{formatBytes(vaultStats.installedBytes)}</p>
-          </Card>
+      <section className="models-page__overview" aria-label="Vault overview">
+        <Card className="detail-section models-page__stats">
+          <h2 className="detail-section__title">Vault summary</h2>
+          {vaultStats ? (
+            <div className="detail-summary-grid detail-summary-grid--metrics">
+              <div className="summary-stat">
+                <span className="summary-stat__label">Registered</span>
+                <span className="summary-stat__value">{vaultStats.registeredCount}</span>
+              </div>
+              <div className="summary-stat">
+                <span className="summary-stat__label">Installed local</span>
+                <span className="summary-stat__value">{vaultStats.installedLocalCount}</span>
+              </div>
+              <div className="summary-stat summary-stat--success">
+                <span className="summary-stat__label">Disk usage</span>
+                <span className="summary-stat__value">{vaultStats.installedGb.toFixed(2)} GB</span>
+              </div>
+              <div className="summary-stat">
+                <span className="summary-stat__label">Bytes on disk</span>
+                <span className="summary-stat__value summary-stat__value--sm">
+                  {formatBytes(vaultStats.installedBytes)}
+                </span>
+              </div>
             </div>
-      )}
+          ) : (
+            <p className="text-muted text-sm">Vault statistics load when the backend is connected.</p>
+          )}
+        </Card>
 
-      {registryInfo && (
-        <p className="text-muted text-sm">
-          Registry: {registryInfo.validModels} valid / {registryInfo.totalModels} total
-          {registryInfo.invalidModels > 0
-            ? ` · ${registryInfo.invalidModels} invalid`
-            : ""}
-          {registryInfo.remoteMerged ? " · online merge active" : " · offline"}
-          {registryInfo.sourcePath ? (
-            <>
-              {" "}
-              · <span className="mono">{registryInfo.sourcePath}</span>
-            </>
-          ) : null}
-        </p>
-      )}
+        <Card className="detail-section models-page__meta">
+          <h2 className="detail-section__title">Storage and registry</h2>
+          <dl className="models-page__meta-list">
+            <div>
+              <dt>Vault path</dt>
+              <dd className="mono">{vaultPath || "Unavailable"}</dd>
+            </div>
+            {registryInfo ? (
+              <>
+                <div>
+                  <dt>Registry entries</dt>
+                  <dd>
+                    {registryInfo.validModels} valid / {registryInfo.totalModels} total
+                    {registryInfo.invalidModels > 0
+                      ? ` (${registryInfo.invalidModels} invalid)`
+                      : ""}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Catalog source</dt>
+                  <dd>{registryInfo.remoteMerged ? "Online merge active" : "Offline bundle"}</dd>
+                </div>
+                {registryInfo.sourcePath ? (
+                  <div className="models-page__meta-wide">
+                    <dt>Source path</dt>
+                    <dd className="mono">{registryInfo.sourcePath}</dd>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div>
+                <dt>Registry</dt>
+                <dd className="text-muted">Loading registry metadata…</dd>
+              </div>
+            )}
+          </dl>
+        </Card>
+      </section>
 
-      {downloadProgress && (
-        <DownloadManagerCard
-          progress={downloadProgress}
-          backendConnected={backendConnected}
-          onPause={() =>
-            void pauseModelDownload()
-              .then(setDownloadProgress)
-              .catch((err) => setError(toAppError(err).message))
-          }
-          onResume={() =>
-            void resumeModelDownload()
-              .then(setDownloadProgress)
-              .catch((err) => setError(toAppError(err).message))
-          }
-          onCancel={() =>
-            void cancelModelDownload()
-              .then(() => {
-                setDownloadProgress(null);
-                setDownloadingId(null);
-              })
-              .catch((err) => setError(toAppError(err).message))
-          }
-          onRetryVerify={() =>
-            void handleRetryVerify(downloadProgress.catalogId)
-          }
-          onCancelVerify={() => void handleCancelVerify()}
-          onStartVerify={() =>
-            void handleStartVerify(downloadProgress.catalogId)
-          }
+      {downloadProgress ? (
+        <section className="models-page__download" aria-label="Active download">
+          <DownloadManagerCard
+            progress={downloadProgress}
+            backendConnected={backendConnected}
+            onPause={() =>
+              void pauseModelDownload()
+                .then(setDownloadProgress)
+                .catch((err) => setError(toAppError(err).message))
+            }
+            onResume={() =>
+              void resumeModelDownload()
+                .then(setDownloadProgress)
+                .catch((err) => setError(toAppError(err).message))
+            }
+            onCancel={() =>
+              void cancelModelDownload()
+                .then(() => {
+                  setDownloadProgress(null);
+                  setDownloadingId(null);
+                })
+                .catch((err) => setError(toAppError(err).message))
+            }
+            onRetryVerify={() => void handleRetryVerify(downloadProgress.catalogId)}
+            onCancelVerify={() => void handleCancelVerify()}
+            onStartVerify={() => void handleStartVerify(downloadProgress.catalogId)}
+          />
+        </section>
+      ) : null}
+
+      <section className="models-page__primary" aria-label="Model registry">
+        <ModelRegistrySection
+          models={installed}
+          isModelBusy={isModelBusy}
+          runtimeModelLoading={runtimeModelLoading}
+          runtimeModelTesting={runtimeModelTesting}
+          runtimeTestingModelId={runtimeTestingModelId}
+          onTest={(model) => void handleTest(model)}
+          onEdit={(model) => void handleEdit(model)}
+          onRemove={(modelId) => void handleRemove(modelId)}
         />
-      )}
-
-      <ModelRegistrySection
-        models={installed}
-        isModelBusy={isModelBusy}
-        runtimeModelLoading={runtimeModelLoading}
-        runtimeModelTesting={runtimeModelTesting}
-        runtimeTestingModelId={runtimeTestingModelId}
-        onTest={(model) => void handleTest(model)}
-        onEdit={(model) => void handleEdit(model)}
-        onRemove={(modelId) => void handleRemove(modelId)}
-      />
+      </section>
 
       <Modal
         open={localTestConfirm !== null}
@@ -666,8 +700,6 @@ export function ModelsPage() {
           void refreshModels();
         }}
       />
-
-      {error && <p className="text-danger">{error}</p>}
     </div>
   );
 }

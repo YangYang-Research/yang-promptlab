@@ -11,9 +11,3 @@ pub enum PlannerError {
 }
 
 pub type PlannerResult<T> = Result<T, PlannerError>;
-
-impl From<aisec_core::AisecError> for PlannerError {
-    fn from(value: aisec_core::AisecError) -> Self {
-        Self::Planning(value.to_string())
-    }
-}

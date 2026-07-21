@@ -1,55 +1,53 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import type { ScanProgressEvent } from "@/shared/ipc";
+import { tailScanConsole, type ScanProgressEvent } from "@/shared/ipc";
 
 type ScanConsoleProps = {
   scanId: string;
+  resetKey?: number;
 };
 
-function formatLine(event: ScanProgressEvent): string {
-  const time = new Date(event.timestamp);
-  const stamp = Number.isNaN(time.getTime())
-    ? "--:--:--"
-    : time.toLocaleTimeString(undefined, { hour12: false });
+const TAIL_POLL_MS = 1_000;
 
-  const parts = [`[${stamp}]`, event.message];
-  if (event.endpoint) {
-    const path = (() => {
-      try {
-        return new URL(event.endpoint).pathname;
-      } catch {
-        return event.endpoint;
+export function ScanConsole({ scanId, resetKey = 0 }: ScanConsoleProps) {
+  const [content, setContent] = useState("");
+  const bodyRef = useRef<HTMLPreElement>(null);
+  const offsetRef = useRef(0);
+  const tailingRef = useRef(true);
+
+  const appendTail = useCallback(async () => {
+    if (!tailingRef.current) return;
+    try {
+      const tail = await tailScanConsole(scanId, offsetRef.current);
+      if (!tailingRef.current) return;
+      offsetRef.current = tail.offset;
+      if (tail.content) {
+        setContent((prev) => prev + tail.content);
       }
-    })();
-    parts.push(`@ ${path}`);
-  }
-  if (event.payload) {
-    parts.push(`(${event.payload})`);
-  }
-  if (event.statusCode != null) {
-    const latency = event.latency != null ? ` ${event.latency}ms` : "";
-    parts.push(`→ ${event.statusCode}${latency}`);
-  }
-  if (event.findingId) {
-    parts.push(`[finding ${event.findingId.slice(0, 8)}]`);
-  }
-  return parts.join(" ");
-}
-
-export function ScanConsole({ scanId }: ScanConsoleProps) {
-  const [lines, setLines] = useState<string[]>([]);
-  const tailRef = useRef<HTMLDivElement>(null);
+    } catch {
+      // Browser mock mode or IPC unavailable — live events may still append below.
+    }
+  }, [scanId]);
 
   useEffect(() => {
-    setLines([]);
+    setContent("");
+    offsetRef.current = 0;
+    tailingRef.current = true;
     let unlisten: UnlistenFn | undefined;
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
     let cancelled = false;
+
+    void appendTail();
+
+    pollTimer = setInterval(() => {
+      void appendTail();
+    }, TAIL_POLL_MS);
 
     void listen<ScanProgressEvent>("scan-progress", (payload) => {
       if (payload.payload.scanId !== scanId) return;
-      setLines((prev) => [...prev, formatLine(payload.payload)]);
+      void appendTail();
     }).then((fn) => {
       if (cancelled) {
         void fn();
@@ -60,28 +58,27 @@ export function ScanConsole({ scanId }: ScanConsoleProps) {
 
     return () => {
       cancelled = true;
+      tailingRef.current = false;
+      if (pollTimer) clearInterval(pollTimer);
       void unlisten?.();
     };
-  }, [scanId]);
+  }, [appendTail, resetKey, scanId]);
 
   useEffect(() => {
-    tailRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [lines]);
+    const body = bodyRef.current;
+    if (!body) return;
+    body.scrollTop = body.scrollHeight;
+  }, [content]);
 
   return (
     <div className="scan-console">
-      <h4 className="scan-console__title">Live Scan Console</h4>
-      <pre className="scan-console__body" aria-live="polite">
-        {lines.length === 0 ? (
+      <h4 className="scan-console__title">Attack Console</h4>
+      <pre ref={bodyRef} className="scan-console__body" aria-live="polite">
+        {content.length === 0 ? (
           <span className="scan-console__placeholder text-muted">Waiting for scan events…</span>
         ) : (
-          lines.map((line, index) => (
-            <div key={`${index}-${line}`} className="scan-console__line">
-              {line}
-            </div>
-          ))
+          content
         )}
-        <div ref={tailRef} />
       </pre>
     </div>
   );

@@ -11,12 +11,18 @@ export const navItems: NavItem[] = [
   { id: "projects", label: "Projects", path: "/projects", icon: "projects", section: "main" },
   { id: "scans", label: "Scans", path: "/scans", icon: "discovery", section: "main" },
   { id: "targets", label: "Targets", path: "/targets", icon: "targets", section: "main" },
-  { id: "attacks", label: "Attacks", path: "/attacks", icon: "attacks", section: "main" },
   { id: "findings", label: "Findings", path: "/findings", icon: "findings", section: "main" },
   { id: "reports", label: "Reports", path: "/reports", icon: "reports", section: "main" },
   { id: "runtime", label: "AI Runtime", path: "/runtime", icon: "runtime", section: "ai" },
   { id: "models", label: "Models", path: "/models", icon: "models", section: "ai" },
   { id: "plugins", label: "Plugins", path: "/plugins", icon: "plugins", section: "advanced" },
+  {
+    id: "attack-categories",
+    label: "Attack Factory",
+    path: "/attack-categories",
+    icon: "attacks",
+    section: "advanced",
+  },
   { id: "settings", label: "Settings", path: "/settings", icon: "settings", section: "system" },
 ];
 

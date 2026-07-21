@@ -5,6 +5,7 @@ import {
   createInitialTargetForm,
   migrateTargetForm,
   syncAuthFormFromProfile,
+  inferFreshAuthFormFromProfile,
   targetFormFingerprint,
   targetFormFromDescriptor,
   targetFormMatchesDescriptor,
@@ -17,15 +18,18 @@ import {
   profileFromDto,
   fullProfileUrl,
   type TargetProfileFormState,
-  type VerificationConsoleEntryDto,
 } from "./targetProfile";
+import type { VerificationLogLine } from "./verificationLog";
 import type { WizardStepId } from "./wizardSteps";
-import type { Target } from "@/shared/types";
+import type { ScanRun, Target } from "@/shared/types";
 
 const STORAGE_KEY = "promptlab:scan-wizard";
-const STORAGE_VERSION = 6;
+const STORAGE_VERSION = 7;
 
 export type PlannerSource = "ai_runtime" | "target_profile";
+
+/** Origin of the current attack plan — imported plans survive step-3 re-verify. */
+export type AttackPlanSource = "imported" | "generated";
 
 export type AttackPlanUiState = {
   profileId: AttackProfileId;
@@ -47,9 +51,16 @@ export type ScanWizardSession = {
   targetForm: TargetFormState;
   savedTargetId: string | null;
   savedTargetFingerprint: string | null;
-  verificationConsole: VerificationConsoleEntryDto | null;
+  verificationLog: VerificationLogLine[];
   attackPlanUi: AttackPlanUiState;
   attackPlan: AttackPlanConfig | null;
+  /** null when no plan; "imported" skips wipe on verify success. */
+  attackPlanSource: AttackPlanSource | null;
+  /**
+   * When true, wizard auto-advances steps 1→3 (countdown), auto-verifies with
+   * retries, then lands on step 4 for plan review.
+   */
+  importAutoAdvance: boolean;
   submittedScanId: string | null;
 };
 
@@ -92,9 +103,11 @@ export function createInitialSession(lockedProjectId = ""): ScanWizardSession {
     targetForm: createInitialTargetForm(),
     savedTargetId: null,
     savedTargetFingerprint: null,
-    verificationConsole: null,
+    verificationLog: [],
     attackPlanUi: createInitialAttackPlanUi(),
     attackPlan: null,
+    attackPlanSource: null,
+    importAutoAdvance: false,
     submittedScanId: null,
   };
 }
@@ -234,6 +247,18 @@ export function parseWizardEntryStep(raw: string): WizardStepId | null {
   return null;
 }
 
+/** True when the URL requests a brand-new wizard (not resume / target / step deep link). */
+export function isFreshWizardEntry(params: {
+  scanId?: string;
+  targetId?: string;
+  step?: string;
+}): boolean {
+  const scanId = params.scanId?.trim() ?? "";
+  const targetId = params.targetId?.trim() ?? "";
+  const step = parseWizardEntryStep(params.step?.trim() ?? "");
+  return !scanId && !targetId && step === null;
+}
+
 /** Apply explicit wizard entry intent from URL deep links (new scan, retry, resume). */
 export function applyWizardEntryStep(
   session: ScanWizardSession,
@@ -242,18 +267,25 @@ export function applyWizardEntryStep(
   if (!step) return session;
 
   if (step === 2) {
+    // New-target flow: blank step 2.
+    if (!session.savedTargetId) {
+      const projectId = session.selectedProjectId;
+      return {
+        ...createInitialSession(projectId),
+        currentStep: 2,
+        selectedProjectId: projectId,
+      };
+    }
+    // Existing target (e.g. New Scan from target details): keep target, clear prior run state.
     return {
       ...session,
       currentStep: 2,
       draftScanId: null,
       submittedScanId: null,
       attackPlan: null,
+      attackPlanSource: null,
       attackPlanUi: createInitialAttackPlanUi(),
-      verificationConsole: null,
-      targetProfile: {
-        ...session.targetProfile,
-        verification: createEmptyVerification(),
-      },
+      importAutoAdvance: false,
     };
   }
 
@@ -262,6 +294,14 @@ export function applyWizardEntryStep(
       ...session,
       currentStep: 4,
       submittedScanId: null,
+    };
+  }
+
+  if (step === 5) {
+    return {
+      ...session,
+      currentStep: 5,
+      submittedScanId: session.submittedScanId ?? session.draftScanId,
     };
   }
 
@@ -284,6 +324,61 @@ export function buildScanWizardUrl(
     params.set("step", String(options.step));
   }
   return `/scans/new?${params.toString()}`;
+}
+
+export function isLiveScanStatus(status: string): boolean {
+  return status === "running" || status === "paused" || status === "pending";
+}
+
+export function isRetryableScanStatus(status: string): boolean {
+  return status === "failed" || status === "cancelled" || status === "stopped";
+}
+
+export function isScanResultsReady(status: string | null | undefined): boolean {
+  return status === "completed";
+}
+
+export function buildScanProgressUrl(
+  projectId: string,
+  scanId: string,
+  targetId?: string | null,
+): string {
+  return buildScanWizardUrl(projectId, targetId ?? undefined, { scanId, step: 5 });
+}
+
+export function buildScanRetryUrl(
+  projectId: string,
+  scanId: string,
+  targetId?: string | null,
+): string {
+  return buildScanWizardUrl(projectId, targetId ?? undefined, { scanId, step: 4 });
+}
+
+export function resolveScanNavigationStatus(
+  storeStatus: string,
+  liveStatus?: string | null,
+): string {
+  if (!isLiveScanStatus(storeStatus)) {
+    return storeStatus;
+  }
+  return liveStatus ?? storeStatus;
+}
+
+export function resolveScanOpenPath(
+  scan: Pick<ScanRun, "id" | "projectId" | "targetId" | "status">,
+  liveStatus?: string | null,
+): string {
+  const status = resolveScanNavigationStatus(scan.status, liveStatus);
+  if (isLiveScanStatus(status)) {
+    return buildScanProgressUrl(scan.projectId, scan.id, scan.targetId);
+  }
+  if (isRetryableScanStatus(status)) {
+    return buildScanRetryUrl(scan.projectId, scan.id, scan.targetId);
+  }
+  if (scan.status === "draft") {
+    return buildScanWizardUrl(scan.projectId, scan.targetId ?? undefined, { scanId: scan.id });
+  }
+  return `/scans/${scan.id}`;
 }
 
 export async function fetchTargetFormForWizard(
@@ -312,9 +407,13 @@ export async function prepareAuthFormForStep3(
   profile: TargetProfileFormState,
   current: TargetFormState,
   targetId: string | null,
+  options?: { reinferFromProfile?: boolean },
 ): Promise<TargetFormState> {
   const profileUrl = fullProfileUrl(profile);
-  let form = syncAuthFormFromProfile(profile, { ...current, url: profileUrl });
+  const base = options?.reinferFromProfile
+    ? inferFreshAuthFormFromProfile(profile)
+    : { ...current, url: profileUrl };
+  let form = syncAuthFormFromProfile(profile, base);
 
   if (targetId && targetFormNeedsSecretHydration(form)) {
     try {

@@ -5,11 +5,14 @@ import {
   formatExecutionStrategySummary,
   plannerSourceFromPlan,
   previewPlanForProfile,
+  planUiForCustomFromCategories,
+  previewPlanForCustomTransition,
   recomputePlanPreview,
   resolveActivePlannerRationales,
   resolvePlannerSummaryBadge,
   type AttackPlanConfig,
 } from "@/features/scans/attackPlan";
+import { getCategory } from "@/features/scans/attackProfiles";
 import { createInitialAttackPlanUi } from "@/features/scans/wizardState";
 
 function samplePayload() {
@@ -31,6 +34,7 @@ function samplePlan(): AttackPlanConfig {
   const profileModes = [
     {
       profileId: "quick" as const,
+      description: "Quick smoke for this target.",
       categories: [
         "prompt_injection",
         "jailbreak",
@@ -47,9 +51,11 @@ function samplePlan(): AttackPlanConfig {
         variantsPerTest: 2,
         maxTotalPayloads: 10,
       },
+      disabledTests: [] as string[],
     },
     {
       profileId: "standard" as const,
+      description: "Balanced review for this target.",
       categories: [
         "prompt_injection",
         "jailbreak",
@@ -61,9 +67,11 @@ function samplePlan(): AttackPlanConfig {
       reflectionEnabled: false,
       adaptivePlanning: false,
       payloadStrategy: payload,
+      disabledTests: [] as string[],
     },
     {
       profileId: "deep" as const,
+      description: "Deep agentic coverage for this target.",
       categories: [
         "prompt_injection",
         "jailbreak",
@@ -79,7 +87,7 @@ function samplePlan(): AttackPlanConfig {
         strategy: "adaptive" as const,
         mutationLevel: "extreme" as const,
         variantsPerTest: 10,
-        maxTotalPayloads: 100,
+        maxTotalPayloads: 50,
       },
     },
   ];
@@ -96,6 +104,7 @@ function samplePlan(): AttackPlanConfig {
     profileModes: profileModes.map((mode) => ({
       ...mode,
       categories: [...mode.categories],
+      disabledTests: [],
     })),
     customCategories: [
       "prompt_injection",
@@ -197,6 +206,34 @@ describe("attack plan preview", () => {
     );
   });
 
+  it("keeps preset categories when switching to custom and exposes the rest as disabled", () => {
+    const quick = previewPlanForProfile(samplePlan(), "quick", []);
+    const custom = previewPlanForCustomTransition(quick, quick.categories, [], "quick");
+    const ui = planUiForCustomFromCategories(quick.categories);
+
+    expect(custom.profileId).toBe("custom");
+    expect(custom.categories).toEqual(quick.categories);
+    expect(custom.customCategories).toEqual(quick.categories);
+    expect(ui.customCategories).toEqual(quick.categories);
+    expect(ui.disabledGraphNodes.length).toBeGreaterThan(0);
+    expect(ui.disabledGraphNodes).not.toContain("prompt_injection");
+    expect(custom.disabledGraphNodes).toEqual(ui.disabledGraphNodes);
+    expect(custom.payloadStrategy.variantsPerTest).toBe(2);
+    expect(custom.executionStrategy).toBe("sequential");
+  });
+
+  it("inherits execution and payload strategy from the source preset when entering custom", () => {
+    const deep = previewPlanForProfile(samplePlan(), "deep", []);
+    const custom = previewPlanForCustomTransition(deep, deep.categories, [], "deep");
+
+    expect(custom.executionStrategy).toBe("agentic");
+    expect(custom.reflectionEnabled).toBe(true);
+    expect(custom.adaptivePlanning).toBe(true);
+    expect(custom.payloadStrategy.strategy).toBe("adaptive");
+    expect(custom.payloadStrategy.mutationLevel).toBe("extreme");
+    expect(custom.payloadStrategy.variantsPerTest).toBe(10);
+  });
+
   it("updates summary when execution strategy changes", () => {
     const base = recomputePlanPreview(samplePlan());
     const preview = recomputePlanPreview({
@@ -227,9 +264,18 @@ describe("attack plan preview", () => {
   });
 
   it("estimates requests as enabledTests × variants × payloads per testcase per category", () => {
+    const categories = [
+      "prompt_injection",
+      "jailbreak",
+      "system_prompt_extraction",
+    ] as const;
+    const enabledTests = categories.reduce(
+      (sum, id) => sum + getCategory(id).tests.length,
+      0,
+    );
     const preview = recomputePlanPreview({
       ...samplePlan(),
-      categories: ["prompt_injection", "jailbreak", "system_prompt_extraction"],
+      categories: [...categories],
       disabledTests: [],
       payloadStrategy: {
         ...samplePlan().payloadStrategy,
@@ -237,10 +283,28 @@ describe("attack plan preview", () => {
         maxTotalPayloads: 10,
       },
     });
-    expect(preview.totalTestcases).toBe(9);
-    expect(preview.estimatedRequests).toBe(180);
-    expect(preview.estimatedRuntimeSeconds).toBe(450);
-    expect(preview.estimatedTokens).toBe(180 * 480);
+    expect(preview.totalTestcases).toBe(enabledTests);
+    expect(preview.estimatedRequests).toBe(enabledTests * 2 * 10);
+    expect(preview.estimatedRuntimeSeconds).toBe(Math.ceil(enabledTests * 2 * 10 * 2.5));
+    expect(preview.estimatedTokens).toBe(enabledTests * 2 * 10 * 480);
+  });
+
+  it("counts active tests from catalog minus disabled technique ids", () => {
+    const category = getCategory("prompt_injection");
+    const keep = category.tests.slice(0, 2).map((test) => test.id);
+    const disabled = category.tests.slice(2).map((test) => test.id);
+    const preview = recomputePlanPreview({
+      ...samplePlan(),
+      categories: ["prompt_injection"],
+      disabledTests: disabled,
+      payloadStrategy: {
+        ...samplePlan().payloadStrategy,
+        variantsPerTest: 1,
+        maxTotalPayloads: 1,
+      },
+    });
+    expect(preview.totalTestcases).toBe(keep.length);
+    expect(preview.estimatedRequests).toBe(keep.length);
   });
 
   it("ignores stale attack plan ui state", () => {

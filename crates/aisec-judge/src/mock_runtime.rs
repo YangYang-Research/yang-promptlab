@@ -77,6 +77,7 @@ mod tests {
         let runtime = JsonMockRuntime::judge_vulnerable(0.95);
         let resp = runtime
             .complete(InferenceRequest {
+                system: None,
                 prompt: "test".into(),
                 max_tokens: 64,
                 temperature: 0.0,

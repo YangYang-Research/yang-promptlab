@@ -47,8 +47,7 @@ async fn build_role_pool(
 ) -> JudgeResult<ModelRolePool> {
     let mut pool = ModelRolePool::new();
     match config.mode {
-        JudgeMode::Deterministic => {}
-        JudgeMode::LocalLlm | JudgeMode::Consensus => {
+        JudgeMode::LocalLlm => {
             let backend = build_local_backend(config, runtime.as_ref()).await?;
             attach_backend_to_pool(&mut pool, backend);
         }
@@ -92,7 +91,12 @@ impl InferenceRuntime for AdapterRuntime {
         request: aisec_models::types::InferenceRequest,
     ) -> aisec_models::error::ModelResult<aisec_models::types::InferenceResponse> {
         self.adapter
-            .complete(None, &request.prompt, request.max_tokens, request.temperature)
+            .complete(
+                request.system.as_deref(),
+                &request.prompt,
+                request.max_tokens,
+                request.temperature,
+            )
             .await
             .map(|text| aisec_models::types::InferenceResponse {
                 text,
@@ -136,7 +140,12 @@ impl InferenceRuntime for BackendRuntime {
         request: aisec_models::types::InferenceRequest,
     ) -> aisec_models::error::ModelResult<aisec_models::types::InferenceResponse> {
         self.backend
-            .complete(&request.prompt, request.max_tokens, request.temperature)
+            .complete(
+                request.system.as_deref(),
+                &request.prompt,
+                request.max_tokens,
+                request.temperature,
+            )
             .await
             .map(|text| aisec_models::types::InferenceResponse {
                 text,
@@ -213,15 +222,7 @@ pub async fn test_connectivity(
 ) -> JudgeResult<JudgeConnectivityResult> {
     let started = Instant::now();
     match config.mode {
-        JudgeMode::Deterministic => Ok(JudgeConnectivityResult {
-            ok: true,
-            provider: "deterministic".into(),
-            model: "rules+regex".into(),
-            latency_ms: 0,
-            message: "Deterministic judge requires no external provider".into(),
-            sample_response: None,
-        }),
-        JudgeMode::LocalLlm | JudgeMode::Consensus => {
+        JudgeMode::LocalLlm => {
             let backend = build_local_backend(config, runtime.as_ref()).await?;
             let ok = backend.health_check().await.unwrap_or(false);
             Ok(JudgeConnectivityResult {
@@ -293,9 +294,8 @@ pub async fn test_model(
         ok: true,
         provider: config.mode.as_str().into(),
         model: match config.mode {
-            JudgeMode::LocalLlm | JudgeMode::Consensus => config.local.model.clone(),
+            JudgeMode::LocalLlm => config.local.model.clone(),
             JudgeMode::RemoteLlm => config.remote.model.clone(),
-            JudgeMode::Deterministic => "rules+regex".into(),
         },
         latency_ms: started.elapsed().as_millis() as u64,
         message: verdict.summary.clone(),

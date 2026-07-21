@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef } from "react";
 
 import { Badge } from "@/shared/components";
+import { IconAi, IconHuman } from "@/shared/components/Icons";
+import { YazgBadge } from "@/shared/components/YazgBadge";
 import { adjustAttackPlan } from "@/shared/ipc/attackPlanner";
 import { toAppError } from "@/shared/errors";
 
@@ -15,19 +17,21 @@ import {
   getProfileMode,
   plannerAdjustContext,
   plannerSourceFromPlan,
+  planUiForCustomFromCategories,
   previewPlanForProfile,
   recomputePlanPreview,
   resolveCategoriesForAdjust,
   resolvePlannerSummaryBadge,
-  resolveProfileModeBadge,
   resolveActivePlannerRationales,
   syncAttackPlanUiAfterAdjust,
   type AttackPlanConfig,
 } from "../attackPlan";
 import {
+  ALL_ATTACK_CATEGORY_IDS,
   ATTACK_CATALOG,
   ATTACK_PROFILES,
   getCategory,
+  getProfile,
   type AttackCategoryId,
   type AttackProfileId,
   type ExecutionStrategy,
@@ -40,6 +44,19 @@ import { WizardRangeSlider } from "./WizardRangeSlider";
 
 const MAX_ATTEMPTS_MIN = 1;
 const MAX_ATTEMPTS_MAX = 20;
+const TEST_COLUMN_COUNT = 2;
+
+/** Split items into at most `maxColumns` columns (fill down, then next column). */
+function chunkIntoColumns<T>(items: T[], maxColumns: number): T[][] {
+  if (items.length === 0) return [];
+  const columnCount = Math.min(Math.max(1, maxColumns), items.length);
+  const perColumn = Math.ceil(items.length / columnCount);
+  const columns: T[][] = [];
+  for (let i = 0; i < items.length; i += perColumn) {
+    columns.push(items.slice(i, i + perColumn));
+  }
+  return columns;
+}
 
 type ReviewAttackPlanStepProps = {
   targetId: string;
@@ -61,7 +78,6 @@ export function ReviewAttackPlanStep({
   const { profileId, customCategories, expandedCategory, disabledTests, disabledGraphNodes } =
     planUi;
   const disabledTestSet = useMemo(() => new Set(disabledTests), [disabledTests]);
-  const disabledGraphSet = useMemo(() => new Set(disabledGraphNodes), [disabledGraphNodes]);
   const payloadAdjustTimerRef = useRef<number | null>(null);
   const adjustRequestRef = useRef(0);
 
@@ -108,7 +124,9 @@ export function ReviewAttackPlanStep({
     onAdjustingChange?.(true);
     const profileChanged =
       patch.profileId !== undefined && patch.profileId !== planUi.profileId;
-    const strategyForRequest = profileChanged
+    const switchingPreset =
+      profileChanged && patch.profileId !== "custom" && planUi.profileId !== "custom";
+    const strategyForRequest = switchingPreset
       ? undefined
       : payloadStrategyToDto(payloadStrategy ?? attackPlan.payloadStrategy);
     const requestId = ++adjustRequestRef.current;
@@ -142,27 +160,52 @@ export function ReviewAttackPlanStep({
   }
 
   function selectProfile(next: AttackProfileId) {
+    const switchingToCustom = next === "custom" && profileId !== "custom";
+    const presetCategories = switchingToCustom
+      ? [...attackPlan.categories]
+      : attackPlan.categories;
+    const customUi = switchingToCustom
+      ? planUiForCustomFromCategories(presetCategories)
+      : null;
+    const nextMode = next !== "custom" ? getProfileMode(attackPlan, next) : null;
+
     const patch: Partial<AttackPlanUiState> = {
       profileId: next,
-      disabledTests: next !== "custom" ? [] : disabledTests,
-      disabledGraphNodes: next !== "custom" ? [] : disabledGraphNodes,
-      customCategories:
-        next === "custom"
-          ? attackPlan.suggestedCategories.filter((id) => !disabledGraphSet.has(id))
+      disabledTests:
+        next !== "custom" ? (nextMode?.disabledTests ?? []) : disabledTests,
+      disabledGraphNodes: switchingToCustom
+        ? customUi!.disabledGraphNodes
+        : next !== "custom"
+          ? []
+          : disabledGraphNodes,
+      customCategories: switchingToCustom
+        ? customUi!.customCategories
+        : next === "custom"
+          ? customCategories
           : customCategories,
     };
-    onPlanChange(
-      previewPlanForProfile(attackPlan, next, patch.disabledTests ?? disabledTests),
-    );
+    const preview = previewPlanForProfile(attackPlan, next, patch.disabledTests ?? disabledTests, {
+      sourceProfileId: switchingToCustom ? profileId : undefined,
+    });
+    onPlanChange(preview);
     onPlanUiChange(patch);
-    void applyAdjust(patch);
+    void applyAdjust(
+      patch,
+      {
+        executionStrategy: preview.executionStrategy,
+        maxAttempts: preview.maxAttempts,
+        reflectionEnabled: preview.reflectionEnabled,
+        adaptivePlanning: preview.adaptivePlanning,
+      },
+      preview.payloadStrategy,
+    );
   }
 
   function toggleCustomCategory(id: AttackCategoryId, enabled: boolean) {
     const nextDisabled = new Set(disabledGraphNodes);
     if (enabled) nextDisabled.delete(id);
     else nextDisabled.add(id);
-    const custom = attackPlan.suggestedCategories.filter((cat) => !nextDisabled.has(cat));
+    const custom = ALL_ATTACK_CATEGORY_IDS.filter((cat) => !nextDisabled.has(cat));
     void applyAdjust({
       profileId: "custom",
       customCategories: custom,
@@ -204,15 +247,36 @@ export function ReviewAttackPlanStep({
     }, 300);
   }
 
-  function acceptRecommendedPayloadStrategy() {
-    if (!isCustomProfile) return;
-    void applyAdjust({}, undefined, attackPlan.recommendedPayloadStrategy);
+  function profileModeBadge(profile: AttackProfileId) {
+    if (profile === "custom") {
+      return (
+        <IconHuman
+          className="wizard-attack-profile__mode-icon wizard-attack-profile__mode-icon--human"
+          aria-label="Manual selection"
+        />
+      );
+    }
+    return (
+      <IconAi
+        className="wizard-attack-profile__mode-icon"
+        aria-label={
+          attackPlan.recommendedProfileId === profile ? "Recommended AI plan" : "AI planned"
+        }
+      />
+    );
+  }
+
+  function plannerSummaryBadge() {
+    if (plannerBadge.label === "AI Planned") {
+      return <YazgBadge />;
+    }
+    return <Badge variant={plannerBadge.variant}>{plannerBadge.label}</Badge>;
   }
 
   function profileModeMeta(id: AttackProfileId): string {
     if (id === "custom") return "Manual selection";
     const mode = getProfileMode(attackPlan, id);
-    if (!mode) return "Re-plan with AI Runtime";
+    if (!mode) return "Re-plan with Yazg";
     return `${mode.categories.length} categories · ${formatExecutionStrategySummary(mode)} · ${formatPayloadGenerationStrategy(mode.payloadStrategy)}`;
   }
 
@@ -221,9 +285,13 @@ export function ReviewAttackPlanStep({
       <section className="wizard-fingerprint-summary">
         <div className="wizard-planner-summary-header">
           <h4 className="wizard-endpoints__title">Planner summary</h4>
-          <Badge variant={plannerBadge.variant}>{plannerBadge.label}</Badge>
+          {plannerSummaryBadge()}
         </div>
         <dl className="wizard-attack-estimates">
+          <div className="wizard-attack-estimate">
+            <span className="wizard-attack-estimate__label">Attack mode</span>
+            <span className="wizard-attack-estimate__value">{getProfile(profileId).label}</span>
+          </div>
           <div className="wizard-attack-estimate">
             <span className="wizard-attack-estimate__label">Active tests</span>
             <span className="wizard-attack-estimate__value">
@@ -231,21 +299,9 @@ export function ReviewAttackPlanStep({
             </span>
           </div>
           <div className="wizard-attack-estimate">
-            <span className="wizard-attack-estimate__label">Execution strategy</span>
-            <span className="wizard-attack-estimate__value">
-              {formatExecutionStrategySummary(attackPlan)}
-            </span>
-          </div>
-          <div className="wizard-attack-estimate">
             <span className="wizard-attack-estimate__label">Payload strategy</span>
             <span className="wizard-attack-estimate__value">
               {formatPayloadGenerationStrategy(attackPlan.payloadStrategy)}
-            </span>
-          </div>
-          <div className="wizard-attack-estimate">
-            <span className="wizard-attack-estimate__label">Est. runtime</span>
-            <span className="wizard-attack-estimate__value">
-              {formatEstimatedRuntime(attackPlan.estimatedRuntimeSeconds)}
             </span>
           </div>
           <div className="wizard-attack-estimate">
@@ -258,6 +314,18 @@ export function ReviewAttackPlanStep({
             <span className="wizard-attack-estimate__label">Est. tokens</span>
             <span className="wizard-attack-estimate__value">
               {attackPlan.estimatedTokens.toLocaleString()}
+            </span>
+          </div>
+          <div className="wizard-attack-estimate">
+            <span className="wizard-attack-estimate__label">Execution strategy</span>
+            <span className="wizard-attack-estimate__value">
+              {formatExecutionStrategySummary(attackPlan)}
+            </span>
+          </div>
+          <div className="wizard-attack-estimate">
+            <span className="wizard-attack-estimate__label">Est. runtime</span>
+            <span className="wizard-attack-estimate__value">
+              {formatEstimatedRuntime(attackPlan.estimatedRuntimeSeconds)}
             </span>
           </div>
           <div className="wizard-attack-estimate">
@@ -284,51 +352,68 @@ export function ReviewAttackPlanStep({
         )}
       </section>
 
-      <section className="wizard-attack-profiles">
+      <section className="wizard-fingerprint-summary">
+        <div className="wizard-planner-summary-header">
+          <h4 className="wizard-endpoints__title">Attack Mode</h4>
+        </div>
+        <div className="wizard-attack-profiles">
         {ATTACK_PROFILES.map((profile) => {
           const selected = profileId === profile.id;
-          const modeBadge = resolveProfileModeBadge(attackPlan, profile.id);
+          const recommended = attackPlan.recommendedProfileId === profile.id;
           return (
             <button
               key={profile.id}
               type="button"
-              className={`wizard-attack-profile${selected ? " wizard-attack-profile--selected" : ""}`}
+              className={[
+                "wizard-attack-profile",
+                selected ? "wizard-attack-profile--selected" : "",
+                recommended ? "wizard-attack-profile--recommended" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
               onClick={() => selectProfile(profile.id)}
               aria-pressed={selected}
             >
+              {recommended ? (
+                <YazgBadge
+                  label="Recommended"
+                  className="wizard-attack-profile__yazg-badge"
+                />
+              ) : null}
               <div className="wizard-attack-profile__top">
-                {modeBadge ? (
-                  <Badge
-                    className={modeBadge.className}
-                    variant={modeBadge.variant}
-                  >
-                    {modeBadge.label}
-                  </Badge>
-                ) : null}
                 <span className="wizard-attack-profile__label">{profile.label}</span>
+                {profileModeBadge(profile.id)}
               </div>
               <span className="wizard-attack-profile__meta text-muted text-sm">
                 {profileModeMeta(profile.id)}
               </span>
               <span className="wizard-attack-profile__description text-sm">
-                {profile.description}
+                {profile.id === "custom"
+                  ? profile.description
+                  : getProfileMode(attackPlan, profile.id)?.description?.trim() ||
+                    profile.description}
               </span>
             </button>
           );
         })}
+        </div>
       </section>
 
       <section className="wizard-attack-categories">
         <div className="wizard-attack-categories__header">
           <h4 className="wizard-endpoints__title">Attack categories</h4>
           <span className="text-muted text-sm">
-            {activeCategories.length} of {attackPlan.suggestedCategories.length} applicable selected
-            {notApplicableCount > 0 ? ` · ${notApplicableCount} not applicable` : ""}
+            {activeCategories.length} of{" "}
+            {isCustomProfile ? ATTACK_CATALOG.length : attackPlan.suggestedCategories.length}{" "}
+            {isCustomProfile ? "categories" : "applicable"} selected
+            {!isCustomProfile && notApplicableCount > 0
+              ? ` · ${notApplicableCount} not applicable`
+              : ""}
           </span>
         </div>
         <div className="wizard-attack-category-list">
           {ATTACK_CATALOG.map((category) => {
-              const applicable = suggestedSet.has(category.id);
+              const applicable = isCustomProfile || suggestedSet.has(category.id);
               if (!applicable) {
                 return (
                   <div
@@ -389,24 +474,28 @@ export function ReviewAttackPlanStep({
                   </div>
 
                   {expanded && (
-                    <ul className="wizard-attack-test-list">
-                      {category.tests.map((test) => {
-                        const enabled = !disabledTestSet.has(test.id);
-                        return (
-                          <li key={test.id}>
-                            <label className="wizard-attack-test">
-                              <input
-                                type="checkbox"
-                                checked={enabled && included}
-                                disabled={!included}
-                                onChange={(e) => toggleTest(test.id, e.target.checked)}
-                              />
-                              <span>{test.name}</span>
-                            </label>
-                          </li>
-                        );
-                      })}
-                    </ul>
+                    <div className="wizard-attack-test-columns">
+                      {chunkIntoColumns(category.tests, TEST_COLUMN_COUNT).map((column, colIndex) => (
+                        <ul key={colIndex} className="wizard-attack-test-list">
+                          {column.map((test) => {
+                            const enabled = !disabledTestSet.has(test.id);
+                            return (
+                              <li key={test.id}>
+                                <label className="wizard-attack-test">
+                                  <input
+                                    type="checkbox"
+                                    checked={enabled && included}
+                                    disabled={!included}
+                                    onChange={(e) => toggleTest(test.id, e.target.checked)}
+                                  />
+                                  <span>{test.name}</span>
+                                </label>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ))}
+                    </div>
                   )}
                 </div>
               );
@@ -416,7 +505,9 @@ export function ReviewAttackPlanStep({
       </section>
 
       <section className="wizard-fingerprint-summary">
-        <h4 className="wizard-endpoints__title">Execution strategy</h4>
+        <div className="wizard-planner-summary-header">
+          <h4 className="wizard-endpoints__title">Execution strategy</h4>
+        </div>
         <div className="wizard-attack-profiles">
           <button
             type="button"
@@ -484,7 +575,10 @@ export function ReviewAttackPlanStep({
                 />
                 <span>Reflection enabled</span>
               </label>
-              <label className="wizard-checkbox">
+              <label
+                className="wizard-checkbox"
+                title="Between retries, rotate techniques and escalate mutation/strategy from judge outcomes."
+              >
                 <input
                   type="checkbox"
                   checked={attackPlan.adaptivePlanning}
@@ -502,9 +596,7 @@ export function ReviewAttackPlanStep({
 
       <PayloadStrategySection
         strategy={attackPlan.payloadStrategy}
-        recommendedStrategy={attackPlan.recommendedPayloadStrategy}
         onChange={updatePayloadStrategy}
-        onAcceptRecommended={acceptRecommendedPayloadStrategy}
         readOnly={!executionEditable}
       />
     </div>

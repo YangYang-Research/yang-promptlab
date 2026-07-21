@@ -1,0 +1,982 @@
+//! Scan attack orchestration — payload preparation and sequential/agentic flows.
+
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use aisec_attack::{AttackCategory, AttackPayload};
+use aisec_inference::InferenceRuntimeManager;
+use aisec_models::LocalModelManager;
+use aisec_planner::AttackPlan;
+use aisec_runtime::{RuntimeManager, SharedModelProvider};
+use aisec_storage::Repositories;
+use aisec_target_profile::{MutationLevel, PayloadGenerationStrategy, PayloadStrategy};
+use aisec_target_profile::wizard_plan::{
+    enabled_tests_for_category, estimate_scan_requests, ExecutionStrategy,
+};
+use tauri::async_runtime::Mutex as AsyncMutex;
+use tracing::{info, warn};
+
+use crate::commands::attack::{
+    CategoryRunOptions, CategoryRunResult, JudgedAttemptSummary, run_category_on_target_profile,
+};
+use crate::commands::generator::{
+    attack_plan_from_scan, generate_payloads_for_scan_job_with_options_and_catalog,
+    generate_payloads_for_scan_job_with_strategy_context_and_catalog,
+    parse_generator_mode_optional, prompt_payloads_map, validate_payload_map_budget,
+};
+use crate::events::ScanProgressEmitter;
+use crate::jobs::{bump_scan_progress, ScanProgress};
+use crate::session_auth::AttackRuntime;
+
+pub struct ScanExecutionConfig {
+    pub execution: ExecutionStrategy,
+    pub max_attempts: u32,
+    pub reflection_enabled: bool,
+    pub adaptive_planning: bool,
+    pub payload_strategy: Option<PayloadStrategy>,
+    pub generator_mode: Option<String>,
+    /// Delay before payload generation so the wizard attack screen can render.
+    pub pipeline_warmup_secs: u32,
+}
+
+impl ScanExecutionConfig {
+    pub fn from_flags(
+        agentic: bool,
+        max_attempts: usize,
+        reflection_enabled: bool,
+        adaptive_planning: bool,
+        payload_strategy: Option<PayloadStrategy>,
+        generator_mode: Option<String>,
+    ) -> Self {
+        Self {
+            execution: if agentic {
+                ExecutionStrategy::Agentic
+            } else {
+                ExecutionStrategy::Sequential
+            },
+            max_attempts: max_attempts.max(1) as u32,
+            reflection_enabled,
+            adaptive_planning: agentic && adaptive_planning,
+            payload_strategy,
+            generator_mode,
+            pipeline_warmup_secs: 3,
+        }
+    }
+}
+
+pub fn scan_testcases_total(
+    categories: &[AttackCategory],
+    disabled_tests: &[String],
+) -> u64 {
+    categories
+        .iter()
+        .map(|category| u64::from(enabled_tests_for_category(*category, disabled_tests)))
+        .sum::<u64>()
+        .max(1)
+}
+
+pub fn scan_attack_requests_total(
+    categories: &[AttackCategory],
+    disabled_tests: &[String],
+    config: &ScanExecutionConfig,
+) -> u64 {
+    let strategy = config.payload_strategy.clone().unwrap_or_default();
+    estimate_scan_requests(
+        categories,
+        disabled_tests,
+        &strategy,
+        config.execution,
+        config.max_attempts,
+    )
+    .max(1) as u64
+}
+
+pub fn scan_progress_total(
+    categories: &[AttackCategory],
+    disabled_tests: &[String],
+    config: &ScanExecutionConfig,
+) -> u64 {
+    let strategy = config.payload_strategy.clone().unwrap_or_default();
+    let attack_units = estimate_scan_requests(
+        categories,
+        disabled_tests,
+        &strategy,
+        config.execution,
+        config.max_attempts,
+    )
+    .max(1) as u64;
+
+    let active_categories = categories
+        .iter()
+        .filter(|category| enabled_tests_for_category(**category, disabled_tests) > 0)
+        .count()
+        .max(1) as u64;
+    let attempts = u64::from(config.max_attempts.max(1));
+
+    let pipeline_units = match config.execution {
+        ExecutionStrategy::Sequential => {
+            // preparing + generate + attack payloads + judge payloads
+            2 + attack_units.saturating_mul(2)
+        }
+        ExecutionStrategy::Agentic => {
+            let generate_units = active_categories.saturating_mul(attempts);
+            let reflection_units = if config.reflection_enabled {
+                active_categories.saturating_mul(attempts)
+            } else {
+                0
+            };
+            let adaptive_units = if config.adaptive_planning && attempts > 1 {
+                active_categories.saturating_mul(attempts - 1)
+            } else {
+                0
+            };
+            let retry_units = if attempts > 1 {
+                active_categories.saturating_mul(attempts - 1)
+            } else {
+                0
+            };
+            1 + generate_units
+                + attack_units.saturating_mul(2)
+                + reflection_units
+                + adaptive_units
+                + retry_units
+        }
+    };
+
+    pipeline_units.max(1)
+}
+
+fn set_scan_phase(
+    progress: &Arc<Mutex<ScanProgress>>,
+    phase: &str,
+    test: Option<&str>,
+    attempt: Option<u32>,
+    retry: Option<u32>,
+) {
+    if let Ok(mut state) = progress.lock() {
+        state.current_phase = Some(phase.into());
+        if let Some(label) = test {
+            state.current_test = Some(label.into());
+        }
+        state.current_attempt = attempt;
+        state.current_retry = retry;
+    }
+}
+
+fn category_payload_map(
+    all: &HashMap<AttackCategory, Vec<AttackPayload>>,
+    category: AttackCategory,
+) -> HashMap<AttackCategory, Vec<AttackPayload>> {
+    let mut map = HashMap::new();
+    if let Some(items) = all.get(&category) {
+        map.insert(category, items.clone());
+    }
+    map
+}
+
+fn category_any_vulnerable(result: &CategoryRunResult) -> bool {
+    result.judged.iter().any(|item| item.vulnerable)
+}
+
+fn reflection_allows_retry(
+    reflection_enabled: bool,
+    result: &CategoryRunResult,
+    emitter: &ScanProgressEmitter,
+) -> bool {
+    if !reflection_enabled {
+        return !category_any_vulnerable(result);
+    }
+    let vulnerable = category_any_vulnerable(result);
+    let high_confidence = result
+        .judged
+        .iter()
+        .any(|item| item.vulnerable && item.confidence >= 0.5);
+    if vulnerable && high_confidence {
+        emitter.info("Reflection: vulnerability confirmed — stopping agentic retries");
+        return false;
+    }
+    emitter.info("Reflection: no confirmed vulnerability — preparing retry");
+    true
+}
+
+fn technique_id_from_payload_id(payload_id: &str) -> &str {
+    payload_id.split(':').next().unwrap_or(payload_id)
+}
+
+fn escalate_payload_strategy(strategy: &PayloadStrategy) -> PayloadStrategy {
+    PayloadStrategy {
+        strategy: strategy.strategy.escalate(),
+        mutation_level: strategy.mutation_level.escalate(),
+        variants_per_test: (strategy.variants_per_test.saturating_add(2)).min(20),
+        max_total_payloads: strategy.max_total_payloads,
+        enable_context_awareness: true,
+        enable_conversation_memory: strategy.enable_conversation_memory,
+        enable_response_adaptation: true,
+        enable_payload_deduplication: strategy.enable_payload_deduplication,
+        enable_cross_category_mutation: strategy.enable_cross_category_mutation
+            || matches!(strategy.mutation_level, MutationLevel::High | MutationLevel::Extreme),
+    }
+    .clamp()
+}
+
+/// Replan technique selection + payload strategy for the next agentic attempt.
+fn adapt_plan_for_retry(
+    plan: &AttackPlan,
+    category: AttackCategory,
+    strategy: &PayloadStrategy,
+    last_result: &CategoryRunResult,
+    catalog: &aisec_payload::PayloadDatabase,
+) -> (AttackPlan, PayloadStrategy, Vec<String>) {
+    let mut notes = Vec::new();
+    let next_strategy = escalate_payload_strategy(strategy);
+    if next_strategy.mutation_level != strategy.mutation_level {
+        notes.push(format!(
+            "escalated mutationLevel {:?} → {:?}",
+            strategy.mutation_level, next_strategy.mutation_level
+        ));
+    }
+    if next_strategy.strategy != strategy.strategy {
+        notes.push(format!(
+            "escalated generation strategy {:?} → {:?}",
+            strategy.strategy, next_strategy.strategy
+        ));
+    }
+    if next_strategy.variants_per_test != strategy.variants_per_test {
+        notes.push(format!(
+            "raised variantsPerTest {} → {}",
+            strategy.variants_per_test, next_strategy.variants_per_test
+        ));
+    }
+    if !strategy.enable_response_adaptation {
+        notes.push("enabled responseAdaptation for judge-guided retries".into());
+    }
+
+    let payload_cat = aisec_generator::convert::attack_to_payload_category(category);
+    let catalog_ids: Vec<String> = catalog
+        .by_category(payload_cat)
+        .into_iter()
+        .map(|record| record.id.clone())
+        .collect();
+
+    let tried: std::collections::HashSet<String> = last_result
+        .judged
+        .iter()
+        .map(|item| technique_id_from_payload_id(&item.payload_id).to_string())
+        .collect();
+    let failed: std::collections::HashSet<String> = last_result
+        .judged
+        .iter()
+        .filter(|item| !item.vulnerable)
+        .map(|item| technique_id_from_payload_id(&item.payload_id).to_string())
+        .collect();
+
+    let mut disabled: std::collections::HashSet<String> =
+        plan.disabled_tests.iter().cloned().collect();
+    // Keep disables outside this category untouched; only rotate within category.
+    let untried: Vec<String> = catalog_ids
+        .iter()
+        .filter(|id| !tried.contains(*id) && !disabled.contains(*id))
+        .cloned()
+        .collect();
+
+    if !untried.is_empty() {
+        for id in &failed {
+            if catalog_ids.iter().any(|cid| cid == id) {
+                disabled.insert(id.clone());
+            }
+        }
+        for id in &untried {
+            disabled.remove(id);
+        }
+        // Ensure at least one technique remains enabled in this category.
+        let enabled_count = catalog_ids
+            .iter()
+            .filter(|id| !disabled.contains(*id))
+            .count();
+        if enabled_count == 0 {
+            if let Some(first) = catalog_ids.first() {
+                disabled.remove(first);
+            }
+        }
+        notes.push(format!(
+            "rotated techniques: prefer {} untried id(s), de-emphasize {} failed id(s)",
+            untried.len(),
+            failed.len()
+        ));
+    } else if !failed.is_empty() {
+        notes.push(
+            "all category techniques already tried — keeping selection and escalating payload strategy"
+                .into(),
+        );
+    }
+
+    let mut next_plan = plan.clone();
+    let mut disabled_list: Vec<String> = disabled.into_iter().collect();
+    disabled_list.sort();
+    next_plan.disabled_tests = disabled_list;
+    next_plan.summary = format!(
+        "{} | adaptive replan for {}",
+        plan.summary,
+        category.as_str()
+    );
+
+    (next_plan, next_strategy, notes)
+}
+
+pub async fn generate_scan_payloads(
+    data_dir: &std::path::Path,
+    inference_manager: Arc<AsyncMutex<InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<LocalModelManager>>,
+    model_provider: SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+    plan: &AttackPlan,
+    config: &ScanExecutionConfig,
+    profile: &aisec_target_profile::TargetProfile,
+    catalog: aisec_payload::PayloadDatabase,
+    emitter: &ScanProgressEmitter,
+) -> Result<HashMap<AttackCategory, Vec<AttackPayload>>, String> {
+    emitter.info("Generating attack payloads from Yazg...");
+    let pack = if let Some(ref strategy) = config.payload_strategy {
+        generate_payloads_for_scan_job_with_strategy_context_and_catalog(
+            data_dir,
+            inference_manager,
+            model_manager,
+            model_provider,
+            runtime_manager,
+            plan,
+            strategy,
+            Some(profile),
+            None,
+            Some(catalog),
+        )
+        .await
+        .map_err(|err| err.to_string())?
+    } else if let Some(mode) = parse_generator_mode_optional(config.generator_mode.as_deref()) {
+        generate_payloads_for_scan_job_with_options_and_catalog(
+            data_dir,
+            inference_manager,
+            model_manager,
+            model_provider,
+            runtime_manager,
+            plan,
+            mode,
+            None,
+            catalog,
+        )
+        .await
+        .map_err(|err| err.to_string())?
+    } else {
+        return Err("payload strategy or generator mode is required before attack".into());
+    };
+
+    info!(
+        payloads = pack.stats.payload_count,
+        categories = pack.stats.category_count,
+        "attack payloads ready"
+    );
+    emitter.info(format!(
+        "Generated {} payloads across {} categories",
+        pack.stats.payload_count, pack.stats.category_count
+    ));
+    Ok(prompt_payloads_map(&pack))
+}
+
+async fn regenerate_category_payloads(
+    data_dir: &std::path::Path,
+    inference_manager: Arc<AsyncMutex<InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<LocalModelManager>>,
+    model_provider: SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+    plan: &AttackPlan,
+    category: AttackCategory,
+    strategy: &PayloadStrategy,
+    profile: &aisec_target_profile::TargetProfile,
+    catalog: aisec_payload::PayloadDatabase,
+    adaptation_feedback: Option<String>,
+    _retry: u32,
+) -> Result<HashMap<AttackCategory, Vec<AttackPayload>>, String> {
+    let category_plan = AttackPlan {
+        categories: vec![category],
+        ..plan.clone()
+    };
+    let pack = generate_payloads_for_scan_job_with_strategy_context_and_catalog(
+        data_dir,
+        inference_manager,
+        model_manager,
+        model_provider,
+        runtime_manager,
+        &category_plan,
+        strategy,
+        Some(profile),
+        adaptation_feedback,
+        Some(catalog),
+    )
+    .await
+    .map_err(|err| err.to_string())?;
+    Ok(category_payload_map(&prompt_payloads_map(&pack), category))
+}
+
+pub struct TargetProfileScanContext<'a> {
+    pub repos: &'a Repositories,
+    pub scan_id: &'a str,
+    pub project_id: &'a str,
+    pub target_id: &'a str,
+    pub profile: &'a aisec_target_profile::TargetProfile,
+    pub categories: &'a [AttackCategory],
+    pub disabled_tests: &'a [String],
+    pub profile_id: &'a str,
+    pub attack_runtime: AttackRuntime,
+    pub data_dir: &'a std::path::Path,
+    pub inference_manager: Arc<AsyncMutex<InferenceRuntimeManager>>,
+    pub model_manager: Arc<AsyncMutex<LocalModelManager>>,
+    pub model_provider: SharedModelProvider,
+    pub runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+    pub plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
+    pub cancel: Arc<AtomicBool>,
+    pub paused: Arc<AtomicBool>,
+    pub job_controls: Option<crate::jobs::ScanJobControls>,
+    pub progress: Arc<Mutex<ScanProgress>>,
+    pub emitter: ScanProgressEmitter,
+}
+
+pub struct TargetProfileScanOutcome {
+    pub findings_total: u64,
+    pub had_error: bool,
+}
+
+async fn wait_if_paused(paused: &AtomicBool, cancel: &AtomicBool) {
+    while paused.load(Ordering::Relaxed) {
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+}
+
+async fn wait_pipeline_warmup(
+    warmup_secs: u32,
+    cancel: &AtomicBool,
+    paused: &AtomicBool,
+    progress: &Arc<Mutex<ScanProgress>>,
+    emitter: &ScanProgressEmitter,
+) {
+    if warmup_secs == 0 {
+        bump_scan_progress(progress, 1);
+        return;
+    }
+
+    set_scan_phase(progress, "preparing", Some("loading attack monitor"), None, None);
+    emitter.info(format!(
+        "Attack pipeline starts in {warmup_secs}s — loading monitor…"
+    ));
+
+    let deadline = Instant::now() + Duration::from_secs(u64::from(warmup_secs));
+    while Instant::now() < deadline {
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        wait_if_paused(paused, cancel).await;
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    bump_scan_progress(progress, 1);
+}
+
+pub async fn run_target_profile_attack_scan(
+    ctx: TargetProfileScanContext<'_>,
+    config: ScanExecutionConfig,
+) -> TargetProfileScanOutcome {
+    wait_pipeline_warmup(
+        config.pipeline_warmup_secs,
+        &ctx.cancel,
+        &ctx.paused,
+        &ctx.progress,
+        &ctx.emitter,
+    )
+    .await;
+
+    if ctx.cancel.load(Ordering::Relaxed) {
+        return TargetProfileScanOutcome {
+            findings_total: 0,
+            had_error: false,
+        };
+    }
+
+    let plan = attack_plan_from_scan(
+        ctx.profile_id.to_string(),
+        ctx.categories.to_vec(),
+        ctx.disabled_tests.to_vec(),
+    );
+
+    set_scan_phase(&ctx.progress, "generate", Some("all categories"), None, None);
+
+    let catalog = match crate::attack_catalog::load_payload_database_from_repos(ctx.repos).await {
+        Ok(db) => db,
+        Err(err) => {
+            warn!(scan_id = %ctx.scan_id, error = %err, "attack catalog load failed");
+            ctx.emitter
+                .error(format!("Attack catalog load failed: {err}"));
+            return TargetProfileScanOutcome {
+                findings_total: 0,
+                had_error: true,
+            };
+        }
+    };
+
+    let generated_payloads = match generate_scan_payloads(
+        ctx.data_dir,
+        Arc::clone(&ctx.inference_manager),
+        Arc::clone(&ctx.model_manager),
+        ctx.model_provider.clone(),
+        Arc::clone(&ctx.runtime_manager),
+        &plan,
+        &config,
+        ctx.profile,
+        catalog.clone(),
+        &ctx.emitter,
+    )
+    .await
+    {
+        Ok(map) => map,
+        Err(err) => {
+            warn!(scan_id = %ctx.scan_id, error = %err, "payload generation failed");
+            ctx.emitter.error(format!("Payload generation failed: {err}"));
+            return TargetProfileScanOutcome {
+                findings_total: 0,
+                had_error: true,
+            };
+        }
+    };
+
+    if let Some(ref strategy) = config.payload_strategy {
+        if let Err(err) = validate_payload_map_budget(
+            &generated_payloads,
+            ctx.categories,
+            ctx.disabled_tests,
+            strategy,
+        ) {
+            warn!(scan_id = %ctx.scan_id, error = %err, "payload budget not met");
+            ctx.emitter.error(err.clone());
+            return TargetProfileScanOutcome {
+                findings_total: 0,
+                had_error: true,
+            };
+        }
+    }
+
+    if config.execution == ExecutionStrategy::Sequential {
+        bump_scan_progress(&ctx.progress, 1);
+    }
+
+    let mut findings_total = 0u64;
+    let mut had_error = false;
+
+    let categories_completed = ctx
+        .progress
+        .lock()
+        .map(|state| state.categories_completed as usize)
+        .unwrap_or(0);
+
+    for (category_index, category) in ctx.categories.iter().enumerate() {
+        if category_index < categories_completed {
+            continue;
+        }
+        if ctx.cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        wait_if_paused(&ctx.paused, &ctx.cancel).await;
+        if ctx.cancel.load(Ordering::Relaxed) {
+            break;
+        }
+
+        if let Ok(mut state) = ctx.progress.lock() {
+            state.status = if ctx.paused.load(Ordering::Relaxed) {
+                "paused".into()
+            } else {
+                "running".into()
+            };
+            state.current_endpoint = Some(ctx.profile.full_url());
+        }
+
+        let run_options = config
+            .payload_strategy
+            .as_ref()
+            .map(|strategy| CategoryRunOptions::from_strategy(*category, ctx.disabled_tests, strategy));
+
+        let category_label = category.display_name();
+
+        let result = if config.execution == ExecutionStrategy::Agentic {
+            run_agentic_category(
+                &ctx,
+                &config,
+                &plan,
+                *category,
+                &generated_payloads,
+                &catalog,
+                run_options.as_ref(),
+            )
+            .await
+        } else {
+            run_sequential_category(
+                &ctx,
+                *category,
+                &generated_payloads,
+                run_options.as_ref(),
+            )
+            .await
+        };
+
+        if ctx.paused.load(Ordering::Relaxed) {
+            break;
+        }
+
+        match result {
+            Ok(category_result) => {
+                findings_total += category_result.findings.len() as u64;
+                if let Ok(mut state) = ctx.progress.lock() {
+                    state.findings = findings_total;
+                    state.categories_completed = state.categories_completed.saturating_add(1);
+                }
+            }
+            Err(err) => {
+                had_error = true;
+                ctx.emitter.error(format!("{category_label} failed: {err}"));
+            }
+        }
+    }
+
+    TargetProfileScanOutcome {
+        findings_total,
+        had_error,
+    }
+}
+
+async fn run_sequential_category(
+    ctx: &TargetProfileScanContext<'_>,
+    category: AttackCategory,
+    generated_payloads: &HashMap<AttackCategory, Vec<AttackPayload>>,
+    run_options: Option<&CategoryRunOptions>,
+) -> Result<CategoryRunResult, String> {
+    run_category_on_target_profile(
+        ctx.repos,
+        ctx.scan_id,
+        ctx.project_id,
+        ctx.target_id,
+        ctx.profile,
+        category,
+        ctx.attack_runtime.clone(),
+        ctx.data_dir,
+        Arc::clone(&ctx.inference_manager),
+        Arc::clone(&ctx.model_manager),
+        ctx.model_provider.clone(),
+        Arc::clone(&ctx.runtime_manager),
+        ctx.plugin_manager.clone(),
+        Some(generated_payloads),
+        Some(&ctx.emitter),
+        run_options,
+        Some(&ctx.progress),
+        ctx.job_controls.as_ref(),
+    )
+    .await
+    .map_err(|err| err.to_string())
+}
+
+async fn run_agentic_category(
+    ctx: &TargetProfileScanContext<'_>,
+    config: &ScanExecutionConfig,
+    plan: &AttackPlan,
+    category: AttackCategory,
+    generated_payloads: &HashMap<AttackCategory, Vec<AttackPayload>>,
+    catalog: &aisec_payload::PayloadDatabase,
+    run_options: Option<&CategoryRunOptions>,
+) -> Result<CategoryRunResult, String> {
+    let mut strategy = config
+        .payload_strategy
+        .clone()
+        .ok_or_else(|| "agentic execution requires payload strategy".to_string())?;
+    let mut active_plan = plan.clone();
+    let mut last_result: Option<CategoryRunResult> = None;
+    let category_label = category.display_name();
+
+    for attempt in 1..=config.max_attempts {
+        if ctx.cancel.load(Ordering::Relaxed) {
+            break;
+        }
+
+        let retry = attempt.saturating_sub(1);
+        set_scan_phase(
+            &ctx.progress,
+            "generate",
+            Some(&category_label),
+            Some(attempt),
+            Some(retry),
+        );
+        ctx.emitter.info(format!(
+            "Agentic attempt {attempt}/{} — generating payloads for {category_label}",
+            config.max_attempts
+        ));
+
+        let payloads_for_run = if attempt == 1 {
+            category_payload_map(generated_payloads, category)
+        } else {
+            let feedback = if strategy.enable_response_adaptation || config.adaptive_planning {
+                last_result.as_ref().map(|result| {
+                    let judged: Vec<(bool, f32, &str)> = result
+                        .judged
+                        .iter()
+                        .map(|j| (j.vulnerable, j.confidence, j.summary.as_str()))
+                        .collect();
+                    aisec_generator::feedback_from_judged(&judged).unwrap_or_else(|| {
+                        format!(
+                            "attempt {} inconclusive: {} successes / {} attempts",
+                            attempt - 1,
+                            result.successes,
+                            result.attempts
+                        )
+                    })
+                })
+            } else {
+                None
+            };
+            regenerate_category_payloads(
+                ctx.data_dir,
+                Arc::clone(&ctx.inference_manager),
+                Arc::clone(&ctx.model_manager),
+                ctx.model_provider.clone(),
+                Arc::clone(&ctx.runtime_manager),
+                &active_plan,
+                category,
+                &strategy,
+                ctx.profile,
+                catalog.clone(),
+                feedback,
+                retry,
+            )
+            .await?
+        };
+
+        bump_scan_progress(&ctx.progress, 1);
+
+        let attempt_options = CategoryRunOptions::from_strategy(
+            category,
+            &active_plan.disabled_tests,
+            &strategy,
+        );
+        let options_ref = if attempt == 1 {
+            run_options
+        } else {
+            Some(&attempt_options)
+        };
+
+        set_scan_phase(
+            &ctx.progress,
+            "attack",
+            Some(&category_label),
+            Some(attempt),
+            Some(retry),
+        );
+
+        let result = run_category_on_target_profile(
+            ctx.repos,
+            ctx.scan_id,
+            ctx.project_id,
+            ctx.target_id,
+            ctx.profile,
+            category,
+            ctx.attack_runtime.clone(),
+            ctx.data_dir,
+            Arc::clone(&ctx.inference_manager),
+            Arc::clone(&ctx.model_manager),
+            ctx.model_provider.clone(),
+            Arc::clone(&ctx.runtime_manager),
+            ctx.plugin_manager.clone(),
+            Some(&payloads_for_run),
+            Some(&ctx.emitter),
+            options_ref,
+            Some(&ctx.progress),
+            ctx.job_controls.as_ref(),
+        )
+        .await
+        .map_err(|err| err.to_string())?;
+
+        if ctx.paused.load(Ordering::Relaxed) {
+            break;
+        }
+
+        set_scan_phase(
+            &ctx.progress,
+            "judge",
+            Some(&category_label),
+            Some(attempt),
+            Some(retry),
+        );
+
+        if config.reflection_enabled {
+            set_scan_phase(
+                &ctx.progress,
+                "reflection",
+                Some(&category_label),
+                Some(attempt),
+                Some(retry),
+            );
+            bump_scan_progress(&ctx.progress, 1);
+        }
+
+        let should_retry = reflection_allows_retry(config.reflection_enabled, &result, &ctx.emitter);
+        last_result = Some(result);
+
+        if !should_retry {
+            break;
+        }
+
+        if attempt >= config.max_attempts {
+            break;
+        }
+
+        if config.adaptive_planning {
+            set_scan_phase(
+                &ctx.progress,
+                "adaptive",
+                Some(&category_label),
+                Some(attempt + 1),
+                Some(attempt),
+            );
+            if let Some(ref prior) = last_result {
+                let (next_plan, next_strategy, notes) =
+                    adapt_plan_for_retry(&active_plan, category, &strategy, prior, catalog);
+                active_plan = next_plan;
+                strategy = next_strategy;
+                ctx.emitter.info(format!(
+                    "Adaptive planning for {category_label}: {}",
+                    if notes.is_empty() {
+                        "strategy refreshed for next attempt".into()
+                    } else {
+                        notes.join("; ")
+                    }
+                ));
+            }
+            bump_scan_progress(&ctx.progress, 1);
+        }
+
+        set_scan_phase(
+            &ctx.progress,
+            "retry",
+            Some(&category_label),
+            Some(attempt + 1),
+            Some(attempt),
+        );
+        bump_scan_progress(&ctx.progress, 1);
+        ctx.emitter.info(format!(
+            "Retrying {category_label} (attempt {} of {})",
+            attempt + 1,
+            config.max_attempts
+        ));
+    }
+
+    last_result.ok_or_else(|| "agentic category produced no attempts".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aisec_attack::AttackCategory;
+    use aisec_target_profile::{PayloadGenerationStrategy, PayloadStrategy};
+
+    fn sample_strategy() -> PayloadStrategy {
+        PayloadStrategy {
+            strategy: PayloadGenerationStrategy::Deterministic,
+            ..PayloadStrategy::default()
+        }
+    }
+
+    #[test]
+    fn adaptive_plan_rotates_failed_techniques_and_escalates_strategy() {
+        let catalog = aisec_payload::PayloadDatabase::builtin().expect("catalog");
+        let plan = AttackPlan {
+            mode: aisec_planner::PlannerMode::Deterministic,
+            profile_id: "standard".into(),
+            categories: vec![AttackCategory::PromptInjection],
+            disabled_tests: vec![],
+            rationales: vec![],
+            confidence: 0.8,
+            summary: "test".into(),
+            llm_rationale: None,
+        };
+        let strategy = sample_strategy();
+        let last = CategoryRunResult {
+            attempts: 1,
+            successes: 0,
+            findings: vec![],
+            judged: vec![JudgedAttemptSummary {
+                payload_id: "pi-direct-override".into(),
+                payload_name: "Direct".into(),
+                vulnerable: false,
+                confidence: 0.1,
+                summary: "refused".into(),
+            }],
+        };
+        let (next_plan, next_strategy, notes) = adapt_plan_for_retry(
+            &plan,
+            AttackCategory::PromptInjection,
+            &strategy,
+            &last,
+            &catalog,
+        );
+        assert!(next_plan.disabled_tests.iter().any(|id| id == "pi-direct-override"));
+        assert_ne!(next_strategy.mutation_level, strategy.mutation_level);
+        assert!(next_strategy.enable_response_adaptation);
+        assert!(!notes.is_empty());
+    }
+
+    #[test]
+    fn sequential_progress_total_includes_pipeline_phases() {
+        let categories = vec![AttackCategory::PromptInjection];
+        let config = ScanExecutionConfig::from_flags(false, 1, false, false, Some(sample_strategy()), None);
+        let attack_units = estimate_scan_requests(
+            &categories,
+            &[],
+            &sample_strategy(),
+            ExecutionStrategy::Sequential,
+            1,
+        ) as u64;
+        let total = scan_progress_total(&categories, &[], &config);
+        assert_eq!(total, 2 + attack_units * 2);
+    }
+
+    #[test]
+    fn agentic_progress_total_includes_generate_reflection_and_retry() {
+        let categories = vec![AttackCategory::PromptInjection];
+        let config = ScanExecutionConfig::from_flags(true, 3, true, false, Some(sample_strategy()), None);
+        let attack_units = estimate_scan_requests(
+            &categories,
+            &[],
+            &sample_strategy(),
+            ExecutionStrategy::Agentic,
+            3,
+        ) as u64;
+        let total = scan_progress_total(&categories, &[], &config);
+        // 1 prepare + 3 generate + 2*attack + 3 reflection + 2 retry
+        assert_eq!(total, 1 + 3 + attack_units * 2 + 3 + 2);
+    }
+
+    #[test]
+    fn agentic_progress_total_includes_adaptive_units() {
+        let categories = vec![AttackCategory::PromptInjection];
+        let config = ScanExecutionConfig::from_flags(true, 3, true, true, Some(sample_strategy()), None);
+        let attack_units = estimate_scan_requests(
+            &categories,
+            &[],
+            &sample_strategy(),
+            ExecutionStrategy::Agentic,
+            3,
+        ) as u64;
+        let total = scan_progress_total(&categories, &[], &config);
+        // 1 prepare + 3 generate + 2*attack + 3 reflection + 2 adaptive + 2 retry
+        assert_eq!(total, 1 + 3 + attack_units * 2 + 3 + 2 + 2);
+    }
+}

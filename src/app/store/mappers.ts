@@ -1,5 +1,4 @@
 import type {
-  EndpointDto,
   FindingDto,
   ProjectDto,
   ReportDto,
@@ -7,7 +6,6 @@ import type {
   TargetDto,
 } from "@/shared/ipc";
 import type {
-  DiscoveredEndpoint,
   Finding,
   JobStatus,
   Project,
@@ -18,10 +16,14 @@ import type {
   Target,
   TargetType,
 } from "@/shared/types";
+import {
+  deriveTargetLastScanAt,
+  deriveTargetStatus,
+} from "@/shared/targetScanContext";
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
 const FINDING_STATUSES: Finding["status"][] = ["open", "confirmed", "false_positive", "fixed"];
-const REPORT_FORMATS: ReportFormat[] = ["html", "pdf", "json", "sarif", "markdown"];
+const REPORT_FORMATS: ReportFormat[] = ["html", "pdf", "json", "sarif", "markdown", "csv"];
 
 function coerceSeverity(value: string): Severity {
   const v = value.toLowerCase();
@@ -67,7 +69,8 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-import { extractAuthType, extractTargetUrl } from "@/features/scans/scanDetailsHelpers";
+import { extractAuthKind, extractAuthType, extractTargetUrl } from "@/features/scans/scanDetailsHelpers";
+import { extractTargetProviderLabel } from "@/features/scans/targetProfile";
 
 function extractConfidence(evidence: unknown): number {
   const obj = asRecord(evidence);
@@ -110,39 +113,54 @@ export function mapProjects(
   }));
 }
 
-export function mapTargets(targets: TargetDto[]): Target[] {
+export function mapTargets(targets: TargetDto[], scans: ScanRun[] = []): Target[] {
   return targets.map((t) => ({
     id: t.id,
     projectId: t.project_id,
     name: t.name,
     url: extractTargetUrl(t.descriptor),
     type: coerceTargetType(t.target_type),
-    status: "pending",
-    lastScanAt: null,
+    providerLabel: extractTargetProviderLabel(t.profile),
+    status: deriveTargetStatus(t.profile, t.id, scans),
+    createdAt: t.created_at,
+    lastScanAt: deriveTargetLastScanAt(t.id, scans),
     fingerprint: null,
     tags: [],
     authType: extractAuthType(t.descriptor),
+    authKind: extractAuthKind(t.descriptor),
   }));
 }
 
 export function mapFindings(findings: FindingDto[], targets: TargetDto[]): Finding[] {
-  const targetNames = new Map(targets.map((t) => [t.id, t.name]));
-  return findings.map((f) => ({
-    id: f.id,
-    scanId: f.scan_id,
-    projectId: f.project_id,
-    targetId: f.target_id ?? "",
-    targetName: f.target_id ? targetNames.get(f.target_id) ?? "" : "",
-    title: f.title,
-    description: f.description ?? "",
-    severity: coerceSeverity(f.severity),
-    category: f.category ?? "general",
-    status: coerceFindingStatus(f.status),
-    confidence: extractConfidence(f.evidence),
-    verdict: extractVerdict(f.evidence),
-    discoveredAt: f.created_at,
-    evidence: f.evidence,
-  }));
+  const targetById = new Map(
+    targets.map((t) => [
+      t.id,
+      {
+        name: t.name,
+        url: extractTargetUrl(t.descriptor),
+      },
+    ]),
+  );
+  return findings.map((f) => {
+    const target = f.target_id ? targetById.get(f.target_id) : undefined;
+    return {
+      id: f.id,
+      scanId: f.scan_id,
+      projectId: f.project_id,
+      targetId: f.target_id ?? "",
+      targetName: target?.name ?? "",
+      targetUrl: target?.url ?? "",
+      title: f.title,
+      description: f.description ?? "",
+      severity: coerceSeverity(f.severity),
+      category: f.category ?? "general",
+      status: coerceFindingStatus(f.status),
+      confidence: extractConfidence(f.evidence),
+      verdict: extractVerdict(f.evidence),
+      discoveredAt: f.created_at,
+      evidence: f.evidence,
+    };
+  });
 }
 
 export function mapScans(scans: ScanDto[]): ScanRun[] {
@@ -155,30 +173,6 @@ export function mapScans(scans: ScanDto[]): ScanRun[] {
     startedAt: s.started_at,
     completedAt: s.completed_at,
     createdAt: s.created_at,
-  }));
-}
-
-export function mapEndpoints(endpoints: EndpointDto[]): DiscoveredEndpoint[] {
-  return endpoints.map((e) => ({
-    id: e.id,
-    scanId: e.scan_id,
-    targetId: e.target_id,
-    url: e.url,
-    kind: e.kind,
-    method: e.method,
-    confidence: e.confidence,
-    evidence: e.evidence,
-    sourceUrl: e.source_url,
-    discoveredAt: e.discovered_at,
-    endpointType: e.endpoint_type,
-    aiFramework: e.ai_framework,
-    riskScore: e.risk_score,
-    metadataConfidence: e.metadata_confidence,
-    discoverySource: e.discovery_source,
-    authRequired: e.auth_required,
-    metadata: e.metadata,
-    attackRecommendations: e.attack_recommendations,
-    fingerprint: null,
   }));
 }
 

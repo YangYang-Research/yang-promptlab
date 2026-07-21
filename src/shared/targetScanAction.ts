@@ -5,6 +5,7 @@ import { buildTargetScanContext } from "./targetScanContext";
 
 export type TargetScanAction =
   | { kind: "setup"; step: WizardStepId; scanId?: string }
+  | { kind: "view_scan"; scanId: string }
   | { kind: "view_report"; scanId: string }
   | { kind: "retry"; scanId: string; step: WizardStepId };
 
@@ -20,7 +21,7 @@ function findDraftScan(targetId: string, projectId: string, scans: ScanRun[]): S
 }
 
 function isAttackScan(scan: ScanRun): boolean {
-  return scan.name.startsWith("Scan (");
+  return scan.name.startsWith("Scan (") || scan.name.startsWith("Agent Scan (");
 }
 
 function latestAttackScan(targetId: string, scans: ScanRun[]): ScanRun | null {
@@ -114,7 +115,7 @@ export function resolveTargetScanAction(
   const running = runningAttackScan(targetId, scans);
 
   if (running) {
-    return { kind: "setup", step: 5 };
+    return { kind: "view_scan", scanId: running.id };
   }
 
   if (context.scanStatusLabel === "Completed" && latestAttack) {

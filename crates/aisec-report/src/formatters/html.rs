@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use serde::Serialize;
 
 use crate::charts::{escape_html, ChartRenderer};
 use crate::error::ReportResult;
@@ -186,49 +185,31 @@ fn render_findings(kind: ReportKind, findings: &[ReportFinding]) -> String {
                 .map(|c| format!(r#" · <span class="conf">confidence {:.0}%</span>"#, c * 100.0))
                 .unwrap_or_default();
 
-            // Technical/compliance reports include the exact payload + response.
-            let payload = if detailed {
-                f.payload
-                    .as_ref()
-                    .map(|p| {
-                        format!(
-                            r#"<div class="kv"><span class="k">Payload sent</span><pre>{}</pre></div>"#,
-                            escape_html(p)
-                        )
-                    })
-                    .unwrap_or_default()
-            } else {
-                String::new()
+            let id_line = format!(
+                r#"<p class="cat">ID: {}</p>"#,
+                escape_html(&f.id)
+            );
+
+            let kv = |label: &str, value: &str| {
+                format!(
+                    r#"<div class="kv"><span class="k">{}</span><pre>{}</pre></div>"#,
+                    escape_html(label),
+                    escape_html(value)
+                )
             };
 
-            let response = if detailed {
-                f.response
-                    .as_ref()
-                    .map(|r| {
-                        format!(
-                            r#"<div class="kv"><span class="k">Target response</span><pre>{}</pre></div>"#,
-                            escape_html(r)
-                        )
-                    })
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
-
-            // Fall back to raw evidence only when structured payload/response are absent.
-            let evidence = if detailed && f.payload.is_none() && f.response.is_none() {
-                f.evidence
-                    .as_ref()
-                    .map(|e| {
-                        format!(
-                            r#"<div class="kv"><span class="k">Evidence</span><pre>{}</pre></div>"#,
-                            escape_html(e)
-                        )
-                    })
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
+            let mut details = String::new();
+            if detailed {
+                if let Some(p) = f.payload.as_ref() {
+                    details.push_str(&kv("Payload sent", p));
+                }
+                if let Some(r) = f.response.as_ref() {
+                    details.push_str(&kv("Target response", r));
+                }
+                if let Some(e) = f.evidence.as_ref() {
+                    details.push_str(&kv("Evidence", e));
+                }
+            }
 
             let rec = f
                 .recommendation
@@ -236,26 +217,36 @@ fn render_findings(kind: ReportKind, findings: &[ReportFinding]) -> String {
                 .map(|r| format!("<p><strong>Fix:</strong> {}</p>", escape_html(r)))
                 .unwrap_or_default();
 
+            let compliance = if !f.compliance_refs.is_empty() {
+                format!(
+                    r#"<p class="compliance">Compliance: {}</p>"#,
+                    escape_html(&f.compliance_refs.join(", "))
+                )
+            } else {
+                String::new()
+            };
+
             format!(
                 r#"<article class="finding {sev_class}">
   <span class="badge" style="background:{color}22;color:{color}">{severity}</span>
   <h3>{title}</h3>
+  {id_line}
   <p class="cat">{category} · {status}{confidence}</p>
   <p>{desc}</p>
-  {payload}{response}{evidence}{rec}
+  {details}{rec}{compliance}
 </article>"#,
                 sev_class = sev_class,
                 color = f.severity.color(),
                 severity = f.severity.as_str(),
                 title = escape_html(&f.title),
+                id_line = id_line,
                 category = escape_html(&f.category),
                 status = escape_html(&f.status),
                 confidence = confidence,
                 desc = escape_html(&f.description),
-                payload = payload,
-                response = response,
-                evidence = evidence,
+                details = details,
                 rec = rec,
+                compliance = compliance,
             )
         })
         .collect::<Vec<_>>()
@@ -345,6 +336,8 @@ mod tests {
         assert!(html.contains("ignore previous instructions"));
         assert!(html.contains("Target response"));
         assert!(html.contains("confidence 83%"));
+        assert!(html.contains("ID: f1"));
+        assert!(html.contains("Compliance: LLM01"));
 
         // Executive report omits raw payload/response detail.
         let exec = HtmlFormatter
@@ -353,5 +346,39 @@ mod tests {
             .unwrap();
         let exec_html = String::from_utf8(exec.bytes).unwrap();
         assert!(!exec_html.contains("Payload sent"));
+    }
+
+    #[tokio::test]
+    async fn technical_html_shows_evidence_alongside_payload() {
+        let input = ReportDataBuilder::build(
+            "s1",
+            "Proj",
+            None,
+            vec![ReportFinding {
+                id: "f2".into(),
+                title: "Leak".into(),
+                severity: Severity::High,
+                category: "prompt_injection".into(),
+                description: "desc".into(),
+                payload: Some("p".into()),
+                response: Some("r".into()),
+                confidence: Some(1.0),
+                evidence: Some(r#"{"indicators":["UNRESTRICTED_OK"]}"#.into()),
+                recommendation: Some("Add guardrails".into()),
+                compliance_refs: vec![],
+                status: "open".into(),
+            }],
+        );
+        let html = String::from_utf8(
+            HtmlFormatter
+                .render(ReportKind::Technical, &input)
+                .await
+                .unwrap()
+                .bytes,
+        )
+        .unwrap();
+        assert!(html.contains("Evidence"));
+        assert!(html.contains("UNRESTRICTED_OK"));
+        assert!(html.contains("Fix:"));
     }
 }

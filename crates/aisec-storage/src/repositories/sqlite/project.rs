@@ -62,17 +62,19 @@ impl ProjectRepository for SqliteProjectRepository {
         let existing = self.get(id).await?;
         let name = input.name.unwrap_or(existing.name);
         let description = input.description.or(existing.description);
+        let summary_json = input.summary_json.or(existing.summary_json);
         let updated_at = now();
 
         let result = sqlx::query(
             r#"
             UPDATE projects
-            SET name = ?, description = ?, updated_at = ?
+            SET name = ?, description = ?, summary_json = ?, updated_at = ?
             WHERE id = ?
             "#,
         )
         .bind(&name)
         .bind(&description)
+        .bind(&summary_json)
         .bind(updated_at)
         .bind(id)
         .execute(&self.pool)

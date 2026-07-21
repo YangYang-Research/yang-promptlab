@@ -61,6 +61,7 @@ async fn mock_inference_runtime() {
         .unwrap();
     let resp = runtime
         .complete(InferenceRequest {
+            system: None,
             prompt: "test".into(),
             max_tokens: 64,
             temperature: 0.0,

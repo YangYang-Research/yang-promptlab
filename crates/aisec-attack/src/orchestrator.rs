@@ -42,7 +42,7 @@ pub struct AttackOrchestrator<T: TargetTransport> {
     config: OrchestratorConfig,
 }
 
-impl<T: TargetTransport> AttackOrchestrator<T> {
+impl<T: TargetTransport + Clone + 'static> AttackOrchestrator<T> {
     pub fn new(executor: AttackExecutor<T>, config: OrchestratorConfig) -> Self {
         Self {
             executor: Arc::new(executor),

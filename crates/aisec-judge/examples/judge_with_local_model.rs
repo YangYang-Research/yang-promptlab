@@ -1,7 +1,6 @@
 //! AI Judge Engine demo using a REAL local model for the LLM evaluator.
 //!
-//! Runs all three evaluators (rule-based, regex-based, and LLM-based) where the
-//! LLM stage executes actual llama.cpp inference — no mocked evaluation.
+//! Runs LLM-based evaluation with actual llama.cpp inference — no mocked evaluation.
 //!
 //! Run:
 //!   MODEL=/path/to/model.gguf \

@@ -6,7 +6,7 @@ import { IconButton } from "./IconButton";
 
 type PageHeaderProps = {
   title: string;
-  description?: string;
+  description?: ReactNode;
   backTo?: string;
   /** Compact header: back icon only (title available to screen readers). */
   backOnly?: boolean;

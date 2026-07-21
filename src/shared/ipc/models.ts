@@ -1,4 +1,5 @@
 import { invokeCommand } from "./invoke";
+import { withModelOperationTimeout } from "./modelOperationTimeout";
 
 export type ModelCapabilitiesDto = {
   chat: boolean;
@@ -216,11 +217,17 @@ export type ModelConnectionTestResult = {
 export function testModelConnection(
   modelId: string,
 ): Promise<ModelConnectionTestResult> {
-  return invokeCommand<ModelConnectionTestResult>("models_test_connection", { modelId });
+  return withModelOperationTimeout(
+    invokeCommand<ModelConnectionTestResult>("models_test_connection", { modelId }),
+    "Connection test",
+  );
 }
 
 export function testModelInference(modelId: string): Promise<ModelInferenceTestResult> {
-  return invokeCommand<ModelInferenceTestResult>("models_test_inference", { modelId });
+  return withModelOperationTimeout(
+    invokeCommand<ModelInferenceTestResult>("models_test_inference", { modelId }),
+    "Model verify",
+  );
 }
 
 export function testModelEmbeddings(

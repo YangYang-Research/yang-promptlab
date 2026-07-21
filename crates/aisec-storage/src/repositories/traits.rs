@@ -29,6 +29,8 @@ pub trait ScanRepository: Send + Sync {
     async fn create(&self, input: CreateScan) -> AisecResult<Scan>;
     async fn get(&self, id: &str) -> AisecResult<Scan>;
     async fn list_by_project(&self, project_id: &str) -> AisecResult<Vec<Scan>>;
+    /// Scans left in a non-terminal in-memory state (e.g. after an abrupt app exit).
+    async fn list_interrupted(&self) -> AisecResult<Vec<Scan>>;
     async fn update(&self, id: &str, input: UpdateScan) -> AisecResult<Scan>;
     async fn delete(&self, id: &str) -> AisecResult<()>;
 }
@@ -99,4 +101,34 @@ pub trait PluginRepository: Send + Sync {
     async fn list(&self) -> AisecResult<Vec<Plugin>>;
     async fn update(&self, id: &str, input: UpdatePlugin) -> AisecResult<Plugin>;
     async fn delete(&self, id: &str) -> AisecResult<()>;
+}
+
+#[async_trait]
+pub trait AttackCatalogRepository: Send + Sync {
+    async fn get(&self, id: &str) -> AisecResult<AttackCatalogTechnique>;
+    async fn list(&self) -> AisecResult<Vec<AttackCatalogTechnique>>;
+    async fn list_enabled(&self) -> AisecResult<Vec<AttackCatalogTechnique>>;
+    async fn list_by_category(&self, category_id: &str) -> AisecResult<Vec<AttackCatalogTechnique>>;
+    /// Insert missing seed rows; refresh factory defaults without clobbering user edits.
+    async fn seed_from(&self, entries: Vec<UpsertAttackCatalogTechnique>) -> AisecResult<u64>;
+    async fn update(
+        &self,
+        id: &str,
+        input: UpdateAttackCatalogTechnique,
+    ) -> AisecResult<AttackCatalogTechnique>;
+    async fn reset_content(&self, id: &str) -> AisecResult<AttackCatalogTechnique>;
+}
+
+#[async_trait]
+pub trait RuntimeTrafficRepository: Send + Sync {
+    async fn insert_many(&self, events: Vec<CreateRuntimeTrafficEvent>) -> AisecResult<u64>;
+    async fn list_between(&self, start_ms: i64, end_ms: i64) -> AisecResult<Vec<RuntimeTrafficEvent>>;
+    async fn counters(&self) -> AisecResult<RuntimeTrafficCounters>;
+    async fn prune_before(&self, cutoff_ms: i64) -> AisecResult<u64>;
+}
+
+#[async_trait]
+pub trait JudgeRoleWeightsRepository: Send + Sync {
+    async fn get(&self) -> AisecResult<JudgeRoleWeights>;
+    async fn update(&self, input: UpdateJudgeRoleWeights) -> AisecResult<JudgeRoleWeights>;
 }

@@ -31,7 +31,7 @@ export type PayloadStrategyDto = {
 export const VARIANTS_PER_TEST_MIN = 1;
 export const VARIANTS_PER_TEST_MAX = 20;
 export const PAYLOAD_BUDGET_MIN = 1;
-export const PAYLOAD_BUDGET_MAX = 100;
+export const PAYLOAD_BUDGET_MAX = 50;
 export const PAYLOAD_BUDGET_DEFAULT = 20;
 export const PAYLOAD_BUDGET_STEP = 1;
 
@@ -60,9 +60,9 @@ export const GENERATION_STRATEGIES: Array<{
   {
     id: "deterministic",
     label: "Deterministic",
-    description: "Curated templates only — repeatable, no AI generation.",
+    description: "Curated templates only — repeatable, no Yazg generation.",
     tooltip:
-      "Uses curated payload templates only. No AI generation. Repeatable across runs.",
+      "Uses curated payload templates only. No Yazg generation. Repeatable across runs.",
   },
   {
     id: "mutation",

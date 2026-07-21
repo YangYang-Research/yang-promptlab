@@ -2,10 +2,21 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 
-import { Button, Card, ConnectivityStatus, Modal, PageHeader, RefreshButton } from "@/shared/components";
+import {
+  Button,
+  Card,
+  ConnectivityStatus,
+  connectivityStatusVariant,
+  EmptyState,
+  Modal,
+  PageHeader,
+  PageLoadingSkeleton,
+  RefreshButton,
+} from "@/shared/components";
 import { toAppError } from "@/shared/errors";
 import { useAiInferenceRoute } from "@/shared/hooks/useAiInferenceRoute";
 import { useRuntimeModelLoading } from "@/shared/hooks/useRuntimeModelLoading";
+import { isYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
 import {
   getRuntimeHardware,
   getRuntimeHealth,
@@ -30,6 +41,10 @@ import {
 } from "@/shared/ipc/runtime";
 import { useToast } from "@/shared/notifications";
 import { formatBytes } from "@/shared/utils/format";
+
+import { RegistryProviderIcon } from "@/features/models/ProviderLogo";
+import { JudgeRoleWeightsPanel } from "@/features/runtime/JudgeRoleWeightsPanel";
+import { RuntimeTrafficChart } from "@/features/runtime/RuntimeTrafficChart";
 
 const ENGINE_INIT_STEPS = [
   { id: "hardware", label: "Detect hardware" },
@@ -328,11 +343,32 @@ export function AIRuntimePage() {
   }, [refreshConfiguration, refreshLocalData]);
 
   const handleRefresh = useCallback(async () => {
-    if (!backendConnected || refreshing) return;
+    if (!backendConnected || refreshing || testingModelId !== null) return;
     setError(null);
     setRefreshing(true);
     try {
       await refreshAll();
+
+      if (mode === "third_party") {
+        const modelId = settings?.selectedModelId;
+        if (modelId) {
+          setTestingModelId(modelId);
+          try {
+            const result = await setRoute("third_party", modelId);
+            if (
+              result?.settings.connectivityTestOk === false &&
+              result.settings.connectivityTestDetail
+            ) {
+              notify(result.settings.connectivityTestDetail, "error");
+            }
+          } finally {
+            setTestingModelId(null);
+          }
+        }
+      } else if (mode === "local") {
+        await getRuntimeHealth();
+        await refreshAll();
+      }
     } catch (err) {
       const message = toAppError(err).message;
       setError(message);
@@ -340,7 +376,16 @@ export function AIRuntimePage() {
     } finally {
       setRefreshing(false);
     }
-  }, [backendConnected, refreshing, refreshAll, notify]);
+  }, [
+    backendConnected,
+    refreshing,
+    testingModelId,
+    refreshAll,
+    mode,
+    settings?.selectedModelId,
+    setRoute,
+    notify,
+  ]);
 
   useEffect(() => {
     void import("@/shared/ipc/client").then(({ healthCheck }) =>
@@ -610,21 +655,24 @@ export function AIRuntimePage() {
   const thirdPartyModels = settings?.thirdPartyModels ?? [];
   const showModePicker = backendConnected && mode === "not_configured" && !configLoading;
   const modeConfigured = mode === "third_party" || mode === "local";
+  const connectionDotVariant = testingModelId
+    ? null
+    : connectivityStatusVariant(configuration?.connectivity);
 
   return (
-    <div className={`page${showModePicker ? " page--runtime-setup" : ""}`}>
+    <div className={`page runtime-page${showModePicker ? " page--runtime-setup" : ""}`}>
       <PageHeader
         title="AI Runtime"
         description={
           showModePicker
-            ? "Set up how PromptLab interacts with AI models."
-            : "Configure third-party cloud providers or manage the embedded local llama.cpp runtime"
+            ? "Choose a cloud or local runtime for Yazg Agent"
+            : "Manage the AI Runtime for Yazg Agent"
         }
         actions={
           backendConnected ? (
             <div className="page-header__actions-row">
               <RefreshButton
-                loading={refreshing || configLoading}
+                loading={refreshing || configLoading || testingModelId !== null}
                 error={error}
                 disabled={!backendConnected}
                 onClick={() => void handleRefresh()}
@@ -644,17 +692,27 @@ export function AIRuntimePage() {
         }
       />
 
-      {!backendConnected && (
-        <p className="text-muted">Connect to the Tauri backend to manage the AI runtime.</p>
-      )}
+      {error ? (
+        <div className="runtime-page__alert" role="alert">
+          {error}
+        </div>
+      ) : null}
 
-      {configLoading && !configuration && backendConnected && (
-        <p className="text-muted text-sm">Loading runtime configuration…</p>
-      )}
+      {!backendConnected ? (
+        <Card className="runtime-page__banner detail-section">
+          <p className="runtime-page__banner-text">
+            Connect to the Tauri backend to manage the AI runtime.
+          </p>
+        </Card>
+      ) : null}
 
-      {configError && !configuration && backendConnected && !configLoading && (
-        <p className="text-danger text-sm">{configError}</p>
-      )}
+      {configLoading && !configuration && backendConnected ? <PageLoadingSkeleton /> : null}
+
+      {configError && !configuration && backendConnected && !configLoading ? (
+        <div className="runtime-page__alert" role="alert">
+          {configError}
+        </div>
+      ) : null}
 
       {showModePicker && (
         <RuntimeModePicker
@@ -667,89 +725,105 @@ export function AIRuntimePage() {
         <>
           {mode === "third_party" && (
             <>
-              <section className="runtime-section">
-                <h2 className="runtime-section__title">Status</h2>
-                <div className="models-summary-grid runtime-summary-grid">
-                  <Card className="models-summary-card">
-                    <span className="models-summary-card__label">Runtime Status</span>
-                    <strong className="models-summary-card__value models-summary-card__value--runtime">
-                      {configuration?.statusLabel ? (
-                        <ConnectivityStatus label={configuration.statusLabel} />
-                      ) : (
-                        "—"
-                      )}
-                    </strong>
-                  </Card>
-                  <Card className="models-summary-card">
-                    <span className="models-summary-card__label">Provider</span>
-                    <strong className="models-summary-card__value">
-                      {configuration?.provider ?? "—"}
-                    </strong>
-                  </Card>
-                  <Card className="models-summary-card">
-                    <span className="models-summary-card__label">Model</span>
-                    <strong className="models-summary-card__value models-summary-card__value--model-name">
-                      {configuration?.modelName ?? settings?.selectedModelName ?? "—"}
-                    </strong>
-                  </Card>
-                  <Card className="models-summary-card">
-                    <span className="models-summary-card__label">Connectivity</span>
-                    <strong className="models-summary-card__value models-summary-card__value--wrap">
-                      {testingModelId ? (
-                        "Testing…"
-                      ) : configuration?.connectivity ? (
-                        <ConnectivityStatus label={configuration.connectivity} />
-                      ) : (
-                        "—"
-                      )}
-                    </strong>
-                  </Card>
-                  <Card className="models-summary-card">
-                    <span className="models-summary-card__label">Last Health Check</span>
-                    <strong className="models-summary-card__value models-summary-card__value--runtime">
-                      {testingModelId
-                        ? "Running connection test…"
-                        : configuration?.lastHealthCheck ?? "Not checked"}
-                    </strong>
-                  </Card>
-                </div>
+              <section className="runtime-page__overview" aria-label="Runtime overview">
+                <Card className="detail-section runtime-page__status">
+                  <h2 className="detail-section__title">Status</h2>
+                  <div className="detail-summary-grid detail-summary-grid--metrics">
+                    <div className="summary-stat">
+                      <span className="summary-stat__label">Runtime status</span>
+                      <span className="summary-stat__value summary-stat__value--sm">
+                        {configuration?.statusLabel ? (
+                          <ConnectivityStatus label={configuration.statusLabel} />
+                        ) : (
+                          "N/A"
+                        )}
+                      </span>
+                    </div>
+                    <div className="summary-stat">
+                      <span className="summary-stat__label">Provider</span>
+                      <span className="summary-stat__value summary-stat__value--sm">
+                        {configuration?.provider ? (
+                          <RegistryProviderIcon provider={configuration.provider} />
+                        ) : (
+                          "N/A"
+                        )}
+                      </span>
+                    </div>
+                    <div className="summary-stat">
+                      <span className="summary-stat__label">Model ID</span>
+                      <span className="summary-stat__value summary-stat__value--sm">
+                        {configuration?.modelName ?? settings?.selectedModelName ?? "N/A"}
+                      </span>
+                    </div>
+                    <div className="summary-stat">
+                      <span className="summary-stat__label">Yazg Agent</span>
+                      <span className="summary-stat__value summary-stat__value--sm">
+                        {testingModelId ? (
+                          "Checking…"
+                        ) : (
+                          <ConnectivityStatus
+                            label={isYazgAgentLive(configuration) ? "Live" : "Offline"}
+                          />
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="detail-section runtime-page__meta">
+                  <h2 className="detail-section__title runtime-page__connection-title">
+                    Connection
+                    {connectionDotVariant ? (
+                      <span
+                        className={`connectivity-status__dot connectivity-status__dot--${connectionDotVariant}`}
+                        aria-hidden
+                      />
+                    ) : null}
+                  </h2>
+                  <dl className="runtime-page__meta-list">
+                    <div>
+                      <dt>Connectivity</dt>
+                      <dd>
+                        {testingModelId
+                          ? "Testing…"
+                          : configuration?.connectivity ?? "N/A"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Last health check</dt>
+                      <dd>
+                        {testingModelId
+                          ? "Running connection test…"
+                          : configuration?.lastHealthCheck ?? "Not checked"}
+                      </dd>
+                    </div>
+                  </dl>
+                </Card>
               </section>
 
-              <section className="runtime-section">
-                <h2 className="runtime-section__title">Registered Models</h2>
-                <Card className="model-card model-card--wide">
-                  {thirdPartyModels.length > 0 ? (
-                    <>
-                      <ul className="runtime-route-models" aria-label="Registered third-party models">
-                        {thirdPartyModels.map((model) => (
-                          <ThirdPartyModelRow
-                            key={model.id}
-                            model={model}
-                            selected={model.id === settings?.selectedModelId}
-                            disabled={disabled}
-                            testing={testingModelId === model.id}
-                            onSelect={() => void handleSelectThirdPartyModel(model.id)}
-                            onEdit={() =>
-                              navigate("/models", { state: { editModelId: model.id } })
-                            }
-                          />
-                        ))}
-                      </ul>
-                      <div className="model-card__actions">
-                        <Button
-                          onClick={() =>
-                            navigate("/models", {
-                              state: { openAddModel: true, openAddModelTab: "third-party" },
-                            })
-                          }
-                        >
-                          Add Model
-                        </Button>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="runtime-choose-model__empty">
+              <Card className="detail-section runtime-page__traffic">
+                <h2 className="detail-section__title">Traffic monitor</h2>
+                <RuntimeTrafficChart
+                  enabled={backendConnected && mode === "third_party"}
+                  defaultRangeId="1m"
+                />
+              </Card>
+
+              <section className="runtime-page__primary" aria-label="Registered models">
+                <Card className="detail-section">
+                  <div className="detail-section__header">
+                    <div>
+                      <h2 className="detail-section__title">Registered models</h2>
+                      <p className="detail-section__hint">
+                        {thirdPartyModels.length === 0
+                          ? "Add a cloud provider model to route AI requests."
+                          : `${thirdPartyModels.length} registered model${thirdPartyModels.length === 1 ? "" : "s"}`}
+                      </p>
+                    </div>
+                    <div className="detail-section__header-actions">
                       <Button
+                        variant="primary"
+                        size="sm"
                         onClick={() =>
                           navigate("/models", {
                             state: { openAddModel: true, openAddModelTab: "third-party" },
@@ -759,6 +833,29 @@ export function AIRuntimePage() {
                         Add Model
                       </Button>
                     </div>
+                  </div>
+
+                  {thirdPartyModels.length > 0 ? (
+                    <ul className="runtime-route-models" aria-label="Registered third-party models">
+                      {thirdPartyModels.map((model) => (
+                        <ThirdPartyModelRow
+                          key={model.id}
+                          model={model}
+                          selected={model.id === settings?.selectedModelId}
+                          disabled={disabled}
+                          testing={testingModelId === model.id}
+                          onSelect={() => void handleSelectThirdPartyModel(model.id)}
+                          onEdit={() =>
+                            navigate("/models", { state: { editModelId: model.id } })
+                          }
+                        />
+                      ))}
+                    </ul>
+                  ) : (
+                    <EmptyState
+                      title="No remote models yet"
+                      description="Register an OpenAI, Anthropic, or custom endpoint provider from Models."
+                    />
                   )}
                 </Card>
               </section>
@@ -767,72 +864,185 @@ export function AIRuntimePage() {
 
           {mode === "local" && (
             <>
-              <section className="runtime-section">
-                <h2 className="runtime-section__title">Status</h2>
-                <div className="models-summary-grid runtime-summary-grid">
-                  <Card className="models-summary-card">
-                    <span className="models-summary-card__label">Runtime Status</span>
-                    <strong className="models-summary-card__value models-summary-card__value--runtime">
-                      {localRuntimeStatusLabel}
-                    </strong>
-                  </Card>
-                  <Card className="models-summary-card">
-                    <span className="models-summary-card__label">Current Runtime</span>
-                    <strong className="models-summary-card__value">
-                      {configuration?.runtimeName ?? "—"}
-                    </strong>
-                  </Card>
-                  <Card className="models-summary-card">
-                    <span className="models-summary-card__label">Loaded Model</span>
-                    <strong className="models-summary-card__value models-summary-card__value--model-name">
-                      {status?.modelLoaded
-                        ? (configuration?.modelName ?? status?.loadedModelPath ?? "—")
-                        : "—"}
-                    </strong>
-                  </Card>
-                  <Card className="models-summary-card">
-                    <span className="models-summary-card__label">Health</span>
-                    <strong className="models-summary-card__value">
-                      {configuration?.connectivity ?? "Not checked"}
-                    </strong>
-                  </Card>
-                </div>
-              </section>
+              <section className="runtime-page__overview" aria-label="Runtime overview">
+                <Card className="detail-section runtime-page__status">
+                  <h2 className="detail-section__title">Status</h2>
+                  <div className="detail-summary-grid detail-summary-grid--metrics">
+                    <div className="summary-stat">
+                      <span className="summary-stat__label">Runtime status</span>
+                      <span className="summary-stat__value summary-stat__value--sm">
+                        {localRuntimeStatusLabel}
+                      </span>
+                    </div>
+                    <div className="summary-stat">
+                      <span className="summary-stat__label">Current runtime</span>
+                      <span className="summary-stat__value summary-stat__value--sm">
+                        {configuration?.runtimeName ?? "N/A"}
+                      </span>
+                    </div>
+                    <div className="summary-stat">
+                      <span className="summary-stat__label">Loaded model</span>
+                      <span className="summary-stat__value summary-stat__value--sm">
+                        {status?.modelLoaded
+                          ? (configuration?.modelName ?? status?.loadedModelPath ?? "N/A")
+                          : "None"}
+                      </span>
+                    </div>
+                    <div className="summary-stat">
+                      <span className="summary-stat__label">Health</span>
+                      <span className="summary-stat__value summary-stat__value--sm">
+                        {configuration?.connectivity ?? "Not checked"}
+                      </span>
+                    </div>
+                  </div>
+                </Card>
 
-              <section className="runtime-section">
-                <h2 className="runtime-section__title">Hardware</h2>
-                <Card className="model-card model-card--wide">
+                <Card className="detail-section runtime-page__hardware">
+                  <h2 className="detail-section__title">Hardware</h2>
                   {hardware ? (
-                    <dl className="runtime-kv-grid">
-                      <div><dt>CPU</dt><dd>{hardware.cpu} ({hardware.cpuCores} cores)</dd></div>
-                      <div><dt>CUDA</dt><dd>{hardware.cuda ? "Yes" : "No"}</dd></div>
-                      <div><dt>Metal</dt><dd>{hardware.metal ? "Yes" : "No"}</dd></div>
-                      <div><dt>ROCm</dt><dd>No</dd></div>
-                      <div><dt>RAM</dt><dd>{formatBytes(hardware.ramBytes)}</dd></div>
-                      <div><dt>GPU</dt><dd>{hardware.gpuName ?? "None detected"}</dd></div>
+                    <dl className="runtime-page__meta-list">
+                      <div>
+                        <dt>CPU</dt>
+                        <dd>
+                          {hardware.cpu} ({hardware.cpuCores} cores)
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>RAM</dt>
+                        <dd>{formatBytes(hardware.ramBytes)}</dd>
+                      </div>
+                      <div>
+                        <dt>GPU</dt>
+                        <dd>{hardware.gpuName ?? "None detected"}</dd>
+                      </div>
+                      <div>
+                        <dt>Acceleration</dt>
+                        <dd>
+                          {[
+                            hardware.cuda ? "CUDA" : null,
+                            hardware.metal ? "Metal" : null,
+                          ]
+                            .filter(Boolean)
+                            .join(", ") || "CPU only"}
+                        </dd>
+                      </div>
                     </dl>
                   ) : (
                     <p className="text-muted text-sm">
-                      Hardware profile not available yet. Reinitialize the engine to detect this machine.
+                      Hardware profile not available yet. Reinitialize the engine to detect this
+                      machine.
                     </p>
                   )}
                 </Card>
               </section>
 
-              <section className="runtime-section">
-                <h2 className="runtime-section__title">Inference Engine</h2>
-                <Card className="model-card model-card--wide">
-                  <p className="text-muted text-sm runtime-engine-intro">
-                    Embedded libllama runs in-process — no separate runtime binary to install.
-                  </p>
+              <section className="runtime-page__primary" aria-label="Installed models">
+                <Card className="detail-section">
+                  <div className="detail-section__header">
+                    <div>
+                      <h2 className="detail-section__title">Installed models</h2>
+                      <p className="detail-section__hint">
+                        {localModels.length === 0
+                          ? "Install a GGUF model, then load it into the local runtime."
+                          : `${localModels.length} local model${localModels.length === 1 ? "" : "s"} — load one to start inference`}
+                      </p>
+                    </div>
+                    <div className="detail-section__header-actions">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={disabled}
+                        onClick={() =>
+                          void runAction("Health check", async () => {
+                            await getRuntimeHealth();
+                          })
+                        }
+                      >
+                        {busy === "Health check" ? "Checking…" : "Health Check"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={disabled}
+                        onClick={() =>
+                          void runAction("Benchmark", async () => {
+                            setBenchmark(await runRuntimeBenchmark());
+                          })
+                        }
+                      >
+                        {busy === "Benchmark" ? "Running…" : "Benchmark"}
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() =>
+                          navigate("/models", {
+                            state: { openAddModel: true, openAddModelTab: "public" },
+                          })
+                        }
+                      >
+                        Add Model
+                      </Button>
+                    </div>
+                  </div>
+
+                  {localModels.length === 0 ? (
+                    <EmptyState
+                      title="No local models yet"
+                      description="Download a catalog model or import a GGUF file from Models."
+                    />
+                  ) : (
+                    <ul className="runtime-route-models" aria-label="Installed local models">
+                      {localModels.map((model) => (
+                        <LocalModelRow
+                          key={model.id}
+                          model={model}
+                          loaded={isLocalModelLoaded(model.id)}
+                          disabled={localModelActionsDisabled}
+                          loading={modelRowLoadingAction(model.id)}
+                          onLoad={() => void handleLoadLocalModel(model.id)}
+                          onUnload={() => void handleUnloadLocalModel(model.id)}
+                        />
+                      ))}
+                    </ul>
+                  )}
+
+                  {benchmark ? (
+                    <dl className="runtime-kv-grid runtime-page__benchmark">
+                      <div>
+                        <dt>Benchmark latency</dt>
+                        <dd>{benchmark.latencyMs} ms</dd>
+                      </div>
+                      <div>
+                        <dt>Throughput</dt>
+                        <dd>{benchmark.tokensPerSec.toFixed(1)} tok/s</dd>
+                      </div>
+                    </dl>
+                  ) : null}
+                </Card>
+              </section>
+
+              <section className="runtime-page__engine" aria-label="Inference engine">
+                <Card className="detail-section">
+                  <div className="detail-section__header">
+                    <div>
+                      <h2 className="detail-section__title">Inference engine</h2>
+                      <p className="detail-section__hint">
+                        Embedded libllama runs in-process — no separate runtime binary to install.
+                      </p>
+                    </div>
+                  </div>
+
                   <dl className="runtime-kv-grid">
                     <div>
                       <dt>Engine</dt>
-                      <dd>{status?.recommendedRuntime ?? "Reinitialize engine to profile hardware"}</dd>
+                      <dd>
+                        {status?.recommendedRuntime ?? "Reinitialize engine to profile hardware"}
+                      </dd>
                     </div>
                     <div>
                       <dt>Version</dt>
-                      <dd>{configuration?.runtimeVersion ?? status?.runtimeVersion ?? "—"}</dd>
+                      <dd>{configuration?.runtimeVersion ?? status?.runtimeVersion ?? "N/A"}</dd>
                     </div>
                     <div>
                       <dt>Inference</dt>
@@ -842,23 +1052,20 @@ export function AIRuntimePage() {
                     </div>
                     <div>
                       <dt>Status</dt>
-                      <dd>{status?.message ?? "—"}</dd>
+                      <dd>{status?.message ?? "N/A"}</dd>
                     </div>
                   </dl>
 
-                  {engineInitializing && (
+                  {engineInitializing ? (
                     <RuntimeEngineProgress
                       progress={engineInitProgress}
                       initializing={engineInitializing}
                       error={error}
                     />
-                  )}
+                  ) : null}
 
                   <div className="model-card__actions">
-                    <Button
-                      disabled={disabled}
-                      onClick={() => void runEngineReinitialize()}
-                    >
+                    <Button disabled={disabled} onClick={() => void runEngineReinitialize()}>
                       {engineInitializing ? "Initializing…" : "Reinitialize Engine"}
                     </Button>
                     {!runtimeStarted && (
@@ -904,16 +1111,21 @@ export function AIRuntimePage() {
                     </Button>
                   </div>
 
-                  {showLogs && (
+                  {showLogs ? (
                     <div className="runtime-log-card runtime-log-card--inline">
                       {logs.length === 0 ? (
                         <p className="text-muted">No runtime logs yet.</p>
                       ) : (
                         <ul className="runtime-log-list">
                           {logs.map((entry, index) => (
-                            <li key={`${entry.timestamp}-${index}`} className="runtime-log-list__item">
+                            <li
+                              key={`${entry.timestamp}-${index}`}
+                              className="runtime-log-list__item"
+                            >
                               <span className="runtime-log-list__time">{entry.timestamp}</span>
-                              <span className={`runtime-log-list__level runtime-log-list__level--${entry.level}`}>
+                              <span
+                                className={`runtime-log-list__level runtime-log-list__level--${entry.level}`}
+                              >
                                 {entry.level}
                               </span>
                               <span>{entry.message}</span>
@@ -922,75 +1134,15 @@ export function AIRuntimePage() {
                         </ul>
                       )}
                     </div>
-                  )}
-                </Card>
-              </section>
-
-              <section className="runtime-section">
-                <h2 className="runtime-section__title">Installed Models</h2>
-                <Card className="model-card model-card--wide">
-                  {localModels.length === 0 ? (
-                    <p className="text-muted text-sm">No local models installed yet.</p>
-                  ) : (
-                    <ul className="runtime-route-models" aria-label="Installed local models">
-                      {localModels.map((model) => (
-                        <LocalModelRow
-                          key={model.id}
-                          model={model}
-                          loaded={isLocalModelLoaded(model.id)}
-                          disabled={localModelActionsDisabled}
-                          loading={modelRowLoadingAction(model.id)}
-                          onLoad={() => void handleLoadLocalModel(model.id)}
-                          onUnload={() => void handleUnloadLocalModel(model.id)}
-                        />
-                      ))}
-                    </ul>
-                  )}
-                  <div className="model-card__actions">
-                    <Button
-                      onClick={() =>
-                        navigate("/models", {
-                          state: { openAddModel: true, openAddModelTab: "public" },
-                        })
-                      }
-                    >
-                      Add Model
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      disabled={disabled}
-                      onClick={() =>
-                        void runAction("Health check", async () => {
-                          await getRuntimeHealth();
-                        })
-                      }
-                    >
-                      {busy === "Health check" ? "Checking…" : "Health Check"}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      disabled={disabled}
-                      onClick={() =>
-                        void runAction("Benchmark", async () => {
-                          setBenchmark(await runRuntimeBenchmark());
-                        })
-                      }
-                    >
-                      {busy === "Benchmark" ? "Running…" : "Benchmark"}
-                    </Button>
-                  </div>
-                  {benchmark && (
-                    <dl className="runtime-kv-grid">
-                      <div><dt>Benchmark latency</dt><dd>{benchmark.latencyMs} ms</dd></div>
-                      <div><dt>Throughput</dt><dd>{benchmark.tokensPerSec.toFixed(1)} tok/s</dd></div>
-                    </dl>
-                  )}
+                  ) : null}
                 </Card>
               </section>
             </>
           )}
 
-          {error && <p className="text-danger">{error}</p>}
+          <section className="runtime-page__weights-section" aria-label="Judge role weights">
+            <JudgeRoleWeightsPanel disabled={disabled} />
+          </section>
         </>
       )}
 

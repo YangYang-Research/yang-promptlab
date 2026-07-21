@@ -39,6 +39,24 @@ export function extractTargetUrl(descriptor: unknown): string {
   return "";
 }
 
+export function extractAuthKind(
+  descriptor: unknown,
+): "none" | "username_password" | "sso" | "basic" | "api_key" | "jwt" {
+  const obj = asRecord(descriptor);
+  const auth = asRecord(obj?.auth) as AuthDescriptor | null;
+  const kind = auth?.kind ?? "none";
+  switch (kind) {
+    case "username_password":
+    case "sso":
+    case "basic":
+    case "api_key":
+    case "jwt":
+      return kind;
+    default:
+      return "none";
+  }
+}
+
 export function extractAuthType(descriptor: unknown): string {
   const obj = asRecord(descriptor);
   const auth = asRecord(obj?.auth) as AuthDescriptor | null;
@@ -46,15 +64,15 @@ export function extractAuthType(descriptor: unknown): string {
 
   switch (kind) {
     case "username_password":
-      return "Username / Password (Playwright)";
+      return "Username / Password";
     case "sso":
-      return "SSO (Playwright)";
+      return "SSO";
     case "basic":
-      return "Basic (AuthEngine)";
+      return "Basic";
     case "api_key":
-      return "API Key (AuthEngine)";
+      return "API Key";
     case "jwt":
-      return "JWT (AuthEngine)";
+      return "JWT";
     default:
       return "None";
   }

@@ -10,7 +10,7 @@ use aisec_inference::{
     InferenceMode, InferenceProvider, InferenceRuntimeManager, InferenceSession,
     PromptRegistry, RemoteAdapterSettings,
 };
-use aisec_judge::{build_judge_engine_with_adapter, deterministic_engine, JudgeEngine, JudgeProviderConfig};
+use aisec_judge::{build_judge_engine_with_adapter, JudgeEngine, JudgeMode, JudgeProviderConfig};
 use aisec_models::{BuiltinCatalog, LocalModelManager, ModelEntry, ModelProvider};
 use aisec_planner::PlannerLlm;
 use aisec_generator::GeneratorLlm;
@@ -104,8 +104,11 @@ pub async fn build_judge_engine_from_gateway(
     runtime_manager: &mut RuntimeManager,
 ) -> CommandResult<JudgeEngine> {
     if !inference.is_ready() {
-        return Ok(deterministic_engine());
+        return Err(CommandError::invalid_input(
+            "AI runtime must be ready before judging scan results — configure and start AI Runtime",
+        ));
     }
+    let entry = model_entry(model_manager, inference)?;
     let mut session = open_gateway_session(
         data_dir,
         inference,
@@ -117,7 +120,12 @@ pub async fn build_judge_engine_from_gateway(
     let adapter = DefaultAiInferenceGateway::adapter_for(&mut session.inner)
         .await
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
-    let config = JudgeProviderConfig::default();
+    let mut config = JudgeProviderConfig::default();
+    config.mode = if entry.provider == ModelProvider::Remote {
+        JudgeMode::RemoteLlm
+    } else {
+        JudgeMode::LocalLlm
+    };
     build_judge_engine_with_adapter(adapter, &config)
         .await
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
@@ -151,55 +159,6 @@ pub async fn gateway_complete(
         })
         .await
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
-}
-
-/// Planner LLM backed by the AI Inference Gateway.
-pub struct HostPlannerLlm {
-    data_dir: PathBuf,
-    inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
-    model_manager: Arc<AsyncMutex<LocalModelManager>>,
-    model_provider: SharedModelProvider,
-    runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
-}
-
-impl HostPlannerLlm {
-    pub fn new(
-        data_dir: PathBuf,
-        inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
-        model_manager: Arc<AsyncMutex<LocalModelManager>>,
-        model_provider: SharedModelProvider,
-        runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
-    ) -> Self {
-        Self {
-            data_dir,
-            inference,
-            model_manager,
-            model_provider,
-            runtime_manager,
-        }
-    }
-}
-
-#[async_trait]
-impl PlannerLlm for HostPlannerLlm {
-    async fn complete(&self, prompt: &str) -> aisec_planner::PlannerResult<String> {
-        let inference = self.inference.lock().await;
-        let manager = self.model_manager.lock().await;
-        let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete(
-            &self.data_dir,
-            &inference,
-            &manager,
-            self.model_provider.clone(),
-            &mut runtime_mgr,
-            None,
-            prompt,
-            2048,
-            0.15,
-        )
-        .await
-        .map_err(|e| aisec_planner::PlannerError::Llm(e.to_string()))
-    }
 }
 
 /// Wizard attack-plan LLM — higher token budget and JSON-focused system prompt.
@@ -251,6 +210,153 @@ impl PlannerLlm for HostWizardPlannerLlm {
     }
 }
 
+/// Endpoint verify LLM — classifies whether a probe response is from an AI API.
+pub struct HostEndpointVerifyLlm {
+    data_dir: PathBuf,
+    inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<LocalModelManager>>,
+    model_provider: SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+}
+
+impl HostEndpointVerifyLlm {
+    pub fn new(
+        data_dir: PathBuf,
+        inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
+        model_manager: Arc<AsyncMutex<LocalModelManager>>,
+        model_provider: SharedModelProvider,
+        runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+    ) -> Self {
+        Self {
+            data_dir,
+            inference,
+            model_manager,
+            model_provider,
+            runtime_manager,
+        }
+    }
+}
+
+#[async_trait]
+impl PlannerLlm for HostEndpointVerifyLlm {
+    async fn complete(&self, prompt: &str) -> aisec_planner::PlannerResult<String> {
+        let inference = self.inference.lock().await;
+        let manager = self.model_manager.lock().await;
+        let mut runtime_mgr = self.runtime_manager.lock().await;
+        gateway_complete(
+            &self.data_dir,
+            &inference,
+            &manager,
+            self.model_provider.clone(),
+            &mut runtime_mgr,
+            Some(PromptRegistry::endpoint_verify_system()),
+            prompt,
+            1024,
+            0.1,
+        )
+        .await
+        .map_err(|e| aisec_planner::PlannerError::Llm(e.to_string()))
+    }
+}
+
+/// Attack results recommendation LLM — remediation guidance from scan findings.
+pub struct HostAttackRecommendLlm {
+    data_dir: PathBuf,
+    inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<LocalModelManager>>,
+    model_provider: SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+}
+
+impl HostAttackRecommendLlm {
+    pub fn new(
+        data_dir: PathBuf,
+        inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
+        model_manager: Arc<AsyncMutex<LocalModelManager>>,
+        model_provider: SharedModelProvider,
+        runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+    ) -> Self {
+        Self {
+            data_dir,
+            inference,
+            model_manager,
+            model_provider,
+            runtime_manager,
+        }
+    }
+}
+
+#[async_trait]
+impl PlannerLlm for HostAttackRecommendLlm {
+    async fn complete(&self, prompt: &str) -> aisec_planner::PlannerResult<String> {
+        let inference = self.inference.lock().await;
+        let manager = self.model_manager.lock().await;
+        let mut runtime_mgr = self.runtime_manager.lock().await;
+        gateway_complete(
+            &self.data_dir,
+            &inference,
+            &manager,
+            self.model_provider.clone(),
+            &mut runtime_mgr,
+            Some(PromptRegistry::attack_results_recommend_system()),
+            prompt,
+            2048,
+            0.15,
+        )
+        .await
+        .map_err(|e| aisec_planner::PlannerError::Llm(e.to_string()))
+    }
+}
+
+/// Project-level summary LLM — posture overview across targets, scans, and findings.
+pub struct HostProjectSummaryLlm {
+    data_dir: PathBuf,
+    inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<LocalModelManager>>,
+    model_provider: SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+}
+
+impl HostProjectSummaryLlm {
+    pub fn new(
+        data_dir: PathBuf,
+        inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
+        model_manager: Arc<AsyncMutex<LocalModelManager>>,
+        model_provider: SharedModelProvider,
+        runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+    ) -> Self {
+        Self {
+            data_dir,
+            inference,
+            model_manager,
+            model_provider,
+            runtime_manager,
+        }
+    }
+}
+
+#[async_trait]
+impl PlannerLlm for HostProjectSummaryLlm {
+    async fn complete(&self, prompt: &str) -> aisec_planner::PlannerResult<String> {
+        let inference = self.inference.lock().await;
+        let manager = self.model_manager.lock().await;
+        let mut runtime_mgr = self.runtime_manager.lock().await;
+        gateway_complete(
+            &self.data_dir,
+            &inference,
+            &manager,
+            self.model_provider.clone(),
+            &mut runtime_mgr,
+            Some(PromptRegistry::project_summary_system()),
+            prompt,
+            2048,
+            0.15,
+        )
+        .await
+        .map_err(|e| aisec_planner::PlannerError::Llm(e.to_string()))
+    }
+}
+
 /// Generator LLM backed by the AI Inference Gateway.
 pub struct HostGeneratorLlm {
     data_dir: PathBuf,
@@ -290,7 +396,7 @@ impl GeneratorLlm for HostGeneratorLlm {
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
-            None,
+            Some(PromptRegistry::generator_system()),
             prompt,
             1536,
             0.2,
@@ -345,19 +451,40 @@ pub async fn test_remote_connectivity_only(
 
     let adapter = RemoteProviderAdapter::new(remote.clone());
     let started = std::time::Instant::now();
-    let ok = ProviderAdapter::health(&adapter).await.unwrap_or(false);
-    Ok(ConnectivityTestResult {
-        ok,
-        provider: remote.provider.as_str().into(),
-        model: entry.display_model_name(),
-        latency_ms: started.elapsed().as_millis() as u64,
-        message: if ok {
-            "Connection Successful".into()
-        } else {
-            "Connection Failed".into()
-        },
-        sample_response: None,
-    })
+    let latency_ms = || started.elapsed().as_millis() as u64;
+
+    aisec_inference::record_sent();
+    let result = ProviderAdapter::health(&adapter).await;
+    if result.is_ok() {
+        aisec_inference::record_received();
+    }
+
+    match result {
+        Ok(true) => Ok(ConnectivityTestResult {
+            ok: true,
+            provider: remote.provider.as_str().into(),
+            model: entry.display_model_name(),
+            latency_ms: latency_ms(),
+            message: "Connection Successful".into(),
+            sample_response: None,
+        }),
+        Ok(false) => Ok(ConnectivityTestResult {
+            ok: false,
+            provider: remote.provider.as_str().into(),
+            model: entry.display_model_name(),
+            latency_ms: latency_ms(),
+            message: "Connection Failed: model returned an empty response".into(),
+            sample_response: None,
+        }),
+        Err(err) => Ok(ConnectivityTestResult {
+            ok: false,
+            provider: remote.provider.as_str().into(),
+            model: entry.display_model_name(),
+            latency_ms: latency_ms(),
+            message: format!("Connection Failed: {err}"),
+            sample_response: None,
+        }),
+    }
 }
 
 pub async fn test_connectivity_for_entry(

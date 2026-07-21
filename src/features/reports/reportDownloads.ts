@@ -1,7 +1,34 @@
 import { exportReport, generateReport } from "@/shared/ipc";
-import type { Finding, Project, Report, ScanRun } from "@/shared/types";
+import type { ReportFormat } from "@/shared/types";
 
-export type ReportExportFormat = "html" | "pdf" | "sarif";
+export type ReportExportFormat = Extract<ReportFormat, "html" | "pdf" | "sarif" | "csv">;
+
+const EXPORT_LABELS: Record<ReportExportFormat, string> = {
+  html: "HTML",
+  pdf: "PDF",
+  sarif: "SARIF",
+  csv: "CSV",
+};
+
+export function reportExportLabel(format: ReportExportFormat): string {
+  return EXPORT_LABELS[format];
+}
+
+export async function generateAndExportScanReport(
+  projectId: string,
+  scanId: string,
+  format: ReportExportFormat,
+): Promise<string> {
+  const report = await generateReport(projectId, scanId, format, "technical");
+  if (report.status !== "completed") {
+    throw new Error(`Report generation failed (${report.status})`);
+  }
+  return exportReport(report.id);
+}
+
+export async function exportStoredReport(reportId: string): Promise<string> {
+  return exportReport(reportId);
+}
 
 export type ScanExportRow = {
   scanId: string;
@@ -12,67 +39,43 @@ export type ScanExportRow = {
   lastGeneratedAt: string | null;
 };
 
-export function reportExportLabel(format: ReportExportFormat): string {
-  switch (format) {
-    case "html":
-      return "HTML";
-    case "pdf":
-      return "PDF";
-    case "sarif":
-      return "SARIF";
-  }
-}
+type BuildScanExportRowsInput = {
+  scans: Array<{ id: string; projectId: string; name: string }>;
+  findings: Array<{ scanId: string }>;
+  reports: Array<{ scanId: string | null; createdAt: string }>;
+  projects: Array<{ id: string; name: string }>;
+};
 
-export function buildScanExportRows(input: {
-  projects: Pick<Project, "id" | "name">[];
-  scans: Pick<ScanRun, "id" | "projectId" | "name">[];
-  findings: Pick<Finding, "scanId">[];
-  reports: Pick<Report, "scanId" | "createdAt">[];
-}): ScanExportRow[] {
-  const projectNameById = new Map(input.projects.map((project) => [project.id, project.name]));
-  const findingCountByScan = new Map<string, number>();
-
+export function buildScanExportRows(input: BuildScanExportRowsInput): ScanExportRow[] {
+  const findingCounts = new Map<string, number>();
   for (const finding of input.findings) {
-    findingCountByScan.set(
-      finding.scanId,
-      (findingCountByScan.get(finding.scanId) ?? 0) + 1,
-    );
+    findingCounts.set(finding.scanId, (findingCounts.get(finding.scanId) ?? 0) + 1);
   }
 
-  const lastGeneratedByScan = new Map<string, string>();
+  const lastGenerated = new Map<string, string>();
   for (const report of input.reports) {
     if (!report.scanId) continue;
-    const existing = lastGeneratedByScan.get(report.scanId);
+    const existing = lastGenerated.get(report.scanId);
     if (!existing || report.createdAt > existing) {
-      lastGeneratedByScan.set(report.scanId, report.createdAt);
+      lastGenerated.set(report.scanId, report.createdAt);
     }
   }
 
+  const projectNames = new Map(input.projects.map((project) => [project.id, project.name]));
+
   return input.scans
-    .map((scan) => {
-      const findingCount = findingCountByScan.get(scan.id) ?? 0;
-      if (findingCount === 0) return null;
-      return {
-        scanId: scan.id,
-        projectId: scan.projectId,
-        projectName: projectNameById.get(scan.projectId) ?? scan.projectId,
-        scanName: scan.name,
-        findingCount,
-        lastGeneratedAt: lastGeneratedByScan.get(scan.id) ?? null,
-      };
-    })
-    .filter((row): row is ScanExportRow => row !== null);
-}
-
-export async function generateAndExportScanReport(
-  projectId: string,
-  scanId: string,
-  format: ReportExportFormat,
-): Promise<string> {
-  const report = await generateReport(projectId, scanId, format, "technical");
-  return exportReport(report.id);
-}
-
-export async function exportStoredReport(reportId: string): Promise<string> {
-  return exportReport(reportId);
+    .filter((scan) => (findingCounts.get(scan.id) ?? 0) > 0)
+    .map((scan) => ({
+      scanId: scan.id,
+      projectId: scan.projectId,
+      projectName: projectNames.get(scan.projectId) ?? "—",
+      scanName: scan.name,
+      findingCount: findingCounts.get(scan.id) ?? 0,
+      lastGeneratedAt: lastGenerated.get(scan.id) ?? null,
+    }))
+    .sort((a, b) => {
+      const aTime = a.lastGeneratedAt ?? "";
+      const bTime = b.lastGeneratedAt ?? "";
+      return bTime.localeCompare(aTime);
+    });
 }

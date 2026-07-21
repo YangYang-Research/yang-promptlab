@@ -43,6 +43,7 @@ async fn all_formats_produce_output() {
         ReportFormat::Pdf,
         ReportFormat::Json,
         ReportFormat::Sarif,
+        ReportFormat::Csv,
     ] {
         let report = engine
             .generate(ReportKind::Technical, format, &input)

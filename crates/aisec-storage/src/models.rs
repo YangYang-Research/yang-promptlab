@@ -11,6 +11,7 @@ pub struct Project {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    pub summary_json: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -145,6 +146,25 @@ pub struct Plugin {
     pub updated_at: OffsetDateTime,
 }
 
+/// Global attack technique catalog row (editable default prompts).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct AttackCatalogTechnique {
+    pub id: String,
+    pub category_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub content: String,
+    pub default_content: String,
+    pub tags_json: String,
+    pub surface: Option<String>,
+    pub owasp: Option<String>,
+    pub enabled: bool,
+    pub user_modified: bool,
+    pub sort_order: i64,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
 // ---------------------------------------------------------------------------
 // Create / Update DTOs
 // ---------------------------------------------------------------------------
@@ -159,6 +179,7 @@ pub struct CreateProject {
 pub struct UpdateProject {
     pub name: Option<String>,
     pub description: Option<String>,
+    pub summary_json: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -339,6 +360,72 @@ pub struct UpdatePlugin {
     pub enabled: Option<bool>,
     pub manifest_json: Option<serde_json::Value>,
     pub install_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpsertAttackCatalogTechnique {
+    pub id: String,
+    pub category_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub content: String,
+    pub default_content: String,
+    pub tags_json: String,
+    pub surface: Option<String>,
+    pub owasp: Option<String>,
+    pub enabled: bool,
+    pub sort_order: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UpdateAttackCatalogTechnique {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub content: Option<String>,
+    pub enabled: Option<bool>,
+    pub tags_json: Option<String>,
+    pub surface: Option<String>,
+    pub owasp: Option<String>,
+    pub sort_order: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct RuntimeTrafficEvent {
+    pub id: String,
+    pub at_ms: i64,
+    pub direction: String,
+    pub created_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateRuntimeTrafficEvent {
+    pub at_ms: i64,
+    pub direction: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct RuntimeTrafficCounters {
+    pub id: i64,
+    pub lifetime_sent: i64,
+    pub lifetime_received: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct JudgeRoleWeights {
+    pub id: i64,
+    pub judge: f64,
+    pub classifier: f64,
+    pub attacker: f64,
+    pub default_llm: f64,
+    pub updated_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateJudgeRoleWeights {
+    pub judge: f64,
+    pub classifier: f64,
+    pub attacker: f64,
+    pub default_llm: f64,
 }
 
 /// Helper for serializing optional JSON columns.

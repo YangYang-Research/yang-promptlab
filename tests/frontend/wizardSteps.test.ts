@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createInitialTargetProfile } from "@/features/scans/targetProfile";
-import { canProceedFromStep, type WizardDraft } from "@/features/scans/wizardSteps";
+import { canNavigateToStep, canProceedFromStep, type WizardDraft } from "@/features/scans/wizardSteps";
 
 function baseDraft(overrides: Partial<WizardDraft> = {}): WizardDraft {
   return {
@@ -40,5 +40,22 @@ describe("canProceedFromStep", () => {
     expect(canProceedFromStep(3, baseDraft({ target: { id: "t1" } as WizardDraft["target"] }))).toBe(
       false,
     );
+  });
+});
+
+describe("canNavigateToStep", () => {
+  it("blocks step 6 while a submitted scan is still running", () => {
+    const draft = baseDraft({ submittedScanId: "scan-1" });
+
+    expect(canNavigateToStep(5, draft, { scanStatus: "running" })).toBe(true);
+    expect(canNavigateToStep(6, draft, { scanStatus: "running" })).toBe(false);
+    expect(canNavigateToStep(6, draft, { scanStatus: "paused" })).toBe(false);
+  });
+
+  it("allows step 6 only after the scan completes", () => {
+    const draft = baseDraft({ submittedScanId: "scan-1" });
+
+    expect(canNavigateToStep(6, draft, { scanStatus: "completed" })).toBe(true);
+    expect(canNavigateToStep(6, draft, { scanStatus: "failed" })).toBe(false);
   });
 });

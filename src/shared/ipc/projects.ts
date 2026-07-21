@@ -5,6 +5,8 @@ export type ProjectDto = {
   id: string;
   name: string;
   description: string | null;
+  /** Persisted AI/fallback project summary JSON when present. */
+  summary?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 };

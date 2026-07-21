@@ -9,6 +9,23 @@ export type TargetProfileVerifyResponse = {
   profile: TargetProfileDto;
   console: VerificationConsoleEntryDto;
   message: string;
+  /** Fresh Step 2 capability-probe HTTP console (before Yazg classification). */
+  probeConsole?: VerificationConsoleEntryDto | null;
+};
+
+export type VerifyHttpSnapshot = {
+  console: VerificationConsoleEntryDto;
+  responseText: string;
+  requestBody: string;
+  responseTimeMs: number;
+  statusCode: number;
+};
+
+export type TargetProfileConnectVerifyResponse = {
+  success: boolean;
+  console: VerificationConsoleEntryDto;
+  message: string;
+  connectSnapshot: VerifyHttpSnapshot | null;
 };
 
 export const listTargetProfileTemplates = () =>
@@ -19,6 +36,36 @@ export const getTargetProfile = (targetId: string) =>
 
 export const saveTargetProfile = (targetId: string, profile: Record<string, unknown>) =>
   invokeCommand<{ id: string }>("target_profile_save", { targetId, profile });
+
+export const verifyTargetProfileConnect = (
+  targetId: string,
+  profile: Record<string, unknown>,
+  options?: {
+    auth?: Record<string, unknown> | null;
+    authHeaders?: Record<string, string> | null;
+  },
+) =>
+  invokeCommand<TargetProfileConnectVerifyResponse>("target_profile_verify_connect", {
+    targetId,
+    profile,
+    auth: options?.auth ?? null,
+    authHeaders: options?.authHeaders ?? null,
+  });
+
+export const verifyTargetProfileAi = (
+  targetId: string,
+  profile: Record<string, unknown>,
+  options?: {
+    auth?: Record<string, unknown> | null;
+    authHeaders?: Record<string, string> | null;
+  },
+) =>
+  invokeCommand<TargetProfileVerifyResponse>("target_profile_verify_ai", {
+    targetId,
+    profile,
+    auth: options?.auth ?? null,
+    authHeaders: options?.authHeaders ?? null,
+  });
 
 export const verifyTargetProfile = (
   targetId: string,

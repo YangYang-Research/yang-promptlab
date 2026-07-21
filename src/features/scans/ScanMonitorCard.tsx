@@ -1,4 +1,5 @@
 import { Badge, Button, ProgressBar, StatusBadge } from "@/shared/components";
+import { formatScanProgressPercent } from "@/features/scans/scanProgressFormat";
 import { formatDurationMs, formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import type { ScanStatusDto } from "@/shared/ipc";
 import type { ScanRun } from "@/shared/types";
@@ -12,6 +13,7 @@ type ScanMonitorCardProps = {
   onPause: () => void;
   onResume: () => void;
   onStop: () => void;
+  actions?: React.ReactNode;
 };
 
 function progressLabel(status: ScanStatusDto): string {
@@ -19,7 +21,8 @@ function progressLabel(status: ScanStatusDto): string {
     return "Scan paused";
   }
   if (status.total > 0) {
-    return `${status.completed} / ${status.total} tests`;
+    const tests = `${status.testcases_completed ?? 0}/${status.testcases_total ?? "—"}`;
+    return `${formatScanProgressPercent(status.progress_percent)} · ${tests} active tests`;
   }
   return "Scan in progress";
 }
@@ -46,6 +49,7 @@ export function ScanMonitorCard({
   onPause,
   onResume,
   onStop,
+  actions,
 }: ScanMonitorCardProps) {
   const isActive = status.status === "running" || status.status === "paused";
   const canPause = status.status === "running";
@@ -61,8 +65,10 @@ export function ScanMonitorCard({
           </p>
           <p className="text-muted text-sm mono">{scan.id}</p>
         </div>
-        <StatusBadge status={status.status as ScanRun["status"]} />
-        {status.agent_mode && <Badge variant="info">Agent</Badge>}
+        <div className="scan-monitor-card__header-actions">
+          <StatusBadge status={status.status as ScanRun["status"]} />
+          {status.agent_mode && <Badge variant="info">Agent</Badge>}
+        </div>
       </div>
 
       {isActive && (
@@ -80,7 +86,7 @@ export function ScanMonitorCard({
         </div>
         <div>
           <dt>Progress</dt>
-          <dd>{Math.round(status.progress_percent)}%</dd>
+          <dd>{formatScanProgressPercent(status.progress_percent)}</dd>
         </div>
         <div className="scan-monitor-card__metric--wide">
           <dt>Current endpoint</dt>
@@ -114,26 +120,41 @@ export function ScanMonitorCard({
         >
           <span className="card-footer-meta text-sm text-muted">{scanStartedLabel(scan)}</span>
           <div className="card-footer-actions scan-monitor-card__controls">
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={controlPending || !canPause}
-              onClick={onPause}
-            >
-              Pause
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={controlPending || !canResume}
-              onClick={onResume}
-            >
-              Resume
-            </Button>
+            {canPause && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={controlPending || status.pause_pending === true}
+                onClick={onPause}
+              >
+                {status.pause_pending ? "Pausing…" : "Pause"}
+              </Button>
+            )}
+            {canResume && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={controlPending}
+                onClick={onResume}
+              >
+                Resume
+              </Button>
+            )}
             <Button variant="danger" size="sm" disabled={controlPending} onClick={onStop}>
               Stop
             </Button>
+            {actions}
           </div>
+        </div>
+      )}
+      {!isActive && actions && (
+        <div
+          className="card-footer"
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          <span className="card-footer-meta text-sm text-muted">{scanStartedLabel(scan)}</span>
+          <div className="card-footer-actions">{actions}</div>
         </div>
       )}
     </div>
@@ -145,6 +166,7 @@ type ScanHistoryCardProps = {
   findingsCount: number;
   projectName: string;
   targetName: string;
+  actions?: React.ReactNode;
 };
 
 export function ScanHistoryCard({
@@ -152,6 +174,7 @@ export function ScanHistoryCard({
   findingsCount,
   projectName,
   targetName,
+  actions,
 }: ScanHistoryCardProps) {
   return (
     <div className="scan-monitor-card scan-monitor-card--history">
@@ -162,7 +185,9 @@ export function ScanHistoryCard({
             {projectName} · {targetName}
           </p>
         </div>
-        <StatusBadge status={scan.status} />
+        <div className="scan-monitor-card__header-actions">
+          <StatusBadge status={scan.status} />
+        </div>
       </div>
       <dl className="scan-monitor-card__metrics">
         <div>
@@ -174,8 +199,13 @@ export function ScanHistoryCard({
           <dd className="text-sm">{scanDurationLabel(scan)}</dd>
         </div>
       </dl>
-      <div className="card-footer">
+      <div
+        className="card-footer"
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
         <span className="card-footer-meta text-sm text-muted">{scanStartedLabel(scan)}</span>
+        {actions ? <div className="card-footer-actions">{actions}</div> : null}
       </div>
     </div>
   );

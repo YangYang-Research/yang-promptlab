@@ -69,6 +69,15 @@ impl ScanRepository for SqliteScanRepository {
         .map_storage()
     }
 
+    async fn list_interrupted(&self) -> AisecResult<Vec<Scan>> {
+        sqlx::query_as::<_, Scan>(
+            "SELECT * FROM scans WHERE status IN ('running', 'paused', 'pending') ORDER BY created_at DESC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_storage()
+    }
+
     async fn update(&self, id: &str, input: UpdateScan) -> AisecResult<Scan> {
         let existing = self.get(id).await?;
         let target_id = match input.target_id {

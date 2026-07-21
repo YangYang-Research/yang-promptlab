@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 /// Built-in AI platform providers. Register new variants here for future platforms.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TargetProvider {
     OpenAiCompatible,
+    OpenRouter,
     AnthropicClaude,
     GoogleGemini,
     AzureOpenAi,
@@ -25,6 +25,7 @@ impl TargetProvider {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::OpenAiCompatible => "openai_compatible",
+            Self::OpenRouter => "openrouter",
             Self::AnthropicClaude => "anthropic_claude",
             Self::GoogleGemini => "google_gemini",
             Self::AzureOpenAi => "azure_openai",
@@ -41,13 +42,14 @@ impl TargetProvider {
 
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().replace(['-', ' '], "_").as_str() {
-            "openai_compatible" | "openai" => Some(Self::OpenAiCompatible),
+            "openai_compatible" | "openai" | "open_ai_compatible" => Some(Self::OpenAiCompatible),
+            "openrouter" | "open_router" => Some(Self::OpenRouter),
             "anthropic_claude" | "anthropic" | "claude" => Some(Self::AnthropicClaude),
             "google_gemini" | "gemini" => Some(Self::GoogleGemini),
-            "azure_openai" | "azure" => Some(Self::AzureOpenAi),
+            "azure_openai" | "azure" | "azure_open_ai" => Some(Self::AzureOpenAi),
             "aws_bedrock" | "bedrock" => Some(Self::AwsBedrock),
             "github_copilot" | "copilot" => Some(Self::GitHubCopilot),
-            "open_webui" | "openwebui" => Some(Self::OpenWebUi),
+            "open_webui" | "openwebui" | "open_web_ui" => Some(Self::OpenWebUi),
             "dify" => Some(Self::Dify),
             "langflow" => Some(Self::Langflow),
             "mcp" | "mcp_server" => Some(Self::Mcp),
@@ -60,6 +62,7 @@ impl TargetProvider {
     pub fn display_name(self) -> &'static str {
         match self {
             Self::OpenAiCompatible => "OpenAI Compatible",
+            Self::OpenRouter => "OpenRouter",
             Self::AnthropicClaude => "Anthropic Claude",
             Self::GoogleGemini => "Google Gemini",
             Self::AzureOpenAi => "Azure OpenAI",
@@ -116,6 +119,15 @@ impl<'de> Deserialize<'de> for HttpMethod {
     {
         let raw = String::deserialize(deserializer)?;
         HttpMethod::parse(&raw).ok_or_else(|| serde::de::Error::custom("invalid HTTP method"))
+    }
+}
+
+impl Serialize for TargetProvider {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -203,7 +215,7 @@ impl Default for TargetProfile {
 
 #[cfg(test)]
 mod profile_serde_tests {
-    use super::TargetProfile;
+    use super::{TargetProfile, TargetProvider};
 
     #[test]
     fn deserializes_verification_verified_at_rfc3339() {
@@ -278,6 +290,57 @@ mod profile_serde_tests {
         });
         let profile: TargetProfile = serde_json::from_value(json).expect("profile json");
         assert!(profile.verification.verified_at.is_some());
+    }
+
+    #[test]
+    fn deserializes_openrouter_provider() {
+        let json = r#"{
+          "provider": "openrouter",
+          "framework": "openrouter",
+          "method": "POST",
+          "baseUrl": "https://openrouter.ai/api/v1",
+          "path": "/chat/completions",
+          "requestTemplate": "{\"messages\":[{\"role\":\"user\",\"content\":\"{{PROMPT}}\"}]}",
+          "promptPlaceholder": "{{PROMPT}}",
+          "verificationStrategy": "openai_chat_completion",
+          "verification": {
+            "verified": false,
+            "provider": "openrouter",
+            "capabilities": {
+              "supportsStreaming": true,
+              "supportsTools": true,
+              "supportsConversation": true,
+              "supportsAttachments": true,
+              "supportsMemory": false,
+              "supportsAgent": false
+            },
+            "responseTimeMs": 0,
+            "statusCode": 0,
+            "status": "pending"
+          }
+        }"#;
+        let profile: TargetProfile = serde_json::from_str(json).expect("openrouter profile json");
+        assert_eq!(profile.provider, TargetProvider::OpenRouter);
+    }
+
+    #[test]
+    fn deserializes_legacy_open_router_alias() {
+        let json = r#"{"provider":"open_router"}"#;
+        let value: serde_json::Value = serde_json::from_str(json).expect("json value");
+        let provider: TargetProvider =
+            serde_json::from_value(value["provider"].clone()).expect("open_router alias");
+        assert_eq!(provider, TargetProvider::OpenRouter);
+    }
+
+    #[test]
+    fn serializes_openrouter_with_canonical_provider_id() {
+        use crate::templates::template_for_provider;
+
+        let profile = template_for_provider(TargetProvider::OpenRouter);
+        let json = serde_json::to_string(&profile).expect("profile json");
+        assert!(json.contains(r#""provider":"openrouter""#));
+        let roundtrip: TargetProfile = serde_json::from_str(&json).expect("roundtrip profile");
+        assert_eq!(roundtrip.provider, TargetProvider::OpenRouter);
     }
 }
 

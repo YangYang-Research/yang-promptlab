@@ -1,9 +1,10 @@
 //! Local model vault commands — browse, install, remove, verify, inference test.
 
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use aisec_auth::SecretStore;
-use aisec_core::AisecError;
+use aisec_core::{AisecError, LogCategory};
 use aisec_models::{
     DownloadManager, DownloadProgress, DownloadStatus, LocalModelManager, ModelCatalogEntry,
     ModelEntry, ModelFormat, ModelProvider, ModelSource, VerificationResult, remote_entry_id,
@@ -30,6 +31,19 @@ use crate::third_party_credentials::{
     API_KEY_CREDENTIAL_ID, API_KEY_ENV, AWS_SECRET_CREDENTIAL_ID, AWS_SESSION_CREDENTIAL_ID,
     LAST_CONNECTIVITY_OK,
 };
+
+const MODEL_OPERATION_TIMEOUT: Duration = Duration::from_secs(45);
+
+async fn with_model_operation_timeout<T, F>(future: F) -> CommandResult<T>
+where
+    F: std::future::Future<Output = CommandResult<T>>,
+{
+    tokio::time::timeout(MODEL_OPERATION_TIMEOUT, future)
+        .await
+        .map_err(|_| {
+            CommandError::invalid_input("operation timed out after 45 seconds")
+        })?
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -258,6 +272,128 @@ fn apply_credential_fields(
     request.aws_session_token = credentials.aws_session_token.clone();
 }
 
+fn looks_like_openrouter_model(model: &str) -> bool {
+    let model = model.trim();
+    model.contains('/') && !model.contains(' ')
+}
+
+fn normalize_third_party_provider(
+    provider: &str,
+    base_url: Option<&str>,
+    model: Option<&str>,
+) -> String {
+    if base_url
+        .map(|url| url.to_ascii_lowercase().contains("openrouter.ai"))
+        .unwrap_or(false)
+    {
+        return "openrouter".to_string();
+    }
+    if provider.trim().eq_ignore_ascii_case("openai")
+        && base_url.map(|url| url.trim().is_empty()).unwrap_or(true)
+        && model.is_some_and(looks_like_openrouter_model)
+    {
+        return "openrouter".to_string();
+    }
+    provider.trim().to_string()
+}
+
+fn default_base_url_for_provider(provider: &str) -> Option<String> {
+    match provider {
+        "openrouter" => Some("https://openrouter.ai/api/v1".into()),
+        "nvidia" => Some("https://integrate.api.nvidia.com/v1".into()),
+        _ => None,
+    }
+}
+
+fn resolve_third_party_base_url(
+    provider: &str,
+    base_url: Option<String>,
+    model: Option<&str>,
+) -> Option<String> {
+    base_url
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| default_base_url_for_provider(provider))
+        .or_else(|| {
+            if model.is_some_and(looks_like_openrouter_model) {
+                default_base_url_for_provider("openrouter")
+            } else {
+                None
+            }
+        })
+}
+
+fn log_model_connectivity_test(
+    state: &AppState,
+    provider: &str,
+    model: &str,
+    ok: bool,
+    message: &str,
+    latency_ms: u64,
+) {
+    let summary = if ok {
+        format!("Connection successful for {provider}/{model} ({latency_ms} ms)")
+    } else {
+        format!("Connection failed for {provider}/{model}: {message}")
+    };
+
+    if ok {
+        state.event_bus().info(
+            LogCategory::Models,
+            "test_connection",
+            "promptlab-desktop",
+            "models",
+            &summary,
+        );
+        tracing::info!(
+            provider = %provider,
+            model = %model,
+            latency_ms,
+            "model connection test succeeded"
+        );
+    } else {
+        state.event_bus().error(
+            LogCategory::Models,
+            "test_connection",
+            "promptlab-desktop",
+            "models",
+            &summary,
+        );
+        tracing::warn!(
+            provider = %provider,
+            model = %model,
+            latency_ms,
+            message = %message,
+            "model connection test failed"
+        );
+    }
+}
+
+fn log_model_connectivity_command_error(
+    state: &AppState,
+    model_id: Option<&str>,
+    provider: Option<&str>,
+    model: Option<&str>,
+    error: &CommandError,
+) {
+    let target = match (provider, model) {
+        (Some(provider), Some(model)) => format!("{provider}/{model}"),
+        _ => model_id.unwrap_or("unknown").to_string(),
+    };
+    let summary = format!("Connection test error for {target}: {}", error.message);
+    state.event_bus().error(
+        LogCategory::Models,
+        "test_connection",
+        "promptlab-desktop",
+        "models",
+        &summary,
+    );
+    tracing::warn!(
+        target = %target,
+        error = %error.message,
+        "model connection test command failed"
+    );
+}
+
 async fn run_third_party_connectivity_test(
     state: &AppState,
     mut request: ThirdPartyModelSaveRequest,
@@ -269,6 +405,17 @@ async fn run_third_party_connectivity_test(
     if request.provider.trim().is_empty() {
         return Err(CommandError::invalid_input("provider is required"));
     }
+
+    request.provider = normalize_third_party_provider(
+        &request.provider,
+        request.base_url.as_deref(),
+        Some(request.model.as_str()),
+    );
+    request.base_url = resolve_third_party_base_url(
+        &request.provider,
+        request.base_url.clone(),
+        Some(request.model.as_str()),
+    );
 
     let mut credentials = credential_fields_from_request(&request);
     let vault = open_model_credential_vault(state.data_dir())?;
@@ -292,6 +439,15 @@ async fn run_third_party_connectivity_test(
     )
     .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
     let result = test_remote_connectivity_only(&entry, remote).await?;
+
+    log_model_connectivity_test(
+        state,
+        &result.provider,
+        &result.model,
+        result.ok,
+        &result.message,
+        result.latency_ms,
+    );
 
     Ok(ThirdPartyModelConnectivityResultDto {
         ok: result.ok,
@@ -726,9 +882,13 @@ pub async fn models_save_third_party(
     if request.provider.trim().is_empty() {
         return Err(CommandError::invalid_input("provider is required"));
     }
-    let provider = request.provider.trim();
+    let provider = normalize_third_party_provider(
+        request.provider.trim(),
+        request.base_url.as_deref(),
+        Some(request.model.trim()),
+    );
     let model = request.model.trim();
-    let new_id = remote_entry_id(provider, model);
+    let new_id = remote_entry_id(&provider, model);
     let existing_id = request
         .existing_model_id
         .as_deref()
@@ -742,9 +902,9 @@ pub async fn models_save_third_party(
 
     let entry = manager
         .register_third_party(
-            provider,
+            &provider,
             model,
-            request.base_url.clone().filter(|value| !value.trim().is_empty()),
+            resolve_third_party_base_url(&provider, request.base_url.clone(), Some(model)),
             request.region.clone().filter(|value| !value.trim().is_empty()),
         )
         .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
@@ -822,24 +982,40 @@ pub async fn models_test_third_party(
     state: State<'_, AppState>,
     request: ThirdPartyModelSaveRequest,
 ) -> CommandResult<ThirdPartyModelConnectivityResultDto> {
-    let model_id = remote_entry_id(request.provider.trim(), request.model.trim());
-    let metadata = {
-        let manager = state.model_manager().lock().await;
-        manager
-            .get_model(&model_id)
-            .map(|entry| entry.metadata.clone())
-    };
-    let result = run_third_party_connectivity_test(state.inner(), request, metadata.clone()).await?;
-    if metadata.is_some() {
-        persist_third_party_model_connectivity(
+    let provider = request.provider.trim().to_string();
+    let model = request.model.trim().to_string();
+    with_model_operation_timeout(async {
+        let model_id = remote_entry_id(&provider, &model);
+        let metadata = {
+            let manager = state.model_manager().lock().await;
+            manager
+                .get_model(&model_id)
+                .map(|entry| entry.metadata.clone())
+        };
+        let result =
+            run_third_party_connectivity_test(state.inner(), request, metadata.clone()).await?;
+        if metadata.is_some() {
+            persist_third_party_model_connectivity(
+                state.inner(),
+                &model_id,
+                result.ok,
+                result.latency_ms,
+            )
+            .await?;
+        }
+        Ok(result)
+    })
+    .await
+    .map_err(|error| {
+        log_model_connectivity_command_error(
             state.inner(),
-            &model_id,
-            result.ok,
-            result.latency_ms,
-        )
-        .await?;
-    }
-    Ok(result)
+            None,
+            Some(&provider),
+            Some(&model),
+            &error,
+        );
+        error
+    })
 }
 
 #[tauri::command]
@@ -847,7 +1023,14 @@ pub async fn models_test_connection(
     state: State<'_, AppState>,
     model_id: String,
 ) -> CommandResult<ThirdPartyModelConnectivityResultDto> {
-    test_third_party_model_connection(state.inner(), &model_id).await
+    with_model_operation_timeout(async {
+        test_third_party_model_connection(state.inner(), &model_id).await
+    })
+    .await
+    .map_err(|error| {
+        log_model_connectivity_command_error(state.inner(), Some(&model_id), None, None, &error);
+        error
+    })
 }
 
 pub(crate) async fn test_third_party_model_connection(
@@ -1108,7 +1291,7 @@ pub async fn models_test_inference(
     }
 
     crate::commands::runtime::set_runtime_model_testing(state.inner(), Some(model_id.clone())).await;
-    let test_result = async {
+    let test_result = with_model_operation_timeout(async {
         let need_load = {
             let runtime_mgr = state.runtime_manager().lock().await;
             !runtime_mgr.is_same_model_loaded_at(&file_path).await
@@ -1186,7 +1369,7 @@ pub async fn models_test_inference(
                 "Inference smoke test returned an empty response".into()
             },
         })
-    }
+    })
     .await;
 
     crate::commands::runtime::set_runtime_model_testing(state.inner(), None).await;

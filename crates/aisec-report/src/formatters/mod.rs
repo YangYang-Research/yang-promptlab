@@ -1,3 +1,4 @@
+mod csv;
 mod html;
 mod json;
 mod pdf;
@@ -8,6 +9,7 @@ use async_trait::async_trait;
 use crate::error::ReportResult;
 use crate::types::{GeneratedReport, ReportFormat, ReportInput, ReportKind};
 
+pub use csv::CsvFormatter;
 pub use html::HtmlFormatter;
 pub use json::JsonFormatter;
 pub use pdf::PdfFormatter;
@@ -26,5 +28,6 @@ pub fn formatter_for(format: ReportFormat) -> Box<dyn ReportFormatter> {
         ReportFormat::Pdf => Box::new(PdfFormatter),
         ReportFormat::Json => Box::new(JsonFormatter),
         ReportFormat::Sarif => Box::new(SarifFormatter),
+        ReportFormat::Csv => Box::new(CsvFormatter),
     }
 }

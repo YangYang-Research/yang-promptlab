@@ -2,6 +2,7 @@ export const PROMPT_PLACEHOLDER = "{{PROMPT}}";
 
 export type TargetProviderId =
   | "openai_compatible"
+  | "openrouter"
   | "anthropic_claude"
   | "google_gemini"
   | "azure_openai"
@@ -92,6 +93,7 @@ export type VerificationConsoleEntryDto = {
 
 export const PROVIDER_OPTIONS: Array<{ id: TargetProviderId; label: string }> = [
   { id: "openai_compatible", label: "OpenAI Compatible" },
+  { id: "openrouter", label: "OpenRouter" },
   { id: "anthropic_claude", label: "Anthropic Claude" },
   { id: "google_gemini", label: "Google Gemini" },
   { id: "azure_openai", label: "Azure OpenAI" },
@@ -253,11 +255,11 @@ export function profileToPayload(form: TargetProfileFormState): Record<string, u
 
 export function validateTargetProfile(form: TargetProfileFormState): string | null {
   const endpoint = formatApiEndpoint(form);
-  if (!endpoint.trim()) return "AI API Endpoint is required.";
+  if (!endpoint.trim()) return "Endpoint is required.";
   try {
     new URL(endpoint);
   } catch {
-    return "Enter a valid AI API Endpoint URL (e.g. https://api.openai.com/v1/chat/completions).";
+    return "Enter a valid Endpoint URL (e.g. https://api.openai.com/v1/chat/completions).";
   }
   if (!form.requestTemplate.includes(form.promptPlaceholder || PROMPT_PLACEHOLDER)) {
     return `Request template must contain ${PROMPT_PLACEHOLDER}.`;
@@ -317,4 +319,30 @@ export function deriveTargetNameFromProfile(form: TargetProfileFormState): strin
   } catch {
     return form.provider.replace(/_/g, " ");
   }
+}
+
+export function formatProviderLabel(providerId: string): string {
+  const match = PROVIDER_OPTIONS.find((option) => option.id === providerId);
+  if (match) return match.label;
+  return providerId.replace(/_/g, " ");
+}
+
+export function extractTargetProviderLabel(profile: unknown): string | null {
+  if (typeof profile !== "object" || profile === null || Array.isArray(profile)) {
+    return null;
+  }
+  const provider = (profile as Record<string, unknown>).provider;
+  if (typeof provider !== "string" || !provider.trim()) {
+    return null;
+  }
+  return formatProviderLabel(provider.trim());
+}
+
+export function targetDisplayType(target: {
+  type: string;
+  providerLabel: string | null;
+}): string {
+  if (target.providerLabel) return target.providerLabel;
+  if (target.type === "llm") return "LLM";
+  return target.type.charAt(0).toUpperCase() + target.type.slice(1);
 }

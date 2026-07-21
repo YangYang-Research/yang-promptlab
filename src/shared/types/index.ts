@@ -2,11 +2,14 @@ export type Severity = "critical" | "high" | "medium" | "low" | "info";
 
 export type JobStatus = "pending" | "draft" | "running" | "paused" | "completed" | "failed" | "cancelled";
 
+/** Lifecycle status for a target (derived from verification + scan history). */
+export type TargetStatus = "pending" | "verified" | "scanned";
+
 export type ProjectStatus = "active" | "archived" | "draft";
 
 export type TargetType = "web" | "api" | "llm" | "mobile";
 
-export type ReportFormat = "html" | "pdf" | "json" | "sarif" | "markdown";
+export type ReportFormat = "html" | "pdf" | "json" | "sarif" | "markdown" | "csv";
 
 export type ModelStatus = "installed" | "downloading" | "available" | "error";
 
@@ -39,11 +42,15 @@ export type Target = {
   name: string;
   url: string;
   type: TargetType;
-  status: JobStatus;
+  /** Human label from saved target profile provider (e.g. OpenRouter). */
+  providerLabel: string | null;
+  status: TargetStatus;
+  createdAt: string;
   lastScanAt: string | null;
   fingerprint: string | null;
   tags: string[];
   authType: string;
+  authKind: "none" | "username_password" | "sso" | "basic" | "api_key" | "jwt";
 };
 
 export type AttackRun = {
@@ -65,6 +72,8 @@ export type Finding = {
   projectId: string;
   targetId: string;
   targetName: string;
+  /** Full endpoint URL from the linked target, when available. */
+  targetUrl: string;
   title: string;
   description: string;
   severity: Severity;
@@ -85,79 +94,6 @@ export type ScanRun = {
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
-};
-
-export type DiscoveredEndpoint = {
-  id: string;
-  scanId: string;
-  targetId: string | null;
-  url: string;
-  kind: string;
-  method: string | null;
-  confidence: number;
-  evidence: string | null;
-  sourceUrl: string | null;
-  discoveredAt: string;
-  endpointType?: string;
-  aiFramework?: string | null;
-  riskScore?: number;
-  metadataConfidence?: number;
-  discoverySource?: string;
-  authRequired?: boolean;
-  metadata?: import("@/shared/ipc/client").AiEndpointMetadataDto | null;
-  attackRecommendations?: import("@/shared/ipc/client").EndpointAttackRecommendationDto[];
-  /** @deprecated use metadata */
-  fingerprint: EndpointFingerprint | null;
-};
-
-export type EndpointFingerprint = {
-  confidence: number;
-  technologies: FingerprintTechnology[];
-  agentFrameworks: FingerprintFramework[];
-  aiComponents: FingerprintComponent[];
-  attackRecommendations: FingerprintRecommendation[];
-  methodsUsed: string[];
-  primaryProvider: string | null;
-  apiStyle: string | null;
-  platformProfile: PlatformProfile;
-};
-
-export type PlatformProfile = {
-  platform: string;
-  version: string;
-  authType: string;
-  llmProvider: string;
-  memoryEnabled: boolean;
-  toolsEnabled: boolean;
-  ragEnabled: boolean;
-};
-
-export type FingerprintTechnology = {
-  id: string;
-  name: string;
-  category: string;
-  confidence: number;
-  signals: string[];
-};
-
-export type FingerprintFramework = {
-  id: string;
-  name: string;
-  confidence: number;
-  signals: string[];
-};
-
-export type FingerprintComponent = {
-  id: string;
-  name: string;
-  confidence: number;
-  signals: string[];
-};
-
-export type FingerprintRecommendation = {
-  category: string;
-  reason: string;
-  priority: number;
 };
 
 export type Report = {

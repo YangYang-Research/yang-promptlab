@@ -79,6 +79,7 @@ impl LocalInferenceEngine {
             let prompt = format_chat_prompt(&request.messages);
             let response = runtime
                 .complete(InferenceRequest {
+                    system: None,
                     prompt,
                     max_tokens: request.max_tokens,
                     temperature: request.temperature,

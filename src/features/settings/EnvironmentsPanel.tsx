@@ -41,13 +41,8 @@ export function EnvironmentsPanel({ backendConnected }: EnvironmentsPanelProps) 
   }
 
   return (
-    <div className="settings-tab-panel">
-      <Card>
-        <h3 className="card__title">Environments</h3>
-        <p className="text-muted text-sm">
-          PromptLab stores all application data under a fixed root directory on this device.
-        </p>
-        {!backendConnected ? (
+    <Card>
+      {!backendConnected ? (
           <p className="text-muted text-sm">Connect to the desktop backend to view the root directory.</p>
         ) : loading ? (
           <p className="text-muted text-sm">Loading environment…</p>
@@ -71,7 +66,6 @@ export function EnvironmentsPanel({ backendConnected }: EnvironmentsPanelProps) 
             {error ? <p className="text-danger text-sm">{error}</p> : null}
           </>
         ) : null}
-      </Card>
-    </div>
+    </Card>
   );
 }

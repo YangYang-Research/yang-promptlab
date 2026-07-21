@@ -6,6 +6,7 @@ use crate::types::{TargetProfile, TargetProvider};
 pub fn harness_kind_for_profile(profile: &TargetProfile) -> HarnessKind {
     match profile.provider {
         TargetProvider::OpenAiCompatible
+        | TargetProvider::OpenRouter
         | TargetProvider::AnthropicClaude
         | TargetProvider::GoogleGemini
         | TargetProvider::AzureOpenAi

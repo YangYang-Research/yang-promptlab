@@ -29,8 +29,9 @@ describe("attackProfiles", () => {
   });
 
   it("computes per-category payload variant count", () => {
-    const perCategory = requestsPerCategory(getCategory("prompt_injection"));
-    expect(perCategory).toBe(3 * VARIANTS_PER_PAYLOAD);
+    const category = getCategory("prompt_injection");
+    const perCategory = requestsPerCategory(category);
+    expect(perCategory).toBe(category.tests.length * VARIANTS_PER_PAYLOAD);
   });
 
   it("formats runtime for sub-minute and multi-minute scans", () => {

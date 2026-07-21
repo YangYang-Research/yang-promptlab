@@ -3,7 +3,12 @@ type Column<T> = {
   header: string;
   render: (row: T) => React.ReactNode;
   width?: string;
+  align?: "left" | "right";
 };
+
+function cellClassName(align?: "left" | "right") {
+  return align === "right" ? "data-table__cell--align-right" : undefined;
+}
 
 type DataTableProps<T> = {
   columns: Column<T>[];
@@ -11,6 +16,7 @@ type DataTableProps<T> = {
   keyField: keyof T & string;
   onRowClick?: (row: T) => void;
   emptyMessage?: string;
+  loading?: boolean;
 };
 
 export function DataTable<T extends { [key: string]: unknown }>({
@@ -19,9 +25,15 @@ export function DataTable<T extends { [key: string]: unknown }>({
   keyField,
   onRowClick,
   emptyMessage = "No data",
+  loading = false,
 }: DataTableProps<T>) {
   if (rows.length === 0) {
-    return <p className="data-table__empty">{emptyMessage}</p>;
+    return (
+      <div className={`data-table__empty ${loading ? "data-table__empty--loading" : ""}`}>
+        {loading ? <span className="data-table__empty-spinner" aria-hidden="true" /> : null}
+        <p>{emptyMessage}</p>
+      </div>
+    );
   }
 
   return (
@@ -30,7 +42,11 @@ export function DataTable<T extends { [key: string]: unknown }>({
         <thead>
           <tr>
             {columns.map((col) => (
-              <th key={col.key} style={col.width ? { width: col.width } : undefined}>
+              <th
+                key={col.key}
+                className={cellClassName(col.align)}
+                style={col.width ? { width: col.width } : undefined}
+              >
                 {col.header}
               </th>
             ))}
@@ -44,7 +60,9 @@ export function DataTable<T extends { [key: string]: unknown }>({
               onClick={onRowClick ? () => onRowClick(row) : undefined}
             >
               {columns.map((col) => (
-                <td key={col.key}>{col.render(row)}</td>
+                <td key={col.key} className={cellClassName(col.align)}>
+                  {col.render(row)}
+                </td>
               ))}
             </tr>
           ))}

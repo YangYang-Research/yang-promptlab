@@ -53,7 +53,10 @@ export function deriveActivity(
 ): ActivityItem[] {
   const items: ActivityItem[] = [];
 
-  for (const finding of findings.slice(0, 12)) {
+  const sortedFindings = [...findings].sort((a, b) =>
+    b.discoveredAt.localeCompare(a.discoveredAt),
+  );
+  for (const finding of sortedFindings) {
     items.push({
       id: `finding-${finding.id}`,
       type: "finding",
@@ -65,34 +68,36 @@ export function deriveActivity(
 
   for (const scan of scans) {
     if (!isAttackScan(scan)) continue;
-    if (scan.status !== "completed" && scan.status !== "failed") continue;
-    items.push({
-      id: `scan-${scan.id}`,
-      type: "attack",
-      message: `Scan ${scan.status}: ${scan.name}`,
-      timestamp: scan.completedAt ?? scan.startedAt ?? scan.createdAt,
-    });
+
+    if (scan.status === "running" || scan.status === "paused" || scan.status === "pending") {
+      items.push({
+        id: `scan-active-${scan.id}`,
+        type: "attack",
+        message: `Scan ${scan.status}: ${scan.name}`,
+        timestamp: scan.startedAt ?? scan.createdAt,
+      });
+      continue;
+    }
+
+    if (scan.status === "completed" || scan.status === "failed") {
+      items.push({
+        id: `scan-${scan.id}`,
+        type: "attack",
+        message: `Scan ${scan.status}: ${scan.name}`,
+        timestamp: scan.completedAt ?? scan.startedAt ?? scan.createdAt,
+      });
+    }
   }
 
-  for (const target of targets.slice(0, 5)) {
+  for (const target of targets) {
     const project = projects.find((p) => p.id === target.projectId);
     items.push({
       id: `target-${target.id}`,
       type: "target",
       message: `Target added: ${target.name}${project ? ` (${project.name})` : ""}`,
-      timestamp: scanTimestampForTarget(target.id, scans) ?? new Date().toISOString(),
+      timestamp: target.createdAt,
     });
   }
 
-  return items
-    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-    .slice(0, 12);
-}
-
-function scanTimestampForTarget(targetId: string, scans: ScanRun[]): string | null {
-  const related = scans
-    .filter((s) => s.targetId === targetId)
-    .sort((a, b) => (b.startedAt ?? b.createdAt).localeCompare(a.startedAt ?? a.createdAt));
-  const latest = related[0];
-  return latest ? latest.startedAt ?? latest.createdAt : null;
+  return items.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }

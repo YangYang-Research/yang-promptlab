@@ -22,7 +22,6 @@ tauri-build = { version = "2", features = [] }
 aisec-core = { workspace = true }
 aisec-storage = { workspace = true }
 aisec-report = { workspace = true }
-aisec-discovery = { workspace = true }
 aisec-endpoint-metadata = { workspace = true }
 aisec-attack = { workspace = true }
 aisec-auth = { workspace = true }
@@ -31,10 +30,9 @@ aisec-runtime = { workspace = true }
 aisec-inference = { workspace = true }
 aisec-judge = { workspace = true }
 aisec-models = { workspace = true }
-aisec-fingerprint = { workspace = true }
 aisec-planner = { workspace = true }
 aisec-generator = { workspace = true }
-aisec-agent = { workspace = true }
+aisec-payload = { workspace = true }
 aisec-plugin-host = { workspace = true }
 aisec-target-profile = { workspace = true }
 serde = { workspace = true }

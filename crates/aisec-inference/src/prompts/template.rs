@@ -9,8 +9,6 @@ pub enum PromptId {
     ClassifierUser,
     AttackerSystem,
     AttackerUser,
-    PlannerSystem,
-    PlannerUser,
     GeneratorSystem,
     GeneratorUser,
     ReportExecutiveSummary,

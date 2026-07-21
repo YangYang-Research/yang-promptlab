@@ -12,7 +12,6 @@ export type AttackScanPlaybook = {
   profile: string;
   categories: string[];
   disabledTests: string[];
-  endpointIds: string[];
   agentMode?: boolean;
   maxAgentAttempts?: number;
 };
@@ -34,7 +33,6 @@ export function parseAttackPlaybook(playbook: unknown): AttackScanPlaybook | nul
     profile: String(obj.profile),
     categories: asStringArray(obj.categories),
     disabledTests: asStringArray(obj.disabled_tests),
-    endpointIds: asStringArray(obj.endpoint_ids),
     agentMode: obj.agent_mode === true,
     maxAgentAttempts:
       typeof obj.max_agent_attempts === "number" ? obj.max_agent_attempts : undefined,
@@ -50,26 +48,46 @@ export function profileLabel(profileId: string): string {
 }
 
 export function listSelectedTests(categories: string[], disabledTests: string[]): string[] {
+  return listSelectedTestsByCategory(categories, disabledTests).flatMap((group) =>
+    group.tests.map((test) => `${group.label}: ${test.name}`),
+  );
+}
+
+export type SelectedTestGroup = {
+  categoryId: string;
+  label: string;
+  tests: { id: string; name: string }[];
+};
+
+export function listSelectedTestsByCategory(
+  categories: string[],
+  disabledTests: string[],
+): SelectedTestGroup[] {
   const disabled = new Set(disabledTests);
-  const tests: string[] = [];
+  const groups: SelectedTestGroup[] = [];
   for (const categoryId of categories) {
     const category = ATTACK_CATALOG.find((item) => item.id === categoryId);
     if (!category) continue;
-    for (const test of category.tests) {
-      if (!disabled.has(test.id)) tests.push(`${category.label}: ${test.name}`);
-    }
+    const tests = category.tests
+      .filter((test) => !disabled.has(test.id))
+      .map((test) => ({ id: test.id, name: test.name }));
+    if (tests.length === 0) continue;
+    groups.push({
+      categoryId,
+      label: category.label,
+      tests,
+    });
   }
-  return tests;
+  return groups;
 }
 
 export function estimateAttackPlan(
-  endpointCount: number,
   profileId: string,
   categories: string[],
   disabledTests: string[],
 ): { requests: number; runtime: string } {
   const input = {
-    selectedEndpointCount: endpointCount,
+    selectedEndpointCount: 1,
     profileId: profileId as AttackProfileId,
     customCategories: categories as AttackCategoryId[],
     disabledTestIds: new Set(disabledTests),

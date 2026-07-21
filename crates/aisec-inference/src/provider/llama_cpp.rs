@@ -51,14 +51,11 @@ impl ProviderAdapter for LlamaCppAdapter {
         max_tokens: u32,
         temperature: f32,
     ) -> InferenceResult<String> {
-        let full_prompt = match system {
-            Some(sys) if !sys.trim().is_empty() => format!("{sys}\n\n{prompt}"),
-            _ => prompt.to_string(),
-        };
         let runtime = self.runtime.lock().await;
         let response = runtime
             .complete(InferenceRequest {
-                prompt: full_prompt,
+                system: system.map(str::to_string),
+                prompt: prompt.to_string(),
                 max_tokens,
                 temperature,
             })

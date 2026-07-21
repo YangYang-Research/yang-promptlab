@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAppStore } from "@/app/store/AppStore";
 import { mapProjects, mapTargets } from "@/app/store/mappers";
 import { Button, Card, PageHeader, Badge } from "@/shared/components";
-import { getProject, startScan, updateTargetDescriptor } from "@/shared/ipc";
+import { getProject, getScanStatus, pauseScan, resumeScan, startScan, updateTargetDescriptor } from "@/shared/ipc";
 import { createWizardScan, loadWizardScan, saveWizardScan } from "@/shared/ipc/scanWizard";
 import { generateAttackPlanForTarget } from "@/shared/ipc/attackPlanner";
 import { getTargetProfile, saveTargetProfile } from "@/shared/ipc/targetProfile";
@@ -13,7 +13,9 @@ import { useToast } from "@/shared/notifications";
 import type { Project, Target } from "@/shared/types";
 
 import { ImportApiModal } from "./components/ImportApiModal";
+import { ReportExportDropdown } from "./components/ReportExportDropdown";
 import { ReviewAttackPlanStep } from "./steps/ReviewAttackPlanStep";
+import { AttackPlanPlanningState } from "./steps/AttackPlanPlanningState";
 import { AuthVerificationStep } from "./steps/AuthVerificationStep";
 import { ProjectStep } from "./steps/ProjectStep";
 import { ResultsStep } from "./steps/ResultsStep";
@@ -22,6 +24,7 @@ import { TargetProfileStep } from "./steps/TargetProfileStep";
 import { mergeScanStatus, useScanStatuses } from "./useScanStatuses";
 import {
   deriveTargetNameFromProfile,
+  createEmptyVerification,
   fullProfileUrl,
   profileFromDto,
   profileToPayload,
@@ -46,6 +49,8 @@ import {
   createSessionForTargetScan,
   applyWizardEntryStep,
   parseWizardEntryStep,
+  isFreshWizardEntry,
+  isScanResultsReady,
   createInitialAttackPlanUi,
   fetchTargetFormForWizard,
   loadTargetDtoForWizard,
@@ -65,16 +70,23 @@ import {
 } from "./wizardSteps";
 import {
   mergeWizardSessions,
-  parsePersistedWizard,
-  sessionFromPersistedWizard,
   wizardStateToPersisted,
 } from "./wizardPersistence";
 import {
-  findWizardDraftScan,
-  peekStoredDraftScanId,
+  hydrateWizardSessionForScanResume,
+  sessionReadyForSubmitStep,
+  sessionReadyForWizardEntry,
+} from "./wizardResume";
+import {
   resolveOrCreateDraftScanId,
   storeDraftScanId,
 } from "./wizardDraftScan";
+import { createSessionFromScanConfigImport } from "./scanConfigExport";
+import {
+  IMPORT_STEP_COUNTDOWN_SEC,
+  IMPORT_VERIFY_MAX_ATTEMPTS,
+} from "./importHarness";
+import { logWizardEvent } from "./wizardLiveLog";
 
 function withNormalizedAttackPlan(session: ScanWizardSession): ScanWizardSession {
   if (!session.attackPlan) return session;
@@ -88,14 +100,24 @@ export function ScanWizardPage() {
   const lockedTargetId = searchParams.get("targetId")?.trim() ?? "";
   const requestedStep = searchParams.get("step")?.trim() ?? "";
   const lockedScanId = searchParams.get("scanId")?.trim() ?? "";
-  const { projects, targets, scans, loading, error, dispatch, actions } = useAppStore();
-  const { notify } = useToast();
+  const entryStep = parseWizardEntryStep(requestedStep);
+  const isFreshWizard = isFreshWizardEntry({
+    scanId: lockedScanId,
+    targetId: lockedTargetId,
+    step: requestedStep,
+  });
+  const { projects, targets, scans, findings, loading, error, dispatch, actions } = useAppStore();
+  const { notify, dismiss } = useToast();
   const deepLinkApplied = useRef(false);
   const deepLinkTargetId = useRef<string | null>(null);
 
-  const [session, setSession] = useState<ScanWizardSession>(() =>
-    withNormalizedAttackPlan(loadWizardSession(lockedProjectId)),
-  );
+  const [session, setSession] = useState<ScanWizardSession>(() => {
+    if (isFreshWizard) {
+      clearWizardSession();
+      return createSessionFromScanConfigImport(lockedProjectId);
+    }
+    return withNormalizedAttackPlan(loadWizardSession(lockedProjectId));
+  });
   const [resolvedProject, setResolvedProject] = useState<Project | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
   const [profileStepError, setProfileStepError] = useState<string | null>(null);
@@ -103,20 +125,33 @@ export function ScanWizardPage() {
   const [scanSubmitError, setScanSubmitError] = useState<string | null>(null);
   const [persistingTarget, setPersistingTarget] = useState(false);
   const [startingScan, setStartingScan] = useState(false);
+  const [consoleResetKey, setConsoleResetKey] = useState(0);
   const [plannerGenerating, setPlannerGenerating] = useState(false);
+  const [plannerReplanning, setPlannerReplanning] = useState(false);
   const [plannerError, setPlannerError] = useState<string | null>(null);
   const [planAdjusting, setPlanAdjusting] = useState(false);
   const [dbVerification, setDbVerification] = useState<VerificationResultForm | null>(null);
   const [dbVerificationLoading, setDbVerificationLoading] = useState(false);
   const [importApiOpen, setImportApiOpen] = useState(false);
+  const [importStepCountdown, setImportStepCountdown] = useState<number | null>(null);
+  const [importVerifyAttempt, setImportVerifyAttempt] = useState(0);
+  const [importPostVerifyCountdown, setImportPostVerifyCountdown] = useState<number | null>(null);
+  const importAdvanceLock = useRef(false);
+  const importHarnessLoggedRef = useRef(false);
+  const [scanControlPending, setScanControlPending] = useState(false);
+  const [wizardResumeLoading, setWizardResumeLoading] = useState(() =>
+    Boolean(lockedScanId && (entryStep === 4 || entryStep === 5)),
+  );
   const plannerRunRef = useRef<string | null>(null);
+  const startingScanRef = useRef(false);
   const wizardDbBootstrap = useRef(false);
   const sessionRef = useRef(session);
   sessionRef.current = session;
   const wizardSaveTimerRef = useRef<number | null>(null);
   const authHydratedKeyRef = useRef<string | null>(null);
-
-  const entryStep = parseWizardEntryStep(requestedStep);
+  const freshWizardKeyRef = useRef<string | null>(null);
+  const wizardResumeHydratedRef = useRef<string | null>(null);
+  const newTargetEntryKeyRef = useRef<string | null>(null);
 
   function appendWizardUrlParams(params: URLSearchParams) {
     if (lockedTargetId) params.set("targetId", lockedTargetId);
@@ -186,11 +221,39 @@ export function ScanWizardPage() {
   );
 
   useEffect(() => {
+    if (!isFreshWizard) return;
+
+    const freshKey = `${lockedProjectId}|${lockedTargetId}|${requestedStep}|${lockedScanId}`;
+    if (freshWizardKeyRef.current === freshKey) return;
+    freshWizardKeyRef.current = freshKey;
+
+    wizardDbBootstrap.current = false;
+    deepLinkApplied.current = false;
+    authHydratedKeyRef.current = null;
+    plannerRunRef.current = null;
+    wizardResumeHydratedRef.current = null;
+    clearWizardSession();
+    setPlannerError(null);
+    setPlannerGenerating(false);
+    setProfileStepError(null);
+    setVerificationError(null);
+    setScanSubmitError(null);
+    setSession(createSessionFromScanConfigImport(lockedProjectId, { consume: true }));
+  }, [isFreshWizard, lockedProjectId, lockedTargetId, requestedStep, lockedScanId]);
+
+  useEffect(() => {
     if (wizardDbBootstrap.current) return;
 
     async function ensureDraftScan() {
       if (lockedScanId) {
-        if (session.draftScanId === lockedScanId) {
+        const savedTarget =
+          session.savedTargetId
+            ? targets.find((target) => target.id === session.savedTargetId) ?? null
+            : null;
+        const readyForEntry = sessionReadyForWizardEntry(session, savedTarget, entryStep);
+        const resumeKey = `${lockedScanId}:${entryStep ?? ""}`;
+
+        if (session.draftScanId === lockedScanId && readyForEntry) {
           if (entryStep) {
             setSession((prev) => {
               const next = applyWizardEntryStep(prev, entryStep);
@@ -199,33 +262,43 @@ export function ScanWizardPage() {
             });
           }
           wizardDbBootstrap.current = true;
+          wizardResumeHydratedRef.current = resumeKey;
+          setWizardResumeLoading(false);
           return;
         }
+
+        if (wizardResumeHydratedRef.current === resumeKey) {
+          wizardDbBootstrap.current = true;
+          setWizardResumeLoading(false);
+          return;
+        }
+
         wizardDbBootstrap.current = true;
+        setWizardResumeLoading(entryStep === 4 || entryStep === 5);
         try {
           const loaded = await loadWizardScan(lockedScanId);
-          const persisted = parsePersistedWizard(loaded.wizard);
-          const projectId = lockedProjectId || loaded.scan.project_id;
-          const remote = persisted
-            ? sessionFromPersistedWizard(persisted, lockedScanId, lockedProjectId)
-            : {
-                ...createInitialSession(projectId),
-                draftScanId: lockedScanId,
-                selectedProjectId: projectId,
-              };
-          const local = peekWizardSession();
+          const next = await hydrateWizardSessionForScanResume(session, loaded, {
+            lockedProjectId,
+            lockedTargetId,
+            entryStep,
+          });
           const merged = withNormalizedAttackPlan(
-            local?.draftScanId === lockedScanId ? mergeWizardSessions(local, remote) : remote,
+            peekWizardSession()?.draftScanId === lockedScanId
+              ? mergeWizardSessions(peekWizardSession()!, next)
+              : next,
           );
-          const next = entryStep ? applyWizardEntryStep(merged, entryStep) : merged;
+          const projectId = lockedProjectId || loaded.scan.project_id;
           storeDraftScanId(projectId, lockedScanId);
-          setSession(next);
-          saveWizardSession(next);
+          setSession(merged);
+          saveWizardSession(merged);
+          wizardResumeHydratedRef.current = resumeKey;
           await actions.refresh();
         } catch (err) {
           wizardDbBootstrap.current = false;
           const message = err instanceof Error ? err.message : "Failed to load wizard scan";
           notify(message, "error");
+        } finally {
+          setWizardResumeLoading(false);
         }
         return;
       }
@@ -233,27 +306,10 @@ export function ScanWizardPage() {
       const projectId = lockedProjectId || session.selectedProjectId;
       if (!projectId) return;
 
-      if (session.draftScanId && entryStep !== 2) {
+      if (session.draftScanId) {
         storeDraftScanId(projectId, session.draftScanId);
         wizardDbBootstrap.current = true;
-        if (!lockedScanId) {
-          const params = new URLSearchParams({ projectId, scanId: session.draftScanId });
-          appendWizardUrlParams(params);
-          navigate(`/scans/new?${params.toString()}`, { replace: true });
-        }
-        return;
-      }
-
-      const remembered = peekStoredDraftScanId(projectId);
-      const existingDraft =
-        entryStep === 2
-          ? null
-          : findWizardDraftScan(scans, projectId, session.savedTargetId) ??
-            (remembered ? scans.find((scan) => scan.id === remembered) ?? null : null);
-      if (existingDraft) {
-        wizardDbBootstrap.current = true;
-        applyDraftScanId(existingDraft.id, projectId);
-        const params = new URLSearchParams({ projectId, scanId: existingDraft.id });
+        const params = new URLSearchParams({ projectId, scanId: session.draftScanId });
         appendWizardUrlParams(params);
         navigate(`/scans/new?${params.toString()}`, { replace: true });
         return;
@@ -266,8 +322,9 @@ export function ScanWizardPage() {
             projectId,
             targetId: session.savedTargetId,
             wizard: wizardStateToPersisted({
-              ...session,
+              ...createInitialSession(projectId),
               selectedProjectId: projectId,
+              draftScanId: null,
             }),
           });
           return created.id;
@@ -293,11 +350,16 @@ export function ScanWizardPage() {
     session.draftScanId,
     session.selectedProjectId,
     session.savedTargetId,
+    session.attackPlan,
+    session.submittedScanId,
+    session.targetProfile.verification.verified,
+    targets,
     scans,
     actions,
     notify,
     navigate,
     applyDraftScanId,
+    entryStep,
   ]);
 
   useEffect(() => {
@@ -331,6 +393,8 @@ export function ScanWizardPage() {
 
   useEffect(() => {
     if (session.currentStep < 3 || !session.savedTargetId) return;
+    // Don't re-hydrate auth when returning from step 4+ — keeps verification process intact.
+    if (session.currentStep > 3) return;
     const hydrationKey = `${session.savedTargetId}:${session.draftScanId ?? ""}:${session.currentStep}`;
     if (authHydratedKeyRef.current === hydrationKey) return;
 
@@ -362,9 +426,18 @@ export function ScanWizardPage() {
   }, [session.currentStep, session.savedTargetId, session.draftScanId]);
 
   const runAttackPlanner = useCallback(
-    async (targetId: string, options?: { autoAdvance?: boolean }) => {
+    async (targetId: string, options?: { replan?: boolean }) => {
+      const replan = options?.replan ?? false;
+      setPlannerReplanning(replan);
       setPlannerGenerating(true);
       setPlannerError(null);
+      logWizardEvent({
+        category: "planner",
+        activityName: replan ? "wizard_plan_replan" : "wizard_plan_request",
+        message: replan ? "Re-planning attack plan…" : "Generating attack plan…",
+        projectId: sessionRef.current.selectedProjectId || lockedProjectId || null,
+        attributes: { targetId, replan },
+      });
       try {
         const dto = await generateAttackPlanForTarget(targetId);
         const plan = attackPlanFromDto(dto);
@@ -374,10 +447,23 @@ export function ScanWizardPage() {
             ...prev,
             attackPlan: plan,
             attackPlanUi: attackPlanUiBaselineFromPlan(plan),
-            currentStep: options?.autoAdvance ? (4 as WizardStepId) : prev.currentStep,
+            attackPlanSource: "generated" as const,
           };
           saveWizardSession(next);
           return next;
+        });
+        logWizardEvent({
+          category: "planner",
+          activityName: "wizard_plan_ready",
+          message: `Attack plan ready (${plan.categories.length} categories, profile ${plan.profileId})`,
+          projectId: sessionRef.current.selectedProjectId || lockedProjectId || null,
+          attributes: {
+            targetId,
+            profileId: plan.profileId,
+            recommendedProfileId: plan.recommendedProfileId,
+            categories: plan.categories.length,
+            modes: plan.profileModes.length,
+          },
         });
         return plan;
       } catch (err) {
@@ -388,9 +474,10 @@ export function ScanWizardPage() {
         return null;
       } finally {
         setPlannerGenerating(false);
+        setPlannerReplanning(false);
       }
     },
-    [notify],
+    [notify, lockedProjectId],
   );
 
   const refreshDbVerification = useCallback(async (targetId: string) => {
@@ -414,18 +501,16 @@ export function ScanWizardPage() {
   }, [session.currentStep, session.savedTargetId, refreshDbVerification]);
 
   useEffect(() => {
-    if (
-      !store.savedTarget ||
-      !session.targetProfile.verification.verified ||
-      session.attackPlan
-    ) {
-      return;
-    }
-    void runAttackPlanner(store.savedTarget.id);
+    if (session.currentStep !== 4 || !store.savedTarget) return;
+    if (!session.targetProfile.verification.verified) return;
+    if (session.attackPlan || plannerGenerating) return;
+    void runAttackPlanner(store.savedTarget.id, { replan: false });
   }, [
+    session.currentStep,
     store.savedTarget,
     session.targetProfile.verification.verified,
     session.attackPlan,
+    plannerGenerating,
     runAttackPlanner,
   ]);
 
@@ -471,6 +556,22 @@ export function ScanWizardPage() {
       cancelled = true;
     };
   }, [lockedProjectId, storeProject, loading, dispatch]);
+
+  useEffect(() => {
+    if (entryStep !== 2 || lockedTargetId || !lockedProjectId) return;
+
+    const entryKey = `${lockedProjectId}|2`;
+    if (newTargetEntryKeyRef.current === entryKey) return;
+    newTargetEntryKeyRef.current = entryKey;
+
+    wizardDbBootstrap.current = false;
+    deepLinkApplied.current = true;
+    clearWizardSession();
+    const next = applyWizardEntryStep(createInitialSession(lockedProjectId), 2);
+    setSession(next);
+    saveWizardSession(next);
+    dispatch({ type: "SET_SELECTED_PROJECT", projectId: lockedProjectId });
+  }, [entryStep, lockedTargetId, lockedProjectId, dispatch]);
 
   useEffect(() => {
     if (lockedScanId) return;
@@ -519,6 +620,7 @@ export function ScanWizardPage() {
               currentStep: entryStep ?? existing!.currentStep,
               submittedScanId: entryStep === 2 ? null : existing!.submittedScanId,
               attackPlan: entryStep === 2 ? null : existing!.attackPlan,
+              attackPlanSource: entryStep === 2 ? null : existing!.attackPlanSource,
               targetProfile: profileState,
               targetForm,
               savedTargetFingerprint: targetFormFingerprint(targetForm),
@@ -578,7 +680,7 @@ export function ScanWizardPage() {
 
   const submittedStatuses = useScanStatuses(
     session.submittedScanId ? [session.submittedScanId] : [],
-    session.currentStep === 5 && session.submittedScanId !== null,
+    (session.currentStep === 5 || session.currentStep === 6) && session.submittedScanId !== null,
   );
   const submittedLiveStatus = session.submittedScanId
     ? submittedStatuses.get(session.submittedScanId)
@@ -587,29 +689,99 @@ export function ScanWizardPage() {
     ? mergeScanStatus(session.submittedScanId, "running", submittedLiveStatus, 0)
     : null;
 
+  useEffect(() => {
+    if (session.currentStep !== 6 || !session.submittedScanId || !submittedStatus) return;
+    if (!isScanResultsReady(submittedStatus.status)) {
+      updateSession({ currentStep: 5 });
+    }
+  }, [session.currentStep, session.submittedScanId, submittedStatus, updateSession]);
+
   const stepDef = getWizardStep(session.currentStep);
+  const activeScanId = session.submittedScanId ?? session.draftScanId;
+  const targetEndpointUrl =
+    fullProfileUrl(session.targetProfile) || store.savedTarget?.url || "";
+  const showScanContextHeader =
+    (session.currentStep === 5 || session.currentStep === 6) && activeScanId !== null;
+  const pageHeaderTitle = showScanContextHeader
+    ? `Scan ID: ${activeScanId}`
+    : "New Scan";
+  const pageHeaderDescription = showScanContextHeader ? (
+    targetEndpointUrl ? (
+      <span className="wizard-planner-summary page-header__endpoint-summary">
+        <strong>Endpoint:</strong>{" "}
+        <span className="wizard-planner-summary__url mono">{targetEndpointUrl}</span>
+      </span>
+    ) : (
+      "Endpoint"
+    )
+  ) : (
+    "Configure a new security scan"
+  );
+  const resultsFindingsCount = useMemo(
+    () =>
+      session.submittedScanId
+        ? findings.filter((finding) => finding.scanId === session.submittedScanId).length
+        : 0,
+    [findings, session.submittedScanId],
+  );
   const showFooterNext =
     session.currentStep < 5 &&
-    (session.currentStep !== 3 ||
-      (draft.profileVerified && draft.attackPlanGenerated && !plannerGenerating));
+    (session.currentStep !== 4 ||
+      (draft.attackPlanGenerated && !plannerGenerating));
   const showStartScan = session.currentStep === 5 && session.submittedScanId === null;
-  const showFooterDone = session.currentStep === 6;
   const showViewResult =
-    session.currentStep === 5 && submittedStatus?.status === "completed";
+    session.currentStep === 5 &&
+    submittedStatus?.status === "completed" &&
+    session.submittedScanId === null;
   const showRetryScan =
     session.currentStep === 5 &&
     submittedStatus !== null &&
     (submittedStatus.status === "failed" ||
       submittedStatus.status === "stopped" ||
       submittedStatus.status === "cancelled");
+  const attackScanActive =
+    session.currentStep === 5 &&
+    session.submittedScanId !== null &&
+    submittedStatus !== null &&
+    ["running", "paused", "pending"].includes(submittedStatus.status);
+  const showAttackScanControls = attackScanActive;
+  const scanCompleted = submittedStatus?.status === "completed";
+  const showHeaderCancel =
+    !(session.currentStep === 5 && session.submittedScanId !== null) &&
+    !(session.currentStep === 6 && scanCompleted);
   const hideBack =
     session.currentStep === 6 ||
     (session.currentStep === 5 && session.submittedScanId !== null);
+  const importHarnessBusy =
+    session.importAutoAdvance &&
+    session.currentStep <= 3 &&
+    (importStepCountdown !== null ||
+      importPostVerifyCountdown !== null ||
+      (session.currentStep === 3 && !session.targetProfile.verification.verified));
   const nextDisabled =
     !canProceedFromStep(session.currentStep, draft) ||
     plannerGenerating ||
-    planAdjusting;
+    planAdjusting ||
+    importHarnessBusy;
   const startScanDisabled = !canStartScan(draft) || startingScan;
+
+  function importFooterLabel(): string {
+    if (importPostVerifyCountdown !== null) {
+      return "Importing…";
+    }
+    if (session.importAutoAdvance && session.currentStep === 3) {
+      const attempt = Math.max(importVerifyAttempt, 1);
+      return `Verifying… (${attempt}/${IMPORT_VERIFY_MAX_ATTEMPTS})`;
+    }
+    if (importStepCountdown !== null && session.currentStep <= 2) {
+      return "Importing…";
+    }
+    if (session.currentStep === 4) {
+      return startingScan ? "Starting attack…" : "Start Attack";
+    }
+    if (persistingTarget) return "Saving target…";
+    return "Next";
+  }
 
   function patchTargetProfile(patch: Partial<typeof session.targetProfile>) {
     setProfileStepError(null);
@@ -651,6 +823,12 @@ export function ScanWizardPage() {
 
       await saveTargetProfile(target.id, profileToPayload(session.targetProfile));
       notify(`Target profile saved for "${name}"`, "success");
+      logWizardEvent({
+        activityName: "wizard_profile_saved",
+        message: `Target profile saved: ${name}`,
+        projectId: activeProjectId,
+        attributes: { targetId: target.id, endpoint: url },
+      });
       return target;
     } catch (err) {
       const message = toAppError(err).message || "Failed to save target profile";
@@ -679,6 +857,13 @@ export function ScanWizardPage() {
       const descriptor = buildTargetDescriptor({ ...session.targetForm, url });
       await updateTargetDescriptor(store.savedTarget.id, descriptor);
       updateSession({ savedTargetFingerprint: targetFormFingerprint(session.targetForm) });
+      logWizardEvent({
+        category: "authentication",
+        activityName: "wizard_auth_saved",
+        message: "Authentication descriptor saved",
+        projectId: activeProjectId,
+        attributes: { targetId: store.savedTarget.id, authKind: session.targetForm.authKind },
+      });
       return true;
     } catch (err) {
       const message = toAppError(err).message || "Failed to save authentication";
@@ -716,16 +901,33 @@ export function ScanWizardPage() {
     }
 
     if (nextStep === 3) {
+      // Returning from a later step: keep auth + verification process as-is.
+      if (session.currentStep > 3) {
+        updateSession({ currentStep: nextStep });
+        return;
+      }
+
       try {
+        const reinferFromProfile = session.currentStep === 2;
         const targetForm = await prepareAuthFormForStep3(
           session.targetProfile,
           session.targetForm,
           targetId,
+          { reinferFromProfile },
         );
         updateSession({
           currentStep: nextStep,
           targetForm,
           savedTargetFingerprint: targetFormFingerprint(targetForm),
+          ...(reinferFromProfile
+            ? {
+                verificationLog: [],
+                targetProfile: {
+                  ...session.targetProfile,
+                  verification: createEmptyVerification(),
+                },
+              }
+            : {}),
         });
       } catch {
         updateSession({ currentStep: nextStep });
@@ -737,13 +939,19 @@ export function ScanWizardPage() {
   }
 
   function handleStepChange(step: WizardStepId) {
-    if (canNavigateToStep(step, draft)) {
+    if (session.importAutoAdvance && session.currentStep <= 3) {
+      return;
+    }
+    if (canNavigateToStep(step, draft, { scanStatus: submittedStatus?.status })) {
       void navigateToStep(step);
     }
   }
 
   async function handleNext() {
     if (session.currentStep >= 6) return;
+    const fromStep = session.currentStep;
+    const projectId = activeProjectId || null;
+    const harness = session.importAutoAdvance;
 
     if (session.currentStep === 2) {
       const target = await persistProfileTarget();
@@ -752,11 +960,26 @@ export function ScanWizardPage() {
         session.targetProfile,
         session.targetForm,
         target.id,
+        { reinferFromProfile: true },
       );
       updateSession({
         currentStep: 3,
         targetForm,
         savedTargetFingerprint: targetFormFingerprint(targetForm),
+        verificationLog: [],
+        targetProfile: {
+          ...session.targetProfile,
+          verification: createEmptyVerification(),
+        },
+      });
+      logWizardEvent({
+        category: harness ? "harness" : "user_interface",
+        activityName: "wizard_step_advance",
+        message: harness
+          ? "Import harness advanced to Authentication"
+          : "Advanced to Authentication",
+        projectId,
+        attributes: { from: fromStep, to: 3, harness, targetId: target.id },
       });
       return;
     }
@@ -768,17 +991,28 @@ export function ScanWizardPage() {
       }
       const saved = await persistAuthDescriptor();
       if (!saved || !store.savedTarget) return;
-      if (!session.attackPlan) {
-        const plan = await runAttackPlanner(store.savedTarget.id);
-        if (!plan) return;
-      }
       updateSession({ currentStep: 4 });
+      logWizardEvent({
+        category: harness ? "harness" : "user_interface",
+        activityName: "wizard_step_advance",
+        message: harness
+          ? "Import harness advanced to Attack Plan"
+          : "Advanced to Attack Plan",
+        projectId,
+        attributes: { from: fromStep, to: 4, harness },
+      });
       return;
     }
 
     if (session.currentStep === 4) {
       if (!canProceedFromStep(4, draft)) return;
       updateSession({ currentStep: 5 });
+      logWizardEvent({
+        activityName: "wizard_step_advance",
+        message: "Advanced to Attack",
+        projectId,
+        attributes: { from: fromStep, to: 5 },
+      });
       if (canStartScan(draft)) {
         await submitScanJob();
       }
@@ -786,17 +1020,200 @@ export function ScanWizardPage() {
     }
 
     if (!canProceedFromStep(session.currentStep, draft)) return;
-    updateSession({ currentStep: (session.currentStep + 1) as WizardStepId });
+    const toStep = (session.currentStep + 1) as WizardStepId;
+    updateSession({ currentStep: toStep });
+    logWizardEvent({
+      category: harness ? "harness" : "user_interface",
+      activityName: "wizard_step_advance",
+      message: `Advanced to step ${toStep}`,
+      projectId,
+      attributes: { from: fromStep, to: toStep, harness },
+    });
+  }
+
+  function goToResultsStep() {
+    if (!isScanResultsReady(submittedStatus?.status)) return;
+    updateSession({ currentStep: 6 });
   }
 
   function handleBack() {
+    if (session.currentStep === 6) return;
+    const fromStep = session.currentStep;
+    if (session.importAutoAdvance) {
+      updateSession({ importAutoAdvance: false });
+      setImportStepCountdown(null);
+      setImportPostVerifyCountdown(null);
+      setImportVerifyAttempt(0);
+      logWizardEvent({
+        category: "harness",
+        severity: "low",
+        activityName: "wizard_import_cancelled",
+        message: "Import harness cancelled by user",
+        projectId: activeProjectId || null,
+        attributes: { step: fromStep },
+      });
+    }
     if (session.currentStep > 1) {
       void navigateToStep((session.currentStep - 1) as WizardStepId);
+      logWizardEvent({
+        category: "user_interface",
+        activityName: "wizard_step_back",
+        message: `Returned to step ${fromStep - 1}`,
+        projectId: activeProjectId || null,
+        attributes: { from: fromStep, to: fromStep - 1 },
+      });
     }
   }
 
+  const importAutoActive = session.importAutoAdvance;
+  const canImportStepAdvance =
+    importAutoActive &&
+    (session.currentStep === 1 || session.currentStep === 2) &&
+    canProceedFromStep(session.currentStep, draft) &&
+    !persistingTarget &&
+    importPostVerifyCountdown === null;
+
+  // Log once when import harness is armed.
+  useEffect(() => {
+    if (!session.importAutoAdvance) {
+      importHarnessLoggedRef.current = false;
+      return;
+    }
+    if (importHarnessLoggedRef.current) return;
+    importHarnessLoggedRef.current = true;
+    logWizardEvent({
+      category: "harness",
+      activityName: "wizard_import_start",
+      message: "Import harness started — auto-walking wizard steps",
+      projectId: activeProjectId || session.selectedProjectId || null,
+      attributes: {
+        step: session.currentStep,
+        hasPlan: Boolean(session.attackPlan),
+        planSource: session.attackPlanSource,
+      },
+    });
+  }, [
+    session.importAutoAdvance,
+    session.currentStep,
+    session.attackPlan,
+    session.attackPlanSource,
+    session.selectedProjectId,
+    activeProjectId,
+  ]);
+
+  // Import harness: countdown then auto Next on steps 1 and 2.
+  useEffect(() => {
+    if (!canImportStepAdvance) {
+      if (!importAutoActive || session.currentStep > 2) {
+        setImportStepCountdown(null);
+      }
+      return;
+    }
+
+    let remaining = IMPORT_STEP_COUNTDOWN_SEC;
+    setImportStepCountdown(remaining);
+    const timer = window.setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        window.clearInterval(timer);
+        setImportStepCountdown(0);
+        if (importAdvanceLock.current) return;
+        importAdvanceLock.current = true;
+        void handleNext().finally(() => {
+          importAdvanceLock.current = false;
+        });
+        return;
+      }
+      setImportStepCountdown(remaining);
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+    // handleNext closes over latest session; re-arm only when step/gates change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- import step gate
+  }, [canImportStepAdvance, session.currentStep, importAutoActive]);
+
+  // Import harness: after verify success, countdown then advance to step 4.
+  useEffect(() => {
+    if (importPostVerifyCountdown === null) return;
+
+    if (importPostVerifyCountdown <= 0) {
+      if (importAdvanceLock.current) return;
+      importAdvanceLock.current = true;
+      setImportPostVerifyCountdown(null);
+      void (async () => {
+        try {
+          updateSession({ importAutoAdvance: false });
+          await handleNext();
+          logWizardEvent({
+            category: "harness",
+            activityName: "wizard_import_complete",
+            message: "Import complete — review the attack plan, then start the attack",
+            projectId: activeProjectId || null,
+            attributes: {
+              hasPlan: Boolean(session.attackPlan),
+              planSource: session.attackPlanSource,
+            },
+          });
+          notify(
+            "Import successful. Review the attack plan, then start the attack.",
+            "success",
+          );
+        } finally {
+          importAdvanceLock.current = false;
+        }
+      })();
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setImportPostVerifyCountdown((prev) => (prev === null ? null : prev - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- post-verify gate
+  }, [importPostVerifyCountdown, updateSession, notify]);
+
   function handleCancel() {
     navigate("/scans");
+  }
+
+  async function handleScanPause() {
+    if (!session.submittedScanId) return;
+    setScanControlPending(true);
+    let pendingToastId: number | undefined;
+    try {
+      pendingToastId = notify("Pausing scan…", "info");
+      await pauseScan(session.submittedScanId);
+      dismiss(pendingToastId);
+      pendingToastId = undefined;
+      notify("Scan paused", "success");
+      await actions.refresh();
+    } catch (err) {
+      if (pendingToastId !== undefined) dismiss(pendingToastId);
+      notify(toAppError(err).message || "Failed to pause scan", "error");
+    } finally {
+      setScanControlPending(false);
+    }
+  }
+
+  async function handleScanResume() {
+    if (!session.submittedScanId) return;
+    setScanControlPending(true);
+    let pendingToastId: number | undefined;
+    try {
+      pendingToastId = notify("Resuming scan…", "info");
+      await resumeScan(session.submittedScanId);
+      dismiss(pendingToastId);
+      pendingToastId = undefined;
+      notify("Scan resumed", "success");
+      await actions.refresh();
+    } catch (err) {
+      if (pendingToastId !== undefined) dismiss(pendingToastId);
+      notify(toAppError(err).message || "Failed to resume scan", "error");
+    } finally {
+      setScanControlPending(false);
+    }
   }
 
   async function handleStartScan() {
@@ -806,11 +1223,46 @@ export function ScanWizardPage() {
 
   async function submitScanJob(options?: { restart?: boolean }) {
     if (!store.savedTarget || !session.attackPlan) return;
+    if (startingScanRef.current) return;
 
     const scanIdToReuse = session.submittedScanId ?? session.draftScanId ?? undefined;
 
+    if (!options?.restart) {
+      updateSession({ currentStep: 5 });
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => resolve());
+        });
+      });
+    }
+
+    if (scanIdToReuse && !options?.restart) {
+      try {
+        const live = await getScanStatus(scanIdToReuse);
+        if (["running", "paused", "pending"].includes(live.status)) {
+          updateSession({ submittedScanId: scanIdToReuse, currentStep: 5 });
+          return;
+        }
+      } catch {
+        // Continue and attempt a fresh start below.
+      }
+    }
+
+    startingScanRef.current = true;
     setStartingScan(true);
     setScanSubmitError(null);
+    logWizardEvent({
+      activityName: "wizard_attack_start",
+      message: options?.restart ? "Restarting attack…" : "Starting attack…",
+      projectId: activeProjectId || null,
+      scanId: scanIdToReuse ?? null,
+      attributes: {
+        targetId: store.savedTarget.id,
+        profileId: session.attackPlan.profileId,
+        categories: session.attackPlan.categories.length,
+        restart: Boolean(options?.restart),
+      },
+    });
     try {
       const result = await startScan({
         projectId: activeProjectId,
@@ -821,16 +1273,35 @@ export function ScanWizardPage() {
         payloadStrategy: payloadStrategyToDto(session.attackPlan.payloadStrategy),
         agentMode: session.attackPlan.executionStrategy === "agentic",
         maxAgentAttempts: session.attackPlan.maxAttempts,
+        reflectionEnabled: session.attackPlan.reflectionEnabled,
+        adaptivePlanning: session.attackPlan.adaptivePlanning,
         draftScanId: scanIdToReuse,
       });
       await actions.refresh();
-      updateSession({ submittedScanId: result.scan_id });
+      updateSession({ submittedScanId: result.scan_id, currentStep: 5 });
+      if (options?.restart) {
+        setConsoleResetKey((key) => key + 1);
+      }
+      logWizardEvent({
+        activityName: "wizard_attack_started",
+        message: `Attack started (${result.scan_id})`,
+        projectId: activeProjectId || null,
+        scanId: result.scan_id,
+      });
       notify(options?.restart ? "Attack restarted" : "Attack started in the background", "success");
     } catch (err) {
       const message = toAppError(err).message || "Failed to start scan";
       setScanSubmitError(message);
+      logWizardEvent({
+        severity: "high",
+        activityName: "wizard_attack_start_failed",
+        message,
+        projectId: activeProjectId || null,
+        scanId: scanIdToReuse ?? null,
+      });
       notify(message, "error");
     } finally {
+      startingScanRef.current = false;
       setStartingScan(false);
     }
   }
@@ -877,41 +1348,76 @@ export function ScanWizardPage() {
             onProfileChange={patchTargetProfile}
             authForm={session.targetForm}
             onAuthChange={patchTargetForm}
-            verificationConsole={session.verificationConsole}
-            onVerificationConsole={(entry) => updateSession({ verificationConsole: entry })}
-            error={verificationError}
+            verificationLog={session.verificationLog}
+            onVerificationLog={(entries) => updateSession({ verificationLog: entries })}
             onError={setVerificationError}
             onBeforeVerify={persistAuthDescriptor}
+            autoVerify={
+              session.importAutoAdvance &&
+              !session.targetProfile.verification.verified &&
+              importPostVerifyCountdown === null
+            }
+            autoVerifyMaxAttempts={IMPORT_VERIFY_MAX_ATTEMPTS}
+            onAutoVerifyAttempt={(attempt) => setImportVerifyAttempt(attempt)}
+            onAutoVerifyComplete={(result) => {
+              if (result.ok) {
+                setImportPostVerifyCountdown(IMPORT_STEP_COUNTDOWN_SEC);
+                return;
+              }
+              updateSession({ importAutoAdvance: false });
+              setImportVerifyAttempt(0);
+              logWizardEvent({
+                category: "harness",
+                severity: "high",
+                activityName: "wizard_import_verify_failed",
+                message: result.message
+                  ? `Import verification failed after ${result.attempts} attempts: ${result.message}`
+                  : `Import verification failed after ${result.attempts} attempts`,
+                projectId: activeProjectId || null,
+                attributes: { attempts: result.attempts },
+              });
+              notify(
+                result.message
+                  ? `Import verification failed after ${result.attempts} attempts: ${result.message}`
+                  : `Import verification failed after ${result.attempts} attempts. Fix credentials and verify manually.`,
+                "error",
+              );
+            }}
             onVerifySettled={() => {
               if (store.savedTarget) void refreshDbVerification(store.savedTarget.id);
             }}
             onVerifySuccess={() => {
               if (!store.savedTarget) return;
-              updateSession({ attackPlan: null, attackPlanUi: createInitialAttackPlanUi() });
+              setSession((prev) => {
+                // Imported plans must survive re-verify; only wipe generated plans.
+                if (prev.attackPlanSource === "imported" && prev.attackPlan) {
+                  return prev;
+                }
+                const next = {
+                  ...prev,
+                  attackPlan: null,
+                  attackPlanUi: createInitialAttackPlanUi(),
+                  attackPlanSource: null,
+                };
+                saveWizardSession(next);
+                return next;
+              });
               plannerRunRef.current = null;
-              void runAttackPlanner(store.savedTarget.id, { autoAdvance: true });
             }}
           />
-            {plannerGenerating && (
-              <p className="text-muted text-sm">Analyzing API with AI Runtime…</p>
-            )}
-            {plannerError && !plannerGenerating && (
-              <p className="text-danger text-sm">{plannerError}</p>
-            )}
           </>
         ) : (
           <p className="text-muted">Complete step 2 to configure authentication.</p>
         );
       case 4:
+        if (wizardResumeLoading) {
+          return <p className="text-muted">Loading attack plan…</p>;
+        }
         if (!session.targetProfile.verification.verified) {
           return <p className="text-muted">Waiting for target verification…</p>;
         }
         if (plannerGenerating || (!session.attackPlan && !plannerError)) {
-          return (
-            <p className="text-muted">
-              {plannerGenerating ? "Analyzing API with AI Runtime…" : "Generating attack plan…"}
-            </p>
-          );
+          return <AttackPlanPlanningState replanning={plannerReplanning} />;
         }
         if (plannerError && !session.attackPlan) {
           return (
@@ -920,7 +1426,7 @@ export function ScanWizardPage() {
               {store.savedTarget && (
                 <Button
                   variant="primary"
-                  onClick={() => void runAttackPlanner(store.savedTarget!.id)}
+                  onClick={() => void runAttackPlanner(store.savedTarget!.id, { replan: false })}
                 >
                   Retry planning
                 </Button>
@@ -944,37 +1450,36 @@ export function ScanWizardPage() {
             onAdjustingChange={setPlanAdjusting}
           />
         ) : (
-          <p className="text-muted">Generating attack plan…</p>
+          <AttackPlanPlanningState replanning={false} />
         );
-      case 5:
-        return activeProjectId &&
-          store.savedTarget &&
-          session.attackPlan &&
-          session.attackPlan.categories.length > 0 &&
-          session.targetProfile.verification.verified ? (
+      case 5: {
+        const waitingForTarget =
+          Boolean(session.submittedScanId && session.savedTargetId && !store.savedTarget);
+        return wizardResumeLoading || waitingForTarget ? (
+          <p className="text-muted">Loading attack progress…</p>
+        ) : sessionReadyForSubmitStep(session, store.savedTarget) && store.savedTarget ? (
           <>
             <SubmitStep
               target={store.savedTarget}
               targetProfile={session.targetProfile}
-              attackPlan={session.attackPlan}
+              attackPlan={session.attackPlan!}
               submittedScanId={session.submittedScanId}
-              onViewResult={() => updateSession({ currentStep: 6 })}
+              consoleResetKey={consoleResetKey}
+              onViewResult={goToResultsStep}
               onRetryScan={() => void handleRetryScan()}
+              onClose={handleCancel}
             />
             {scanSubmitError && <p className="text-danger">{scanSubmitError}</p>}
           </>
         ) : (
           <p className="text-muted">Complete steps 1–4 before submitting the scan.</p>
         );
+      }
       case 6:
-        return session.submittedScanId && activeProjectId ? (
+        return session.submittedScanId ? (
           <ResultsStep
-            projectId={activeProjectId}
             scanId={session.submittedScanId}
-            onDone={() => {
-              clearWizardSession();
-              navigate("/");
-            }}
+            attackCategories={session.attackPlan?.categories}
           />
         ) : (
           <p className="text-muted">Submit a scan in step 5 to review results.</p>
@@ -987,12 +1492,38 @@ export function ScanWizardPage() {
   return (
     <div className="page">
       <PageHeader
-        title="New Scan"
-        description="Configure a new security scan"
+        title={pageHeaderTitle}
+        description={pageHeaderDescription}
         actions={
-          <Button variant="danger" onClick={handleCancel}>
-            Cancel
-          </Button>
+          showAttackScanControls ? (
+            <div className="page-actions">
+              {submittedStatus?.status === "running" && (
+                <Button
+                  variant="secondary"
+                  disabled={
+                    scanControlPending ||
+                    submittedStatus.pause_pending === true
+                  }
+                  onClick={() => void handleScanPause()}
+                >
+                  {submittedStatus.pause_pending ? "Pausing…" : "Pause"}
+                </Button>
+              )}
+              {submittedStatus?.status === "paused" && (
+                <Button
+                  variant="secondary"
+                  disabled={scanControlPending}
+                  onClick={() => void handleScanResume()}
+                >
+                  Resume
+                </Button>
+              )}
+            </div>
+          ) : showHeaderCancel ? (
+            <Button variant="danger" onClick={handleCancel}>
+              Cancel
+            </Button>
+          ) : undefined
         }
       />
 
@@ -1005,6 +1536,7 @@ export function ScanWizardPage() {
       <WizardStepper
         currentStep={session.currentStep}
         draft={draft}
+        scanStatus={submittedStatus?.status}
         onStepChange={handleStepChange}
       />
 
@@ -1018,7 +1550,8 @@ export function ScanWizardPage() {
             <p className="wizard-panel__hint text-muted">{stepDef.hint}</p>
             {session.currentStep === 4 &&
             store.savedTarget &&
-            session.targetProfile.verification.verified ? (
+            session.targetProfile.verification.verified &&
+            session.attackPlan ? (
               <Button
                 variant="ghost"
                 disabled={plannerGenerating || planAdjusting}
@@ -1027,12 +1560,15 @@ export function ScanWizardPage() {
                   updateSession({
                     attackPlan: null,
                     attackPlanUi: createInitialAttackPlanUi(),
+                    attackPlanSource: null,
                   });
-                  void runAttackPlanner(store.savedTarget!.id);
+                  void runAttackPlanner(store.savedTarget!.id, { replan: true });
                 }}
               >
-                {plannerGenerating ? "Re-planning…" : "Re-plan"}
+                {plannerGenerating && plannerReplanning ? "Re-planning…" : "Re-plan"}
               </Button>
+            ) : session.currentStep === 4 && plannerGenerating ? (
+              <Badge variant="muted">{plannerReplanning ? "Re-planning…" : "Planning…"}</Badge>
             ) : null}
             {session.currentStep === 3 && session.savedTargetId ? (
               dbVerificationLoading ? (
@@ -1047,6 +1583,13 @@ export function ScanWizardPage() {
               <Button variant="ghost" onClick={() => setImportApiOpen(true)}>
                 Import
               </Button>
+            ) : null}
+            {session.currentStep === 6 && activeProjectId && session.submittedScanId ? (
+              <ReportExportDropdown
+                projectId={activeProjectId}
+                scanId={session.submittedScanId}
+                findingsCount={resultsFindingsCount}
+              />
             ) : null}
           </div>
         </header>
@@ -1072,7 +1615,7 @@ export function ScanWizardPage() {
               </Button>
             )}
             {showViewResult && (
-              <Button variant="primary" onClick={() => updateSession({ currentStep: 6 })}>
+              <Button variant="primary" onClick={goToResultsStep}>
                 View Result
               </Button>
             )}
@@ -1091,24 +1634,7 @@ export function ScanWizardPage() {
                 disabled={nextDisabled || persistingTarget || startingScan}
                 onClick={() => void handleNext()}
               >
-                {session.currentStep === 4
-                  ? startingScan
-                    ? "Starting attack…"
-                    : "Run Attack"
-                  : persistingTarget
-                    ? "Saving target…"
-                    : "Next"}
-              </Button>
-            )}
-            {showFooterDone && (
-              <Button
-                variant="primary"
-                onClick={() => {
-                  clearWizardSession();
-                  navigate("/");
-                }}
-              >
-                Done
+                {importFooterLabel()}
               </Button>
             )}
           </div>

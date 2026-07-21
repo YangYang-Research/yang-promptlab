@@ -82,6 +82,14 @@ describe("inferWizardResumeStep", () => {
 });
 
 describe("resolveTargetScanAction", () => {
+  it("shows view scan for running scans", () => {
+    const action = resolveTargetScanAction("target-1", "project-1", [
+      scan({ id: "scan-running", status: "running" }),
+    ], null);
+
+    expect(action).toEqual({ kind: "view_scan", scanId: "scan-running" });
+  });
+
   it("shows view report for completed scans", () => {
     const action = resolveTargetScanAction("target-1", "project-1", [
       scan({ id: "scan-1", status: "completed", completedAt: "2026-01-01T01:00:00Z" }),

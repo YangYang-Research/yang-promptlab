@@ -186,26 +186,22 @@ impl LlmEvaluator {
         self.role
     }
 
-    fn build_prompt(&self, request: &JudgeRequest) -> String {
-        format!(
-            "{system}\n\n{user}",
-            system = RolePrompts::system(self.role),
-            user = RolePrompts::user(
-                self.role,
-                &request.attack_category,
-                &request.payload,
-                &request.response_text,
-            ),
+    fn build_user_prompt(&self, request: &JudgeRequest) -> String {
+        RolePrompts::user(
+            self.role,
+            &request.attack_category,
+            &request.payload,
+            &request.response_text,
         )
     }
 
     pub async fn evaluate_async(&self, request: &JudgeRequest) -> JudgeResult<EvaluatorResult> {
-        let prompt = self.build_prompt(request);
         let runtime = self.runtime.lock().await;
 
         let response = runtime
             .complete(InferenceRequest {
-                prompt,
+                system: Some(RolePrompts::system(self.role).to_string()),
+                prompt: self.build_user_prompt(request),
                 max_tokens: self.max_tokens,
                 temperature: self.temperature,
             })

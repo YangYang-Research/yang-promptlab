@@ -4,15 +4,21 @@ import { WIZARD_STEPS, canNavigateToStep, isStepComplete } from "./wizardSteps";
 type WizardStepperProps = {
   currentStep: WizardStepId;
   draft: WizardDraft;
+  scanStatus?: string | null;
   onStepChange: (step: WizardStepId) => void;
 };
 
-export function WizardStepper({ currentStep, draft, onStepChange }: WizardStepperProps) {
+export function WizardStepper({
+  currentStep,
+  draft,
+  scanStatus,
+  onStepChange,
+}: WizardStepperProps) {
   return (
     <nav className="wizard-stepper" aria-label="Scan wizard progress">
       <ol className="wizard-stepper__list">
         {WIZARD_STEPS.map((step, index) => {
-          const reachable = canNavigateToStep(step.id, draft);
+          const reachable = canNavigateToStep(step.id, draft, { scanStatus });
           const active = step.id === currentStep;
           const complete = isStepComplete(step.id, draft) && step.id < currentStep;
 

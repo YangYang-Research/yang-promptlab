@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { Button } from "@/shared/components";
+import { Button, IconButton, IconExternalLink } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
 import {
   saveThirdPartyModelForm,
@@ -13,6 +13,9 @@ import {
   type ThirdPartyProvider,
 } from "@/shared/ipc/thirdPartyModels";
 import { useToast } from "@/shared/notifications";
+import { openExternalUrl } from "@/shared/utils/openExternalUrl";
+
+import { ProviderLogo } from "./ProviderLogo";
 
 type ThirdPartyModelsPanelProps = {
   backendConnected: boolean;
@@ -21,8 +24,29 @@ type ThirdPartyModelsPanelProps = {
   onSaved?: () => void;
 };
 
-function providerIcon(label: string): string {
-  return label.trim().charAt(0).toUpperCase();
+function ModelIdLabel({
+  htmlFor,
+  providerLabel,
+  modelsDocsUrl,
+}: {
+  htmlFor: string;
+  providerLabel: string;
+  modelsDocsUrl?: string;
+}) {
+  return (
+    <div className="settings-field__label-row">
+      <label htmlFor={htmlFor}>Model ID</label>
+      {modelsDocsUrl ? (
+        <IconButton
+          ariaLabel={`Open ${providerLabel} model catalog`}
+          size="sm"
+          onClick={() => void openExternalUrl(modelsDocsUrl)}
+        >
+          <IconExternalLink />
+        </IconButton>
+      ) : null}
+    </div>
+  );
 }
 
 function connectivityToast(
@@ -137,7 +161,12 @@ export function ThirdPartyModelsPanel({
       {isEditing ? (
         <div className="third-party-models__edit-header">
           <span className="third-party-models__edit-label">Provider</span>
-          <strong className="third-party-models__edit-value">{providerLabel}</strong>
+          <div className="third-party-models__edit-value-row">
+            <span className="third-party-models__icon" aria-hidden="true">
+              <ProviderLogo provider={form.provider} />
+            </span>
+            <strong className="third-party-models__edit-value">{providerLabel}</strong>
+          </div>
         </div>
       ) : (
         <div className="third-party-models__grid">
@@ -152,7 +181,7 @@ export function ThirdPartyModelsPanel({
                 onClick={() => selectProvider(provider.value)}
               >
                 <span className="third-party-models__icon" aria-hidden="true">
-                  {providerIcon(provider.label)}
+                  <ProviderLogo provider={provider.value} />
                 </span>
                 <span className="third-party-models__name">{provider.label}</span>
               </button>
@@ -164,6 +193,22 @@ export function ThirdPartyModelsPanel({
       <div className="third-party-models__form">
         {isBedrock ? (
           <>
+            <div className="settings-field">
+              <ModelIdLabel
+                htmlFor="bedrockModel"
+                providerLabel={selectedProvider.label}
+                modelsDocsUrl={selectedProvider.modelsDocsUrl}
+              />
+              <input
+                id="bedrockModel"
+                className="input mono"
+                placeholder={selectedProvider.modelPlaceholder}
+                value={form.model}
+                disabled={!backendConnected}
+                onChange={(e) => patchForm({ model: e.target.value })}
+              />
+            </div>
+
             <div className="settings-field">
               <label htmlFor="bedrockAccessKeyId">Access Key ID</label>
               <input
@@ -226,18 +271,6 @@ export function ThirdPartyModelsPanel({
                 }
               />
             </div>
-
-            <div className="settings-field">
-              <label htmlFor="bedrockModel">Model</label>
-              <input
-                id="bedrockModel"
-                className="input mono"
-                placeholder={selectedProvider.modelPlaceholder}
-                value={form.model}
-                disabled={!backendConnected}
-                onChange={(e) => patchForm({ model: e.target.value })}
-              />
-            </div>
           </>
         ) : (
           <>
@@ -262,7 +295,11 @@ export function ThirdPartyModelsPanel({
             )}
 
             <div className="settings-field">
-              <label htmlFor="thirdPartyModel">Model</label>
+              <ModelIdLabel
+                htmlFor="thirdPartyModel"
+                providerLabel={selectedProvider.label}
+                modelsDocsUrl={selectedProvider.modelsDocsUrl}
+              />
               <input
                 id="thirdPartyModel"
                 className="input"

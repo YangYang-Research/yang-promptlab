@@ -1157,6 +1157,7 @@ impl LocalModelManager {
         let engine = self.inference_engine(model_id).await?;
         let response = engine
             .complete(InferenceRequest {
+                system: None,
                 prompt: "Reply with exactly: AISec OK".into(),
                 max_tokens: 16,
                 temperature: 0.0,

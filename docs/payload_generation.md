@@ -67,7 +67,7 @@ Additional engine categories (`jailbreak`, `mcp_abuse`) are included when select
 
 | Mode | Behavior |
 |------|----------|
-| **Static Pack** | Loads `crates/aisec-payload/data/payloads.json`; filters by plan categories and `disabled_tests` |
+| **Static Pack** | Loads attack catalog from SQLite (`attack_catalog_techniques`, seeded from `catalog_seed.json`); filters by plan categories and `disabled_tests` |
 | **Template Mutation** | Static sources expanded with `MutationKind` encodings (base64, hex, HTML, unicode obfuscation) |
 | **Local LLM** | Static baseline + 2–3 LLM probes per category; falls back to static-only if parse fails |
 

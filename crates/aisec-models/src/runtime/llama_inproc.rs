@@ -291,7 +291,7 @@ fn generate(
         .map_err(|e| ModelError::runtime(format!("failed to create context: {e}")))?;
 
     let tokens = model
-        .str_to_token(&request.prompt, AddBos::Always)
+        .str_to_token(&request.effective_prompt(), AddBos::Always)
         .map_err(|e| ModelError::runtime(format!("tokenization failed: {e}")))?;
 
     let n_prompt = tokens.len();

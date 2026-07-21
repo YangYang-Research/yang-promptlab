@@ -34,3 +34,6 @@ logs/
 
 # Build artifacts
 *.local
+
+.agents/
+skills-lock.json

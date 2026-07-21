@@ -22,11 +22,13 @@ const TargetDetailsPage = lazy(() =>
     default: m.TargetDetailsPage,
   })),
 );
-const AttacksPage = lazy(() =>
-  import("@/features/attacks/AttacksPage").then((m) => ({ default: m.AttacksPage })),
-);
 const FindingsPage = lazy(() =>
   import("@/features/findings/FindingsPage").then((m) => ({ default: m.FindingsPage })),
+);
+const FindingDetailsPage = lazy(() =>
+  import("@/features/findings/FindingDetailsPage").then((m) => ({
+    default: m.FindingDetailsPage,
+  })),
 );
 const ReportsPage = lazy(() =>
   import("@/features/reports/ReportsPage").then((m) => ({ default: m.ReportsPage })),
@@ -36,6 +38,11 @@ const ModelsPage = lazy(() =>
 );
 const PluginsPage = lazy(() =>
   import("@/features/plugins/PluginsPage").then((m) => ({ default: m.PluginsPage })),
+);
+const AttackCategoriesPage = lazy(() =>
+  import("@/features/attack-catalog/AttackCategoriesPage").then((m) => ({
+    default: m.AttackCategoriesPage,
+  })),
 );
 const AIRuntimePage = lazy(() =>
   import("@/features/runtime/AIRuntimePage").then((m) => ({ default: m.AIRuntimePage })),
@@ -132,18 +139,18 @@ export function AppRouter() {
             }
           />
           <Route
-            path="attacks"
-            element={
-              <Suspense fallback={<PageLoader />}>
-                <AttacksPage />
-              </Suspense>
-            }
-          />
-          <Route
             path="findings"
             element={
               <Suspense fallback={<PageLoader />}>
                 <FindingsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="findings/:findingId"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <FindingDetailsPage />
               </Suspense>
             }
           />
@@ -176,6 +183,14 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <PluginsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="attack-categories"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <AttackCategoriesPage />
               </Suspense>
             }
           />

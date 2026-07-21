@@ -8,10 +8,12 @@ import {
   Card,
   ContentToolbar,
   DataTable,
+  EmptyState,
   ListCard,
   PageHeader,
   Pagination,
   RefreshButton,
+  StatusBadge,
 } from "@/shared/components";
 import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
 import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
@@ -23,6 +25,7 @@ import {
 import type { Project, ScanRun, Target } from "@/shared/types";
 
 import { AddTargetModal } from "./AddTargetModal";
+import { targetDisplayType } from "@/features/scans/targetProfile";
 
 type FlatTargetRow = Target & {
   projectName: string;
@@ -99,6 +102,12 @@ export function TargetsPage() {
     },
     {
       key: "status",
+      header: "Status",
+      width: "110px",
+      render: (target: FlatTargetRow) => <StatusBadge status={target.status} />,
+    },
+    {
+      key: "scanStatus",
       header: "Scan Status",
       width: "120px",
       render: (target: FlatTargetRow) => target.scanContext.scanStatusLabel,
@@ -137,12 +146,11 @@ export function TargetsPage() {
         </Card>
       )}
 
-      {rows.length === 0 ? (
-        <Card>
-          <p className="text-muted">
-            {loading ? "Loading targets…" : "No targets yet. Add your first target."}
-          </p>
-        </Card>
+      {targets.length === 0 && !loading ? (
+        <EmptyState
+          title="No targets yet"
+          description="Add an endpoint, application, or model to start security testing."
+        />
       ) : (
         <>
           <ContentToolbar
@@ -159,7 +167,8 @@ export function TargetsPage() {
                 rows={pagination.items}
                 keyField="id"
                 onRowClick={(target) => navigate(`/targets/${target.id}`)}
-                emptyMessage={loading ? "Loading targets…" : "No targets found"}
+                emptyMessage={loading ? "Loading targets…" : "No targets match your filters"}
+                loading={loading && pagination.items.length === 0}
               />
             </Card>
           ) : (
@@ -168,11 +177,12 @@ export function TargetsPage() {
                 <ListCard
                   key={target.id}
                   title={target.name}
-                  status={<Badge variant="info">{target.type}</Badge>}
+                  status={<Badge variant="info">{targetDisplayType(target)}</Badge>}
                   metadata={[
                     { label: "Project", value: target.projectName },
                     { label: "URL", value: <span className="mono text-sm">{target.url}</span> },
                     { label: "Authentication", value: target.authType },
+                    { label: "Status", value: <StatusBadge status={target.status} /> },
                     { label: "Scan Status", value: target.scanContext.scanStatusLabel },
                     { label: "Latest Result", value: target.scanContext.latestScanResult },
                   ]}

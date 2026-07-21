@@ -73,186 +73,9 @@ export type FindingDto = {
   updated_at: string;
 };
 
-export type EndpointDto = {
-  id: string;
+export type FindingImportDto = {
   scan_id: string;
-  target_id: string | null;
-  url: string;
-  kind: string;
-  method: string | null;
-  confidence: number;
-  evidence: string | null;
-  source_url: string | null;
-  discovered_at: string;
-  endpoint_type: string;
-  ai_framework: string | null;
-  risk_score: number;
-  metadata_confidence: number;
-  discovery_source: string;
-  auth_required: boolean;
-  metadata: AiEndpointMetadataDto | null;
-  attack_recommendations: EndpointAttackRecommendationDto[];
-};
-
-export type AiEndpointMetadataDto = {
-  basic: EndpointBasicDto;
-  fingerprint: FingerprintMetadataDto;
-  schema: SchemaMetadataDto;
-  inference: InferenceFieldsDto;
-  capabilities: EndpointCapabilitiesDto;
-  classification: EndpointClassificationDto;
-  risk: RiskAssessmentDto;
-  provenance: DiscoveryProvenanceDto;
-  raw?: RawObservationDto | null;
-};
-
-export type EndpointBasicDto = {
-  id: string;
-  url: string;
-  method: string;
-  host: string;
-  protocol: string;
-  status: number;
-};
-
-export type FingerprintMetadataDto = {
-  framework: string;
-  provider: string;
-  version: string;
-  confidence: number;
-  apiStyle: string;
-  technologies: string[];
-};
-
-export type SchemaMetadataDto = {
-  contentType: string | null;
-  requestSchema: NormalizedSchemaDto | null;
-  responseSchema: NormalizedSchemaDto | null;
-  transport: string[];
-};
-
-export type NormalizedSchemaDto = {
-  format: string;
-  fields: SchemaFieldDto[];
-};
-
-export type SchemaFieldDto = {
-  name: string;
-  fieldType: string;
-  required: boolean;
-};
-
-export type InferenceFieldsDto = {
-  promptField: string | null;
-  historyField: string | null;
-  conversationField: string | null;
-  modelField: string | null;
-  streamField: string | null;
-  toolField: string | null;
-  attachmentField: string | null;
-};
-
-export type EndpointCapabilitiesDto = {
-  supportsChat: boolean;
-  supportsStreaming: boolean;
-  supportsEmbedding: boolean;
-  supportsVision: boolean;
-  supportsTools: boolean;
-  supportsJsonMode: boolean;
-  supportsThinking: boolean;
-  supportsMemory: boolean;
-  supportsAgent: boolean;
-};
-
-export type EndpointClassificationDto = {
-  endpointType: string;
-  aiFramework: string;
-  confidence: number;
-  riskScore: number;
-};
-
-export type RiskAssessmentDto = {
-  score: number;
-  factors: string[];
-};
-
-export type DiscoveryProvenanceDto = {
-  discoverySource: string;
-  authenticationRequired: boolean;
-  discoveredAt: string;
-  kind: string;
-  evidence: string | null;
-};
-
-export type RawObservationDto = {
-  requestHeaders: Record<string, string>;
-  requestBody: string | null;
-  responseHeaders: Record<string, string>;
-  responseBody: string | null;
-};
-
-export type EndpointAttackRecommendationDto = {
-  category: string;
-  reason: string;
-  priority: number;
-};
-
-/** @deprecated Use metadata + attack_recommendations */
-export type EndpointFingerprintDto = {
-  confidence: number;
-  technologies: FingerprintTechnologyDto[];
-  agentFrameworks: FingerprintFrameworkDto[];
-  aiComponents: FingerprintComponentDto[];
-  attackRecommendations: FingerprintRecommendationDto[];
-  methodsUsed: string[];
-  primaryProvider: string | null;
-  apiStyle: string | null;
-  platformProfile: PlatformProfileDto;
-};
-
-export type PlatformProfileDto = {
-  platform: string;
-  version: string;
-  authType: string;
-  llmProvider: string;
-  memoryEnabled: boolean;
-  toolsEnabled: boolean;
-  ragEnabled: boolean;
-};
-
-export type FingerprintTechnologyDto = {
-  id: string;
-  name: string;
-  category: string;
-  confidence: number;
-  signals: string[];
-};
-
-export type FingerprintFrameworkDto = {
-  id: string;
-  name: string;
-  confidence: number;
-  signals: string[];
-};
-
-export type FingerprintComponentDto = {
-  id: string;
-  name: string;
-  confidence: number;
-  signals: string[];
-};
-
-export type FingerprintRecommendationDto = {
-  category: string;
-  reason: string;
-  priority: number;
-};
-
-export type AttackRunDto = {
-  scan: ScanDto;
-  category: string;
-  attempts: number;
-  successes: number;
+  imported_count: number;
   findings: FindingDto[];
 };
 
@@ -270,6 +93,8 @@ export type ScanStartRequest = {
   payloadStrategy?: import("@/features/scans/payloadStrategy").PayloadStrategyDto;
   agentMode?: boolean;
   maxAgentAttempts?: number;
+  reflectionEnabled?: boolean;
+  adaptivePlanning?: boolean;
   draftScanId?: string;
 };
 
@@ -279,6 +104,12 @@ export type ScanStatusDto = {
   progress_percent: number;
   completed: number;
   total: number;
+  categories_completed?: number;
+  attacks_completed?: number;
+  attacks_total?: number;
+  testcases_completed?: number;
+  testcases_total?: number;
+  pause_pending?: boolean;
   findings_count: number;
   current_endpoint: string | null;
   current_test: string | null;
@@ -296,9 +127,16 @@ export type ScanProgressEvent = {
   message: string;
   endpoint?: string;
   payload?: string;
+  response?: string;
   statusCode?: number;
   latency?: number;
   findingId?: string;
+};
+
+export type ScanConsoleTailDto = {
+  content: string;
+  offset: number;
+  totalBytes: number;
 };
 
 export type ReportDto = {
@@ -343,29 +181,30 @@ export const createTarget = (
   descriptor?: unknown,
 ) => invokeCommand<TargetDto>("target_create", { projectId, name, targetType, descriptor });
 
+export const deleteTarget = (id: string) => invokeCommand<void>("target_delete", { id });
+
 export const listScans = (projectId: string) =>
   invokeCommand<ScanDto[]>("scan_list", { projectId });
 
 export const getScan = (id: string) => invokeCommand<ScanDetailDto>("scan_get", { id });
-
-export const createScan = (
-  projectId: string,
-  name: string,
-  targetId?: string | null,
-  status?: string | null,
-) =>
-  invokeCommand<ScanDto>("scan_create", {
-    projectId,
-    targetId: targetId ?? null,
-    name,
-    status: status ?? null,
-  });
 
 export const listFindings = (scanId: string) =>
   invokeCommand<FindingDto[]>("finding_list", { scanId });
 
 export const listFindingsAll = () =>
   invokeCommand<FindingDto[]>("finding_list_all");
+
+export const importFindingsSarif = (path: string, projectId?: string | null) =>
+  invokeCommand<FindingImportDto>("finding_import_sarif", {
+    path,
+    projectId: projectId || null,
+  });
+
+export const updateFindingStatus = (id: string, status: string) =>
+  invokeCommand<FindingDto>("finding_update", { id, status });
+
+export const deleteFinding = (id: string) =>
+  invokeCommand<void>("finding_delete", { id });
 
 export const generateReport = (
   projectId: string,
@@ -387,23 +226,6 @@ export const readReport = (id: string) =>
 export const exportReport = (id: string) =>
   invokeCommand<string>("report_export", { id });
 
-export const listEndpoints = (scanId: string) =>
-  invokeCommand<EndpointDto[]>("endpoint_list", { scanId });
-
-export const createEndpoint = (
-  scanId: string,
-  targetId: string,
-  method: string,
-  path: string,
-) =>
-  invokeCommand<EndpointDto>("endpoint_create", { scanId, targetId, method, path });
-
-export const updateEndpoint = (endpointId: string, method: string) =>
-  invokeCommand<EndpointDto>("endpoint_update", { endpointId, method });
-
-export const runPromptInjection = (endpointId: string) =>
-  invokeCommand<AttackRunDto>("attack_run_prompt_injection", { endpointId });
-
 export const startScan = (request: ScanStartRequest) =>
   invokeCommand<ScanStartDto>("scan_start", {
     projectId: request.projectId,
@@ -415,6 +237,8 @@ export const startScan = (request: ScanStartRequest) =>
     payloadStrategy: request.payloadStrategy,
     agentMode: request.agentMode ?? false,
     maxAgentAttempts: request.maxAgentAttempts ?? 5,
+    reflectionEnabled: request.reflectionEnabled ?? false,
+    adaptivePlanning: request.adaptivePlanning ?? false,
     draftScanId: request.draftScanId,
   });
 
@@ -429,3 +253,12 @@ export const resumeScan = (scanId: string) =>
 
 export const stopScan = (scanId: string) =>
   invokeCommand<ScanStatusDto>("scan_stop", { scanId });
+
+export const tailScanConsole = (scanId: string, offset?: number) =>
+  invokeCommand<ScanConsoleTailDto>("scan_console_tail", {
+    scanId,
+    offset: offset ?? null,
+  });
+
+export const deleteScan = (scanId: string) =>
+  invokeCommand<null>("scan_delete", { id: scanId });

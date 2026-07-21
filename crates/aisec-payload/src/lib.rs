@@ -10,7 +10,7 @@ pub mod pipeline;
 pub mod types;
 
 pub use error::{PayloadError, PayloadResult};
-pub use library::PayloadDatabase;
+pub use library::{parse_category, CatalogSeedEntry, PayloadDatabase};
 pub use mutation::{
     base64_encode, hex_encode, html_encode, unicode_obfuscate, MutatedVariant, MutationConfig,
     MutationEngine,

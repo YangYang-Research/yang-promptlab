@@ -1,8 +1,11 @@
 //! Tauri event payloads for live UI updates.
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use time::OffsetDateTime;
+
+use crate::scan_console_log;
+use crate::state::AppState;
 
 pub const SCAN_PROGRESS_EVENT: &str = "scan-progress";
 pub const APP_DATA_CHANGED_EVENT: &str = "app-data-changed";
@@ -29,6 +32,8 @@ pub struct ScanProgressEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub response: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub status_code: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency: Option<u64>,
@@ -47,6 +52,7 @@ impl ScanProgressEvent {
             message: message.into(),
             endpoint: None,
             payload: None,
+            response: None,
             status_code: None,
             latency: None,
             finding_id: None,
@@ -60,6 +66,11 @@ impl ScanProgressEvent {
 
     pub fn payload(mut self, payload: impl Into<String>) -> Self {
         self.payload = Some(payload.into());
+        self
+    }
+
+    pub fn response(mut self, response: impl Into<String>) -> Self {
+        self.response = Some(response.into());
         self
     }
 
@@ -80,6 +91,11 @@ impl ScanProgressEvent {
 }
 
 pub fn emit_scan_progress(app: &AppHandle, event: ScanProgressEvent) {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Err(err) = scan_console_log::append_line(&state.logs_dir(), &event) {
+            tracing::warn!(scan_id = %event.scan_id, ?err, "failed to write scan console log");
+        }
+    }
     let _ = app.emit(SCAN_PROGRESS_EVENT, event);
 }
 
