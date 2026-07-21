@@ -5,6 +5,7 @@ import { toAppError } from "@/shared/errors";
 import {
   saveThirdPartyModelForm,
   testThirdPartyModelConnectivity,
+  thirdPartyConnectionTestFingerprint,
   THIRD_PARTY_PROVIDERS,
   thirdPartyModelTemplate,
   validateThirdPartyModelForm,
@@ -80,12 +81,17 @@ export function ThirdPartyModelsPanel({
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [successfulTest, setSuccessfulTest] = useState<{
+    fingerprint: string;
+    latencyMs: number;
+  } | null>(null);
 
   useEffect(() => {
     if (initialForm) {
       setForm(initialForm);
       setSaved(false);
       setError(null);
+      setSuccessfulTest(null);
     }
   }, [initialForm]);
 
@@ -104,12 +110,14 @@ export function ThirdPartyModelsPanel({
 
   function patchForm(patchValue: Partial<ThirdPartyModelForm>) {
     setSaved(false);
+    setSuccessfulTest(null);
     setForm((current) => ({ ...current, ...patchValue }));
   }
 
   function selectProvider(provider: ThirdPartyProvider) {
     setForm(thirdPartyModelTemplate(provider));
     setSaved(false);
+    setSuccessfulTest(null);
   }
 
   async function handleSave() {
@@ -119,13 +127,28 @@ export function ThirdPartyModelsPanel({
       return;
     }
 
+    const fingerprint = thirdPartyConnectionTestFingerprint(form);
+    const priorTest =
+      successfulTest !== null && successfulTest.fingerprint === fingerprint
+        ? successfulTest
+        : null;
+
     setError(null);
     setSaving(true);
     try {
-      const savedForm = await saveThirdPartyModelForm(form, editingModelId);
+      const savedForm = await saveThirdPartyModelForm(form, editingModelId, {
+        markVerified: priorTest !== null,
+        testLatencyMs: priorTest?.latencyMs ?? null,
+      });
       setForm(savedForm);
       setSaved(true);
-      notify("Third-party model saved", "success");
+      setSuccessfulTest(null);
+      notify(
+        priorTest
+          ? "Third-party model saved and marked Verified"
+          : "Third-party model saved",
+        "success",
+      );
       onSaved?.();
     } catch (err) {
       const message = toAppError(err).message;
@@ -149,7 +172,16 @@ export function ThirdPartyModelsPanel({
       const result = await testThirdPartyModelConnectivity(form);
       const toast = connectivityToast(result);
       notify(toast.message, toast.type);
+      if (result.ok) {
+        setSuccessfulTest({
+          fingerprint: thirdPartyConnectionTestFingerprint(form),
+          latencyMs: result.latencyMs,
+        });
+      } else {
+        setSuccessfulTest(null);
+      }
     } catch (err) {
+      setSuccessfulTest(null);
       notify(toAppError(err).message, "error");
     } finally {
       setTesting(false);
@@ -331,7 +363,7 @@ export function ThirdPartyModelsPanel({
             </div>
 
             <div className="settings-field">
-              <label htmlFor="thirdPartyApiKey">API Key</label>
+              <label htmlFor="thirdPartyApiKey">API Key (optional)</label>
               <input
                 id="thirdPartyApiKey"
                 className="input mono"

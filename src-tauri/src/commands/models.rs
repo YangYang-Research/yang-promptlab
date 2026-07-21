@@ -160,6 +160,11 @@ pub struct ThirdPartyModelSaveRequest {
     pub aws_session_token: String,
     #[serde(default)]
     pub existing_model_id: Option<String>,
+    /// When true, apply a prior successful Test Connection as verified on save.
+    #[serde(default)]
+    pub mark_verified: bool,
+    #[serde(default)]
+    pub test_latency_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -246,6 +251,8 @@ fn third_party_request_from_entry(
             aws_secret_access_key: String::new(),
             aws_session_token: String::new(),
             existing_model_id: None,
+            mark_verified: false,
+            test_latency_ms: None,
         }),
         _ => Err(CommandError::invalid_input(
             "connection test only applies to third-party models",
@@ -945,7 +952,23 @@ pub async fn models_save_third_party(
 
         let is_new_model = existing_id.is_none();
         let renamed = existing_id.is_some_and(|old_id| old_id != entry.id);
-        if is_new_model || renamed || credential_input_changed {
+        if request.mark_verified {
+            let latency_ms = request.test_latency_ms.unwrap_or(0);
+            let checked_at = format_health_check_timestamp(OffsetDateTime::now_utc());
+            let current = manager
+                .get_model(&entry.id)
+                .ok_or_else(|| {
+                    CommandError::invalid_input(format!("model not found: {}", entry.id))
+                })?;
+            let mut metadata = current.metadata.clone();
+            apply_model_connectivity_metadata(&mut metadata, true, latency_ms, &checked_at);
+            manager
+                .update_model_metadata(&entry.id, metadata)
+                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+            manager
+                .set_model_verified(&entry.id, true)
+                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        } else if is_new_model || renamed || credential_input_changed {
             manager
                 .set_model_verified(&entry.id, false)
                 .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;

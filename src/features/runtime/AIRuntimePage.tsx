@@ -927,7 +927,15 @@ export function AIRuntimePage() {
                     <div className="summary-stat">
                       <span className="summary-stat__label">Runtime status</span>
                       <span className="summary-stat__value summary-stat__value--sm">
-                        {localRuntimeStatusLabel}
+                        <span className="connectivity-status">
+                          {localRuntimeStatusLabel}
+                          <span
+                            className={`connectivity-status__dot connectivity-status__dot--${
+                              connectivityStatusVariant(localRuntimeStatusLabel) ?? "warning"
+                            }`}
+                            aria-hidden
+                          />
+                        </span>
                       </span>
                     </div>
                     <div className="summary-stat">
@@ -937,17 +945,23 @@ export function AIRuntimePage() {
                       </span>
                     </div>
                     <div className="summary-stat">
-                      <span className="summary-stat__label">Loaded model</span>
+                      <span className="summary-stat__label">Model ID</span>
                       <span className="summary-stat__value summary-stat__value--sm">
                         {status?.modelLoaded
                           ? (configuration?.modelName ?? status?.loadedModelPath ?? "N/A")
-                          : "None"}
+                          : "N/A"}
                       </span>
                     </div>
                     <div className="summary-stat">
-                      <span className="summary-stat__label">Health</span>
+                      <span className="summary-stat__label">Yazg Agent</span>
                       <span className="summary-stat__value summary-stat__value--sm">
-                        {configuration?.connectivity ?? "Not checked"}
+                        {modelLoadInProgress ? (
+                          "Checking…"
+                        ) : (
+                          <ConnectivityStatus
+                            label={isYazgAgentLive(configuration) ? "Live" : "Offline"}
+                          />
+                        )}
                       </span>
                     </div>
                   </div>

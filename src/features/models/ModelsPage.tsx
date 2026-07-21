@@ -76,6 +76,9 @@ export function ModelsPage() {
   const [installed, setInstalled] = useState<ModelEntryDto[]>([]);
   const [catalog, setCatalog] = useState<ModelCatalogEntryDto[]>([]);
   const [registryInfo, setRegistryInfo] = useState<ModelRegistryInfoDto | null>(null);
+  const [registryInfoStatus, setRegistryInfoStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
   const [vaultPath, setVaultPath] = useState<string>("");
   const [vaultStats, setVaultStats] = useState<ModelVaultStatsDto | null>(null);
   const [importName, setImportName] = useState("");
@@ -148,16 +151,37 @@ export function ModelsPage() {
   }, [location.state, backendConnected, notify]);
 
   const refreshModels = useCallback(async () => {
-    const [models, entries, info, stats] = await Promise.all([
+    // Load independently so one failing IPC (e.g. registry meta) cannot blank the model list.
+    const settled = await Promise.allSettled([
       listModels(),
       browseModels(),
       getModelsRegistryInfo(),
       getModelsVaultStats(),
     ]);
-    setInstalled(models);
-    setCatalog(entries);
-    setRegistryInfo(info);
-    setVaultStats(stats);
+
+    const [modelsResult, catalogResult, infoResult, statsResult] = settled;
+
+    if (catalogResult.status === "fulfilled") {
+      setCatalog(catalogResult.value);
+    }
+
+    if (infoResult.status === "fulfilled") {
+      setRegistryInfo(infoResult.value);
+      setRegistryInfoStatus("ready");
+    } else {
+      setRegistryInfoStatus("error");
+    }
+
+    if (statsResult.status === "fulfilled") {
+      setVaultStats(statsResult.value);
+    }
+
+    if (modelsResult.status === "fulfilled") {
+      setInstalled(modelsResult.value);
+      return;
+    }
+
+    throw modelsResult.reason;
   }, []);
 
   const applyDownloadStatus = useCallback(
@@ -234,6 +258,7 @@ export function ModelsPage() {
     if (!backendConnected) {
       return;
     }
+    setRegistryInfoStatus((prev) => (prev === "ready" ? prev : "loading"));
     void refreshModels().catch((err) => setError(toAppError(err).message));
     void getModelsVaultPath()
       .then(setVaultPath)
@@ -588,7 +613,13 @@ export function ModelsPage() {
             ) : (
               <div>
                 <dt>Registry</dt>
-                <dd className="text-muted">Loading registry metadata…</dd>
+                <dd className="text-muted">
+                  {registryInfoStatus === "error"
+                    ? "Registry metadata unavailable"
+                    : registryInfoStatus === "loading" || registryInfoStatus === "idle"
+                      ? "Loading registry metadata…"
+                      : "Registry metadata unavailable"}
+                </dd>
               </div>
             )}
           </dl>

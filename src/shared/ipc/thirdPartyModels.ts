@@ -215,16 +215,13 @@ export function validateThirdPartyModelForm(form: ThirdPartyModelForm): string |
     return "Base URL is required for custom providers";
   }
 
-  if (!form.apiKey.trim() && !form.apiKeyConfigured) {
-    return "API Key is required";
-  }
-
   return null;
 }
 
 export function thirdPartyModelToSaveRequest(
   form: ThirdPartyModelForm,
   existingModelId?: string | null,
+  options?: { markVerified?: boolean; testLatencyMs?: number | null },
 ): ThirdPartyModelSaveRequest {
   const provider =
     form.provider === "custom"
@@ -240,7 +237,27 @@ export function thirdPartyModelToSaveRequest(
     awsSecretAccessKey: form.awsSecretAccessKey,
     awsSessionToken: form.awsSessionToken,
     existingModelId: existingModelId ?? undefined,
+    markVerified: options?.markVerified ?? false,
+    testLatencyMs: options?.testLatencyMs ?? null,
   };
+}
+
+/** Fingerprint of fields that affect connectivity — used to reuse a prior Test Connection. */
+export function thirdPartyConnectionTestFingerprint(form: ThirdPartyModelForm): string {
+  return JSON.stringify({
+    provider: form.provider,
+    customProviderName: form.customProviderName.trim(),
+    model: form.model.trim(),
+    baseUrl: form.baseUrl?.trim() || null,
+    apiKey: form.apiKey.trim() || (form.apiKeyConfigured ? "__configured__" : ""),
+    apiKeyEnv: form.apiKeyEnv?.trim() || null,
+    awsSecretAccessKey:
+      form.awsSecretAccessKey.trim() ||
+      (form.awsSecretAccessKeyConfigured ? "__configured__" : ""),
+    awsSessionToken:
+      form.awsSessionToken.trim() || (form.awsSessionTokenConfigured ? "__configured__" : ""),
+    awsRegion: form.awsRegion?.trim() || null,
+  });
 }
 
 export function testThirdPartyModelConnectivity(
@@ -292,8 +309,9 @@ export async function loadThirdPartyModelForm(
 export async function saveThirdPartyModelForm(
   form: ThirdPartyModelForm,
   existingModelId?: string | null,
+  options?: { markVerified?: boolean; testLatencyMs?: number | null },
 ): Promise<ThirdPartyModelForm> {
-  await saveThirdPartyModel(thirdPartyModelToSaveRequest(form, existingModelId));
+  await saveThirdPartyModel(thirdPartyModelToSaveRequest(form, existingModelId, options));
   return {
     ...form,
     apiKey: "",

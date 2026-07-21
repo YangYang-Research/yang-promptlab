@@ -15,13 +15,25 @@ export function connectivityStatusVariant(
   ) {
     return "success";
   }
-  if (value === "Ready") {
+  if (
+    value === "Ready" ||
+    value === "Loading model" ||
+    value === "Verifying model" ||
+    value === "Starting" ||
+    value === "Stopping" ||
+    value === "Installing" ||
+    value === "Idle"
+  ) {
     return "warning";
   }
   if (
     value === "Connection Failed" ||
     value === "Failed" ||
     value === "Offline" ||
+    value === "Stopped" ||
+    value === "Not Installed" ||
+    value === "Repair Required" ||
+    value === "Setup Required" ||
     value.startsWith("Unreachable")
   ) {
     return "failed";

@@ -153,6 +153,9 @@ export type ThirdPartyModelSaveRequest = {
   awsSecretAccessKey?: string;
   awsSessionToken?: string;
   existingModelId?: string | null;
+  /** Apply a successful Test Connection as Verified on save. */
+  markVerified?: boolean;
+  testLatencyMs?: number | null;
 };
 
 export function saveThirdPartyModel(

@@ -59,6 +59,7 @@ type AuthVerificationStepProps = {
   verificationLog: VerificationLogLine[];
   onVerificationLog: (lines: VerificationLogLine[]) => void;
   onError: (message: string | null) => void;
+  error?: string | null;
   onBeforeVerify?: () => Promise<boolean>;
   onVerifySuccess?: () => void;
   onVerifySettled?: () => void;
@@ -129,6 +130,7 @@ export function AuthVerificationStep({
   verificationLog,
   onVerificationLog,
   onError,
+  error = null,
   onBeforeVerify,
   onVerifySuccess,
   onVerifySettled,
@@ -150,6 +152,8 @@ export function AuthVerificationStep({
   authFormRef.current = authForm;
   const onAuthChangeRef = useRef(onAuthChange);
   onAuthChangeRef.current = onAuthChange;
+  /** Once the user picks an auth method (including None), stop auto-overriding from headers. */
+  const authKindChosenByUserRef = useRef(false);
   /** Step 1 passed for this probe key — retry after Step 2 failure skips Step 1. */
   const step1PassedRef = useRef<{ key: string } | null>(null);
   const verifyPhaseRef = useRef(verifyPhase);
@@ -162,7 +166,12 @@ export function AuthVerificationStep({
   // Restore pipeline UI when returning to step 3 with a persisted verification result.
   useEffect(() => {
     if (verifying) return;
-    if (!profile.verification.verified) return;
+    if (!profile.verification.verified) {
+      setVerifyPhase((prev) =>
+        prev === "done" ? phaseFromVerification(profile.verification) : prev,
+      );
+      return;
+    }
     setVerifyPhase("done");
     setVerifyResultMessage(messageFromVerification(profile.verification));
   }, [
@@ -177,7 +186,12 @@ export function AuthVerificationStep({
     const inferred = inferAuthFromProfileHeaders(profile, current);
 
     if (current.authKind === "none") {
-      if (inferred.authKind && inferred.authKind !== "none") {
+      // Respect an explicit None selection — only auto-detect once before the user picks.
+      if (
+        !authKindChosenByUserRef.current &&
+        inferred.authKind &&
+        inferred.authKind !== "none"
+      ) {
         setAuthDetectedFromProfile(true);
         onAuthChangeRef.current(inferred);
       } else if (inferred.url && inferred.url !== current.url) {
@@ -274,6 +288,7 @@ export function AuthVerificationStep({
           setVerifyPhase("failed_auth");
           activePhase = "failed_auth";
           const message = "Authentication was not saved — fix errors above and retry.";
+          setVerifyResultMessage(message);
           onError(message);
           append(formatErrorLogLine(message));
           return { ok: false, message };
@@ -292,6 +307,7 @@ export function AuthVerificationStep({
           step1PassedRef.current = null;
           setVerifyPhase("failed_auth");
           activePhase = "failed_auth";
+          setVerifyResultMessage(connect.message);
           onError(connect.message);
           if (!quietToasts) notify(connect.message, "error");
           onProfileChange({
@@ -337,7 +353,16 @@ export function AuthVerificationStep({
       }
       append(formatAiValidationLogLine(result.message));
 
-      onProfileChange(profileFromDto(result.profile));
+      const nextProfile = profileFromDto(result.profile);
+      if (result.verified) {
+        nextProfile.verification = {
+          ...nextProfile.verification,
+          verified: true,
+          status: nextProfile.verification.status || "verified",
+          errorMessage: null,
+        };
+      }
+      onProfileChange(nextProfile);
       onVerifySettled?.();
       setVerifyResultMessage(result.message);
       if (result.verified) {
@@ -453,6 +478,11 @@ export function AuthVerificationStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- harness start gate
   }, [autoVerify, targetId]);
 
+  const verificationButtonError =
+    (verifyPhase === "failed_auth" || verifyPhase === "failed_ai") && verifyResultMessage
+      ? verifyResultMessage
+      : error;
+
   return (
     <div className="auth-verification-step">
       <section>
@@ -466,8 +496,11 @@ export function AuthVerificationStep({
           form={authForm}
           authKindLabel="Authentication Type"
           onChange={(patch) => {
-            if (patch.authKind && patch.authKind !== authForm.authKind) {
-              setAuthDetectedFromProfile(false);
+            if (patch.authKind !== undefined) {
+              authKindChosenByUserRef.current = true;
+              if (patch.authKind !== authForm.authKind) {
+                setAuthDetectedFromProfile(false);
+              }
             }
             onAuthChange(patch);
           }}
@@ -492,6 +525,11 @@ export function AuthVerificationStep({
             {verifying ? "Verifying…" : autoVerify ? "Auto-verifying…" : "Verification"}
           </span>
         </Button>
+        {verificationButtonError ? (
+          <p className="text-danger text-sm auth-verification-step__error" role="alert">
+            {verificationButtonError}
+          </p>
+        ) : null}
         <VerificationProgressPipeline phase={verifyPhase} resultMessage={verifyResultMessage} />
       </section>
 

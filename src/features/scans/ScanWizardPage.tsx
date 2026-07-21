@@ -503,7 +503,7 @@ export function ScanWizardPage() {
   useEffect(() => {
     if (session.currentStep !== 4 || !store.savedTarget) return;
     if (!session.targetProfile.verification.verified) return;
-    if (session.attackPlan || plannerGenerating) return;
+    if (session.attackPlan || plannerGenerating || plannerError) return;
     void runAttackPlanner(store.savedTarget.id, { replan: false });
   }, [
     session.currentStep,
@@ -511,6 +511,7 @@ export function ScanWizardPage() {
     session.targetProfile.verification.verified,
     session.attackPlan,
     plannerGenerating,
+    plannerError,
     runAttackPlanner,
   ]);
 
@@ -846,24 +847,32 @@ export function ScanWizardPage() {
       setVerificationError("Complete Step 2 and save the target profile before verifying.");
       return false;
     }
-    const validationError = validateTargetStep(session.targetForm);
+    const url = fullProfileUrl(session.targetProfile);
+    const formForSave = {
+      ...session.targetForm,
+      url: session.targetForm.url.trim() || url,
+    };
+    const validationError = validateTargetStep(formForSave);
     if (validationError) {
       setVerificationError(validationError);
+      notify(validationError, "error");
       return false;
     }
 
     setPersistingTarget(true);
     try {
-      const url = fullProfileUrl(session.targetProfile);
-      const descriptor = buildTargetDescriptor({ ...session.targetForm, url });
+      const descriptor = buildTargetDescriptor({ ...formForSave, url });
       await updateTargetDescriptor(store.savedTarget.id, descriptor);
-      updateSession({ savedTargetFingerprint: targetFormFingerprint(session.targetForm) });
+      updateSession({
+        targetForm: formForSave,
+        savedTargetFingerprint: targetFormFingerprint(formForSave),
+      });
       logWizardEvent({
         category: "authentication",
         activityName: "wizard_auth_saved",
         message: "Authentication descriptor saved",
         projectId: activeProjectId,
-        attributes: { targetId: store.savedTarget.id, authKind: session.targetForm.authKind },
+        attributes: { targetId: store.savedTarget.id, authKind: formForSave.authKind },
       });
       return true;
     } catch (err) {
@@ -987,7 +996,9 @@ export function ScanWizardPage() {
 
     if (session.currentStep === 3) {
       if (!session.targetProfile.verification.verified) {
-        setVerificationError("Verify the target connection before continuing.");
+        const message = "Verify the target connection before continuing.";
+        setVerificationError(message);
+        notify(message, "error");
         return;
       }
       const saved = await persistAuthDescriptor();
@@ -1352,6 +1363,7 @@ export function ScanWizardPage() {
             verificationLog={session.verificationLog}
             onVerificationLog={(entries) => updateSession({ verificationLog: entries })}
             onError={setVerificationError}
+            error={verificationError}
             onBeforeVerify={persistAuthDescriptor}
             autoVerify={
               session.importAutoAdvance &&
