@@ -290,17 +290,6 @@ pub struct TargetProfileConnectVerifyResponse {
     pub connect_snapshot: Option<VerifyHttpSuccess>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TargetProfileVerifyAiRequest {
-    pub target_id: String,
-    pub profile: serde_json::Value,
-    /// Inline auth from the wizard form — used to re-send the Step 2 capability probe.
-    pub auth: Option<serde_json::Value>,
-    /// Resolved auth headers from the wizard form (highest priority).
-    pub auth_headers: Option<std::collections::HashMap<String, String>>,
-}
-
 pub async fn target_profile_verify_connect_op(
     state: &AppState,
     request: TargetProfileVerifyRequest,
@@ -345,10 +334,70 @@ pub async fn target_profile_verify_connect_op(
     }
 }
 
-pub async fn target_profile_verify_ai_op(
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetProfileCapabilityVerifyResponse {
+    pub success: bool,
+    pub console: VerificationConsoleEntryDto,
+    pub message: String,
+    /// Fresh capability-probe snapshot for Yazg classification (when success).
+    pub capability_snapshot: Option<VerifyHttpSuccess>,
+    pub profile: TargetProfileDto,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetProfileVerifyAiRequest {
+    pub target_id: String,
+    pub profile: serde_json::Value,
+    /// Inline auth from the wizard form — used to re-send the Step 2 capability probe.
+    pub auth: Option<serde_json::Value>,
+    /// Resolved auth headers from the wizard form (highest priority).
+    pub auth_headers: Option<std::collections::HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetProfileVerifyAiClassifyRequest {
+    pub target_id: String,
+    pub profile: serde_json::Value,
+    pub capability_snapshot: VerifyHttpSuccess,
+}
+
+async fn persist_failed_verification(
+    state: &AppState,
+    target_id: &str,
+    profile: &mut TargetProfile,
+    console: &aisec_target_profile::VerificationConsoleEntry,
+    message: &str,
+) -> CommandResult<()> {
+    profile.verification = aisec_target_profile::VerificationResult {
+        verified: false,
+        verified_at: None,
+        provider: profile.provider.as_str().into(),
+        model: None,
+        capabilities: profile.default_capabilities.clone(),
+        response_time_ms: console.response_time_ms,
+        status_code: console.status_code,
+        status: "failed".into(),
+        response_preview: console.response_preview.clone(),
+        error_message: Some(message.to_string()),
+    };
+    let json = profile_to_json(profile)?;
+    state
+        .repositories()
+        .targets()
+        .update_profile(target_id, &json)
+        .await
+        .map_err(CommandError::from)?;
+    Ok(())
+}
+
+/// Step 2a — capability probe only (HTTP). Frontend can render this before Yazg runs.
+pub async fn target_profile_verify_capability_op(
     state: &AppState,
     request: TargetProfileVerifyAiRequest,
-) -> CommandResult<TargetProfileVerifyResponse> {
+) -> CommandResult<TargetProfileCapabilityVerifyResponse> {
     let TargetProfileVerifyAiRequest {
         target_id,
         profile: profile_value,
@@ -373,46 +422,25 @@ pub async fn target_profile_verify_ai_op(
         CommandError::invalid_input(format!("invalid target profile: {err}"))
     })?;
 
-    let inference = state.inference_manager().lock().await;
-    if !is_inference_ready(&inference) {
-        return Err(CommandError::invalid_input(
-            "Yazg Agent is offline. Configure and start AI Runtime so Yazg is Live before verifying the endpoint.",
-        ));
-    }
-    drop(inference);
-
-    // Step 2 always re-sends the capability probe, then classifies that fresh response.
     let http = match execute_capability_probe(&profile, auth_headers).await {
         Ok(snapshot) => snapshot,
         Err(attempt) => {
             let message = attempt.console.message.clone();
-            profile.verification = aisec_target_profile::VerificationResult {
-                verified: false,
-                verified_at: None,
-                provider: profile.provider.as_str().into(),
-                model: None,
-                capabilities: profile.default_capabilities.clone(),
-                response_time_ms: attempt.console.response_time_ms,
-                status_code: attempt.console.status_code,
-                status: "failed".into(),
-                response_preview: attempt.console.response_preview.clone(),
-                error_message: Some(message.clone()),
-            };
-            let json = profile_to_json(&profile)?;
-            state
-                .repositories()
-                .targets()
-                .update_profile(&target_id, &json)
-                .await
-                .map_err(CommandError::from)?;
-
-            let probe_console = VerificationConsoleEntryDto::from(attempt.console.clone());
-            return Ok(TargetProfileVerifyResponse {
-                verified: false,
-                profile: TargetProfileDto::from(profile),
-                console: probe_console.clone(),
+            persist_failed_verification(
+                state,
+                &target_id,
+                &mut profile,
+                &attempt.console,
+                &message,
+            )
+            .await?;
+            let console = VerificationConsoleEntryDto::from(attempt.console);
+            return Ok(TargetProfileCapabilityVerifyResponse {
+                success: false,
+                console,
                 message,
-                probe_console: Some(probe_console),
+                capability_snapshot: None,
+                profile: TargetProfileDto::from(profile),
             });
         }
     };
@@ -426,38 +454,54 @@ pub async fn target_profile_verify_ai_op(
         } else {
             VerificationError::NoAiResponse.to_string()
         };
-        profile.verification = aisec_target_profile::VerificationResult {
-            verified: false,
-            verified_at: None,
-            provider: profile.provider.as_str().into(),
-            model: None,
-            capabilities: profile.default_capabilities.clone(),
-            response_time_ms: http.response_time_ms,
-            status_code: http.status_code,
-            status: "failed".into(),
-            response_preview: http.console.response_preview.clone(),
-            error_message: Some(message.clone()),
-        };
-        let json = profile_to_json(&profile)?;
-        state
-            .repositories()
-            .targets()
-            .update_profile(&target_id, &json)
-            .await
-            .map_err(CommandError::from)?;
-
-        return Ok(TargetProfileVerifyResponse {
-            verified: false,
-            profile: TargetProfileDto::from(profile),
+        persist_failed_verification(state, &target_id, &mut profile, &http.console, &message)
+            .await?;
+        return Ok(TargetProfileCapabilityVerifyResponse {
+            success: false,
             console: VerificationConsoleEntryDto {
                 success: false,
                 message: message.clone(),
-                ..probe_console.clone()
+                ..probe_console
             },
             message,
-            probe_console: Some(probe_console),
+            capability_snapshot: None,
+            profile: TargetProfileDto::from(profile),
         });
     }
+
+    Ok(TargetProfileCapabilityVerifyResponse {
+        success: true,
+        console: probe_console,
+        message: http.console.message.clone(),
+        capability_snapshot: Some(http),
+        profile: TargetProfileDto::from(profile),
+    })
+}
+
+/// Step 2b — Yazg / AnalyzeEndpointAgent classification of an already-captured probe.
+pub async fn target_profile_verify_ai_classify_op(
+    state: &AppState,
+    request: TargetProfileVerifyAiClassifyRequest,
+) -> CommandResult<TargetProfileVerifyResponse> {
+    let TargetProfileVerifyAiClassifyRequest {
+        target_id,
+        profile: profile_value,
+        capability_snapshot: http,
+    } = request;
+
+    let mut profile: TargetProfile = serde_json::from_value(profile_value).map_err(|err| {
+        CommandError::invalid_input(format!("invalid target profile: {err}"))
+    })?;
+
+    let inference = state.inference_manager().lock().await;
+    if !is_inference_ready(&inference) {
+        return Err(CommandError::invalid_input(
+            "Yazg Agent is offline. Configure and start AI Runtime so Yazg is Live before verifying the endpoint.",
+        ));
+    }
+    drop(inference);
+
+    let probe_console = VerificationConsoleEntryDto::from(http.console.clone());
 
     let hosts = YazgHostLlms::from_app(
         state.data_dir().to_path_buf(),
@@ -503,25 +547,8 @@ pub async fn target_profile_verify_ai_op(
             } else {
                 message
             };
-            profile.verification = aisec_target_profile::VerificationResult {
-                verified: false,
-                verified_at: None,
-                provider: profile.provider.as_str().into(),
-                model: None,
-                capabilities: profile.default_capabilities.clone(),
-                response_time_ms: probe_console.response_time_ms,
-                status_code: probe_console.status_code,
-                status: "failed".into(),
-                response_preview: probe_console.response_preview.clone(),
-                error_message: Some(message.clone()),
-            };
-            let json = profile_to_json(&profile)?;
-            state
-                .repositories()
-                .targets()
-                .update_profile(&target_id, &json)
-                .await
-                .map_err(CommandError::from)?;
+            persist_failed_verification(state, &target_id, &mut profile, &http.console, &message)
+                .await?;
 
             Ok(TargetProfileVerifyResponse {
                 verified: false,
@@ -537,25 +564,8 @@ pub async fn target_profile_verify_ai_op(
         }
         Err(err) => {
             let message = err.to_string();
-            profile.verification = aisec_target_profile::VerificationResult {
-                verified: false,
-                verified_at: None,
-                provider: profile.provider.as_str().into(),
-                model: None,
-                capabilities: profile.default_capabilities.clone(),
-                response_time_ms: probe_console.response_time_ms,
-                status_code: probe_console.status_code,
-                status: "failed".into(),
-                response_preview: probe_console.response_preview.clone(),
-                error_message: Some(message.clone()),
-            };
-            let json = profile_to_json(&profile)?;
-            state
-                .repositories()
-                .targets()
-                .update_profile(&target_id, &json)
-                .await
-                .map_err(CommandError::from)?;
+            persist_failed_verification(state, &target_id, &mut profile, &http.console, &message)
+                .await?;
 
             Ok(TargetProfileVerifyResponse {
                 verified: false,
@@ -570,6 +580,43 @@ pub async fn target_profile_verify_ai_op(
             })
         }
     }
+}
+
+/// Combined Step 2 — capability probe then Yazg classification (legacy / one-shot callers).
+pub async fn target_profile_verify_ai_op(
+    state: &AppState,
+    request: TargetProfileVerifyAiRequest,
+) -> CommandResult<TargetProfileVerifyResponse> {
+    let capability = target_profile_verify_capability_op(state, request.clone()).await?;
+    if !capability.success {
+        return Ok(TargetProfileVerifyResponse {
+            verified: false,
+            profile: capability.profile,
+            console: capability.console.clone(),
+            message: capability.message,
+            probe_console: Some(capability.console),
+        });
+    }
+
+    let Some(snapshot) = capability.capability_snapshot else {
+        return Ok(TargetProfileVerifyResponse {
+            verified: false,
+            profile: capability.profile,
+            console: capability.console.clone(),
+            message: capability.message,
+            probe_console: Some(capability.console),
+        });
+    };
+
+    target_profile_verify_ai_classify_op(
+        state,
+        TargetProfileVerifyAiClassifyRequest {
+            target_id: request.target_id,
+            profile: request.profile,
+            capability_snapshot: snapshot,
+        },
+    )
+    .await
 }
 
 pub async fn target_profile_verify_op(
@@ -769,6 +816,44 @@ pub async fn target_profile_verify_ai(
             profile,
             auth,
             auth_headers,
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn target_profile_verify_capability(
+    state: State<'_, AppState>,
+    target_id: String,
+    profile: serde_json::Value,
+    auth: Option<serde_json::Value>,
+    auth_headers: Option<std::collections::HashMap<String, String>>,
+) -> CommandResult<TargetProfileCapabilityVerifyResponse> {
+    target_profile_verify_capability_op(
+        state.inner(),
+        TargetProfileVerifyAiRequest {
+            target_id,
+            profile,
+            auth,
+            auth_headers,
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn target_profile_verify_ai_classify(
+    state: State<'_, AppState>,
+    target_id: String,
+    profile: serde_json::Value,
+    capability_snapshot: VerifyHttpSuccess,
+) -> CommandResult<TargetProfileVerifyResponse> {
+    target_profile_verify_ai_classify_op(
+        state.inner(),
+        TargetProfileVerifyAiClassifyRequest {
+            target_id,
+            profile,
+            capability_snapshot,
         },
     )
     .await

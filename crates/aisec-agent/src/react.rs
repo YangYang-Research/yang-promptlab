@@ -296,6 +296,12 @@ fn format_context(
         None => "Context:\n- target: (none selected)\n- verified: false\n- capability_probe_ready: false\n"
             .into(),
     };
+    if has_probe {
+        out.push_str(
+            "- note: capability_probe_ready means Scan wizard Verification — call analyze_endpoint; \
+             this is NOT Attack Factory / generate_prompt\n",
+        );
+    }
     if let Some(t) = technique {
         out.push_str(&format!(
             "- technique_id: {}\n- technique_name: {}\n- category: {}\n- factory_prompt_ready: true\n\

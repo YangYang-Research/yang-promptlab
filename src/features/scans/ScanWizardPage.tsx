@@ -1487,7 +1487,6 @@ export function ScanWizardPage() {
               submittedScanId={session.submittedScanId}
               consoleResetKey={consoleResetKey}
               onViewResult={goToResultsStep}
-              onRetryScan={() => void handleRetryScan()}
               onClose={handleCancel}
             />
             {scanSubmitError && <p className="text-danger">{scanSubmitError}</p>}

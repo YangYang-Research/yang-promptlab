@@ -28,6 +28,14 @@ export type TargetProfileConnectVerifyResponse = {
   connectSnapshot: VerifyHttpSnapshot | null;
 };
 
+export type TargetProfileCapabilityVerifyResponse = {
+  success: boolean;
+  console: VerificationConsoleEntryDto;
+  message: string;
+  capabilitySnapshot: VerifyHttpSnapshot | null;
+  profile: TargetProfileDto;
+};
+
 export const listTargetProfileTemplates = () =>
   invokeCommand<TargetProfileDto[]>("target_profile_list_templates");
 
@@ -52,6 +60,35 @@ export const verifyTargetProfileConnect = (
     authHeaders: options?.authHeaders ?? null,
   });
 
+/** Step 2a — capability probe HTTP only (render console before Yazg). */
+export const verifyTargetProfileCapability = (
+  targetId: string,
+  profile: Record<string, unknown>,
+  options?: {
+    auth?: Record<string, unknown> | null;
+    authHeaders?: Record<string, string> | null;
+  },
+) =>
+  invokeCommand<TargetProfileCapabilityVerifyResponse>("target_profile_verify_capability", {
+    targetId,
+    profile,
+    auth: options?.auth ?? null,
+    authHeaders: options?.authHeaders ?? null,
+  });
+
+/** Step 2b — Yazg classification of an already-captured capability probe. */
+export const verifyTargetProfileAiClassify = (
+  targetId: string,
+  profile: Record<string, unknown>,
+  capabilitySnapshot: VerifyHttpSnapshot,
+) =>
+  invokeCommand<TargetProfileVerifyResponse>("target_profile_verify_ai_classify", {
+    targetId,
+    profile,
+    capabilitySnapshot,
+  });
+
+/** Combined Step 2 (probe + classify). Prefer the split APIs for progressive console logs. */
 export const verifyTargetProfileAi = (
   targetId: string,
   profile: Record<string, unknown>,

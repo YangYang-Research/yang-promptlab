@@ -2,11 +2,12 @@
 
 use std::collections::HashMap;
 
+use aisec_judge::{JudgeEngine, JudgeRequest};
 use aisec_target_profile::{AttackResultsSummary, TargetProfile, VerificationResult, WizardAttackPlan};
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{info, warn};
 
-use crate::analyze_endpoint::AnalyzeEndpointAgentOutcome;
+use crate::analyze_endpoint::{AnalyzeEndpointAgent, AnalyzeEndpointAgentOutcome};
 use crate::attack_plan::AttackPlanAgentOutcome;
 use crate::error::AgentResult;
 use crate::generate_prompt::{GeneratePromptAgentOutcome, TechniquePromptContext};
@@ -15,8 +16,6 @@ use crate::react::{run_react, ReactActionKind, ReactArtifacts, ReactLlms, ReactR
 use crate::recommend::RecommendAgentOutcome;
 use crate::summary::{SummaryAgentOutcome, SummaryRequest};
 use crate::types::{AgentEvent, AgentId};
-
-use aisec_judge::{JudgeEngine, JudgeRequest};
 
 /// Soft hint for the ReAct goal (not a hard route).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -164,8 +163,10 @@ impl YazgSupervisor {
         llms: &ReactLlms<'_>,
     ) -> AgentResult<YazgDelegation> {
         let message = format!(
-            "Scan wizard Verification: a capability probe already succeeded for {} (HTTP {}). \
-             Classify whether this endpoint is a live generative AI API, then finish with a concise UI result.",
+            "Scan wizard Verification / endpoint analysis: a capability HTTP response was already \
+             captured for {} (HTTP {}). Call analyze_endpoint to classify whether this is a live \
+             generative AI API, then finish with a concise UI result. This is NOT Attack Factory — \
+             do not call generate_prompt and do not ask for a technique.",
             profile.full_url(),
             http.status_code
         );
@@ -174,7 +175,34 @@ impl YazgSupervisor {
             .with_profile(Some(profile))
             .with_capability_probe(Some(http))
             .with_max_steps(4);
-        Self::react(request, llms).await
+        let delegation = Self::react(request, llms).await?;
+        if matches!(delegation, YazgDelegation::AnalyzedEndpoint { .. }) {
+            return Ok(delegation);
+        }
+
+        // Soft ReAct can misfire (e.g. Attack Factory "select a technique") on small models.
+        // Wizard Verification always needs AnalyzeEndpointAgent — recover by calling it directly.
+        warn!(
+            endpoint = %profile.full_url(),
+            "Yazg ReAct missed AnalyzeEndpointAgent during Verification; forcing classify_probe"
+        );
+        let outcome =
+            AnalyzeEndpointAgent::classify_probe(profile, http, llms.analyze).await?;
+        let mut events = vec![AgentEvent::info(
+            AgentId::Yazg,
+            "ReAct recovery: forced AnalyzeEndpointAgent after misrouted Verification turn",
+        )];
+        events.extend(outcome.events.clone());
+        Ok(YazgDelegation::AnalyzedEndpoint {
+            turn: YazgTurn {
+                reply: format_analyze_success(&outcome.verification),
+                intent: SupervisorIntent::AnalyzeEndpoint,
+                events,
+                verified: Some(true),
+                plan_summary: None,
+            },
+            outcome,
+        })
     }
 
     /// Wizard attack-plan step.

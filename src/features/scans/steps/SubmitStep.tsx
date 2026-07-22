@@ -26,7 +26,6 @@ type SubmitStepProps = {
   submittedScanId: string | null;
   consoleResetKey?: number;
   onViewResult: () => void;
-  onRetryScan: () => void;
   onClose: () => void;
 };
 
@@ -37,7 +36,6 @@ export function SubmitStep({
   submittedScanId,
   consoleResetKey,
   onViewResult,
-  onRetryScan,
   onClose,
 }: SubmitStepProps) {
   const statuses = useScanStatuses(submittedScanId ? [submittedScanId] : [], submittedScanId !== null);
@@ -149,11 +147,6 @@ export function SubmitStep({
             {isSuccess && (
               <Button variant="primary" onClick={onViewResult}>
                 View Result
-              </Button>
-            )}
-            {isFailed && (
-              <Button variant="primary" onClick={onRetryScan}>
-                Retry attack
               </Button>
             )}
             {isRunning && (

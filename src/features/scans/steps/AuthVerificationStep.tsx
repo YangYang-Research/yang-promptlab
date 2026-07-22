@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/shared/components";
 import { IconAi } from "@/shared/components/Icons";
 import {
-  verifyTargetProfileAi,
+  verifyTargetProfileAiClassify,
+  verifyTargetProfileCapability,
   verifyTargetProfileConnect,
 } from "@/shared/ipc/targetProfile";
 import { useToast } from "@/shared/notifications";
@@ -354,14 +355,43 @@ export function AuthVerificationStep({
       append(VERIFICATION_LOG_START_AI);
       append(formatSendRequestLogLine(capabilityPreview.requestLog, 2));
 
-      const result = await verifyTargetProfileAi(
+      const probe = await verifyTargetProfileCapability(
         targetId,
         profileToPayload(profileRef.current),
         verifyOptions,
       );
-      if (result.probeConsole) {
-        append(formatResponseLogLine(result.probeConsole, "ai_probe"));
+      append(formatResponseLogLine(probe.console, "ai_probe"));
+
+      if (!probe.success || !probe.capabilitySnapshot) {
+        const nextProfile = profileFromDto(probe.profile);
+        onProfileChange(nextProfile);
+        onVerifySettled?.();
+        setVerifyResultMessage(probe.message);
+        setVerifyPhase("failed_ai");
+        activePhase = "failed_ai";
+        onError(probe.message);
+        if (!quietToasts) notify(probe.message, "error");
+        logWizardEvent({
+          category: "authentication",
+          severity: "medium",
+          activityName: "verify_ai_fail",
+          message: probe.message,
+          component: "AuthVerificationStep",
+          attributes: { targetId },
+        });
+        return { ok: false, message: probe.message };
       }
+
+      // Let React paint the capability-probe console line before Yazg runs.
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
+
+      const result = await verifyTargetProfileAiClassify(
+        targetId,
+        profileToPayload(profileRef.current),
+        probe.capabilitySnapshot,
+      );
       append(formatAiValidationLogLine(result.message));
 
       const nextProfile = profileFromDto(result.profile);
