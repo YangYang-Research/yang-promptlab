@@ -1,12 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
+import { buildScanRetryUrl } from "@/features/scans/wizardState";
+import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import { Badge, Button, YazgBadge } from "@/shared/components";
 import { IconAi } from "@/shared/components/Icons";
 import {
   generateProjectSummary,
+  type ProjectSummaryActionDto,
+  type ProjectSummaryFailedScanDto,
   type ProjectSummaryResponse,
 } from "@/shared/ipc/projectSummary";
-import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 
 type ProjectSummaryPanelProps = {
   projectId: string;
@@ -14,10 +18,129 @@ type ProjectSummaryPanelProps = {
   enabled?: boolean;
 };
 
+function isRetryAction(item: ProjectSummaryActionDto): boolean {
+  return item.action.trim().toLowerCase() === "retry_scan";
+}
+
+function looksLikeRetryHighlight(text: string): boolean {
+  const t = text.toLowerCase();
+  return (
+    t.includes("retry scan") ||
+    t.includes("re-run") ||
+    t.includes("rerun") ||
+    (t.includes("failed") && t.includes("scan"))
+  );
+}
+
+/** Replace endpoint URLs and scan IDs in LLM-generated text with links. */
+function linkifyHighlight(
+  text: string,
+  failedScans: ProjectSummaryFailedScanDto[],
+): ReactNode {
+  if (failedScans.length === 0) return text;
+
+  type Needle = {
+    value: string;
+    kind: "target" | "scan";
+    targetId?: string | null;
+    scanId: string;
+  };
+
+  const needles: Needle[] = [];
+  for (const item of failedScans) {
+    const url = item.target_url?.trim();
+    if (url) {
+      needles.push({
+        value: url,
+        kind: "target",
+        targetId: item.target_id,
+        scanId: item.scan_id,
+      });
+    }
+    needles.push({
+      value: item.scan_id,
+      kind: "scan",
+      targetId: item.target_id,
+      scanId: item.scan_id,
+    });
+  }
+
+  needles.sort((a, b) => b.value.length - a.value.length);
+
+  type Seg =
+    | { type: "text"; value: string }
+    | { type: "link"; needle: Needle; value: string };
+
+  let segments: Seg[] = [{ type: "text", value: text }];
+
+  for (const needle of needles) {
+    if (!needle.value) continue;
+    const next: Seg[] = [];
+    for (const seg of segments) {
+      if (seg.type !== "text") {
+        next.push(seg);
+        continue;
+      }
+      let remaining = seg.value;
+      while (remaining.length > 0) {
+        const idx = remaining.indexOf(needle.value);
+        if (idx < 0) {
+          next.push({ type: "text", value: remaining });
+          break;
+        }
+        if (idx > 0) {
+          next.push({ type: "text", value: remaining.slice(0, idx) });
+        }
+        next.push({
+          type: "link",
+          needle,
+          value: needle.value,
+        });
+        remaining = remaining.slice(idx + needle.value.length);
+      }
+    }
+    segments = next;
+  }
+
+  return (
+    <>
+      {segments.map((seg, index) => {
+        if (seg.type === "text") {
+          return <Fragment key={`t-${index}`}>{seg.value}</Fragment>;
+        }
+        if (seg.needle.kind === "target" && seg.needle.targetId) {
+          return (
+            <Link
+              key={`l-${index}`}
+              className="project-summary__link"
+              to={`/targets/${seg.needle.targetId}`}
+            >
+              {seg.value}
+            </Link>
+          );
+        }
+        if (seg.needle.kind === "scan") {
+          return (
+            <Link
+              key={`l-${index}`}
+              className="project-summary__link mono"
+              to={`/scans/${seg.needle.scanId}`}
+            >
+              {seg.value}
+            </Link>
+          );
+        }
+        return <Fragment key={`l-${index}`}>{seg.value}</Fragment>;
+      })}
+    </>
+  );
+}
+
 export function ProjectSummaryPanel({
   projectId,
   enabled = true,
 }: ProjectSummaryPanelProps) {
+  const navigate = useNavigate();
   const [summary, setSummary] = useState<ProjectSummaryResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,12 +187,40 @@ export function ProjectSummaryPanel({
   }, [projectId, enabled]);
 
   const empty = !summary;
+  const failedScans = summary?.failed_scans ?? [];
+  const retryActions =
+    summary?.actions?.filter(isRetryAction) ??
+    failedScans.map((scan) => ({
+      title: "Retry Scan",
+      description: "",
+      action: "retry_scan",
+      scan_id: scan.scan_id,
+      target_id: scan.target_id,
+    }));
+  const retryHighlightIndex =
+    summary?.highlights.findIndex((h) => looksLikeRetryHighlight(h)) ?? -1;
   const sourceBadge =
     summary?.source === "ai" ? (
       <YazgBadge />
     ) : summary?.source === "fallback" ? (
       <Badge variant="muted">Rule-based guidance</Badge>
     ) : null;
+
+  function handleRetryScan(scanId: string, targetId?: string | null) {
+    navigate(buildScanRetryUrl(projectId, scanId, targetId));
+  }
+
+  function retryButtonLabel(action: ProjectSummaryActionDto): string {
+    if (retryActions.length <= 1) return "Retry Scan";
+    const match = failedScans.find((s) => s.scan_id === action.scan_id);
+    const endpoint = match?.target_url?.trim() || match?.target_name?.trim();
+    if (endpoint) {
+      const short =
+        endpoint.length > 42 ? `${endpoint.slice(0, 39)}…` : endpoint;
+      return `Retry · ${short}`;
+    }
+    return `Retry · ${action.scan_id}`;
+  }
 
   return (
     <div
@@ -115,16 +266,44 @@ export function ProjectSummaryPanel({
 
           {summary.highlights.length > 0 ? (
             <ol className="scan-rec__list">
-              {summary.highlights.map((item, index) => (
-                <li key={`${index}-${item}`} className="scan-rec__item">
-                  <span className="scan-rec__index" aria-hidden="true">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <div className="scan-rec__body">
-                    <p className="scan-rec__item-desc">{item}</p>
-                  </div>
-                </li>
-              ))}
+              {summary.highlights.map((item, index) => {
+                const showRetry =
+                  retryActions.length > 0 &&
+                  (retryHighlightIndex >= 0
+                    ? index === retryHighlightIndex
+                    : index === 0 && failedScans.length > 0);
+                return (
+                  <li key={`${index}-${item}`} className="scan-rec__item">
+                    <span className="scan-rec__index" aria-hidden="true">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <div className="scan-rec__body">
+                      <p className="scan-rec__item-desc">
+                        {failedScans.length > 0
+                          ? linkifyHighlight(item, failedScans)
+                          : item}
+                      </p>
+                      {showRetry ? (
+                        <div className="scan-rec__actions project-summary__retry-actions">
+                          {retryActions.map((action) => (
+                            <Button
+                              key={action.scan_id}
+                              variant="primary"
+                              size="sm"
+                              title={action.description || undefined}
+                              onClick={() =>
+                                handleRetryScan(action.scan_id, action.target_id)
+                              }
+                            >
+                              {retryButtonLabel(action)}
+                            </Button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </li>
+                );
+              })}
             </ol>
           ) : null}
 

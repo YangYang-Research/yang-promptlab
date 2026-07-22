@@ -10,6 +10,17 @@ use crate::wizard_recommendations::AttackResultsSummary;
 pub struct SummaryBundle {
     pub overview: String,
     pub highlights: Vec<String>,
+    /// Optional UI actions (e.g. retry_scan when a project has failed scans).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<SummaryAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SummaryAction {
+    pub title: String,
+    pub description: String,
+    /// `retry_scan` | `start_attack`
+    pub action: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,7 +76,69 @@ pub fn parse_summary_bundle(raw: &str) -> PlannerResult<SummaryBundle> {
     Ok(SummaryBundle {
         overview: overview.into(),
         highlights,
+        actions: Vec::new(),
     })
+}
+
+/// Whether project-level summary should surface Retry Scan / Start Attack.
+pub fn project_has_retryable_scan_status<'a, I>(statuses: I) -> bool
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    statuses
+        .into_iter()
+        .any(crate::wizard_recommendations::is_retryable_scan_status)
+}
+
+/// Attach a typed Retry Scan action when failed scans exist.
+/// Does **not** rewrite highlight text — that must come from the LLM (or fallback)
+/// as one of the normal highlight items.
+pub fn ensure_failed_project_summary_action(
+    has_retryable_scan: bool,
+    mut bundle: SummaryBundle,
+) -> SummaryBundle {
+    if !has_retryable_scan {
+        return bundle;
+    }
+
+    if !bundle
+        .actions
+        .iter()
+        .any(|a| matches!(a.action.as_str(), "retry_scan" | "start_attack"))
+    {
+        bundle.actions = vec![SummaryAction {
+            title: "Retry Scan".into(),
+            description: "Open the scan wizard to review plan/auth and Retry Scan on the \
+                 newest failed assessment."
+                .into(),
+            action: "retry_scan".into(),
+        }];
+    }
+
+    order_summary_action_highlight_first(bundle)
+}
+
+fn highlight_looks_like_retry(text: &str) -> bool {
+    let t = text.to_ascii_lowercase();
+    t.contains("retry scan")
+        || t.contains("re-run")
+        || t.contains("rerun")
+        || t.contains("start attack")
+        || (t.contains("failed scan") && (t.contains("re-run") || t.contains("retry")))
+}
+
+fn order_summary_action_highlight_first(mut bundle: SummaryBundle) -> SummaryBundle {
+    if let Some(idx) = bundle
+        .highlights
+        .iter()
+        .position(|h| highlight_looks_like_retry(h))
+    {
+        if idx > 0 {
+            let item = bundle.highlights.remove(idx);
+            bundle.highlights.insert(0, item);
+        }
+    }
+    bundle
 }
 
 fn extract_json_object(raw: &str) -> PlannerResult<String> {
@@ -122,5 +195,37 @@ mod tests {
         let bundle = parse_summary_bundle(raw).unwrap();
         assert!(bundle.overview.contains("mixed"));
         assert_eq!(bundle.highlights.len(), 2);
+        assert!(bundle.actions.is_empty());
+    }
+
+    #[test]
+    fn ensure_attaches_action_without_rewriting_highlights() {
+        let bundle = SummaryBundle {
+            overview: "Scan failed.".into(),
+            highlights: vec![
+                "Retry Scan on https://api.example.com/v1 after auth fix for scan abc.".into(),
+                "Verify auth".into(),
+                "Cover high-value targets".into(),
+                "Establish cadence".into(),
+            ],
+            actions: Vec::new(),
+        };
+        let out = ensure_failed_project_summary_action(true, bundle);
+        assert_eq!(out.actions.len(), 1);
+        assert_eq!(out.actions[0].action, "retry_scan");
+        assert!(out.highlights[0].contains("https://api.example.com/v1"));
+        assert_eq!(out.highlights.len(), 4);
+    }
+
+    #[test]
+    fn ensure_skips_when_no_failed() {
+        let bundle = SummaryBundle {
+            overview: "Clean.".into(),
+            highlights: vec!["Keep testing".into()],
+            actions: Vec::new(),
+        };
+        let out = ensure_failed_project_summary_action(false, bundle);
+        assert!(out.actions.is_empty());
+        assert_eq!(out.highlights.len(), 1);
     }
 }

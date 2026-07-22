@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
-import { Badge, YazgBadge } from "@/shared/components";
+import {
+  buildScanRetryUrl,
+  buildScanStartAttackUrl,
+} from "@/features/scans/wizardState";
+import { Badge, Button, YazgBadge } from "@/shared/components";
 import {
   generateScanRecommendations,
   type AttackRecommendationDto,
@@ -15,6 +20,11 @@ function recommendationPriorityVariant(
   return "muted";
 }
 
+function isActionRecommendation(item: AttackRecommendationDto): boolean {
+  const action = item.action?.trim().toLowerCase();
+  return action === "retry_scan" || action === "start_attack";
+}
+
 type ScanRecommendationsPanelProps = {
   scanId: string;
   attackCategories?: string[];
@@ -23,6 +33,12 @@ type ScanRecommendationsPanelProps = {
   className?: string;
   /** `details` uses the Scan Details editorial layout; `wizard` keeps the compact step-6 style. */
   variant?: "wizard" | "details";
+  /** Required for Retry Scan / Start Attack navigation from Scan Details. */
+  projectId?: string;
+  targetId?: string | null;
+  /** In-wizard overrides (avoid full navigation). */
+  onRetryScan?: () => void;
+  onStartAttack?: () => void;
 };
 
 export function ScanRecommendationsPanel({
@@ -31,7 +47,12 @@ export function ScanRecommendationsPanel({
   enabled = true,
   className,
   variant = "wizard",
+  projectId,
+  targetId,
+  onRetryScan,
+  onStartAttack,
 }: ScanRecommendationsPanelProps) {
+  const navigate = useNavigate();
   const [recommendations, setRecommendations] = useState<AttackRecommendationDto[]>([]);
   const [overview, setOverview] = useState<string | null>(null);
   const [source, setSource] = useState<"ai" | "fallback" | null>(null);
@@ -71,6 +92,39 @@ export function ScanRecommendationsPanel({
       cancelled = true;
     };
   }, [scanId, enabled, attackCategories.join("|")]);
+
+  function handleRetryScan() {
+    if (onRetryScan) {
+      onRetryScan();
+      return;
+    }
+    if (!projectId) return;
+    navigate(buildScanRetryUrl(projectId, scanId, targetId));
+  }
+
+  function handleStartAttack() {
+    if (onStartAttack) {
+      onStartAttack();
+      return;
+    }
+    if (!projectId) return;
+    navigate(buildScanStartAttackUrl(projectId, scanId, targetId));
+  }
+
+  function renderActionButtons(item: AttackRecommendationDto) {
+    if (!isActionRecommendation(item)) return null;
+    if (!onRetryScan && !onStartAttack && !projectId) return null;
+    return (
+      <div className="scan-rec__actions">
+        <Button variant="primary" size="sm" onClick={handleRetryScan}>
+          Retry Scan
+        </Button>
+        <Button variant="secondary" size="sm" onClick={handleStartAttack}>
+          Start Attack
+        </Button>
+      </div>
+    );
+  }
 
   if (!enabled) return null;
 
@@ -116,7 +170,7 @@ export function ScanRecommendationsPanel({
 
             <ol className="scan-rec__list">
               {recommendations.map((item, index) => (
-                <li key={`${item.title}-${item.priority}`} className="scan-rec__item">
+                <li key={`${item.title}-${item.priority}-${index}`} className="scan-rec__item">
                   <span className="scan-rec__index" aria-hidden="true">
                     {String(index + 1).padStart(2, "0")}
                   </span>
@@ -128,6 +182,7 @@ export function ScanRecommendationsPanel({
                       </Badge>
                     </div>
                     <p className="scan-rec__item-desc">{item.description}</p>
+                    {renderActionButtons(item)}
                   </div>
                 </li>
               ))}
@@ -157,9 +212,9 @@ export function ScanRecommendationsPanel({
             <p className="wizard-results__recommendations-overview">{overview}</p>
           ) : null}
           <ul className="wizard-results__recommendation-list">
-            {recommendations.map((item) => (
+            {recommendations.map((item, index) => (
               <li
-                key={`${item.title}-${item.priority}`}
+                key={`${item.title}-${item.priority}-${index}`}
                 className="wizard-results__recommendation-item"
               >
                 <div className="wizard-results__recommendation-row">
@@ -171,6 +226,7 @@ export function ScanRecommendationsPanel({
                 <p className="wizard-results__recommendation-description text-sm">
                   {item.description}
                 </p>
+                {renderActionButtons(item)}
               </li>
             ))}
           </ul>

@@ -5452,6 +5452,14 @@ a:hover {
   text-wrap: pretty;
 }
 
+.scan-rec__actions,
+.wizard-results__recommendation-item .scan-rec__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
 .scan-rec__status {
   margin: 0;
 }
@@ -7332,6 +7340,31 @@ a:hover {
   gap: 0.75rem;
   margin-top: 0.25rem;
   width: 100%;
+}
+
+.project-summary__link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+  word-break: break-all;
+}
+
+.project-summary__link:hover {
+  color: color-mix(in srgb, var(--accent) 80%, var(--text) 20%);
+}
+
+.project-summary__retry-actions {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.project-summary__retry-actions .btn {
+  max-width: 100%;
+  text-align: left;
+  white-space: normal;
+  height: auto;
+  min-height: 2rem;
+  padding-block: 0.35rem;
 }
 
 .project-summary__action {

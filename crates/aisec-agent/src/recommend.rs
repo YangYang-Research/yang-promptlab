@@ -4,7 +4,8 @@
 
 use aisec_planner::PlannerLlm;
 use aisec_target_profile::{
-    generate_attack_recommendations_with_llm, AttackRecommendationsBundle, AttackResultsSummary,
+    ensure_failed_scan_action_recommendation, generate_attack_recommendations_with_llm,
+    AttackRecommendationsBundle, AttackResultsSummary,
 };
 use tracing::info;
 
@@ -43,6 +44,7 @@ impl RecommendAgent {
 
         match generate_attack_recommendations_with_llm(summary, llm).await {
             Ok(bundle) => {
+                let bundle = ensure_failed_scan_action_recommendation(summary, bundle);
                 events.push(AgentEvent::completed(
                     AgentId::Recommend,
                     format!(

@@ -4,6 +4,8 @@ export type AttackRecommendationDto = {
   title: string;
   description: string;
   priority: string;
+  /** Optional UI action: `retry_scan` | `start_attack`. */
+  action?: string | null;
 };
 
 export type ScanRecommendationsResponse = {

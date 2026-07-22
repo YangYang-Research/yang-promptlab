@@ -101,6 +101,7 @@ export function ScanWizardPage() {
   const lockedTargetId = searchParams.get("targetId")?.trim() ?? "";
   const requestedStep = searchParams.get("step")?.trim() ?? "";
   const lockedScanId = searchParams.get("scanId")?.trim() ?? "";
+  const autoStartRequested = searchParams.get("autoStart") === "1";
   const entryStep = parseWizardEntryStep(requestedStep);
   const isFreshWizard = isFreshWizardEntry({
     scanId: lockedScanId,
@@ -145,6 +146,7 @@ export function ScanWizardPage() {
   );
   const plannerRunRef = useRef<string | null>(null);
   const startingScanRef = useRef(false);
+  const autoStartTriggeredRef = useRef(false);
   const wizardDbBootstrap = useRef(false);
   const sessionRef = useRef(session);
   sessionRef.current = session;
@@ -233,6 +235,7 @@ export function ScanWizardPage() {
     authHydratedKeyRef.current = null;
     plannerRunRef.current = null;
     wizardResumeHydratedRef.current = null;
+    autoStartTriggeredRef.current = false;
     clearWizardSession();
     setPlannerError(null);
     setPlannerGenerating(false);
@@ -1331,6 +1334,24 @@ export function ScanWizardPage() {
     await submitScanJob({ restart: true });
   }
 
+  useEffect(() => {
+    if (!autoStartRequested || wizardResumeLoading || autoStartTriggeredRef.current) return;
+    if (!store.savedTarget || !session.attackPlan) return;
+
+    autoStartTriggeredRef.current = true;
+    const params = new URLSearchParams(searchParams);
+    params.delete("autoStart");
+    navigate(`/scans/new?${params.toString()}`, { replace: true });
+    void handleRetryScan();
+  }, [
+    autoStartRequested,
+    wizardResumeLoading,
+    store.savedTarget,
+    session.attackPlan,
+    searchParams,
+    navigate,
+  ]);
+
   function renderStepBody() {
     switch (session.currentStep) {
       case 1:
@@ -1500,6 +1521,12 @@ export function ScanWizardPage() {
           <ResultsStep
             scanId={session.submittedScanId}
             attackCategories={session.attackPlan?.categories}
+            onRetryScan={() => {
+              updateSession({ currentStep: 4 });
+            }}
+            onStartAttack={() => {
+              void handleRetryScan();
+            }}
           />
         ) : (
           <p className="text-muted">Submit a scan in step 5 to review results.</p>

@@ -39,6 +39,9 @@ pub struct AttackRecommendation {
     pub title: String,
     pub description: String,
     pub priority: String,
+    /// Optional UI action: `retry_scan` | `start_attack`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,6 +61,8 @@ struct LlmRecommendationItem {
     title: String,
     description: String,
     priority: String,
+    #[serde(default)]
+    action: Option<String>,
 }
 
 pub fn build_attack_results_summary(
@@ -127,6 +132,7 @@ pub fn parse_attack_recommendations(raw: &str) -> PlannerResult<AttackRecommenda
             title: title.into(),
             description: description.into(),
             priority: normalize_priority(&item.priority),
+            action: normalize_action(item.action.as_deref()),
         });
     }
 
@@ -134,6 +140,99 @@ pub fn parse_attack_recommendations(raw: &str) -> PlannerResult<AttackRecommenda
         overview: overview.into(),
         recommendations: out,
     })
+}
+
+/// Whether this scan status should surface a Retry Scan / Start Attack recommendation.
+pub fn is_retryable_scan_status(status: &str) -> bool {
+    matches!(
+        status.trim().to_ascii_lowercase().as_str(),
+        "failed" | "cancelled" | "canceled" | "stopped" | "error"
+    )
+}
+
+/// Ensure failed/incomplete scans include one actionable Retry Scan recommendation
+/// (in addition to up to 4 remediation items).
+pub fn ensure_failed_scan_action_recommendation(
+    summary: &AttackResultsSummary,
+    mut bundle: AttackRecommendationsBundle,
+) -> AttackRecommendationsBundle {
+    if !is_retryable_scan_status(&summary.scan_status) {
+        return bundle;
+    }
+
+    // Normalize LLM-produced retry-ish items into a typed action.
+    for rec in &mut bundle.recommendations {
+        if rec.action.is_none() && title_looks_like_retry(&rec.title) {
+            rec.action = Some("retry_scan".into());
+            rec.priority = "high".into();
+        }
+    }
+
+    if bundle
+        .recommendations
+        .iter()
+        .any(|r| matches!(r.action.as_deref(), Some("retry_scan" | "start_attack")))
+    {
+        return order_action_first(bundle);
+    }
+
+    let mut remediation: Vec<AttackRecommendation> = bundle
+        .recommendations
+        .into_iter()
+        .filter(|r| r.action.is_none())
+        .take(4)
+        .collect();
+
+    let mut recommendations = Vec::with_capacity(remediation.len() + 1);
+    recommendations.push(failed_scan_action_recommendation(summary));
+    recommendations.append(&mut remediation);
+
+    AttackRecommendationsBundle {
+        overview: bundle.overview,
+        recommendations,
+    }
+}
+
+fn failed_scan_action_recommendation(summary: &AttackResultsSummary) -> AttackRecommendation {
+    let status = summary.scan_status.trim().to_ascii_lowercase();
+    let target = summary
+        .target_name
+        .as_deref()
+        .or(summary.target_url.as_deref())
+        .unwrap_or("this target");
+    AttackRecommendation {
+        title: "Retry Scan".into(),
+        description: format!(
+            "This attack scan ended as `{status}` on {target}. Open the scan wizard to Retry Scan \
+             (review plan/auth) or Start Attack immediately to re-run the assessment."
+        ),
+        priority: "high".into(),
+        action: Some("retry_scan".into()),
+    }
+}
+
+fn title_looks_like_retry(title: &str) -> bool {
+    let t = title.to_ascii_lowercase();
+    t.contains("retry") || t.contains("re-run") || t.contains("rerun") || t.contains("start attack")
+}
+
+fn order_action_first(mut bundle: AttackRecommendationsBundle) -> AttackRecommendationsBundle {
+    bundle.recommendations.sort_by_key(|r| {
+        if matches!(r.action.as_deref(), Some("retry_scan" | "start_attack")) {
+            0
+        } else {
+            1
+        }
+    });
+    bundle
+}
+
+fn normalize_action(raw: Option<&str>) -> Option<String> {
+    match raw?.trim().to_ascii_lowercase().as_str() {
+        "retry_scan" | "retry" | "retest" => Some("retry_scan".into()),
+        "start_attack" | "start" | "attack" => Some("start_attack".into()),
+        _ => None,
+    }
 }
 
 fn normalize_priority(raw: &str) -> String {
@@ -225,5 +324,49 @@ mod tests {
         assert_eq!(bundle.recommendations.len(), 1);
         assert_eq!(bundle.recommendations[0].title, "Guardrails");
         assert_eq!(bundle.recommendations[0].priority, "critical");
+        assert_eq!(bundle.recommendations[0].action, None);
+    }
+
+    #[test]
+    fn ensure_injects_retry_for_failed_scan() {
+        let summary = build_attack_results_summary("failed", &[], &[]);
+        let bundle = AttackRecommendationsBundle {
+            overview: "Scan failed before completion.".into(),
+            recommendations: vec![
+                AttackRecommendation {
+                    title: "Check auth".into(),
+                    description: "Verify credentials.".into(),
+                    priority: "high".into(),
+                    action: None,
+                },
+                AttackRecommendation {
+                    title: "Tighten rate limits".into(),
+                    description: "Avoid throttling.".into(),
+                    priority: "medium".into(),
+                    action: None,
+                },
+            ],
+        };
+        let out = ensure_failed_scan_action_recommendation(&summary, bundle);
+        assert_eq!(out.recommendations.len(), 3);
+        assert_eq!(out.recommendations[0].action.as_deref(), Some("retry_scan"));
+        assert_eq!(out.recommendations[0].title, "Retry Scan");
+    }
+
+    #[test]
+    fn ensure_skips_completed_scan() {
+        let summary = build_attack_results_summary("completed", &[], &[]);
+        let bundle = AttackRecommendationsBundle {
+            overview: "Clean run.".into(),
+            recommendations: vec![AttackRecommendation {
+                title: "Keep testing".into(),
+                description: "Schedule continuous tests.".into(),
+                priority: "info".into(),
+                action: None,
+            }],
+        };
+        let out = ensure_failed_scan_action_recommendation(&summary, bundle);
+        assert_eq!(out.recommendations.len(), 1);
+        assert!(out.recommendations[0].action.is_none());
     }
 }

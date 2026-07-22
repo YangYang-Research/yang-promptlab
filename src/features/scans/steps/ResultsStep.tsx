@@ -14,6 +14,8 @@ import type { Finding, Severity } from "@/shared/types";
 type ResultsStepProps = {
   scanId: string;
   attackCategories?: AttackCategoryId[];
+  onRetryScan?: () => void;
+  onStartAttack?: () => void;
 };
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
@@ -48,7 +50,12 @@ function severityVariantForStatus(
   return "muted";
 }
 
-export function ResultsStep({ scanId, attackCategories = [] }: ResultsStepProps) {
+export function ResultsStep({
+  scanId,
+  attackCategories = [],
+  onRetryScan,
+  onStartAttack,
+}: ResultsStepProps) {
   const { scans, findings, actions, loading, error } = useAppStore();
   const navigate = useNavigate();
   const [selectedSeverity, setSelectedSeverity] = useState<Severity | null>(null);
@@ -164,6 +171,10 @@ export function ResultsStep({ scanId, attackCategories = [] }: ResultsStepProps)
           scanId={scanId}
           attackCategories={attackCategories as string[]}
           variant="wizard"
+          projectId={scan?.projectId}
+          targetId={scan?.targetId}
+          onRetryScan={onRetryScan}
+          onStartAttack={onStartAttack}
         />
       </section>
 

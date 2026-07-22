@@ -354,6 +354,15 @@ export function buildScanRetryUrl(
   return buildScanWizardUrl(projectId, targetId ?? undefined, { scanId, step: 4 });
 }
 
+/** Open wizard submit step and auto-restart the attack once hydrated. */
+export function buildScanStartAttackUrl(
+  projectId: string,
+  scanId: string,
+  targetId?: string | null,
+): string {
+  return `${buildScanRetryUrl(projectId, scanId, targetId)}&autoStart=1`;
+}
+
 export function resolveScanNavigationStatus(
   storeStatus: string,
   liveStatus?: string | null,

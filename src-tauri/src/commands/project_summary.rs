@@ -4,6 +4,9 @@ use aisec_agent::{SummaryRequest, YazgDelegation, YazgSupervisor};
 use aisec_storage::{
     FindingRepository, ProjectRepository, ScanRepository, TargetRepository, UpdateProject,
 };
+use aisec_target_profile::{
+    ensure_failed_project_summary_action, is_retryable_scan_status, SummaryAction, SummaryBundle,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::State;
@@ -21,10 +24,38 @@ pub struct ProjectSummaryRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectSummaryFailedScanDto {
+    pub scan_id: String,
+    pub scan_name: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_name: Option<String>,
+    /// Full endpoint URL for the target (preferred display label).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectSummaryActionDto {
+    pub title: String,
+    pub description: String,
+    pub action: String,
+    pub scan_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectSummaryResponse {
     pub source: String,
     pub overview: String,
     pub highlights: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed_scans: Vec<ProjectSummaryFailedScanDto>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<ProjectSummaryActionDto>,
     pub generated_at: String,
     pub target_count: usize,
     pub scan_count: usize,
@@ -40,6 +71,9 @@ struct ProjectSummaryInput {
     finding_count: usize,
     severity_counts: serde_json::Map<String, serde_json::Value>,
     targets: Vec<ProjectSummaryTarget>,
+    /// Failed/cancelled/stopped attack scans (full endpoint + scan_id for LLM wording).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    failed_scans: Vec<ProjectSummaryFailedScanDto>,
     recent_findings: Vec<ProjectSummaryFinding>,
 }
 
@@ -72,6 +106,71 @@ struct LlmProjectSummary {
     highlights: Vec<String>,
 }
 
+fn collect_retryable_failed_scans(
+    attack_scans: &[&aisec_storage::Scan],
+    targets: &[aisec_storage::Target],
+) -> Vec<ProjectSummaryFailedScanDto> {
+    let target_by_id: std::collections::HashMap<&str, &aisec_storage::Target> = targets
+        .iter()
+        .map(|t| (t.id.as_str(), t))
+        .collect();
+
+    attack_scans
+        .iter()
+        .copied()
+        .filter(|scan| is_retryable_scan_status(&scan.status))
+        .map(|scan| {
+            let target = scan
+                .target_id
+                .as_deref()
+                .and_then(|tid| target_by_id.get(tid).copied());
+            let target_url = target
+                .map(|t| extract_url(&t.descriptor_json))
+                .filter(|u| !u.trim().is_empty());
+            ProjectSummaryFailedScanDto {
+                scan_id: scan.id.clone(),
+                scan_name: scan.name.clone(),
+                status: scan.status.clone(),
+                target_id: scan.target_id.clone(),
+                target_name: target.map(|t| t.name.clone()),
+                target_url,
+            }
+        })
+        .collect()
+}
+
+fn attach_retry_actions(
+    bundle: SummaryBundle,
+    failed: &[ProjectSummaryFailedScanDto],
+) -> SummaryBundle {
+    ensure_failed_project_summary_action(!failed.is_empty(), bundle)
+}
+
+/// One Retry Scan CTA per failed/cancelled/stopped attack scan.
+fn actions_to_dto(failed: &[ProjectSummaryFailedScanDto]) -> Vec<ProjectSummaryActionDto> {
+    failed
+        .iter()
+        .map(|scan| {
+            let endpoint = scan
+                .target_url
+                .as_deref()
+                .filter(|u| !u.trim().is_empty())
+                .or(scan.target_name.as_deref())
+                .unwrap_or("target");
+            ProjectSummaryActionDto {
+                title: "Retry Scan".into(),
+                description: format!(
+                    "Open the scan wizard to Retry Scan for {endpoint} ({})",
+                    scan.scan_id
+                ),
+                action: "retry_scan".into(),
+                scan_id: scan.scan_id.clone(),
+                target_id: scan.target_id.clone(),
+            }
+        })
+        .collect()
+}
+
 pub async fn project_summary_generate_op(
     state: &AppState,
     request: ProjectSummaryRequest,
@@ -100,20 +199,8 @@ pub async fn project_summary_generate_op(
         ));
     }
 
-    // Cached summary is only returned when the project still has targets.
-    if !request.force {
-        if let Some(cached) = load_stored_summary(project.summary_json.as_deref()) {
-            return Ok(cached);
-        }
-    }
-
     let scans = repos
         .scans()
-        .list_by_project(project_id)
-        .await
-        .map_err(CommandError::from)?;
-    let findings = repos
-        .findings()
         .list_by_project(project_id)
         .await
         .map_err(CommandError::from)?;
@@ -124,6 +211,45 @@ pub async fn project_summary_generate_op(
             scan.name.starts_with("Scan (") || scan.name.starts_with("Agent Scan (")
         })
         .collect();
+    let target_name_by_id: std::collections::HashMap<&str, &str> = targets
+        .iter()
+        .map(|t| (t.id.as_str(), t.name.as_str()))
+        .collect();
+    let failed_scans = collect_retryable_failed_scans(&attack_scans, &targets);
+
+    // Cached summary is only returned when the project still has targets.
+    // Re-attach retry actions from live scan state so failed scans get CTAs.
+    if !request.force {
+        if let Some(mut cached) = load_stored_summary(project.summary_json.as_deref()) {
+            let ensured = attach_retry_actions(
+                SummaryBundle {
+                    overview: cached.overview.clone(),
+                    highlights: cached.highlights.clone(),
+                    actions: cached
+                        .actions
+                        .iter()
+                        .map(|a| SummaryAction {
+                            title: a.title.clone(),
+                            description: a.description.clone(),
+                            action: a.action.clone(),
+                        })
+                        .collect(),
+                },
+                &failed_scans,
+            );
+            cached.overview = ensured.overview;
+            cached.highlights = ensured.highlights;
+            cached.failed_scans = failed_scans.clone();
+            cached.actions = actions_to_dto(&failed_scans);
+            return Ok(cached);
+        }
+    }
+
+    let findings = repos
+        .findings()
+        .list_by_project(project_id)
+        .await
+        .map_err(CommandError::from)?;
 
     let mut severity_counts = serde_json::Map::new();
     for finding in &findings {
@@ -163,11 +289,6 @@ pub async fn project_summary_generate_op(
             scans_by_target.entry(tid).or_default().push(scan);
         }
     }
-
-    let target_name_by_id: std::collections::HashMap<&str, &str> = targets
-        .iter()
-        .map(|t| (t.id.as_str(), t.name.as_str()))
-        .collect();
 
     let input = ProjectSummaryInput {
         project_name: project.name.clone(),
@@ -217,6 +338,7 @@ pub async fn project_summary_generate_op(
                 }
             })
             .collect(),
+        failed_scans: failed_scans.clone(),
         recent_findings: findings
             .iter()
             .take(20)
@@ -302,18 +424,36 @@ pub async fn project_summary_generate_op(
         }
     };
 
-    let (source, overview, highlights) = match llm_bundle {
-        Some(bundle) => ("ai".into(), bundle.overview, bundle.highlights),
+    let (source, bundle) = match llm_bundle {
+        Some(bundle) => (
+            "ai".into(),
+            SummaryBundle {
+                overview: bundle.overview,
+                highlights: bundle.highlights,
+                actions: Vec::new(),
+            },
+        ),
         None => {
             let fallback = fallback_summary(&input);
-            ("fallback".into(), fallback.overview, fallback.highlights)
+            (
+                "fallback".into(),
+                SummaryBundle {
+                    overview: fallback.overview,
+                    highlights: fallback.highlights,
+                    actions: Vec::new(),
+                },
+            )
         }
     };
 
+    let bundle = attach_retry_actions(bundle, &failed_scans);
+
     let response = ProjectSummaryResponse {
         source,
-        overview,
-        highlights,
+        overview: bundle.overview,
+        highlights: bundle.highlights,
+        failed_scans: failed_scans.clone(),
+        actions: actions_to_dto(&failed_scans),
         generated_at,
         target_count: input.target_count,
         scan_count: input.scan_count,
@@ -334,6 +474,10 @@ pub async fn project_summary_generate_op(
 fn fallback_summary(input: &ProjectSummaryInput) -> LlmProjectSummary {
     let unscanned = input.targets.iter().filter(|t| t.scan_count == 0).count();
     let never_scanned = input.scan_count == 0 || unscanned == input.target_count;
+    let retryable = input.targets.iter().any(|t| {
+        is_retryable_scan_status(&t.latest_scan_status)
+            || t.scan_status_counts.keys().any(|k| is_retryable_scan_status(k))
+    });
 
     let overview = if never_scanned {
         format!(
@@ -365,6 +509,26 @@ fn fallback_summary(input: &ProjectSummaryInput) -> LlmProjectSummary {
     };
 
     let mut highlights = Vec::new();
+    if !input.failed_scans.is_empty() {
+        let parts: Vec<String> = input
+            .failed_scans
+            .iter()
+            .map(|f| {
+                let endpoint = f
+                    .target_url
+                    .as_deref()
+                    .filter(|u| !u.trim().is_empty())
+                    .or(f.target_name.as_deref())
+                    .unwrap_or("unknown endpoint");
+                format!("{endpoint} (scan {})", f.scan_id)
+            })
+            .collect();
+        highlights.push(format!(
+            "Retry Scan for failed assessment{} on {} to restore coverage confidence",
+            if input.failed_scans.len() == 1 { "" } else { "s" },
+            parts.join("; "),
+        ));
+    }
     highlights.push(format!(
         "Inventory: {} targets · {} scans · {} findings",
         input.target_count, input.scan_count, input.finding_count
@@ -436,16 +600,14 @@ fn fallback_summary(input: &ProjectSummaryInput) -> LlmProjectSummary {
         .targets
         .iter()
         .filter(|t| {
-            t.latest_scan_status == "failed"
+            is_retryable_scan_status(&t.latest_scan_status)
                 || t.scan_status_counts
-                    .get("failed")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0)
-                    > 0
+                    .keys()
+                    .any(|k| is_retryable_scan_status(k))
         })
         .map(|t| t.name.as_str())
         .collect();
-    if !failed_targets.is_empty() {
+    if !failed_targets.is_empty() && !retryable {
         highlights.push(format!(
             "Failed scan(s) on {} — investigate and re-run before trusting coverage",
             failed_targets.join(", ")

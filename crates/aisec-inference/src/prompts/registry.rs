@@ -159,15 +159,16 @@ Response body:
 Produce a short overall assessment, then prioritized remediation recommendations from the findings summary in the user message.
 
 Reply with a single compact JSON object only — no markdown, no prose:
-{"overview":"one sentence summarizing the scan outcome and risk posture","recommendations":[{"title":"short action title","description":"1-3 sentences of concrete mitigation","priority":"critical|high|medium|low|info"}]}
+{"overview":"one sentence summarizing the scan outcome and risk posture","recommendations":[{"title":"short action title","description":"1-3 sentences of concrete mitigation","priority":"critical|high|medium|low|info","action":"retry_scan|start_attack|null"}]}
 
 Rules:
 - overview: exactly one clear sentence (under 200 characters) summarizing what this scan found and the overall risk posture. Reflect scan_status (e.g. completed/failed/cancelled/running) and target context when present.
-- Then provide 3 to 6 recommendations ordered by priority (most urgent first) — concrete actions to take after this scan.
-- Tie each recommendation to patterns visible in the findings (categories, severities, titles).
+- Provide 3 to 4 remediation recommendations ordered by priority (most urgent first) — concrete mitigations for guardrails, architecture, monitoring, and policy.
+- When scan_status is failed, cancelled, stopped, or otherwise incomplete: you MUST also include exactly one operational recommendation with action "retry_scan", title "Retry Scan", priority "high", telling the operator to open the scan wizard to Retry Scan or Start Attack again. Keep remediation items separate (no action field / null).
+- When scan_status is completed: do not include retry_scan / start_attack actions; focus on remediation only.
+- Tie each remediation recommendation to patterns visible in the findings (categories, severities, titles).
 - Use target_name / target_url and target_scan_status_counts when present to tailor advice for that target's scan history (e.g. repeated failures vs first completed run).
-- Focus on guardrails, architecture, monitoring, and policy — not re-running the scan, unless scan_status indicates failure/incomplete and a re-test is warranted.
-- If there are zero findings, overview should state that clearly, and recommendations should cover continuous testing plus baseline hardening for the scoped attack categories.
+- If there are zero findings and the scan completed, overview should state that clearly, and recommendations should cover continuous testing plus baseline hardening for the scoped attack categories.
 - Keep titles under 80 characters; descriptions under 280 characters each."#
     }
 
@@ -184,6 +185,7 @@ Rules:
 - Use per-target finding_count, scan_count, latest_scan_status, scan_status_counts, and severity_counts when comparing posture across targets.
 - latest_scan_status is the newest attack-scan status for that target (`none` means never scanned). scan_status_counts breaks down statuses (completed/failed/running/pending/cancelled/etc).
 - Call out failed, cancelled, or stuck (running/pending) scans when they affect coverage confidence.
+- When the input includes a non-empty `failed_scans` array (or any target has latest_scan_status / scan_status_counts failed|cancelled|stopped): include Retry Scan as ONE of the 4–6 highlights (prefer first). In that highlight, mention each failed item using its full endpoint URL (`target_url`) and `scan_id` from `failed_scans` — write natural prose; do not use a fixed template. Remaining highlights cover posture/coverage/remediation. Do not suggest "Start Attack" as a separate CTA.
 - highlights: 3 to 5 short bullets (each one sentence). Cover severity posture, coverage gaps, hottest targets, scan-status issues, and next actions when relevant.
 - If targets exist but project scan_count is 0 (or every target has scan_count 0 / latest_scan_status none): this is an unscanned project. Do NOT invent findings or residual risk. Overview should state assessment has not started yet. Highlights must recommend concrete next steps: start authorized attack scans on priority targets, verify auth/endpoints before scanning, cover high-value LLM/API targets first, and establish a baseline scan cadence.
 - If some targets are scanned and others are not: call out the unscanned coverage gap and recommend scanning those next.

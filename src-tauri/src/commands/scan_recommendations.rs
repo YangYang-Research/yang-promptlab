@@ -4,8 +4,8 @@ use aisec_agent::{YazgDelegation, YazgSupervisor};
 use aisec_report::{generate_recommendations, data::StorageFindingRow};
 use aisec_storage::{Finding, FindingRepository, ScanRepository, TargetRepository, UpdateScan};
 use aisec_target_profile::{
-    build_attack_results_summary, AttackRecommendation, AttackRecommendationsBundle,
-    FindingSummaryInput,
+    build_attack_results_summary, ensure_failed_scan_action_recommendation,
+    AttackRecommendation, AttackRecommendationsBundle, FindingSummaryInput,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -30,6 +30,9 @@ pub struct AttackRecommendationDto {
     pub title: String,
     pub description: String,
     pub priority: String,
+    /// Optional UI action: `retry_scan` | `start_attack`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,10 +61,28 @@ pub async fn scan_recommendations_generate_op(
         .map_err(crate::error::CommandError::from)?;
 
     if let Some(cached) = load_stored_recommendations(scan.playbook_json.as_deref()) {
+        let mut cache_summary = build_attack_results_summary(&scan.status, &[], &[]);
+        cache_summary.scan_name = Some(scan.name.clone());
+        let ensured = ensure_failed_scan_action_recommendation(
+            &cache_summary,
+            AttackRecommendationsBundle {
+                overview: cached.overview.clone(),
+                recommendations: cached
+                    .recommendations
+                    .iter()
+                    .map(|r| AttackRecommendation {
+                        title: r.title.clone(),
+                        description: r.description.clone(),
+                        priority: r.priority.clone(),
+                        action: r.action.clone(),
+                    })
+                    .collect(),
+            },
+        );
         return Ok(ScanRecommendationsResponse {
             source: cached.source,
-            overview: cached.overview,
-            recommendations: cached.recommendations,
+            overview: ensured.overview,
+            recommendations: ensured.recommendations.into_iter().map(Into::into).collect(),
         });
     }
 
@@ -139,7 +160,13 @@ pub async fn scan_recommendations_generate_op(
 
     let (source, bundle) = match bundle {
         Some((source, bundle)) => (source, bundle),
-        None => ("fallback", fallback_recommendations_bundle(&findings)),
+        None => (
+            "fallback",
+            ensure_failed_scan_action_recommendation(
+                &summary,
+                fallback_recommendations_bundle(&findings),
+            ),
+        ),
     };
 
     let response = ScanRecommendationsResponse {
@@ -262,6 +289,7 @@ fn fallback_recommendations_bundle(findings: &[Finding]) -> AttackRecommendation
             title: rec.title,
             description: rec.description,
             priority: rec.priority.as_str().into(),
+            action: None,
         })
         .collect();
 
@@ -270,6 +298,7 @@ fn fallback_recommendations_bundle(findings: &[Finding]) -> AttackRecommendation
             title: "Schedule continuous authorized testing".into(),
             description: "Re-run adversarial assessments periodically and keep input/output guardrails enabled even when a single scan is clean.".into(),
             priority: "info".into(),
+            action: None,
         }]
     } else {
         recommendations
@@ -287,6 +316,7 @@ impl From<AttackRecommendation> for AttackRecommendationDto {
             title: value.title,
             description: value.description,
             priority: value.priority,
+            action: value.action,
         }
     }
 }
