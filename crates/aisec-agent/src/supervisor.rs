@@ -10,10 +10,13 @@ use crate::analyze_endpoint::AnalyzeEndpointAgentOutcome;
 use crate::attack_plan::AttackPlanAgentOutcome;
 use crate::error::AgentResult;
 use crate::generate_prompt::{GeneratePromptAgentOutcome, TechniquePromptContext};
+use crate::judge_coordinator::JudgeCoordinatorAgentOutcome;
 use crate::react::{run_react, ReactActionKind, ReactArtifacts, ReactLlms, ReactRequest};
 use crate::recommend::RecommendAgentOutcome;
 use crate::summary::{SummaryAgentOutcome, SummaryRequest};
 use crate::types::{AgentEvent, AgentId};
+
+use aisec_judge::{JudgeEngine, JudgeRequest};
 
 /// Soft hint for the ReAct goal (not a hard route).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -27,6 +30,7 @@ pub enum SupervisorIntent {
     GeneratePrompt,
     Recommend,
     Summary,
+    Judge,
 }
 
 impl SupervisorIntent {
@@ -45,6 +49,7 @@ impl SupervisorIntent {
                 Self::Recommend
             }
             "summary" | "summarize" | "project_summary" | "scan_summary" => Self::Summary,
+            "judge" | "judging" | "judge_coordinator" => Self::Judge,
             "chat" | "help" => Self::Chat,
             "auto" | "" => Self::Auto,
             _ => Self::Auto,
@@ -89,6 +94,10 @@ pub enum YazgDelegation {
         turn: YazgTurn,
         outcome: SummaryAgentOutcome,
     },
+    Judged {
+        turn: YazgTurn,
+        outcome: JudgeCoordinatorAgentOutcome,
+    },
 }
 
 /// Yazg — top-level supervisor agent (ReAct).
@@ -112,6 +121,9 @@ impl YazgSupervisor {
             }
             SupervisorIntent::Summary => {
                 "User preference hint: project/scan summary may be appropriate."
+            }
+            SupervisorIntent::Judge => {
+                "User preference hint: consensus judging via JudgeCoordinatorAgent may be appropriate."
             }
             SupervisorIntent::Chat => "User preference hint: conversational reply may be enough.",
             SupervisorIntent::Auto => "No forced action — choose freely via ReAct.",
@@ -246,6 +258,26 @@ impl YazgSupervisor {
         Self::react(request, llms).await
     }
 
+    /// Consensus judge a single probe via JudgeCoordinatorAgent workers.
+    /// Soft intent hint only — Yazg ReAct chooses the agent/action.
+    pub async fn react_judge(
+        judge_request: &JudgeRequest,
+        judge_engine: &JudgeEngine,
+        llms: &ReactLlms<'_>,
+    ) -> AgentResult<YazgDelegation> {
+        let message = format!(
+            "Judge probe `{}` (category={}): run JudgeCoordinatorAgent so JudgeWorker, \
+             ClassifierWorker, and AttackerWorker vote, then finish with the consensus verdict \
+             for the UI. Probe response context is enough — no live target probe required.",
+            judge_request.probe_id, judge_request.attack_category
+        );
+        let goal = Self::build_goal(&message, SupervisorIntent::Judge);
+        let request = ReactRequest::new(goal)
+            .with_judge(Some(judge_request), Some(judge_engine))
+            .with_max_steps(4);
+        Self::react(request, llms).await
+    }
+
     /// Offline fallback when AI Runtime is unavailable (no ReAct).
     pub fn offline_chat(message: &str, profile: Option<&TargetProfile>) -> YazgTurn {
         let trimmed = message.trim();
@@ -267,7 +299,7 @@ impl YazgSupervisor {
             format!(
                 "I am Yazg (offline). Start AI Runtime so I can ReAct-route to \
                  AnalyzeEndpointAgent / AttackPlanAgent / GeneratePromptAgent / \
-                 RecommendAgent / SummaryAgent.\n\n{target_line}"
+                 RecommendAgent / SummaryAgent / JudgeCoordinatorAgent.\n\n{target_line}"
             )
         } else {
             format!(
@@ -292,8 +324,11 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
         Some(ReactActionKind::GeneratePrompt) => SupervisorIntent::GeneratePrompt,
         Some(ReactActionKind::Recommend) => SupervisorIntent::Recommend,
         Some(ReactActionKind::Summary) => SupervisorIntent::Summary,
+        Some(ReactActionKind::Judge) => SupervisorIntent::Judge,
         Some(ReactActionKind::Finish) | None => {
-            if artifacts.summary.is_some() {
+            if artifacts.judge.is_some() {
+                SupervisorIntent::Judge
+            } else if artifacts.summary.is_some() {
                 SupervisorIntent::Summary
             } else if artifacts.recommend.is_some() {
                 SupervisorIntent::Recommend
@@ -322,6 +357,24 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
         verified: verified.or(artifacts.analyze.as_ref().map(|_| true)),
         plan_summary: plan_summary.clone(),
     };
+
+    if let Some(outcome) = artifacts.judge {
+        if matches!(intent, SupervisorIntent::Judge)
+            || artifacts.last_action == Some(ReactActionKind::Judge)
+        {
+            let mut turn = turn;
+            turn.intent = SupervisorIntent::Judge;
+            if turn.reply.trim().is_empty() {
+                turn.reply = format!(
+                    "Judge consensus: {} (confidence={:.0}%, votes={}).",
+                    outcome.verdict.verdict,
+                    outcome.verdict.confidence * 100.0,
+                    outcome.worker_results.len()
+                );
+            }
+            return YazgDelegation::Judged { turn, outcome };
+        }
+    }
 
     if let Some(outcome) = artifacts.summary {
         if matches!(intent, SupervisorIntent::Summary)
@@ -487,6 +540,7 @@ mod tests {
             SupervisorIntent::parse("project_summary"),
             SupervisorIntent::Summary
         );
+        assert_eq!(SupervisorIntent::parse("judge"), SupervisorIntent::Judge);
     }
 
     #[test]

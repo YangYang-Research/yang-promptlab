@@ -495,6 +495,7 @@ pub async fn target_profile_verify_ai_op(
                 | YazgDelegation::GeneratedPrompt { turn, .. }
                 | YazgDelegation::Recommended { turn, .. }
                 | YazgDelegation::Summarized { turn, .. }
+                | YazgDelegation::Judged { turn, .. }
                 | YazgDelegation::AnalyzedEndpoint { turn, .. } => turn.reply.clone(),
             };
             let message = if message.trim().is_empty() {
@@ -664,6 +665,7 @@ pub async fn planner_generate_from_profile_op(
                 | YazgDelegation::GeneratedPrompt { turn, .. }
                 | YazgDelegation::Recommended { turn, .. }
                 | YazgDelegation::Summarized { turn, .. }
+                | YazgDelegation::Judged { turn, .. }
                 | YazgDelegation::Planned { turn, .. } => turn.reply,
             };
             warn!(

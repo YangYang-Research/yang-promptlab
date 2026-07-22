@@ -31,9 +31,9 @@ export const RUNTIME_INFERENCE_SITES: RuntimeInferenceSite[] = [
   {
     id: "judge",
     title: "Response judging",
-    location: "Scan execution · Judge phase",
+    location: "Scan execution · Judge phase · JudgeCoordinatorAgent",
     description:
-      "Yazg scores each attack response, assigns severity, and writes finding records with confidence and reasoning.",
+      "Yazg delegates to JudgeCoordinatorAgent, which runs JudgeWorker, ClassifierWorker, and AttackerWorker, then returns a consensus verdict (severity, confidence, reasoning) used to write findings.",
   },
   {
     id: "recommendations",

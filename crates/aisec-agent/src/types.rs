@@ -10,6 +10,10 @@ pub enum AgentId {
     GeneratePrompt,
     Recommend,
     Summary,
+    JudgeCoordinator,
+    JudgeWorker,
+    ClassifierWorker,
+    AttackerWorker,
 }
 
 impl AgentId {
@@ -21,6 +25,10 @@ impl AgentId {
             Self::GeneratePrompt => "generate_prompt",
             Self::Recommend => "recommend",
             Self::Summary => "summary",
+            Self::JudgeCoordinator => "judge_coordinator",
+            Self::JudgeWorker => "judge_worker",
+            Self::ClassifierWorker => "classifier_worker",
+            Self::AttackerWorker => "attacker_worker",
         }
     }
 
@@ -32,6 +40,10 @@ impl AgentId {
             Self::GeneratePrompt => "GeneratePromptAgent",
             Self::Recommend => "RecommendAgent",
             Self::Summary => "SummaryAgent",
+            Self::JudgeCoordinator => "JudgeCoordinatorAgent",
+            Self::JudgeWorker => "JudgeWorker",
+            Self::ClassifierWorker => "ClassifierWorker",
+            Self::AttackerWorker => "AttackerWorker",
         }
     }
 }

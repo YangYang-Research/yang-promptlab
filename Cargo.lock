@@ -56,6 +56,8 @@ dependencies = [
 name = "aisec-agent"
 version = "0.1.0"
 dependencies = [
+ "aisec-judge",
+ "aisec-models",
  "aisec-planner",
  "aisec-target-profile",
  "async-trait",

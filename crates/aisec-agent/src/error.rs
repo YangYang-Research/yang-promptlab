@@ -14,6 +14,8 @@ pub enum AgentError {
     Recommend(String),
     #[error("summary failed: {0}")]
     Summary(String),
+    #[error("judge failed: {0}")]
+    Judge(String),
     #[error("supervisor: {0}")]
     Supervisor(String),
 }

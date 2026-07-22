@@ -8,7 +8,8 @@ use aisec_endpoint_metadata::body_template_from_metadata;
 use crate::dto::metadata_from_endpoint;
 use aisec_target_profile::{TargetProfile, TargetProvider};
 use aisec_auth::{resolve_descriptor_for_runtime, resolve_descriptor_for_wizard, AuthSessionManager, SecretStore};
-use aisec_judge::{JudgeVerdict, Severity as JudgeSeverity};
+use aisec_agent::JudgeCoordinatorAgent;
+use aisec_judge::{JudgeRequest, JudgeVerdict, Severity as JudgeSeverity};
 use aisec_plugin_host::evaluate_with_judge_plugins;
 use aisec_inference::InferenceRuntimeManager;
 use aisec_runtime::{RuntimeManager, SharedModelProvider};
@@ -279,16 +280,16 @@ async fn judge_single_attempt(
     let eval = &attempt.evaluation;
     let normalized = &attempt.response.normalized;
 
-    let mut verdict: JudgeVerdict = env
-        .judge
-        .judge_normalized(
-            attempt.payload_id.clone(),
-            env.category_name,
-            attempt.mutated_content.clone(),
-            normalized,
-        )
+    let judge_request = JudgeRequest::from_normalized(
+        attempt.payload_id.clone(),
+        env.category_name,
+        attempt.mutated_content.clone(),
+        normalized,
+    );
+    let mut verdict: JudgeVerdict = JudgeCoordinatorAgent::run(&judge_request, env.judge)
         .await
-        .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
+        .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?
+        .verdict;
 
     {
         let mut plugins = env.plugin_manager.lock().await;

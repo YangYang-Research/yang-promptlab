@@ -5,7 +5,9 @@ use crate::error::{JudgeError, JudgeResult};
 use crate::evaluators::LlmEvaluator;
 use crate::roles::ModelRolePool;
 use crate::scoring::{aggregate_confidence, consensus_vulnerable, dominant_category, max_severity};
-use crate::types::{JudgeConfig, JudgeMode, JudgeRequest, JudgeVerdict, VulnerabilityCategory};
+use crate::types::{
+    EvaluatorResult, JudgeConfig, JudgeRequest, JudgeVerdict, ModelRole, VulnerabilityCategory,
+};
 use time::OffsetDateTime;
 
 /// AI Judge Engine — LLM evaluation with multi-role consensus scoring.
@@ -62,40 +64,28 @@ impl JudgeEngine {
         .await
     }
 
-    async fn run_evaluators(&self, request: JudgeRequest) -> JudgeResult<JudgeVerdict> {
-        let roles = self.role_pool.configured_roles();
-        if roles.is_empty() {
-            return Err(JudgeError::config(
-                "judge requires at least one configured LLM role (local or remote AI runtime)",
-            ));
-        }
+    /// Run a single role evaluator (Judge / Classifier / Attacker worker).
+    pub async fn evaluate_role(
+        &self,
+        role: ModelRole,
+        request: &JudgeRequest,
+    ) -> JudgeResult<EvaluatorResult> {
+        let runtime = self.role_pool.get(role)?;
+        let llm = LlmEvaluator::new(
+            role,
+            runtime,
+            self.config.llm_max_tokens,
+            self.config.llm_temperature,
+        );
+        llm.evaluate_async(request).await
+    }
 
-        let mut results = Vec::new();
-
-        for role in roles {
-            let runtime = self.role_pool.get(role)?;
-            let llm = LlmEvaluator::new(
-                role,
-                runtime,
-                self.config.llm_max_tokens,
-                self.config.llm_temperature,
-            );
-            match llm.evaluate_async(&request).await {
-                Ok(r) => {
-                    debug!(
-                        evaluator = %r.evaluator_id,
-                        vulnerable = r.vulnerable,
-                        confidence = r.confidence,
-                        "llm evaluation"
-                    );
-                    results.push(r);
-                }
-                Err(err) => {
-                    debug!(%role, error = %err, "llm evaluation skipped");
-                }
-            }
-        }
-
+    /// Aggregate worker votes into a final consensus verdict.
+    pub fn synthesize_verdict(
+        &self,
+        request: JudgeRequest,
+        results: Vec<EvaluatorResult>,
+    ) -> JudgeResult<JudgeVerdict> {
         if results.is_empty() {
             return Err(JudgeError::evaluation(
                 "all LLM judge evaluators failed — check AI runtime connectivity",
@@ -143,6 +133,36 @@ impl JudgeEngine {
             evaluator_results: results,
             judged_at: OffsetDateTime::now_utc(),
         })
+    }
+
+    async fn run_evaluators(&self, request: JudgeRequest) -> JudgeResult<JudgeVerdict> {
+        let roles = self.role_pool.configured_roles();
+        if roles.is_empty() {
+            return Err(JudgeError::config(
+                "judge requires at least one configured LLM role (local or remote AI runtime)",
+            ));
+        }
+
+        let mut results = Vec::new();
+
+        for role in roles {
+            match self.evaluate_role(role, &request).await {
+                Ok(r) => {
+                    debug!(
+                        evaluator = %r.evaluator_id,
+                        vulnerable = r.vulnerable,
+                        confidence = r.confidence,
+                        "llm evaluation"
+                    );
+                    results.push(r);
+                }
+                Err(err) => {
+                    debug!(%role, error = %err, "llm evaluation skipped");
+                }
+            }
+        }
+
+        self.synthesize_verdict(request, results)
     }
 }
 

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use aisec_judge::{JudgeEngine, JudgeRequest};
 use aisec_planner::PlannerLlm;
 use aisec_target_profile::{AttackResultsSummary, TargetProfile, VerifyHttpSuccess};
 use serde::Deserialize;
@@ -13,6 +14,7 @@ use crate::error::{AgentError, AgentResult};
 use crate::generate_prompt::{
     GeneratePromptAgent, GeneratePromptAgentOutcome, TechniquePromptContext,
 };
+use crate::judge_coordinator::{JudgeCoordinatorAgent, JudgeCoordinatorAgentOutcome};
 use crate::recommend::{RecommendAgent, RecommendAgentOutcome};
 use crate::summary::{SummaryAgent, SummaryAgentOutcome, SummaryRequest};
 use crate::types::{AgentEvent, AgentId};
@@ -26,6 +28,7 @@ pub enum ReactActionKind {
     GeneratePrompt,
     Recommend,
     Summary,
+    Judge,
     Finish,
 }
 
@@ -37,6 +40,7 @@ pub struct ReactArtifacts {
     pub generate_prompt: Option<GeneratePromptAgentOutcome>,
     pub recommend: Option<RecommendAgentOutcome>,
     pub summary: Option<SummaryAgentOutcome>,
+    pub judge: Option<JudgeCoordinatorAgentOutcome>,
     pub final_reply: String,
     pub last_action: Option<ReactActionKind>,
 }
@@ -51,7 +55,7 @@ pub struct ReactLlms<'a> {
     pub summary: &'a dyn PlannerLlm,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ReactRequest<'a> {
     pub goal: String,
     pub profile: Option<&'a TargetProfile>,
@@ -64,6 +68,10 @@ pub struct ReactRequest<'a> {
     pub attack_results: Option<&'a AttackResultsSummary>,
     /// When set, SummaryAgent can produce project/scan summary.
     pub summary_request: Option<&'a SummaryRequest>,
+    /// When set with `judge_engine`, JudgeCoordinatorAgent can score a probe.
+    pub judge_request: Option<&'a JudgeRequest>,
+    /// Runtime/role pool for JudgeCoordinatorAgent workers.
+    pub judge_engine: Option<&'a JudgeEngine>,
     pub max_steps: usize,
 }
 
@@ -77,6 +85,8 @@ impl<'a> ReactRequest<'a> {
             technique: None,
             attack_results: None,
             summary_request: None,
+            judge_request: None,
+            judge_engine: None,
             max_steps: DEFAULT_MAX_STEPS,
         }
     }
@@ -108,6 +118,16 @@ impl<'a> ReactRequest<'a> {
 
     pub fn with_summary_request(mut self, request: Option<&'a SummaryRequest>) -> Self {
         self.summary_request = request;
+        self
+    }
+
+    pub fn with_judge(
+        mut self,
+        request: Option<&'a JudgeRequest>,
+        engine: Option<&'a JudgeEngine>,
+    ) -> Self {
+        self.judge_request = request;
+        self.judge_engine = engine;
         self
     }
 
@@ -143,6 +163,7 @@ pub async fn run_react(
         request.technique,
         request.attack_results.is_some(),
         request.summary_request,
+        request.judge_request.is_some() && request.judge_engine.is_some(),
     ));
     transcript.push_str(
         "\nBegin ReAct. Respond with one JSON step (thought + action).\n",
@@ -222,11 +243,15 @@ pub async fn run_react(
                     execute_summary(&request, llms.summary, &mut artifacts).await?;
                 push_observation(&mut transcript, &mut artifacts, &observation);
             }
+            ReactActionKind::Judge => {
+                let observation = execute_judge(&request, &mut artifacts).await?;
+                push_observation(&mut transcript, &mut artifacts, &observation);
+            }
         }
 
         transcript.push_str(
             "\nContinue ReAct: choose the next action JSON \
-             (analyze_endpoint, attack_plan, generate_prompt, recommend, summary, or finish).\n",
+             (analyze_endpoint, attack_plan, generate_prompt, recommend, summary, judge, or finish).\n",
         );
     }
 
@@ -258,6 +283,7 @@ fn format_context(
     technique: Option<&TechniquePromptContext>,
     has_attack_results: bool,
     summary_request: Option<&SummaryRequest>,
+    judge_ready: bool,
 ) -> String {
     let mut out = match profile {
         Some(p) => format!(
@@ -303,6 +329,13 @@ fn format_context(
         }
         None => out.push_str("- summary_ready: false\n"),
     }
+    out.push_str(&format!("- judge_ready: {judge_ready}\n"));
+    if judge_ready {
+        out.push_str(
+            "- note: judge runs JudgeCoordinatorAgent → JudgeWorker/ClassifierWorker/AttackerWorker; \
+             no live target probe needed when probe response context is present\n",
+        );
+    }
     out
 }
 
@@ -322,6 +355,9 @@ fn parse_action_kind(raw: &str) -> AgentResult<ReactActionKind> {
         }
         "summary" | "summarize" | "project_summary" | "scan_summary" => {
             Ok(ReactActionKind::Summary)
+        }
+        "judge" | "judging" | "judge_coordinator" | "consensus_judge" => {
+            Ok(ReactActionKind::Judge)
         }
         "finish" | "done" | "respond" | "final" => Ok(ReactActionKind::Finish),
         other => Err(AgentError::Supervisor(format!(
@@ -540,7 +576,50 @@ async fn execute_summary(
     }
 }
 
+async fn execute_judge(
+    request: &ReactRequest<'_>,
+    artifacts: &mut ReactArtifacts,
+) -> AgentResult<String> {
+    let (Some(judge_request), Some(engine)) = (request.judge_request, request.judge_engine) else {
+        return Ok(
+            "JudgeCoordinatorAgent FAILED — judge request/engine not provided".into(),
+        );
+    };
+
+    artifacts.events.push(AgentEvent::info(
+        AgentId::Yazg,
+        "Acting: JudgeCoordinatorAgent",
+    ));
+
+    match JudgeCoordinatorAgent::run(judge_request, engine).await {
+        Ok(out) => {
+            artifacts.events.extend(out.events.clone());
+            let msg = format!(
+                "JudgeCoordinatorAgent OK — verdict={} confidence={:.2} votes={}",
+                out.verdict.verdict,
+                out.verdict.confidence,
+                out.worker_results.len()
+            );
+            artifacts.judge = Some(out);
+            Ok(msg)
+        }
+        Err(err) => {
+            artifacts.events.push(AgentEvent::failed(
+                AgentId::JudgeCoordinator,
+                err.to_string(),
+            ));
+            Ok(format!("JudgeCoordinatorAgent FAILED — {err}"))
+        }
+    }
+}
+
 fn summarize_partial(artifacts: &ReactArtifacts) -> String {
+    if let Some(judge) = &artifacts.judge {
+        return format!(
+            "Reached step limit after judging. Verdict: {} · confidence={:.2}",
+            judge.verdict.verdict, judge.verdict.confidence
+        );
+    }
     if let Some(summary) = &artifacts.summary {
         return format!(
             "Reached step limit after summary. Kind: {} · {}",
@@ -618,6 +697,10 @@ mod tests {
         assert_eq!(
             parse_action_kind("project_summary").unwrap(),
             ReactActionKind::Summary
+        );
+        assert_eq!(
+            parse_action_kind("judge").unwrap(),
+            ReactActionKind::Judge
         );
         assert_eq!(
             parse_action_kind("generate_prompt").unwrap(),
