@@ -8,6 +8,8 @@ pub enum AgentId {
     AnalyzeEndpoint,
     AttackPlan,
     GeneratePrompt,
+    Recommend,
+    Summary,
 }
 
 impl AgentId {
@@ -17,6 +19,8 @@ impl AgentId {
             Self::AnalyzeEndpoint => "analyze_endpoint",
             Self::AttackPlan => "attack_plan",
             Self::GeneratePrompt => "generate_prompt",
+            Self::Recommend => "recommend",
+            Self::Summary => "summary",
         }
     }
 
@@ -26,6 +30,8 @@ impl AgentId {
             Self::AnalyzeEndpoint => "AnalyzeEndpointAgent",
             Self::AttackPlan => "AttackPlanAgent",
             Self::GeneratePrompt => "GeneratePromptAgent",
+            Self::Recommend => "RecommendAgent",
+            Self::Summary => "SummaryAgent",
         }
     }
 }

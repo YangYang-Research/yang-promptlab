@@ -87,7 +87,7 @@ pub fn build_attack_results_summary(
 
 pub async fn generate_attack_recommendations_with_llm(
     summary: &AttackResultsSummary,
-    llm: &impl PlannerLlm,
+    llm: &dyn PlannerLlm,
 ) -> PlannerResult<AttackRecommendationsBundle> {
     let summary_json = serde_json::to_string(summary)
         .map_err(|e| PlannerError::Llm(format!("failed to serialize findings summary: {e}")))?;

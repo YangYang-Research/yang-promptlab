@@ -38,16 +38,16 @@ export const RUNTIME_INFERENCE_SITES: RuntimeInferenceSite[] = [
   {
     id: "recommendations",
     title: "Remediation recommendations",
-    location: "Scan wizard · Step 6 · Scan details",
+    location: "Scan wizard · Step 6 · Scan details · RecommendAgent",
     description:
-      "Yazg summarizes scan findings and produces prioritized fix guidance. Falls back to rule-based text if Yazg is unavailable.",
+      "Yazg ReActs then delegates to RecommendAgent: summarizes scan findings and produces prioritized fix guidance. Falls back to rule-based text if Yazg is unavailable.",
   },
   {
     id: "project-summary",
     title: "Project summary",
-    location: "Project details · Summary",
+    location: "Project details · Summary · SummaryAgent",
     description:
-      "Yazg summarizes overall project posture across targets, scans, and findings. The result is persisted on the project and reused until regenerated.",
+      "Yazg ReActs then delegates to SummaryAgent: summarizes overall project posture across targets, scans, and findings. The result is persisted on the project and reused until regenerated.",
   },
   {
     id: "attack-factory-prompt",

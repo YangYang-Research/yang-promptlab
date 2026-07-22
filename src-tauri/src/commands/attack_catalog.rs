@@ -7,10 +7,7 @@ use aisec_agent::{TechniquePromptContext, YazgDelegation, YazgSupervisor};
 use aisec_storage::{AttackCatalogRepository, AttackCatalogTechnique, UpdateAttackCatalogTechnique};
 
 use crate::error::{CommandError, CommandResult};
-use crate::inference_host::{
-    is_inference_ready, HostEndpointVerifyLlm, HostGeneratePromptLlm, HostWizardPlannerLlm,
-    HostYazgReactLlm,
-};
+use crate::inference_host::{is_inference_ready, YazgHostLlms};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,44 +208,18 @@ pub async fn attack_catalog_generate_prompt_op(
         current_prompt: row.content.clone(),
     };
 
-    let supervisor_llm = HostYazgReactLlm::new(
+    let hosts = YazgHostLlms::from_app(
         state.data_dir().to_path_buf(),
         state.inference_manager().clone(),
         state.model_manager().clone(),
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
-    let analyze_llm = HostEndpointVerifyLlm::new(
-        state.data_dir().to_path_buf(),
-        state.inference_manager().clone(),
-        state.model_manager().clone(),
-        state.model_provider().clone(),
-        state.runtime_manager().clone(),
-    );
-    let plan_llm = HostWizardPlannerLlm::new(
-        state.data_dir().to_path_buf(),
-        state.inference_manager().clone(),
-        state.model_manager().clone(),
-        state.model_provider().clone(),
-        state.runtime_manager().clone(),
-    );
-    let prompt_llm = HostGeneratePromptLlm::new(
-        state.data_dir().to_path_buf(),
-        state.inference_manager().clone(),
-        state.model_manager().clone(),
-        state.model_provider().clone(),
-        state.runtime_manager().clone(),
-    );
+    let llms = hosts.react_llms();
 
-    let delegation = YazgSupervisor::react_generate_prompt(
-        &technique,
-        &supervisor_llm,
-        &analyze_llm,
-        &plan_llm,
-        &prompt_llm,
-    )
-    .await
-    .map_err(|err| CommandError::invalid_input(err.to_string()))?;
+    let delegation = YazgSupervisor::react_generate_prompt(&technique, &llms)
+        .await
+        .map_err(|err| CommandError::invalid_input(err.to_string()))?;
 
     match delegation {
         YazgDelegation::GeneratedPrompt { outcome, .. } => Ok(AttackCatalogGeneratePromptDto {
@@ -260,6 +231,8 @@ pub async fn attack_catalog_generate_prompt_op(
                 YazgDelegation::Chat { turn }
                 | YazgDelegation::AnalyzedEndpoint { turn, .. }
                 | YazgDelegation::Planned { turn, .. }
+                | YazgDelegation::Recommended { turn, .. }
+                | YazgDelegation::Summarized { turn, .. }
                 | YazgDelegation::GeneratedPrompt { turn, .. } => turn.reply,
             };
             Err(CommandError::invalid_input(if message.trim().is_empty() {

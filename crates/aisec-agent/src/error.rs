@@ -10,6 +10,10 @@ pub enum AgentError {
     AttackPlan(String),
     #[error("generate prompt failed: {0}")]
     GeneratePrompt(String),
+    #[error("recommend failed: {0}")]
+    Recommend(String),
+    #[error("summary failed: {0}")]
+    Summary(String),
     #[error("supervisor: {0}")]
     Supervisor(String),
 }

@@ -14,9 +14,7 @@ use tracing::{info, warn};
 
 use crate::dto::{TargetDto, TargetProfileDto, VerificationConsoleEntryDto};
 use crate::error::{CommandError, CommandResult};
-use crate::inference_host::{
-    is_inference_ready, HostEndpointVerifyLlm, HostGeneratePromptLlm, HostWizardPlannerLlm,
-};
+use crate::inference_host::{is_inference_ready, YazgHostLlms};
 use crate::state::AppState;
 
 fn profile_from_json(raw: &str) -> CommandResult<TargetProfile> {
@@ -461,45 +459,16 @@ pub async fn target_profile_verify_ai_op(
         });
     }
 
-    let llm_host = HostEndpointVerifyLlm::new(
+    let hosts = YazgHostLlms::from_app(
         state.data_dir().to_path_buf(),
         state.inference_manager().clone(),
         state.model_manager().clone(),
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
-    let supervisor_llm = crate::inference_host::HostYazgReactLlm::new(
-        state.data_dir().to_path_buf(),
-        state.inference_manager().clone(),
-        state.model_manager().clone(),
-        state.model_provider().clone(),
-        state.runtime_manager().clone(),
-    );
-    let plan_llm = HostWizardPlannerLlm::new(
-        state.data_dir().to_path_buf(),
-        state.inference_manager().clone(),
-        state.model_manager().clone(),
-        state.model_provider().clone(),
-        state.runtime_manager().clone(),
-    );
-    let prompt_llm = HostGeneratePromptLlm::new(
-        state.data_dir().to_path_buf(),
-        state.inference_manager().clone(),
-        state.model_manager().clone(),
-        state.model_provider().clone(),
-        state.runtime_manager().clone(),
-    );
+    let llms = hosts.react_llms();
 
-    let delegation =
-        YazgSupervisor::react_classify_probe(
-            &profile,
-            &http,
-            &supervisor_llm,
-            &llm_host,
-            &plan_llm,
-            &prompt_llm,
-        )
-            .await;
+    let delegation = YazgSupervisor::react_classify_probe(&profile, &http, &llms).await;
     match delegation {
         Ok(YazgDelegation::AnalyzedEndpoint { outcome, .. }) => {
             profile.verification = outcome.verification;
@@ -524,6 +493,8 @@ pub async fn target_profile_verify_ai_op(
                 YazgDelegation::Chat { turn }
                 | YazgDelegation::Planned { turn, .. }
                 | YazgDelegation::GeneratedPrompt { turn, .. }
+                | YazgDelegation::Recommended { turn, .. }
+                | YazgDelegation::Summarized { turn, .. }
                 | YazgDelegation::AnalyzedEndpoint { turn, .. } => turn.reply.clone(),
             };
             let message = if message.trim().is_empty() {
@@ -669,34 +640,14 @@ pub async fn planner_generate_from_profile_op(
     }
     drop(inference);
 
-    let plan_llm = HostWizardPlannerLlm::new(
+    let hosts = YazgHostLlms::from_app(
         state.data_dir().to_path_buf(),
         state.inference_manager().clone(),
         state.model_manager().clone(),
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
-    let supervisor_llm = crate::inference_host::HostYazgReactLlm::new(
-        state.data_dir().to_path_buf(),
-        state.inference_manager().clone(),
-        state.model_manager().clone(),
-        state.model_provider().clone(),
-        state.runtime_manager().clone(),
-    );
-    let analyze_llm = HostEndpointVerifyLlm::new(
-        state.data_dir().to_path_buf(),
-        state.inference_manager().clone(),
-        state.model_manager().clone(),
-        state.model_provider().clone(),
-        state.runtime_manager().clone(),
-    );
-    let prompt_llm = HostGeneratePromptLlm::new(
-        state.data_dir().to_path_buf(),
-        state.inference_manager().clone(),
-        state.model_manager().clone(),
-        state.model_provider().clone(),
-        state.runtime_manager().clone(),
-    );
+    let llms = hosts.react_llms();
 
     info!(
         target_id = %target_id,
@@ -704,21 +655,15 @@ pub async fn planner_generate_from_profile_op(
         "wizard attack plan: Yazg supervisor (soft AttackPlan hint)"
     );
 
-    let plan = match YazgSupervisor::react_plan(
-        &profile,
-        &supervisor_llm,
-        &analyze_llm,
-        &plan_llm,
-        &prompt_llm,
-    )
-    .await
-    {
+    let plan = match YazgSupervisor::react_plan(&profile, &llms).await {
         Ok(YazgDelegation::Planned { outcome, .. }) => outcome.plan,
         Ok(other) => {
             let message = match other {
                 YazgDelegation::Chat { turn }
                 | YazgDelegation::AnalyzedEndpoint { turn, .. }
                 | YazgDelegation::GeneratedPrompt { turn, .. }
+                | YazgDelegation::Recommended { turn, .. }
+                | YazgDelegation::Summarized { turn, .. }
                 | YazgDelegation::Planned { turn, .. } => turn.reply,
             };
             warn!(

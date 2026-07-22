@@ -1,17 +1,18 @@
 //! AI-backed remediation recommendations for scan results (wizard step 6).
 
+use aisec_agent::{YazgDelegation, YazgSupervisor};
 use aisec_report::{generate_recommendations, data::StorageFindingRow};
 use aisec_storage::{Finding, FindingRepository, ScanRepository, TargetRepository, UpdateScan};
 use aisec_target_profile::{
-    build_attack_results_summary, generate_attack_recommendations_with_llm, AttackRecommendation,
-    AttackRecommendationsBundle, FindingSummaryInput,
+    build_attack_results_summary, AttackRecommendation, AttackRecommendationsBundle,
+    FindingSummaryInput,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tracing::warn;
 
 use crate::error::CommandResult;
-use crate::inference_host::{is_inference_ready, HostAttackRecommendLlm};
+use crate::inference_host::{is_inference_ready, YazgHostLlms};
 use crate::session_auth::seed_url_from_descriptor;
 use crate::state::AppState;
 
@@ -102,15 +103,26 @@ pub async fn scan_recommendations_generate_op(
         let inference = state.inference_manager().lock().await;
         if is_inference_ready(&inference) {
             drop(inference);
-            let llm = HostAttackRecommendLlm::new(
+            let hosts = YazgHostLlms::from_app(
                 state.data_dir().to_path_buf(),
                 state.inference_manager().clone(),
                 state.model_manager().clone(),
                 state.model_provider().clone(),
                 state.runtime_manager().clone(),
             );
-            match generate_attack_recommendations_with_llm(&summary, &llm).await {
-                Ok(recommendations) => Some(("ai", recommendations)),
+            let llms = hosts.react_llms();
+            match YazgSupervisor::react_recommend(&summary, &llms).await {
+                Ok(YazgDelegation::Recommended { outcome, .. }) => {
+                    Some(("ai", outcome.bundle))
+                }
+                Ok(other) => {
+                    warn!(
+                        scan_id = %request.scan_id,
+                        "Yazg ReAct finished without RecommendAgent; using rule-based fallback"
+                    );
+                    let _ = other;
+                    None
+                }
                 Err(err) => {
                     warn!(
                         scan_id = %request.scan_id,

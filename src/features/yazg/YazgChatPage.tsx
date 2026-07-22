@@ -149,7 +149,7 @@ export function YazgChatPage() {
     <div className="yazg-chat-page">
       <PageHeader
         title="Yazg"
-        description="Supervisor agent with ReAct routing to AnalyzeEndpointAgent, AttackPlanAgent, and GeneratePromptAgent."
+        description="Supervisor agent with ReAct routing to AnalyzeEndpointAgent, AttackPlanAgent, GeneratePromptAgent, RecommendAgent, and SummaryAgent."
         actions={
           <div className="yazg-chat-page__header-meta">
             <YazgBadge />
@@ -215,7 +215,8 @@ export function YazgChatPage() {
 
           <p className="detail-section__hint">
             Buttons only hint the goal — Yazg ReActs (Reason → Act → Observe) and chooses
-            AnalyzeEndpointAgent / AttackPlanAgent / GeneratePromptAgent. Wizard and Attack Factory use the same loop.
+            AnalyzeEndpointAgent / AttackPlanAgent / GeneratePromptAgent / RecommendAgent / SummaryAgent.
+            Wizard, Attack Factory, recommendations, and project summary use the same loop.
           </p>
         </Card>
 

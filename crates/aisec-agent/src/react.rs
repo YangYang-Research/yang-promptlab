@@ -1,9 +1,9 @@
-//! Yazg ReAct loop — Reason → Act → Observe until finish.
+//! Soft ReAct loop for Yazg: Thought → Action → Observation until `finish`.
 
 use std::collections::HashMap;
 
 use aisec_planner::PlannerLlm;
-use aisec_target_profile::{TargetProfile, VerifyHttpSuccess};
+use aisec_target_profile::{AttackResultsSummary, TargetProfile, VerifyHttpSuccess};
 use serde::Deserialize;
 use tracing::{info, warn};
 
@@ -13,37 +13,58 @@ use crate::error::{AgentError, AgentResult};
 use crate::generate_prompt::{
     GeneratePromptAgent, GeneratePromptAgentOutcome, TechniquePromptContext,
 };
+use crate::recommend::{RecommendAgent, RecommendAgentOutcome};
+use crate::summary::{SummaryAgent, SummaryAgentOutcome, SummaryRequest};
 use crate::types::{AgentEvent, AgentId};
 
-const DEFAULT_MAX_STEPS: u32 = 6;
+const DEFAULT_MAX_STEPS: usize = 6;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReactActionKind {
     AnalyzeEndpoint,
     AttackPlan,
     GeneratePrompt,
+    Recommend,
+    Summary,
     Finish,
 }
 
-#[derive(Debug, Deserialize)]
-struct ReactStepJson {
-    thought: Option<String>,
-    action: String,
-    #[serde(default)]
-    reply: Option<String>,
+#[derive(Debug, Clone, Default)]
+pub struct ReactArtifacts {
+    pub events: Vec<AgentEvent>,
+    pub analyze: Option<AnalyzeEndpointAgentOutcome>,
+    pub plan: Option<AttackPlanAgentOutcome>,
+    pub generate_prompt: Option<GeneratePromptAgentOutcome>,
+    pub recommend: Option<RecommendAgentOutcome>,
+    pub summary: Option<SummaryAgentOutcome>,
+    pub final_reply: String,
+    pub last_action: Option<ReactActionKind>,
 }
 
-/// Inputs for one Yazg ReAct run.
+/// LLM handles for each ReAct actor (supervisor + specialist sub-agents).
+pub struct ReactLlms<'a> {
+    pub supervisor: &'a dyn PlannerLlm,
+    pub analyze: &'a dyn PlannerLlm,
+    pub plan: &'a dyn PlannerLlm,
+    pub prompt: &'a dyn PlannerLlm,
+    pub recommend: &'a dyn PlannerLlm,
+    pub summary: &'a dyn PlannerLlm,
+}
+
+#[derive(Debug, Clone)]
 pub struct ReactRequest<'a> {
     pub goal: String,
     pub profile: Option<&'a TargetProfile>,
     pub auth_headers: HashMap<String, String>,
-    /// When set (wizard AI step), AnalyzeEndpointAgent classifies this probe.
+    /// When set, AnalyzeEndpointAgent classifies this probe (skips HTTP).
     pub capability_probe: Option<&'a VerifyHttpSuccess>,
-    /// When set (Attack Factory), GeneratePromptAgent invents a probe for this technique.
+    /// When set, GeneratePromptAgent can produce a factory probe.
     pub technique: Option<&'a TechniquePromptContext>,
-    pub max_steps: u32,
+    /// When set, RecommendAgent can produce post-scan recommendations.
+    pub attack_results: Option<&'a AttackResultsSummary>,
+    /// When set, SummaryAgent can produce project/scan summary.
+    pub summary_request: Option<&'a SummaryRequest>,
+    pub max_steps: usize,
 }
 
 impl<'a> ReactRequest<'a> {
@@ -54,6 +75,8 @@ impl<'a> ReactRequest<'a> {
             auth_headers: HashMap::new(),
             capability_probe: None,
             technique: None,
+            attack_results: None,
+            summary_request: None,
             max_steps: DEFAULT_MAX_STEPS,
         }
     }
@@ -78,30 +101,33 @@ impl<'a> ReactRequest<'a> {
         self
     }
 
-    pub fn with_max_steps(mut self, max_steps: u32) -> Self {
+    pub fn with_attack_results(mut self, results: Option<&'a AttackResultsSummary>) -> Self {
+        self.attack_results = results;
+        self
+    }
+
+    pub fn with_summary_request(mut self, request: Option<&'a SummaryRequest>) -> Self {
+        self.summary_request = request;
+        self
+    }
+
+    pub fn with_max_steps(mut self, max_steps: usize) -> Self {
         self.max_steps = max_steps.max(1);
         self
     }
 }
 
-/// Accumulated domain outcomes from actions during the loop.
-#[derive(Debug, Default)]
-pub struct ReactArtifacts {
-    pub analyze: Option<AnalyzeEndpointAgentOutcome>,
-    pub plan: Option<AttackPlanAgentOutcome>,
-    pub generate_prompt: Option<GeneratePromptAgentOutcome>,
-    pub events: Vec<AgentEvent>,
-    pub final_reply: String,
-    pub last_action: Option<ReactActionKind>,
+#[derive(Debug, Deserialize)]
+struct ReactStepJson {
+    thought: Option<String>,
+    action: String,
+    #[serde(default)]
+    reply: Option<String>,
 }
 
-/// Run Yazg ReAct until `finish` or max steps.
 pub async fn run_react(
     request: ReactRequest<'_>,
-    supervisor_llm: &dyn PlannerLlm,
-    analyze_llm: &dyn PlannerLlm,
-    plan_llm: &dyn PlannerLlm,
-    prompt_llm: &dyn PlannerLlm,
+    llms: &ReactLlms<'_>,
 ) -> AgentResult<ReactArtifacts> {
     let mut artifacts = ReactArtifacts::default();
     artifacts.events.push(AgentEvent::started(
@@ -115,6 +141,8 @@ pub async fn run_react(
         request.profile,
         request.capability_probe.is_some(),
         request.technique,
+        request.attack_results.is_some(),
+        request.summary_request,
     ));
     transcript.push_str(
         "\nBegin ReAct. Respond with one JSON step (thought + action).\n",
@@ -127,7 +155,8 @@ pub async fn run_react(
             format!("ReAct step {step}/{max}", max = request.max_steps),
         ));
 
-        let raw = supervisor_llm
+        let raw = llms
+            .supervisor
             .complete(&transcript)
             .await
             .map_err(|err| AgentError::Supervisor(format!("ReAct reasoning failed: {err}")))?;
@@ -170,35 +199,34 @@ pub async fn run_react(
             }
             ReactActionKind::AnalyzeEndpoint => {
                 let observation =
-                    execute_analyze(&request, analyze_llm, &mut artifacts).await?;
-                transcript.push_str(&format!("Observation:\n{observation}\n"));
-                artifacts.events.push(AgentEvent::info(
-                    AgentId::Yazg,
-                    format!("Observation: {}", truncate(&observation, 240)),
-                ));
+                    execute_analyze(&request, llms.analyze, &mut artifacts).await?;
+                push_observation(&mut transcript, &mut artifacts, &observation);
             }
             ReactActionKind::AttackPlan => {
-                let observation = execute_attack_plan(&request, plan_llm, &mut artifacts).await?;
-                transcript.push_str(&format!("Observation:\n{observation}\n"));
-                artifacts.events.push(AgentEvent::info(
-                    AgentId::Yazg,
-                    format!("Observation: {}", truncate(&observation, 240)),
-                ));
+                let observation =
+                    execute_attack_plan(&request, llms.plan, &mut artifacts).await?;
+                push_observation(&mut transcript, &mut artifacts, &observation);
             }
             ReactActionKind::GeneratePrompt => {
                 let observation =
-                    execute_generate_prompt(&request, prompt_llm, &mut artifacts).await?;
-                transcript.push_str(&format!("Observation:\n{observation}\n"));
-                artifacts.events.push(AgentEvent::info(
-                    AgentId::Yazg,
-                    format!("Observation: {}", truncate(&observation, 240)),
-                ));
+                    execute_generate_prompt(&request, llms.prompt, &mut artifacts).await?;
+                push_observation(&mut transcript, &mut artifacts, &observation);
+            }
+            ReactActionKind::Recommend => {
+                let observation =
+                    execute_recommend(&request, llms.recommend, &mut artifacts).await?;
+                push_observation(&mut transcript, &mut artifacts, &observation);
+            }
+            ReactActionKind::Summary => {
+                let observation =
+                    execute_summary(&request, llms.summary, &mut artifacts).await?;
+                push_observation(&mut transcript, &mut artifacts, &observation);
             }
         }
 
         transcript.push_str(
             "\nContinue ReAct: choose the next action JSON \
-             (analyze_endpoint, attack_plan, generate_prompt, or finish).\n",
+             (analyze_endpoint, attack_plan, generate_prompt, recommend, summary, or finish).\n",
         );
     }
 
@@ -212,10 +240,24 @@ pub async fn run_react(
     Ok(artifacts)
 }
 
+fn push_observation(
+    transcript: &mut String,
+    artifacts: &mut ReactArtifacts,
+    observation: &str,
+) {
+    transcript.push_str(&format!("Observation:\n{observation}\n"));
+    artifacts.events.push(AgentEvent::info(
+        AgentId::Yazg,
+        format!("Observation: {}", truncate(observation, 240)),
+    ));
+}
+
 fn format_context(
     profile: Option<&TargetProfile>,
     has_probe: bool,
     technique: Option<&TechniquePromptContext>,
+    has_attack_results: bool,
+    summary_request: Option<&SummaryRequest>,
 ) -> String {
     let mut out = match profile {
         Some(p) => format!(
@@ -237,6 +279,30 @@ fn format_context(
     } else {
         out.push_str("- factory_prompt_ready: false\n");
     }
+    out.push_str(&format!(
+        "- attack_results_ready: {}\n",
+        has_attack_results
+    ));
+    if has_attack_results {
+        out.push_str(
+            "- note: recommend uses completed scan results; no live target probe needed\n",
+        );
+    }
+    match summary_request {
+        Some(SummaryRequest::Project { project_name, .. }) => {
+            out.push_str(&format!(
+                "- summary_ready: true\n- summary_kind: project\n- project_name: {project_name}\n\
+                 - note: summary does not need a live scan target\n"
+            ));
+        }
+        Some(SummaryRequest::Scan { .. }) => {
+            out.push_str(
+                "- summary_ready: true\n- summary_kind: scan\n\
+                 - note: summary uses completed scan results; no live target probe needed\n",
+            );
+        }
+        None => out.push_str("- summary_ready: false\n"),
+    }
     out
 }
 
@@ -251,6 +317,12 @@ fn parse_action_kind(raw: &str) -> AgentResult<ReactActionKind> {
         | "prompt"
         | "factory_prompt"
         | "attack_factory" => Ok(ReactActionKind::GeneratePrompt),
+        "recommend" | "recommendation" | "recommendations" | "remediation" => {
+            Ok(ReactActionKind::Recommend)
+        }
+        "summary" | "summarize" | "project_summary" | "scan_summary" => {
+            Ok(ReactActionKind::Summary)
+        }
         "finish" | "done" | "respond" | "final" => Ok(ReactActionKind::Finish),
         other => Err(AgentError::Supervisor(format!(
             "unknown ReAct action '{other}'"
@@ -398,7 +470,90 @@ async fn execute_generate_prompt(
     }
 }
 
+async fn execute_recommend(
+    request: &ReactRequest<'_>,
+    recommend_llm: &dyn PlannerLlm,
+    artifacts: &mut ReactArtifacts,
+) -> AgentResult<String> {
+    let Some(results) = request.attack_results else {
+        return Ok("RecommendAgent FAILED — no attack results provided".into());
+    };
+
+    artifacts.events.push(AgentEvent::info(
+        AgentId::Yazg,
+        "Acting: RecommendAgent",
+    ));
+
+    match RecommendAgent::run(results, recommend_llm).await {
+        Ok(out) => {
+            artifacts.events.extend(out.events.clone());
+            let msg = format!(
+                "RecommendAgent OK — items={} overview={}",
+                out.bundle.recommendations.len(),
+                truncate(&out.bundle.overview, 160)
+            );
+            artifacts.recommend = Some(out);
+            Ok(msg)
+        }
+        Err(err) => {
+            artifacts.events.push(AgentEvent::failed(
+                AgentId::Recommend,
+                err.to_string(),
+            ));
+            Ok(format!("RecommendAgent FAILED — {err}"))
+        }
+    }
+}
+
+async fn execute_summary(
+    request: &ReactRequest<'_>,
+    summary_llm: &dyn PlannerLlm,
+    artifacts: &mut ReactArtifacts,
+) -> AgentResult<String> {
+    let Some(summary_request) = request.summary_request else {
+        return Ok("SummaryAgent FAILED — no summary request provided".into());
+    };
+
+    artifacts.events.push(AgentEvent::info(
+        AgentId::Yazg,
+        "Acting: SummaryAgent",
+    ));
+
+    match SummaryAgent::run(summary_request, summary_llm).await {
+        Ok(out) => {
+            artifacts.events.extend(out.events.clone());
+            let msg = format!(
+                "SummaryAgent OK — kind={} overview={} highlights={}",
+                out.kind,
+                truncate(&out.bundle.overview, 120),
+                out.bundle.highlights.len()
+            );
+            artifacts.summary = Some(out);
+            Ok(msg)
+        }
+        Err(err) => {
+            artifacts
+                .events
+                .push(AgentEvent::failed(AgentId::Summary, err.to_string()));
+            Ok(format!("SummaryAgent FAILED — {err}"))
+        }
+    }
+}
+
 fn summarize_partial(artifacts: &ReactArtifacts) -> String {
+    if let Some(summary) = &artifacts.summary {
+        return format!(
+            "Reached step limit after summary. Kind: {} · {}",
+            summary.kind,
+            truncate(&summary.bundle.overview, 120)
+        );
+    }
+    if let Some(rec) = &artifacts.recommend {
+        return format!(
+            "Reached step limit after recommendations. Items: {}",
+            rec.bundle.recommendations.len()
+        );
+    }
     if let Some(gen) = &artifacts.generate_prompt {
         return format!(
             "Reached step limit after prompt generation. Technique: {} · {} chars",
@@ -457,15 +612,15 @@ mod tests {
             ReactActionKind::AttackPlan
         );
         assert_eq!(
-            parse_action_kind("attack_plan").unwrap(),
-            ReactActionKind::AttackPlan
+            parse_action_kind("recommend").unwrap(),
+            ReactActionKind::Recommend
+        );
+        assert_eq!(
+            parse_action_kind("project_summary").unwrap(),
+            ReactActionKind::Summary
         );
         assert_eq!(
             parse_action_kind("generate_prompt").unwrap(),
-            ReactActionKind::GeneratePrompt
-        );
-        assert_eq!(
-            parse_action_kind("factory_prompt").unwrap(),
             ReactActionKind::GeneratePrompt
         );
     }

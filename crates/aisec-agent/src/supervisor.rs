@@ -1,9 +1,8 @@
-//! Yazg supervisor — ReAct routing to AnalyzeEndpoint / AttackPlan / GeneratePrompt agents.
+//! Yazg supervisor — ReAct routing to specialist sub-agents.
 
 use std::collections::HashMap;
 
-use aisec_planner::PlannerLlm;
-use aisec_target_profile::{TargetProfile, VerificationResult, WizardAttackPlan};
+use aisec_target_profile::{AttackResultsSummary, TargetProfile, VerificationResult, WizardAttackPlan};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -11,7 +10,9 @@ use crate::analyze_endpoint::AnalyzeEndpointAgentOutcome;
 use crate::attack_plan::AttackPlanAgentOutcome;
 use crate::error::AgentResult;
 use crate::generate_prompt::{GeneratePromptAgentOutcome, TechniquePromptContext};
-use crate::react::{run_react, ReactActionKind, ReactArtifacts, ReactRequest};
+use crate::react::{run_react, ReactActionKind, ReactArtifacts, ReactLlms, ReactRequest};
+use crate::recommend::RecommendAgentOutcome;
+use crate::summary::{SummaryAgentOutcome, SummaryRequest};
 use crate::types::{AgentEvent, AgentId};
 
 /// Soft hint for the ReAct goal (not a hard route).
@@ -24,6 +25,8 @@ pub enum SupervisorIntent {
     AnalyzeEndpoint,
     AttackPlan,
     GeneratePrompt,
+    Recommend,
+    Summary,
 }
 
 impl SupervisorIntent {
@@ -38,6 +41,10 @@ impl SupervisorIntent {
             | "generate-prompt"
             | "factory_prompt"
             | "attack_factory" => Self::GeneratePrompt,
+            "recommend" | "recommendation" | "recommendations" | "remediation" => {
+                Self::Recommend
+            }
+            "summary" | "summarize" | "project_summary" | "scan_summary" => Self::Summary,
             "chat" | "help" => Self::Chat,
             "auto" | "" => Self::Auto,
             _ => Self::Auto,
@@ -74,6 +81,14 @@ pub enum YazgDelegation {
         turn: YazgTurn,
         outcome: GeneratePromptAgentOutcome,
     },
+    Recommended {
+        turn: YazgTurn,
+        outcome: RecommendAgentOutcome,
+    },
+    Summarized {
+        turn: YazgTurn,
+        outcome: SummaryAgentOutcome,
+    },
 }
 
 /// Yazg — top-level supervisor agent (ReAct).
@@ -92,6 +107,12 @@ impl YazgSupervisor {
             SupervisorIntent::GeneratePrompt => {
                 "User preference hint: Attack Factory prompt generation may be appropriate."
             }
+            SupervisorIntent::Recommend => {
+                "User preference hint: post-scan remediation recommendations may be appropriate."
+            }
+            SupervisorIntent::Summary => {
+                "User preference hint: project/scan summary may be appropriate."
+            }
             SupervisorIntent::Chat => "User preference hint: conversational reply may be enough.",
             SupervisorIntent::Auto => "No forced action — choose freely via ReAct.",
         };
@@ -101,14 +122,10 @@ impl YazgSupervisor {
     /// Primary entry: ReAct reasoning then act on sub-agents.
     pub async fn react(
         request: ReactRequest<'_>,
-        supervisor_llm: &dyn PlannerLlm,
-        analyze_llm: &dyn PlannerLlm,
-        plan_llm: &dyn PlannerLlm,
-        prompt_llm: &dyn PlannerLlm,
+        llms: &ReactLlms<'_>,
     ) -> AgentResult<YazgDelegation> {
         info!(goal = %truncate(&request.goal, 120), "Yazg ReAct handle");
-        let artifacts =
-            run_react(request, supervisor_llm, analyze_llm, plan_llm, prompt_llm).await?;
+        let artifacts = run_react(request, llms).await?;
         Ok(delegation_from_artifacts(artifacts))
     }
 
@@ -118,16 +135,13 @@ impl YazgSupervisor {
         intent_hint: SupervisorIntent,
         profile: Option<&TargetProfile>,
         auth_headers: HashMap<String, String>,
-        supervisor_llm: &dyn PlannerLlm,
-        analyze_llm: &dyn PlannerLlm,
-        plan_llm: &dyn PlannerLlm,
-        prompt_llm: &dyn PlannerLlm,
+        llms: &ReactLlms<'_>,
     ) -> AgentResult<YazgDelegation> {
         let goal = Self::build_goal(message, intent_hint);
         let request = ReactRequest::new(goal)
             .with_profile(profile)
             .with_auth(auth_headers);
-        Self::react(request, supervisor_llm, analyze_llm, plan_llm, prompt_llm).await
+        Self::react(request, llms).await
     }
 
     /// Wizard Verification AI step: probe already captured.
@@ -135,10 +149,7 @@ impl YazgSupervisor {
     pub async fn react_classify_probe(
         profile: &TargetProfile,
         http: &aisec_target_profile::VerifyHttpSuccess,
-        supervisor_llm: &dyn PlannerLlm,
-        analyze_llm: &dyn PlannerLlm,
-        plan_llm: &dyn PlannerLlm,
-        prompt_llm: &dyn PlannerLlm,
+        llms: &ReactLlms<'_>,
     ) -> AgentResult<YazgDelegation> {
         let message = format!(
             "Scan wizard Verification: a capability probe already succeeded for {} (HTTP {}). \
@@ -151,17 +162,14 @@ impl YazgSupervisor {
             .with_profile(Some(profile))
             .with_capability_probe(Some(http))
             .with_max_steps(4);
-        Self::react(request, supervisor_llm, analyze_llm, plan_llm, prompt_llm).await
+        Self::react(request, llms).await
     }
 
     /// Wizard attack-plan step.
     /// Soft intent hint only — Yazg ReAct chooses the agent/action.
     pub async fn react_plan(
         profile: &TargetProfile,
-        supervisor_llm: &dyn PlannerLlm,
-        analyze_llm: &dyn PlannerLlm,
-        plan_llm: &dyn PlannerLlm,
-        prompt_llm: &dyn PlannerLlm,
+        llms: &ReactLlms<'_>,
     ) -> AgentResult<YazgDelegation> {
         Self::handle(
             "Scan wizard Attack Plan: generate an attack plan for the current verified target, \
@@ -169,10 +177,7 @@ impl YazgSupervisor {
             SupervisorIntent::AttackPlan,
             Some(profile),
             HashMap::new(),
-            supervisor_llm,
-            analyze_llm,
-            plan_llm,
-            prompt_llm,
+            llms,
         )
         .await
     }
@@ -181,10 +186,7 @@ impl YazgSupervisor {
     /// Soft intent hint only — Yazg ReAct chooses the agent/action.
     pub async fn react_generate_prompt(
         technique: &TechniquePromptContext,
-        supervisor_llm: &dyn PlannerLlm,
-        analyze_llm: &dyn PlannerLlm,
-        plan_llm: &dyn PlannerLlm,
-        prompt_llm: &dyn PlannerLlm,
+        llms: &ReactLlms<'_>,
     ) -> AgentResult<YazgDelegation> {
         let message = format!(
             "Attack Factory: invent an improved adversarial factory prompt for technique \
@@ -196,7 +198,52 @@ impl YazgSupervisor {
         let request = ReactRequest::new(goal)
             .with_technique(Some(technique))
             .with_max_steps(4);
-        Self::react(request, supervisor_llm, analyze_llm, plan_llm, prompt_llm).await
+        Self::react(request, llms).await
+    }
+
+    /// Post-scan recommendations.
+    /// Soft intent hint only — Yazg ReAct chooses the agent/action.
+    pub async fn react_recommend(
+        results: &AttackResultsSummary,
+        llms: &ReactLlms<'_>,
+    ) -> AgentResult<YazgDelegation> {
+        let message = format!(
+            "Scan results: produce prioritized remediation recommendations for this completed \
+             attack scan (status={}, findings={}). No live target probe is required — attack \
+             results context is enough. Call recommend, then finish with a short UI summary.",
+            results.scan_status, results.total_findings
+        );
+        let goal = Self::build_goal(&message, SupervisorIntent::Recommend);
+        let request = ReactRequest::new(goal)
+            .with_attack_results(Some(results))
+            .with_max_steps(4);
+        Self::react(request, llms).await
+    }
+
+    /// Project or scan posture summary.
+    /// Soft intent hint only — Yazg ReAct chooses the agent/action.
+    pub async fn react_summarize(
+        summary_request: &SummaryRequest,
+        llms: &ReactLlms<'_>,
+    ) -> AgentResult<YazgDelegation> {
+        let message = match summary_request {
+            SummaryRequest::Project { project_name, .. } => format!(
+                "Project Summary: summarize overall security posture for project `{project_name}`. \
+                 No live scan target is required — project assessment context is enough. \
+                 Call summary, then finish with a short UI summary."
+            ),
+            SummaryRequest::Scan { summary } => format!(
+                "Scan Summary: summarize this attack scan (status={}, findings={}). \
+                 No live target probe is required — scan results context is enough. \
+                 Call summary, then finish with a short UI summary.",
+                summary.scan_status, summary.total_findings
+            ),
+        };
+        let goal = Self::build_goal(&message, SupervisorIntent::Summary);
+        let request = ReactRequest::new(goal)
+            .with_summary_request(Some(summary_request))
+            .with_max_steps(4);
+        Self::react(request, llms).await
     }
 
     /// Offline fallback when AI Runtime is unavailable (no ReAct).
@@ -219,7 +266,8 @@ impl YazgSupervisor {
             ) {
             format!(
                 "I am Yazg (offline). Start AI Runtime so I can ReAct-route to \
-                 AnalyzeEndpointAgent / AttackPlanAgent / GeneratePromptAgent.\n\n{target_line}"
+                 AnalyzeEndpointAgent / AttackPlanAgent / GeneratePromptAgent / \
+                 RecommendAgent / SummaryAgent.\n\n{target_line}"
             )
         } else {
             format!(
@@ -242,8 +290,14 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
         Some(ReactActionKind::AnalyzeEndpoint) => SupervisorIntent::AnalyzeEndpoint,
         Some(ReactActionKind::AttackPlan) => SupervisorIntent::AttackPlan,
         Some(ReactActionKind::GeneratePrompt) => SupervisorIntent::GeneratePrompt,
+        Some(ReactActionKind::Recommend) => SupervisorIntent::Recommend,
+        Some(ReactActionKind::Summary) => SupervisorIntent::Summary,
         Some(ReactActionKind::Finish) | None => {
-            if artifacts.generate_prompt.is_some() {
+            if artifacts.summary.is_some() {
+                SupervisorIntent::Summary
+            } else if artifacts.recommend.is_some() {
+                SupervisorIntent::Recommend
+            } else if artifacts.generate_prompt.is_some() {
                 SupervisorIntent::GeneratePrompt
             } else if artifacts.plan.is_some() {
                 SupervisorIntent::AttackPlan
@@ -268,6 +322,39 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
         verified: verified.or(artifacts.analyze.as_ref().map(|_| true)),
         plan_summary: plan_summary.clone(),
     };
+
+    if let Some(outcome) = artifacts.summary {
+        if matches!(intent, SupervisorIntent::Summary)
+            || artifacts.last_action == Some(ReactActionKind::Summary)
+        {
+            let mut turn = turn;
+            turn.intent = SupervisorIntent::Summary;
+            if turn.reply.trim().is_empty() {
+                turn.reply = format!(
+                    "{} summary ready ({} highlights).",
+                    outcome.kind,
+                    outcome.bundle.highlights.len()
+                );
+            }
+            return YazgDelegation::Summarized { turn, outcome };
+        }
+    }
+
+    if let Some(outcome) = artifacts.recommend {
+        if matches!(intent, SupervisorIntent::Recommend)
+            || artifacts.last_action == Some(ReactActionKind::Recommend)
+        {
+            let mut turn = turn;
+            turn.intent = SupervisorIntent::Recommend;
+            if turn.reply.trim().is_empty() {
+                turn.reply = format!(
+                    "Recommendations ready ({} items).",
+                    outcome.bundle.recommendations.len()
+                );
+            }
+            return YazgDelegation::Recommended { turn, outcome };
+        }
+    }
 
     if let Some(outcome) = artifacts.generate_prompt {
         if matches!(intent, SupervisorIntent::GeneratePrompt)
@@ -387,6 +474,18 @@ mod tests {
         assert_eq!(
             SupervisorIntent::parse("attack_factory"),
             SupervisorIntent::GeneratePrompt
+        );
+    }
+
+    #[test]
+    fn parses_recommend_and_summary_intents() {
+        assert_eq!(
+            SupervisorIntent::parse("recommend"),
+            SupervisorIntent::Recommend
+        );
+        assert_eq!(
+            SupervisorIntent::parse("project_summary"),
+            SupervisorIntent::Summary
         );
     }
 

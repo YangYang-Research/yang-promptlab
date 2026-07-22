@@ -5,17 +5,13 @@ use std::collections::HashMap;
 use aisec_agent::{
     AgentEvent, SupervisorIntent, YazgDelegation, YazgSupervisor, YazgTurn,
 };
-use aisec_core::AisecError;
 use aisec_storage::TargetRepository;
 use aisec_target_profile::TargetProfile;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::error::{CommandError, CommandResult};
-use crate::inference_host::{
-    is_inference_ready, HostEndpointVerifyLlm, HostGeneratePromptLlm, HostWizardPlannerLlm,
-    HostYazgReactLlm,
-};
+use crate::inference_host::{is_inference_ready, YazgHostLlms};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -25,7 +21,8 @@ pub struct YazgChatRequest {
     #[serde(default)]
     pub target_id: Option<String>,
     /// Soft hint only — Yazg ReAct still chooses the action.
-    /// `auto` | `chat` | `analyze_endpoint` | `verify` (alias) | `attack_plan` | `plan` (alias)
+    /// `auto` | `chat` | `analyze_endpoint` | `verify` | `attack_plan` | `plan` |
+    /// `generate_prompt` | `recommend` | `summary`
     #[serde(default)]
     pub intent: Option<String>,
 }
@@ -79,6 +76,8 @@ fn turn_to_response(turn: YazgTurn) -> YazgChatResponse {
             SupervisorIntent::AnalyzeEndpoint => "analyze_endpoint".into(),
             SupervisorIntent::AttackPlan => "attack_plan".into(),
             SupervisorIntent::GeneratePrompt => "generate_prompt".into(),
+            SupervisorIntent::Recommend => "recommend".into(),
+            SupervisorIntent::Summary => "summary".into(),
         },
         events: turn.events.into_iter().map(event_dto).collect(),
         verified: turn.verified,
@@ -122,44 +121,21 @@ pub async fn yazg_chat_op(
         )));
     }
 
-    let supervisor_llm = HostYazgReactLlm::new(
+    let hosts = YazgHostLlms::from_app(
         state.data_dir().to_path_buf(),
         state.inference_manager().clone(),
         state.model_manager().clone(),
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
-    let analyze_llm = HostEndpointVerifyLlm::new(
-        state.data_dir().to_path_buf(),
-        state.inference_manager().clone(),
-        state.model_manager().clone(),
-        state.model_provider().clone(),
-        state.runtime_manager().clone(),
-    );
-    let plan_llm = HostWizardPlannerLlm::new(
-        state.data_dir().to_path_buf(),
-        state.inference_manager().clone(),
-        state.model_manager().clone(),
-        state.model_provider().clone(),
-        state.runtime_manager().clone(),
-    );
-    let prompt_llm = HostGeneratePromptLlm::new(
-        state.data_dir().to_path_buf(),
-        state.inference_manager().clone(),
-        state.model_manager().clone(),
-        state.model_provider().clone(),
-        state.runtime_manager().clone(),
-    );
+    let llms = hosts.react_llms();
 
     let delegation = YazgSupervisor::handle(
         &request.message,
         intent_hint,
         profile.as_ref(),
         auth_headers,
-        &supervisor_llm,
-        &analyze_llm,
-        &plan_llm,
-        &prompt_llm,
+        &llms,
     )
     .await
     .map_err(map_agent_err)?;
@@ -186,7 +162,9 @@ pub async fn yazg_chat_op(
         YazgDelegation::Chat { turn }
         | YazgDelegation::AnalyzedEndpoint { turn, .. }
         | YazgDelegation::Planned { turn, .. }
-        | YazgDelegation::GeneratedPrompt { turn, .. } => turn,
+        | YazgDelegation::GeneratedPrompt { turn, .. }
+        | YazgDelegation::Recommended { turn, .. }
+        | YazgDelegation::Summarized { turn, .. } => turn,
     };
     Ok(turn_to_response(turn))
 }

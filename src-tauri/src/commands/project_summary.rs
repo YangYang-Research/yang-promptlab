@@ -1,6 +1,6 @@
 //! AI-backed project posture summary (Project Details → Summary).
 
-use aisec_inference::PromptRegistry;
+use aisec_agent::{SummaryRequest, YazgDelegation, YazgSupervisor};
 use aisec_storage::{
     FindingRepository, ProjectRepository, ScanRepository, TargetRepository, UpdateProject,
 };
@@ -10,7 +10,7 @@ use tauri::State;
 use tracing::warn;
 
 use crate::error::{CommandError, CommandResult};
-use crate::inference_host::{is_inference_ready, HostProjectSummaryLlm};
+use crate::inference_host::{is_inference_ready, YazgHostLlms};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -250,20 +250,49 @@ pub async fn project_summary_generate_op(
         let inference = state.inference_manager().lock().await;
         if is_inference_ready(&inference) {
             drop(inference);
-            let llm = HostProjectSummaryLlm::new(
-                state.data_dir().to_path_buf(),
-                state.inference_manager().clone(),
-                state.model_manager().clone(),
-                state.model_provider().clone(),
-                state.runtime_manager().clone(),
-            );
-            match generate_with_llm(&input, &llm).await {
-                Ok(bundle) => Some(bundle),
+            match serde_json::to_string(&input) {
+                Ok(input_json) => {
+                    let hosts = YazgHostLlms::from_app(
+                        state.data_dir().to_path_buf(),
+                        state.inference_manager().clone(),
+                        state.model_manager().clone(),
+                        state.model_provider().clone(),
+                        state.runtime_manager().clone(),
+                    );
+                    let llms = hosts.react_llms();
+                    let summary_request = SummaryRequest::Project {
+                        project_name: input.project_name.clone(),
+                        input_json,
+                    };
+                    match YazgSupervisor::react_summarize(&summary_request, &llms).await {
+                        Ok(YazgDelegation::Summarized { outcome, .. }) => {
+                            Some(LlmProjectSummary {
+                                overview: outcome.bundle.overview,
+                                highlights: outcome.bundle.highlights,
+                            })
+                        }
+                        Ok(_) => {
+                            warn!(
+                                project_id = %project_id,
+                                "Yazg ReAct finished without SummaryAgent; using rule-based fallback"
+                            );
+                            None
+                        }
+                        Err(err) => {
+                            warn!(
+                                project_id = %project_id,
+                                error = %err,
+                                "AI project summary failed; using rule-based fallback"
+                            );
+                            None
+                        }
+                    }
+                }
                 Err(err) => {
                     warn!(
                         project_id = %project_id,
                         error = %err,
-                        "AI project summary failed; using rule-based fallback"
+                        "failed to serialize project summary input; using rule-based fallback"
                     );
                     None
                 }
@@ -300,42 +329,6 @@ pub async fn project_summary_generate_op(
     }
 
     Ok(response)
-}
-
-async fn generate_with_llm(
-    input: &ProjectSummaryInput,
-    llm: &HostProjectSummaryLlm,
-) -> Result<LlmProjectSummary, String> {
-    use aisec_planner::PlannerLlm;
-
-    let summary_json = serde_json::to_string(input).map_err(|e| e.to_string())?;
-    let prompt = PromptRegistry::project_summary_user(&summary_json);
-    let raw = llm.complete(&prompt).await.map_err(|e| e.to_string())?;
-    parse_project_summary(&raw)
-}
-
-fn parse_project_summary(raw: &str) -> Result<LlmProjectSummary, String> {
-    let json_str = extract_json_object(raw)?;
-    let parsed: LlmProjectSummary =
-        serde_json::from_str(&json_str).map_err(|e| format!("invalid project summary JSON: {e}"))?;
-    let overview = parsed.overview.trim();
-    if overview.is_empty() {
-        return Err("project summary overview must not be empty".into());
-    }
-    let highlights: Vec<String> = parsed
-        .highlights
-        .into_iter()
-        .map(|h| h.trim().to_string())
-        .filter(|h| !h.is_empty())
-        .take(6)
-        .collect();
-    if highlights.is_empty() {
-        return Err("project summary highlights must not be empty".into());
-    }
-    Ok(LlmProjectSummary {
-        overview: overview.into(),
-        highlights,
-    })
 }
 
 fn fallback_summary(input: &ProjectSummaryInput) -> LlmProjectSummary {
@@ -504,48 +497,6 @@ fn extract_url(descriptor_json: &str) -> String {
         .or_else(|| value.get("base_url").and_then(|v| v.as_str()))
         .unwrap_or("")
         .to_string()
-}
-
-fn extract_json_object(raw: &str) -> Result<String, String> {
-    let trimmed = raw.trim();
-    let start = trimmed
-        .find('{')
-        .ok_or_else(|| "no JSON object in LLM response".to_string())?;
-    let slice = &trimmed[start..];
-
-    let mut depth = 0i32;
-    let mut in_string = false;
-    let mut escape = false;
-
-    for (idx, ch) in slice.char_indices() {
-        if in_string {
-            if escape {
-                escape = false;
-                continue;
-            }
-            if ch == '\\' {
-                escape = true;
-                continue;
-            }
-            if ch == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-        match ch {
-            '"' => in_string = true,
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Ok(slice[..=idx].to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-
-    Err("truncated or unterminated JSON in LLM response".into())
 }
 
 #[tauri::command]

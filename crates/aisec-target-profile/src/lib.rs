@@ -11,6 +11,7 @@ pub mod planner;
 pub mod wizard_llm;
 pub mod wizard_plan;
 pub mod wizard_recommendations;
+pub mod wizard_summary;
 pub mod prompt;
 pub mod serde_verified_at;
 pub mod templates;
@@ -30,6 +31,10 @@ pub use wizard_recommendations::{
     build_attack_results_summary, generate_attack_recommendations_with_llm,
     parse_attack_recommendations, AttackRecommendation, AttackRecommendationsBundle,
     AttackResultsSummary, FindingSummaryInput,
+};
+pub use wizard_summary::{
+    generate_project_summary_with_llm, generate_scan_summary_with_llm, parse_summary_bundle,
+    SummaryBundle,
 };
 pub use wizard_plan::{
     adjust_wizard_attack_plan, active_categories_for_profile, apply_profile_mode_settings,
