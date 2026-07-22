@@ -233,7 +233,7 @@ pub fn third_party_status_label(
     selected_model: Option<&ModelEntry>,
 ) -> String {
     if !has_configured_model {
-        return "N/A".into();
+        return "Idle".into();
     }
     if config.selected_model_id.is_none() {
         return "Ready".into();
