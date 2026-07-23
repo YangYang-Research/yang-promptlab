@@ -15,8 +15,8 @@ use crate::endpoint_recovery::{
 };
 use crate::error::{AgentError, AgentResult};
 use crate::memory::{
-    load_memory_prompt_block, remember_ltm, remember_stm, AgentMemoryStore, LtmWrite,
-    MemoryContext, MemoryScopeType, StmRole, StmWrite,
+    load_memory_prompt_block, load_prior_attack_failure_block, remember_attack_category_outcome,
+    remember_stm, AgentMemoryStore, MemoryContext, StmRole, StmWrite,
 };
 use crate::types::{AgentEvent, AgentId};
 
@@ -102,6 +102,34 @@ impl SequentialAttackExecutionAgent {
         let memory_block =
             load_memory_prompt_block(memory, &memory_ctx, AgentId::SequentialAttackExecution)
                 .await;
+        let prior_failure = load_prior_attack_failure_block(
+            memory,
+            &memory_ctx,
+            AgentId::SequentialAttackExecution,
+            &request.category,
+        )
+        .await;
+        if !prior_failure.is_empty() {
+            remember_stm(
+                memory,
+                &memory_ctx,
+                StmWrite {
+                    agent_id: AgentId::SequentialAttackExecution,
+                    role: StmRole::System,
+                    memory_key: Some("prior_failure".into()),
+                    content: prior_failure.trim().to_string(),
+                    content_json: None,
+                    importance: 0.95,
+                },
+            )
+            .await;
+            tools
+                .emit_info(format!(
+                    "SequentialAttackExecutionAgent: loaded prior failure context for {}",
+                    request.category
+                ))
+                .await;
+        }
 
         let attempt = 1u32;
         let mut last_obs = AttackAttemptObservation::default();
@@ -120,6 +148,13 @@ impl SequentialAttackExecutionAgent {
         ));
         if !memory_block.is_empty() {
             transcript.push_str(&memory_block);
+        }
+        if !prior_failure.is_empty() {
+            transcript.push_str(&prior_failure);
+            transcript.push_str(
+                "If prior failure context is present, prefer recover early (serial wait, higher delay,\n\
+                 longer timeout) before or immediately after the first unhealthy attack.\n\n",
+            );
         }
         transcript.push_str(
             "Respond with one JSON step each turn:\n\
@@ -316,6 +351,32 @@ impl SequentialAttackExecutionAgent {
                                     AgentId::SequentialAttackExecution,
                                     stopped_reason.clone(),
                                 ));
+                                remember_attack_category_outcome(
+                                    memory,
+                                    &memory_ctx,
+                                    AgentId::SequentialAttackExecution,
+                                    &request.category,
+                                    &stopped_reason,
+                                    format!(
+                                        "sequential fatal {} recoveries={} {}",
+                                        stopped_reason,
+                                        recoveries_used,
+                                        last_obs.health_line()
+                                    ),
+                                    serde_json::json!({
+                                        "mode": "sequential",
+                                        "category": request.category,
+                                        "stopped_reason": stopped_reason,
+                                        "recoveries_used": recoveries_used,
+                                        "endpoint_unhealthy": true,
+                                        "endpoint_error": err,
+                                        "health": last_obs.health_line(),
+                                    }),
+                                    0.95,
+                                    true,
+                                    Some(err.as_str()),
+                                )
+                                .await;
                                 return Err(AgentError::AttackExecution(stopped_reason));
                             }
                         }
@@ -447,38 +508,44 @@ impl SequentialAttackExecutionAgent {
         )
         .await;
 
-        let (scope_type, scope_id) = if let Some(scan_id) = memory_ctx.scan_id.as_ref() {
-            (MemoryScopeType::Scan, scan_id.clone())
-        } else {
-            memory_ctx.primary_scope()
-        };
-        remember_ltm(
+        remember_attack_category_outcome(
             memory,
-            LtmWrite {
-                agent_id: AgentId::SequentialAttackExecution,
-                scope_type,
-                scope_id,
-                memory_key: format!("attack.{}.last_outcome", request.category),
-                content: format!(
-                    "sequential reason={} vulnerable={} recoveries={}",
-                    stopped_reason, last_obs.any_vulnerable, recoveries_used
-                ),
-                content_json: Some(serde_json::json!({
-                    "mode": "sequential",
-                    "category": request.category,
-                    "stopped_reason": stopped_reason,
-                    "any_vulnerable": last_obs.any_vulnerable,
-                    "high_confidence_vuln": last_obs.high_confidence_vuln,
-                    "recoveries_used": recoveries_used,
-                    "summary": last_obs.summary,
-                    "health": last_obs.health_line(),
-                })),
-                importance: if last_obs.high_confidence_vuln {
-                    0.95
-                } else {
-                    0.7
-                },
+            &memory_ctx,
+            AgentId::SequentialAttackExecution,
+            &request.category,
+            &stopped_reason,
+            format!(
+                "sequential reason={} vulnerable={} recoveries={} {}",
+                stopped_reason,
+                last_obs.any_vulnerable,
+                recoveries_used,
+                last_obs.health_line()
+            ),
+            serde_json::json!({
+                "mode": "sequential",
+                "category": request.category,
+                "stopped_reason": stopped_reason,
+                "any_vulnerable": last_obs.any_vulnerable,
+                "high_confidence_vuln": last_obs.high_confidence_vuln,
+                "recoveries_used": recoveries_used,
+                "summary": last_obs.summary,
+                "health": last_obs.health_line(),
+                "endpoint_unhealthy": last_obs.endpoint_unhealthy,
+                "endpoint_error": last_obs.endpoint_error,
+                "http_successes": last_obs.http_successes,
+                "transport_errors": last_obs.transport_errors,
+                "rate_limited": last_obs.rate_limited,
+                "server_errors": last_obs.server_errors,
+                "avg_latency_ms": last_obs.avg_latency_ms,
+                "max_latency_ms": last_obs.max_latency_ms,
+            }),
+            if last_obs.high_confidence_vuln {
+                0.95
+            } else {
+                0.7
             },
+            last_obs.endpoint_unhealthy,
+            last_obs.endpoint_error.as_deref(),
         )
         .await;
 

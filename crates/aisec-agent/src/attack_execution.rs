@@ -14,8 +14,8 @@ use crate::endpoint_recovery::{
 };
 use crate::error::{AgentError, AgentResult};
 use crate::memory::{
-    load_memory_prompt_block, remember_ltm, remember_stm, AgentMemoryStore, LtmWrite,
-    MemoryContext, MemoryScopeType, StmRole, StmWrite,
+    load_memory_prompt_block, load_prior_attack_failure_block, remember_attack_category_outcome,
+    remember_stm, AgentMemoryStore, MemoryContext, StmRole, StmWrite,
 };
 use crate::reflection::{ReflectionAgent, ReflectionOutcome, ReflectionRequest};
 use crate::types::{AgentEvent, AgentId};
@@ -213,6 +213,34 @@ impl AgenticAttackExecutionAgent {
 
         let memory_block =
             load_memory_prompt_block(memory, &memory_ctx, AgentId::AgenticAttackExecution).await;
+        let prior_failure = load_prior_attack_failure_block(
+            memory,
+            &memory_ctx,
+            AgentId::AgenticAttackExecution,
+            &request.category,
+        )
+        .await;
+        if !prior_failure.is_empty() {
+            remember_stm(
+                memory,
+                &memory_ctx,
+                StmWrite {
+                    agent_id: AgentId::AgenticAttackExecution,
+                    role: StmRole::System,
+                    memory_key: Some("prior_failure".into()),
+                    content: prior_failure.trim().to_string(),
+                    content_json: None,
+                    importance: 0.95,
+                },
+            )
+            .await;
+            tools
+                .emit_info(format!(
+                    "AgenticAttackExecutionAgent: loaded prior failure context for {}",
+                    request.category
+                ))
+                .await;
+        }
 
         let mut attempt: u32 = 0;
         let mut last_obs = AttackAttemptObservation::default();
@@ -233,6 +261,13 @@ impl AgenticAttackExecutionAgent {
         ));
         if !memory_block.is_empty() {
             transcript.push_str(&memory_block);
+        }
+        if !prior_failure.is_empty() {
+            transcript.push_str(&prior_failure);
+            transcript.push_str(
+                "If prior failure context is present, prefer recover early (serial wait, higher delay,\n\
+                 longer timeout) before repeating the same unhealthy attack pattern.\n\n",
+            );
         }
         transcript.push_str(
             "Respond with one JSON step each turn:\n\
@@ -458,6 +493,32 @@ impl AgenticAttackExecutionAgent {
                                     AgentId::AgenticAttackExecution,
                                     stopped_reason.clone(),
                                 ));
+                                remember_attack_category_outcome(
+                                    memory,
+                                    &memory_ctx,
+                                    AgentId::AgenticAttackExecution,
+                                    &request.category,
+                                    &stopped_reason,
+                                    format!(
+                                        "agentic fatal {} recoveries={} {}",
+                                        stopped_reason,
+                                        recoveries_used,
+                                        last_obs.health_line()
+                                    ),
+                                    serde_json::json!({
+                                        "mode": "agentic",
+                                        "category": request.category,
+                                        "stopped_reason": stopped_reason,
+                                        "recoveries_used": recoveries_used,
+                                        "endpoint_unhealthy": true,
+                                        "endpoint_error": err,
+                                        "health": last_obs.health_line(),
+                                    }),
+                                    0.95,
+                                    true,
+                                    Some(err.as_str()),
+                                )
+                                .await;
                                 return Err(AgentError::AttackExecution(stopped_reason));
                             }
                         }
@@ -732,42 +793,54 @@ impl AgenticAttackExecutionAgent {
                     "stopped_reason": stopped_reason,
                     "any_vulnerable": last_obs.any_vulnerable,
                     "high_confidence_vuln": last_obs.high_confidence_vuln,
+                    "recoveries_used": recoveries_used,
+                    "endpoint_unhealthy": last_obs.endpoint_unhealthy,
                 })),
                 importance: 0.8,
             },
         )
         .await;
 
-        let (scope_type, scope_id) = if let Some(scan_id) = memory_ctx.scan_id.as_ref() {
-            (MemoryScopeType::Scan, scan_id.clone())
-        } else {
-            memory_ctx.primary_scope()
-        };
-        remember_ltm(
+        remember_attack_category_outcome(
             memory,
-            LtmWrite {
-                agent_id: AgentId::AgenticAttackExecution,
-                scope_type,
-                scope_id,
-                memory_key: format!("attack.{}.last_outcome", request.category),
-                content: format!(
-                    "attempts={} reason={} vulnerable={}",
-                    attempt, stopped_reason, last_obs.any_vulnerable
-                ),
-                content_json: Some(serde_json::json!({
-                    "category": request.category,
-                    "attempts_run": attempt,
-                    "stopped_reason": stopped_reason,
-                    "any_vulnerable": last_obs.any_vulnerable,
-                    "high_confidence_vuln": last_obs.high_confidence_vuln,
-                    "summary": last_obs.summary,
-                })),
-                importance: if last_obs.high_confidence_vuln {
-                    0.95
-                } else {
-                    0.7
-                },
+            &memory_ctx,
+            AgentId::AgenticAttackExecution,
+            &request.category,
+            &stopped_reason,
+            format!(
+                "attempts={} reason={} vulnerable={} recoveries={} {}",
+                attempt,
+                stopped_reason,
+                last_obs.any_vulnerable,
+                recoveries_used,
+                last_obs.health_line()
+            ),
+            serde_json::json!({
+                "mode": "agentic",
+                "category": request.category,
+                "attempts_run": attempt,
+                "stopped_reason": stopped_reason,
+                "any_vulnerable": last_obs.any_vulnerable,
+                "high_confidence_vuln": last_obs.high_confidence_vuln,
+                "recoveries_used": recoveries_used,
+                "summary": last_obs.summary,
+                "health": last_obs.health_line(),
+                "endpoint_unhealthy": last_obs.endpoint_unhealthy,
+                "endpoint_error": last_obs.endpoint_error,
+                "http_successes": last_obs.http_successes,
+                "transport_errors": last_obs.transport_errors,
+                "rate_limited": last_obs.rate_limited,
+                "server_errors": last_obs.server_errors,
+                "avg_latency_ms": last_obs.avg_latency_ms,
+                "max_latency_ms": last_obs.max_latency_ms,
+            }),
+            if last_obs.high_confidence_vuln {
+                0.95
+            } else {
+                0.7
             },
+            last_obs.endpoint_unhealthy,
+            last_obs.endpoint_error.as_deref(),
         )
         .await;
 

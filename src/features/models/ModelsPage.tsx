@@ -14,8 +14,6 @@ import {
   cancelModelDownload,
   cancelModelDownloadVerify,
   getModelDownloadStatus,
-  getModelsRegistryInfo,
-  getModelsVaultPath,
   getModelsVaultStats,
   importModelGguf,
   importModelZip,
@@ -30,7 +28,6 @@ import {
   type ModelCatalogEntryDto,
   type ModelDownloadProgressDto,
   type ModelEntryDto,
-  type ModelRegistryInfoDto,
   type ModelVaultStatsDto,
 } from "@/shared/ipc/models";
 import { getRuntimeConfiguration } from "@/shared/ipc/runtime";
@@ -75,11 +72,6 @@ export function ModelsPage() {
   const [backendConnected, setBackendConnected] = useState(false);
   const [installed, setInstalled] = useState<ModelEntryDto[]>([]);
   const [catalog, setCatalog] = useState<ModelCatalogEntryDto[]>([]);
-  const [registryInfo, setRegistryInfo] = useState<ModelRegistryInfoDto | null>(null);
-  const [registryInfoStatus, setRegistryInfoStatus] = useState<
-    "idle" | "loading" | "ready" | "error"
-  >("idle");
-  const [vaultPath, setVaultPath] = useState<string>("");
   const [vaultStats, setVaultStats] = useState<ModelVaultStatsDto | null>(null);
   const [importName, setImportName] = useState("");
   const [importPath, setImportPath] = useState("");
@@ -151,25 +143,17 @@ export function ModelsPage() {
   }, [location.state, backendConnected, notify]);
 
   const refreshModels = useCallback(async () => {
-    // Load independently so one failing IPC (e.g. registry meta) cannot blank the model list.
+    // Load independently so one failing IPC cannot blank the model list.
     const settled = await Promise.allSettled([
       listModels(),
       browseModels(),
-      getModelsRegistryInfo(),
       getModelsVaultStats(),
     ]);
 
-    const [modelsResult, catalogResult, infoResult, statsResult] = settled;
+    const [modelsResult, catalogResult, statsResult] = settled;
 
     if (catalogResult.status === "fulfilled") {
       setCatalog(catalogResult.value);
-    }
-
-    if (infoResult.status === "fulfilled") {
-      setRegistryInfo(infoResult.value);
-      setRegistryInfoStatus("ready");
-    } else {
-      setRegistryInfoStatus("error");
     }
 
     if (statsResult.status === "fulfilled") {
@@ -258,11 +242,7 @@ export function ModelsPage() {
     if (!backendConnected) {
       return;
     }
-    setRegistryInfoStatus((prev) => (prev === "ready" ? prev : "loading"));
     void refreshModels().catch((err) => setError(toAppError(err).message));
-    void getModelsVaultPath()
-      .then(setVaultPath)
-      .catch(() => undefined);
   }, [backendConnected, refreshModels]);
 
   const handleRefresh = useCallback(async () => {
@@ -270,11 +250,7 @@ export function ModelsPage() {
     setRefreshing(true);
     setError(null);
     try {
-      await Promise.all([
-        refreshModels(),
-        getModelsVaultPath().then(setVaultPath).catch(() => undefined),
-        pollDownloadStatus(),
-      ]);
+      await Promise.all([refreshModels(), pollDownloadStatus()]);
     } catch (err) {
       setError(toAppError(err).message);
     } finally {
@@ -556,7 +532,7 @@ export function ModelsPage() {
         <Card className="detail-section models-page__stats">
           <h2 className="detail-section__title">Vault summary</h2>
           {vaultStats ? (
-            <div className="detail-summary-grid detail-summary-grid--metrics">
+            <div className="detail-summary-grid models-page__stats-grid">
               <div className="summary-stat">
                 <span className="summary-stat__label">Registered</span>
                 <span className="summary-stat__value">{vaultStats.registeredCount}</span>
@@ -579,50 +555,6 @@ export function ModelsPage() {
           ) : (
             <p className="text-muted text-sm">Vault statistics load when the backend is connected.</p>
           )}
-        </Card>
-
-        <Card className="detail-section models-page__meta">
-          <h2 className="detail-section__title">Storage and registry</h2>
-          <dl className="models-page__meta-list">
-            <div>
-              <dt>Vault path</dt>
-              <dd className="mono">{vaultPath || "Unavailable"}</dd>
-            </div>
-            {registryInfo ? (
-              <>
-                <div>
-                  <dt>Registry entries</dt>
-                  <dd>
-                    {registryInfo.validModels} valid / {registryInfo.totalModels} total
-                    {registryInfo.invalidModels > 0
-                      ? ` (${registryInfo.invalidModels} invalid)`
-                      : ""}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Catalog source</dt>
-                  <dd>{registryInfo.remoteMerged ? "Online merge active" : "Offline bundle"}</dd>
-                </div>
-                {registryInfo.sourcePath ? (
-                  <div className="models-page__meta-wide">
-                    <dt>Source path</dt>
-                    <dd className="mono">{registryInfo.sourcePath}</dd>
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <div>
-                <dt>Registry</dt>
-                <dd className="text-muted">
-                  {registryInfoStatus === "error"
-                    ? "Registry metadata unavailable"
-                    : registryInfoStatus === "loading" || registryInfoStatus === "idle"
-                      ? "Loading registry metadata…"
-                      : "Registry metadata unavailable"}
-                </dd>
-              </div>
-            )}
-          </dl>
         </Card>
       </section>
 

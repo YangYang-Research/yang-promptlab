@@ -8,7 +8,6 @@ import {
   PageHeader,
   PageLoadingSkeleton,
   Select,
-  YazgBadge,
 } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
 import { useAiInferenceRoute } from "@/shared/hooks/useAiInferenceRoute";
@@ -49,7 +48,7 @@ export function YazgChatPage() {
     {
       id: "welcome",
       role: "yazg",
-      text: "I am Yazg. Select a target, then ask me to analyze the endpoint or generate an attack plan — or just say hi.",
+      text: "I am Yazg, your AI Assistant. Ask me how to work across the app.",
       events: [{ agent: "yazg", kind: "info", message: "Supervisor ready" }],
     },
   ]);
@@ -149,10 +148,9 @@ export function YazgChatPage() {
     <div className="yazg-chat-page">
       <PageHeader
         title="Yazg"
-        description="Supervisor agent with ReAct routing to AgenticAttackExecutionAgent / SequentialAttackExecutionAgent, AnalyzeEndpointAgent, AttackPlanAgent, GeneratePromptAgent, RecommendAgent, SummaryAgent, ReflectionAgent, and JudgeCoordinatorAgent."
+        description="AI Assistant that helps you work across the app."
         actions={
           <div className="yazg-chat-page__header-meta">
-            <YazgBadge />
             <span
               className={`yazg-chat-page__live ${live ? "yazg-chat-page__live--on" : ""}`}
             >

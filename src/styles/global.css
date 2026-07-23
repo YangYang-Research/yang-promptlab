@@ -7788,9 +7788,13 @@ a:hover {
 
 .models-page__overview {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  grid-template-columns: 1fr;
   gap: 1.25rem;
   align-items: stretch;
+}
+
+.models-page__stats-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .models-page__meta-list {
@@ -7841,6 +7845,10 @@ a:hover {
 @media (max-width: 1024px) {
   .models-page__overview {
     grid-template-columns: 1fr;
+  }
+
+  .models-page__stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .models-page__meta-list {
