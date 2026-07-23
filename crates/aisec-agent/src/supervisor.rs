@@ -14,6 +14,7 @@ use crate::attack_execution::{
     AttackExecutionTools,
 };
 use crate::attack_plan::AttackPlanAgentOutcome;
+use crate::create_project::{CreateProjectTools, CreatedProject};
 use crate::error::AgentResult;
 use crate::generate_prompt::{GeneratePromptAgentOutcome, TechniquePromptContext};
 use crate::judge_coordinator::JudgeCoordinatorAgentOutcome;
@@ -40,6 +41,7 @@ pub enum SupervisorIntent {
     Summary,
     Judge,
     ExecuteAttack,
+    CreateProject,
 }
 
 impl SupervisorIntent {
@@ -64,6 +66,9 @@ impl SupervisorIntent {
             | "attack_execution"
             | "agentic_scan"
             | "run_scan" => Self::ExecuteAttack,
+            "create_project" | "create-project" | "new_project" | "add_project" => {
+                Self::CreateProject
+            }
             "chat" | "help" => Self::Chat,
             "auto" | "" => Self::Auto,
             _ => Self::Auto,
@@ -112,6 +117,10 @@ pub enum YazgDelegation {
         turn: YazgTurn,
         outcome: JudgeCoordinatorAgentOutcome,
     },
+    CreatedProject {
+        turn: YazgTurn,
+        project: CreatedProject,
+    },
     ExecutedAttack {
         turn: YazgTurn,
         outcome: AttackExecutionOutcome,
@@ -142,6 +151,10 @@ impl YazgSupervisor {
             }
             SupervisorIntent::Judge => {
                 "User preference hint: consensus judging via JudgeCoordinatorAgent may be appropriate."
+            }
+            SupervisorIntent::CreateProject => {
+                "User preference hint: create a workspace project via create_project \
+                 (include JSON name; target is NOT required)."
             }
             SupervisorIntent::ExecuteAttack => {
                 "User preference hint: agentic scan execution via AgenticAttackExecutionAgent may be appropriate."
@@ -174,12 +187,14 @@ impl YazgSupervisor {
         llms: &ReactLlms<'_>,
         memory: Option<&dyn AgentMemoryStore>,
         memory_ctx: MemoryContext,
+        project_tools: Option<&dyn CreateProjectTools>,
     ) -> AgentResult<YazgDelegation> {
         let goal = Self::build_goal(message, intent_hint);
         let request = ReactRequest::new(goal)
             .with_profile(profile)
             .with_auth(auth_headers)
-            .with_memory(memory, memory_ctx);
+            .with_memory(memory, memory_ctx)
+            .with_project_tools(project_tools);
         Self::react(request, llms).await
     }
 
@@ -253,6 +268,7 @@ impl YazgSupervisor {
             llms,
             memory,
             memory_ctx,
+            None,
         )
         .await
     }
@@ -461,8 +477,11 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
         Some(ReactActionKind::Recommend) => SupervisorIntent::Recommend,
         Some(ReactActionKind::Summary) => SupervisorIntent::Summary,
         Some(ReactActionKind::Judge) => SupervisorIntent::Judge,
+        Some(ReactActionKind::CreateProject) => SupervisorIntent::CreateProject,
         Some(ReactActionKind::Finish) | None => {
-            if artifacts.judge.is_some() {
+            if artifacts.created_project.is_some() {
+                SupervisorIntent::CreateProject
+            } else if artifacts.judge.is_some() {
                 SupervisorIntent::Judge
             } else if artifacts.summary.is_some() {
                 SupervisorIntent::Summary
@@ -493,6 +512,18 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
         verified: verified.or(artifacts.analyze.as_ref().map(|_| true)),
         plan_summary: plan_summary.clone(),
     };
+
+    if let Some(project) = artifacts.created_project.clone() {
+        let mut turn = turn;
+        turn.intent = SupervisorIntent::CreateProject;
+        if turn.reply.trim().is_empty() {
+            turn.reply = format!(
+                "Created project \"{}\" (id={}).",
+                project.name, project.id
+            );
+        }
+        return YazgDelegation::CreatedProject { turn, project };
+    }
 
     if let Some(outcome) = artifacts.judge {
         if matches!(intent, SupervisorIntent::Judge)
@@ -677,6 +708,14 @@ mod tests {
             SupervisorIntent::Summary
         );
         assert_eq!(SupervisorIntent::parse("judge"), SupervisorIntent::Judge);
+        assert_eq!(
+            SupervisorIntent::parse("create_project"),
+            SupervisorIntent::CreateProject
+        );
+        assert_eq!(
+            SupervisorIntent::parse("new_project"),
+            SupervisorIntent::CreateProject
+        );
     }
 
     #[test]

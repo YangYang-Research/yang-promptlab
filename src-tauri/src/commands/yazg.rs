@@ -3,14 +3,17 @@
 use std::collections::HashMap;
 
 use aisec_agent::{
-    AgentEvent, MemoryContext, SupervisorIntent, YazgDelegation, YazgSupervisor, YazgTurn,
+    AgentEvent, CreateProjectTools, CreatedProject, MemoryContext, SupervisorIntent,
+    YazgDelegation, YazgSupervisor, YazgTurn,
 };
 use aisec_storage::TargetRepository;
 use aisec_target_profile::TargetProfile;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::agent_memory::SqliteAgentMemoryStore;
+use crate::commands::projects::project_create_op;
 use crate::error::{CommandError, CommandResult};
 use crate::inference_host::{gateway_complete, is_inference_ready, YazgHostLlms};
 use crate::state::AppState;
@@ -33,12 +36,21 @@ pub struct YazgChatRequest {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct YazgCreatedProjectDto {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct YazgChatResponse {
     pub reply: String,
     pub intent: String,
     pub events: Vec<AgentEventDto>,
     pub verified: Option<bool>,
     pub plan_summary: Option<String>,
+    pub created_project: Option<YazgCreatedProjectDto>,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,6 +59,32 @@ pub struct AgentEventDto {
     pub agent: String,
     pub kind: String,
     pub message: String,
+}
+
+struct HostCreateProjectTools<'a> {
+    state: &'a AppState,
+}
+
+#[async_trait]
+impl CreateProjectTools for HostCreateProjectTools<'_> {
+    async fn create_project(
+        &self,
+        name: &str,
+        description: Option<&str>,
+    ) -> Result<CreatedProject, String> {
+        project_create_op(
+            self.state,
+            name.to_string(),
+            description.map(str::to_string),
+        )
+        .await
+        .map(|project| CreatedProject {
+            id: project.id,
+            name: project.name,
+            description: project.description,
+        })
+        .map_err(|err| err.to_string())
+    }
 }
 
 fn profile_from_json(raw: &str) -> CommandResult<TargetProfile> {
@@ -71,7 +109,10 @@ fn event_dto(event: AgentEvent) -> AgentEventDto {
     }
 }
 
-fn turn_to_response(turn: YazgTurn) -> YazgChatResponse {
+fn turn_to_response(
+    turn: YazgTurn,
+    created_project: Option<CreatedProject>,
+) -> YazgChatResponse {
     YazgChatResponse {
         reply: turn.reply,
         intent: match turn.intent {
@@ -84,10 +125,16 @@ fn turn_to_response(turn: YazgTurn) -> YazgChatResponse {
             SupervisorIntent::Summary => "summary".into(),
             SupervisorIntent::Judge => "judge".into(),
             SupervisorIntent::ExecuteAttack => "execute_attack".into(),
+            SupervisorIntent::CreateProject => "create_project".into(),
         },
         events: turn.events.into_iter().map(event_dto).collect(),
         verified: turn.verified,
         plan_summary: turn.plan_summary,
+        created_project: created_project.map(|project| YazgCreatedProjectDto {
+            id: project.id,
+            name: project.name,
+            description: project.description,
+        }),
     }
 }
 
@@ -121,10 +168,10 @@ pub async fn yazg_chat_op(
     drop(inference);
 
     if !runtime_ready {
-        return Ok(turn_to_response(YazgSupervisor::offline_chat(
-            &request.message,
-            profile.as_ref(),
-        )));
+        return Ok(turn_to_response(
+            YazgSupervisor::offline_chat(&request.message, profile.as_ref()),
+            None,
+        ));
     }
 
     let hosts = YazgHostLlms::from_app(
@@ -136,6 +183,7 @@ pub async fn yazg_chat_op(
     );
     let llms = hosts.react_llms();
     let memory = SqliteAgentMemoryStore::new(state.repositories());
+    let project_tools = HostCreateProjectTools { state };
     let session_id = request
         .session_id
         .as_deref()
@@ -156,6 +204,7 @@ pub async fn yazg_chat_op(
         &llms,
         Some(&memory),
         memory_ctx,
+        Some(&project_tools),
     )
     .await
     .map_err(map_agent_err)?;
@@ -175,10 +224,11 @@ pub async fn yazg_chat_op(
                 }
             }
         }
-        return Ok(turn_to_response(turn.clone()));
+        return Ok(turn_to_response(turn.clone(), None));
     }
 
-    let turn = match delegation {
+    let (turn, created_project) = match delegation {
+        YazgDelegation::CreatedProject { turn, project } => (turn, Some(project)),
         YazgDelegation::Chat { turn }
         | YazgDelegation::AnalyzedEndpoint { turn, .. }
         | YazgDelegation::Planned { turn, .. }
@@ -186,9 +236,9 @@ pub async fn yazg_chat_op(
         | YazgDelegation::Recommended { turn, .. }
         | YazgDelegation::Summarized { turn, .. }
         | YazgDelegation::Judged { turn, .. }
-        | YazgDelegation::ExecutedAttack { turn, .. } => turn,
+        | YazgDelegation::ExecutedAttack { turn, .. } => (turn, None),
     };
-    Ok(turn_to_response(turn))
+    Ok(turn_to_response(turn, created_project))
 }
 
 #[derive(Debug, Deserialize)]

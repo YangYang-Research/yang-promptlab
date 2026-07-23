@@ -8,6 +8,7 @@
 //! ├── GeneratePromptAgent   — Attack Factory novel technique probe
 //! ├── RecommendAgent        — post-scan remediation recommendations
 //! ├── SummaryAgent          — project / scan posture summaries
+//! ├── CreateProjectTool     — create a workspace project (host SQLite)
 //! ├── JudgeCoordinatorAgent — consensus judging via role workers
 //! │   ├── JudgeWorker
 //! │   ├── ClassifierWorker
@@ -20,6 +21,7 @@
 pub mod analyze_endpoint;
 pub mod attack_execution;
 pub mod attack_plan;
+pub mod create_project;
 pub mod endpoint_recovery;
 pub mod error;
 pub mod generate_prompt;
@@ -46,6 +48,7 @@ pub use endpoint_recovery::{
 pub use attack_plan::{
     AdaptPlanOutcome, AdaptPlanRequest, AttackPlanAgent, AttackPlanAgentOutcome,
 };
+pub use create_project::{CreateProjectTools, CreatedProject};
 pub use error::{AgentError, AgentResult};
 pub use generate_prompt::{
     GeneratePromptAgent, GeneratePromptAgentOutcome, TechniquePromptContext,

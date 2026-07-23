@@ -10,6 +10,7 @@ use tracing::{info, warn};
 
 use crate::analyze_endpoint::{AnalyzeEndpointAgent, AnalyzeEndpointAgentOutcome};
 use crate::attack_plan::{AttackPlanAgent, AttackPlanAgentOutcome};
+use crate::create_project::{CreateProjectTools, CreatedProject};
 use crate::error::{AgentError, AgentResult};
 use crate::generate_prompt::{
     GeneratePromptAgent, GeneratePromptAgentOutcome, TechniquePromptContext,
@@ -33,6 +34,7 @@ pub enum ReactActionKind {
     Recommend,
     Summary,
     Judge,
+    CreateProject,
     Finish,
 }
 
@@ -45,6 +47,7 @@ pub struct ReactArtifacts {
     pub recommend: Option<RecommendAgentOutcome>,
     pub summary: Option<SummaryAgentOutcome>,
     pub judge: Option<JudgeCoordinatorAgentOutcome>,
+    pub created_project: Option<CreatedProject>,
     pub final_reply: String,
     pub last_action: Option<ReactActionKind>,
 }
@@ -76,6 +79,8 @@ pub struct ReactRequest<'a> {
     pub judge_request: Option<&'a JudgeRequest>,
     /// Runtime/role pool for JudgeCoordinatorAgent workers.
     pub judge_engine: Option<&'a JudgeEngine>,
+    /// Host project creation tool (assistant chat CRUD).
+    pub project_tools: Option<&'a dyn CreateProjectTools>,
     /// Optional host memory store (STM/LTM).
     pub memory: Option<&'a dyn AgentMemoryStore>,
     /// Session / entity scope for memory ops.
@@ -95,6 +100,7 @@ impl<'a> ReactRequest<'a> {
             summary_request: None,
             judge_request: None,
             judge_engine: None,
+            project_tools: None,
             memory: None,
             memory_ctx: MemoryContext::default(),
             max_steps: DEFAULT_MAX_STEPS,
@@ -141,6 +147,11 @@ impl<'a> ReactRequest<'a> {
         self
     }
 
+    pub fn with_project_tools(mut self, tools: Option<&'a dyn CreateProjectTools>) -> Self {
+        self.project_tools = tools;
+        self
+    }
+
     pub fn with_memory(
         mut self,
         store: Option<&'a dyn AgentMemoryStore>,
@@ -163,6 +174,13 @@ struct ReactStepJson {
     action: String,
     #[serde(default)]
     reply: Option<String>,
+    /// Project name when action is create_project.
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default, alias = "project_name")]
+    project_name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
 }
 
 pub async fn run_react(
@@ -199,9 +217,11 @@ pub async fn run_react(
          1) Read and analyze the user prompt.\n\
          2) Use short-term / long-term memory for facts already known about this workspace.\n\
          3) Call a specialist tool only when needed for fresh work \
-         (analyze_endpoint, attack_plan, generate_prompt, recommend, summary, judge).\n\
+         (analyze_endpoint, attack_plan, generate_prompt, recommend, summary, judge, create_project).\n\
          4) When you have enough to answer, finish with a concise reply.\n\
-         Do not invent tool results. Prefer finish for general app questions.\n\n",
+         Do not invent tool results. Prefer finish for general app questions.\n\
+         For create_project: include JSON fields name (required) and optional description; \
+         do not ask for a scan target — projects do not need a target.\n\n",
     );
     transcript.push_str(&format!("User prompt:\n{}\n\n", request.goal.trim()));
     if !memory_block.is_empty() {
@@ -317,11 +337,28 @@ pub async fn run_react(
                 push_observation(&mut transcript, &mut artifacts, &observation);
                 remember_observation(&request, AgentId::JudgeCoordinator, &observation).await;
             }
+            ReactActionKind::CreateProject => {
+                let name = parsed
+                    .name
+                    .or(parsed.project_name)
+                    .unwrap_or_default();
+                let description = parsed.description;
+                let observation = execute_create_project(
+                    &request,
+                    &name,
+                    description.as_deref(),
+                    &mut artifacts,
+                )
+                .await?;
+                push_observation(&mut transcript, &mut artifacts, &observation);
+                remember_observation(&request, AgentId::CreateProject, &observation).await;
+            }
         }
 
         transcript.push_str(
             "\nContinue ReAct: choose the next action JSON \
-             (analyze_endpoint, attack_plan, generate_prompt, recommend, summary, judge, or finish).\n",
+             (analyze_endpoint, attack_plan, generate_prompt, recommend, summary, judge, \
+             create_project, or finish).\n",
         );
     }
 
@@ -590,6 +627,11 @@ fn format_context(
              no live target probe needed when probe response context is present\n",
         );
     }
+    out.push_str(
+        "- create_project_ready: true\n\
+         - note: create_project only needs a project name (+ optional description). \
+         Do NOT require a scan target or analyze_endpoint for project creation.\n",
+    );
     out
 }
 
@@ -612,6 +654,9 @@ fn parse_action_kind(raw: &str) -> AgentResult<ReactActionKind> {
         }
         "judge" | "judging" | "judge_coordinator" | "consensus_judge" => {
             Ok(ReactActionKind::Judge)
+        }
+        "create_project" | "createproject" | "new_project" | "add_project" => {
+            Ok(ReactActionKind::CreateProject)
         }
         "finish" | "done" | "respond" | "final" => Ok(ReactActionKind::Finish),
         other => Err(AgentError::Supervisor(format!(
@@ -867,7 +912,67 @@ async fn execute_judge(
     }
 }
 
+async fn execute_create_project(
+    request: &ReactRequest<'_>,
+    name: &str,
+    description: Option<&str>,
+    artifacts: &mut ReactArtifacts,
+) -> AgentResult<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Ok(
+            "CreateProjectTool FAILED — missing project name. \
+             Call create_project again with JSON field \"name\"."
+                .into(),
+        );
+    }
+
+    let Some(tools) = request.project_tools else {
+        return Ok(
+            "CreateProjectTool FAILED — project tools unavailable in this context".into(),
+        );
+    };
+
+    artifacts.events.push(AgentEvent::info(
+        AgentId::Yazg,
+        "Acting: CreateProjectTool",
+    ));
+
+    let description = description
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    match tools.create_project(trimmed, description).await {
+        Ok(project) => {
+            let msg = format!(
+                "CreateProjectTool OK — id={} name={} description={}",
+                project.id,
+                project.name,
+                project.description.as_deref().unwrap_or("(none)")
+            );
+            artifacts.events.push(AgentEvent::completed(
+                AgentId::CreateProject,
+                format!("Created project {}", project.name),
+            ));
+            artifacts.created_project = Some(project);
+            Ok(msg)
+        }
+        Err(err) => {
+            artifacts
+                .events
+                .push(AgentEvent::failed(AgentId::CreateProject, err.clone()));
+            Ok(format!("CreateProjectTool FAILED — {err}"))
+        }
+    }
+}
+
 fn summarize_partial(artifacts: &ReactArtifacts) -> String {
+    if let Some(project) = &artifacts.created_project {
+        return format!(
+            "Reached step limit after creating project '{}' (id={}).",
+            project.name, project.id
+        );
+    }
     if let Some(judge) = &artifacts.judge {
         return format!(
             "Reached step limit after judging. Verdict: {} · confidence={:.2}",
@@ -955,6 +1060,14 @@ mod tests {
         assert_eq!(
             parse_action_kind("judge").unwrap(),
             ReactActionKind::Judge
+        );
+        assert_eq!(
+            parse_action_kind("create_project").unwrap(),
+            ReactActionKind::CreateProject
+        );
+        assert_eq!(
+            parse_action_kind("new_project").unwrap(),
+            ReactActionKind::CreateProject
         );
         assert_eq!(
             parse_action_kind("generate_prompt").unwrap(),

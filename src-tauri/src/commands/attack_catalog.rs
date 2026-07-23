@@ -239,6 +239,7 @@ pub async fn attack_catalog_generate_prompt_op(
                 | YazgDelegation::Summarized { turn, .. }
                 | YazgDelegation::Judged { turn, .. }
                 | YazgDelegation::ExecutedAttack { turn, .. }
+                | YazgDelegation::CreatedProject { turn, .. }
                 | YazgDelegation::GeneratedPrompt { turn, .. } => turn.reply,
             };
             Err(CommandError::invalid_input(if message.trim().is_empty() {

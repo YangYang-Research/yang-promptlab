@@ -547,6 +547,7 @@ pub async fn target_profile_verify_ai_classify_op(
                 | YazgDelegation::Summarized { turn, .. }
                 | YazgDelegation::Judged { turn, .. }
                 | YazgDelegation::ExecutedAttack { turn, .. }
+                | YazgDelegation::CreatedProject { turn, .. }
                 | YazgDelegation::AnalyzedEndpoint { turn, .. } => turn.reply.clone(),
             };
             let message = if message.trim().is_empty() {
@@ -725,6 +726,7 @@ pub async fn planner_generate_from_profile_op(
                 | YazgDelegation::Summarized { turn, .. }
                 | YazgDelegation::Judged { turn, .. }
                 | YazgDelegation::ExecutedAttack { turn, .. }
+                | YazgDelegation::CreatedProject { turn, .. }
                 | YazgDelegation::Planned { turn, .. } => turn.reply,
             };
             warn!(

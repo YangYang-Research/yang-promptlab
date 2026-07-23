@@ -7,7 +7,8 @@ export type YazgIntent =
   | "verify"
   | "attack_plan"
   | "plan"
-  | "generate_prompt";
+  | "generate_prompt"
+  | "create_project";
 
 export type YazgAgentEventDto = {
   agent: string;
@@ -23,12 +24,19 @@ export type YazgChatRequest = {
   intent?: YazgIntent | null;
 };
 
+export type YazgCreatedProjectDto = {
+  id: string;
+  name: string;
+  description?: string | null;
+};
+
 export type YazgChatResponse = {
   reply: string;
   intent: string;
   events: YazgAgentEventDto[];
   verified?: boolean | null;
   planSummary?: string | null;
+  createdProject?: YazgCreatedProjectDto | null;
 };
 
 export type YazgGenerateChatTitleRequest = {

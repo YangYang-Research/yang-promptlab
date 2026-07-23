@@ -27,6 +27,7 @@ import {
 } from "@/shared/ipc/yazg";
 import { isYazgAgentLive, assertYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
 import { useToast } from "@/shared/notifications";
+import { useAppStore } from "@/app/store/AppStore";
 
 type ChatMessage = {
   id: string;
@@ -181,6 +182,7 @@ function persistStore(store: ChatStore) {
 }
 
 export function YazgChatPage() {
+  const { actions } = useAppStore();
   const [backendConnected, setBackendConnected] = useState(false);
   const { configuration, loading: configLoading } = useAiInferenceRoute({
     enabled: backendConnected,
@@ -419,6 +421,11 @@ export function YazgChatPage() {
           ],
         };
       });
+
+      if (response.createdProject) {
+        void actions.refresh();
+        notify(`Created project "${response.createdProject.name}"`, "success");
+      }
 
       if (isFirstUserTurn) {
         void generateConversationTitle(trimmed, response.reply).then((title) => {
