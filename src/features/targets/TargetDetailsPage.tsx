@@ -165,16 +165,11 @@ export function TargetDetailsPage() {
           navigate(buildScanProgressUrl(target.projectId, scanAction.scanId, target.id)),
       });
     } else if (scanAction.kind === "retry") {
+      // Retry is the primary CTA when failed; New Scan lives in the menu.
       items.push({
-        id: "retry",
-        label: "Retry Scan",
-        onClick: () =>
-          navigate(
-            buildScanWizardUrl(target.projectId, target.id, {
-              step: scanAction.step,
-              scanId: scanAction.scanId,
-            }),
-          ),
+        id: "new-scan",
+        label: "New Scan",
+        onClick: startNewScan,
       });
     } else if (scanAction.kind === "setup") {
       items.push({
@@ -207,7 +202,7 @@ export function TargetDetailsPage() {
     });
 
     return items;
-  }, [deleting, handleDeleteTarget, navigate, project, scanAction, target]);
+  }, [deleting, handleDeleteTarget, navigate, project, scanAction, startNewScan, target]);
 
   if (!target && !loading) {
     return (
@@ -234,9 +229,9 @@ export function TargetDetailsPage() {
           onClick: () =>
             navigate(buildScanProgressUrl(target.projectId, runningScan.id, target.id)),
         }
-      : scanAction?.kind === "setup" && scanContext.scanStatusLabel !== "Never Scanned"
+      : scanAction?.kind === "retry"
         ? {
-            label: "Continue setup",
+            label: "Retry Scan",
             onClick: () =>
               navigate(
                 buildScanWizardUrl(target.projectId, target.id, {
@@ -245,10 +240,21 @@ export function TargetDetailsPage() {
                 }),
               ),
           }
-        : {
-            label: "New scan",
-            onClick: startNewScan,
-          };
+        : scanAction?.kind === "setup" && scanContext.scanStatusLabel !== "Never Scanned"
+          ? {
+              label: "Continue setup",
+              onClick: () =>
+                navigate(
+                  buildScanWizardUrl(target.projectId, target.id, {
+                    step: scanAction.step,
+                    scanId: scanAction.scanId,
+                  }),
+                ),
+            }
+          : {
+              label: "New Scan",
+              onClick: startNewScan,
+            };
 
   return (
     <div className="page target-details">

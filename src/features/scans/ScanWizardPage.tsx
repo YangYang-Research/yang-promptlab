@@ -712,11 +712,13 @@ export function ScanWizardPage() {
   const activeScanId = session.submittedScanId ?? session.draftScanId;
   const targetEndpointUrl =
     fullProfileUrl(session.targetProfile) || store.savedTarget?.url || "";
-  const showScanContextHeader =
-    (session.currentStep === 5 || session.currentStep === 6) && activeScanId !== null;
-  const pageHeaderTitle = showScanContextHeader
-    ? `Scan ID: ${activeScanId}`
-    : "New Scan";
+  const showScanContextHeader = session.currentStep >= 2;
+  const pageHeaderTitle =
+    showScanContextHeader && activeScanId
+      ? `Scan ID: ${activeScanId}`
+      : showScanContextHeader
+        ? "Scan ID"
+        : "New Scan";
   const pageHeaderDescription = showScanContextHeader ? (
     targetEndpointUrl ? (
       <span className="wizard-planner-summary page-header__endpoint-summary">

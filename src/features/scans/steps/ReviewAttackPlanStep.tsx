@@ -83,7 +83,6 @@ export function ReviewAttackPlanStep({
 
   const activeCategories = attackPlan.categories;
   const isCustomProfile = profileId === "custom";
-  const executionEditable = isCustomProfile;
   const suggestedSet = useMemo(
     () => new Set(attackPlan.suggestedCategories),
     [attackPlan.suggestedCategories],
@@ -224,26 +223,67 @@ export function ReviewAttackPlanStep({
     });
   }
 
+  /** Editing execution/payload on a preset mirrors category edits: promote to Custom. */
+  function promoteToCustomUi(): Partial<AttackPlanUiState> {
+    if (profileId === "custom") return {};
+    const customUi = planUiForCustomFromCategories(attackPlan.categories);
+    return {
+      profileId: "custom",
+      customCategories: customUi.customCategories,
+      disabledGraphNodes: customUi.disabledGraphNodes,
+    };
+  }
+
   function updateExecution(patch: {
     executionStrategy?: ExecutionStrategy;
     maxAttempts?: number;
     reflectionEnabled?: boolean;
     adaptivePlanning?: boolean;
   }) {
-    if (!isCustomProfile) return;
-    onPlanChange(recomputePlanPreview({ ...attackPlan, ...patch }));
-    void applyAdjust({}, patch);
+    const uiPatch = promoteToCustomUi();
+    if (Object.keys(uiPatch).length > 0) {
+      onPlanUiChange(uiPatch);
+    }
+    onPlanChange(
+      recomputePlanPreview({
+        ...attackPlan,
+        ...(uiPatch.profileId === "custom"
+          ? {
+              profileId: "custom" as const,
+              customCategories: uiPatch.customCategories!,
+              disabledGraphNodes: uiPatch.disabledGraphNodes!,
+            }
+          : {}),
+        ...patch,
+      }),
+    );
+    void applyAdjust(uiPatch, patch);
   }
 
   function updatePayloadStrategy(patch: Partial<PayloadStrategyConfig>) {
-    if (!isCustomProfile) return;
+    const uiPatch = promoteToCustomUi();
+    if (Object.keys(uiPatch).length > 0) {
+      onPlanUiChange(uiPatch);
+    }
     const nextStrategy = { ...attackPlan.payloadStrategy, ...patch };
-    onPlanChange(recomputePlanPreview({ ...attackPlan, payloadStrategy: nextStrategy }));
+    onPlanChange(
+      recomputePlanPreview({
+        ...attackPlan,
+        ...(uiPatch.profileId === "custom"
+          ? {
+              profileId: "custom" as const,
+              customCategories: uiPatch.customCategories!,
+              disabledGraphNodes: uiPatch.disabledGraphNodes!,
+            }
+          : {}),
+        payloadStrategy: nextStrategy,
+      }),
+    );
     if (payloadAdjustTimerRef.current) {
       window.clearTimeout(payloadAdjustTimerRef.current);
     }
     payloadAdjustTimerRef.current = window.setTimeout(() => {
-      void applyAdjust({}, undefined, nextStrategy);
+      void applyAdjust(uiPatch, undefined, nextStrategy);
     }, 300);
   }
 
@@ -512,13 +552,8 @@ export function ReviewAttackPlanStep({
           <button
             type="button"
             className={`wizard-attack-profile${attackPlan.executionStrategy === "sequential" ? " wizard-attack-profile--selected" : ""}`}
-            onClick={() => {
-              if (!executionEditable) return;
-              updateExecution({ executionStrategy: "sequential" });
-            }}
+            onClick={() => updateExecution({ executionStrategy: "sequential" })}
             aria-pressed={attackPlan.executionStrategy === "sequential"}
-            aria-disabled={!executionEditable}
-            data-readonly={!executionEditable || undefined}
           >
             <span className="wizard-attack-profile__label">Sequential</span>
             <span className="wizard-attack-profile__description text-sm">
@@ -528,13 +563,8 @@ export function ReviewAttackPlanStep({
           <button
             type="button"
             className={`wizard-attack-profile${attackPlan.executionStrategy === "agentic" ? " wizard-attack-profile--selected" : ""}`}
-            onClick={() => {
-              if (!executionEditable) return;
-              updateExecution({ executionStrategy: "agentic" });
-            }}
+            onClick={() => updateExecution({ executionStrategy: "agentic" })}
             aria-pressed={attackPlan.executionStrategy === "agentic"}
-            aria-disabled={!executionEditable}
-            data-readonly={!executionEditable || undefined}
           >
             <span className="wizard-attack-profile__label">Agentic</span>
             <span className="wizard-attack-profile__description text-sm">
@@ -552,7 +582,6 @@ export function ReviewAttackPlanStep({
                 max={MAX_ATTEMPTS_MAX}
                 formatValue={(value) => `${value}`}
                 title="Maximum agentic retry attempts per attack category."
-                disabled={!executionEditable}
                 onChange={(value) =>
                   updateExecution({
                     maxAttempts: Math.min(
@@ -568,7 +597,6 @@ export function ReviewAttackPlanStep({
                 <input
                   type="checkbox"
                   checked={attackPlan.reflectionEnabled}
-                  disabled={!executionEditable}
                   onChange={(event) =>
                     updateExecution({ reflectionEnabled: event.target.checked })
                   }
@@ -582,7 +610,6 @@ export function ReviewAttackPlanStep({
                 <input
                   type="checkbox"
                   checked={attackPlan.adaptivePlanning}
-                  disabled={!executionEditable}
                   onChange={(event) =>
                     updateExecution({ adaptivePlanning: event.target.checked })
                   }
@@ -597,7 +624,6 @@ export function ReviewAttackPlanStep({
       <PayloadStrategySection
         strategy={attackPlan.payloadStrategy}
         onChange={updatePayloadStrategy}
-        readOnly={!executionEditable}
       />
     </div>
   );
