@@ -3,13 +3,14 @@
 use std::collections::HashMap;
 
 use aisec_agent::{
-    AgentEvent, SupervisorIntent, YazgDelegation, YazgSupervisor, YazgTurn,
+    AgentEvent, MemoryContext, SupervisorIntent, YazgDelegation, YazgSupervisor, YazgTurn,
 };
 use aisec_storage::TargetRepository;
 use aisec_target_profile::TargetProfile;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use crate::agent_memory::SqliteAgentMemoryStore;
 use crate::error::{CommandError, CommandResult};
 use crate::inference_host::{is_inference_ready, YazgHostLlms};
 use crate::state::AppState;
@@ -97,7 +98,7 @@ pub async fn yazg_chat_op(
 ) -> CommandResult<YazgChatResponse> {
     let intent_hint = SupervisorIntent::parse(request.intent.as_deref().unwrap_or("auto"));
 
-    let (profile, auth_headers) = if let Some(target_id) = request.target_id.as_ref() {
+    let (profile, auth_headers, project_id) = if let Some(target_id) = request.target_id.as_ref() {
         let target = state
             .repositories()
             .targets()
@@ -107,9 +108,9 @@ pub async fn yazg_chat_op(
         let profile = profile_from_json(&target.profile_json)?;
         let auth_headers =
             crate::commands::target_profile::auth_headers_from_descriptor(&target.descriptor_json)?;
-        (Some(profile), auth_headers)
+        (Some(profile), auth_headers, Some(target.project_id))
     } else {
-        (None, HashMap::new())
+        (None, HashMap::new(), None)
     };
 
     let inference = state.inference_manager().lock().await;
@@ -131,6 +132,13 @@ pub async fn yazg_chat_op(
         state.runtime_manager().clone(),
     );
     let llms = hosts.react_llms();
+    let memory = SqliteAgentMemoryStore::new(state.repositories());
+    let memory_ctx = MemoryContext::new(format!(
+        "yazg-chat:{}",
+        request.target_id.as_deref().unwrap_or("global")
+    ))
+    .with_project(project_id)
+    .with_target(request.target_id.clone());
 
     let delegation = YazgSupervisor::handle(
         &request.message,
@@ -138,6 +146,8 @@ pub async fn yazg_chat_op(
         profile.as_ref(),
         auth_headers,
         &llms,
+        Some(&memory),
+        memory_ctx,
     )
     .await
     .map_err(map_agent_err)?;

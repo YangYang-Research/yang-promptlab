@@ -77,6 +77,9 @@ pub struct AttackBudget {
     /// Bounded parallelism for outbound probe HTTP requests.
     #[serde(default = "default_attack_concurrency")]
     pub max_concurrent_requests: usize,
+    /// Sleep between launching each probe (0 = fire as soon as a pool slot frees).
+    #[serde(default)]
+    pub inter_request_delay_ms: u64,
 }
 
 fn default_attack_concurrency() -> usize {
@@ -90,6 +93,7 @@ impl Default for AttackBudget {
             max_mutations_per_payload: 3,
             timeout_ms: 30_000,
             max_concurrent_requests: DEFAULT_ATTACK_CONCURRENCY,
+            inter_request_delay_ms: 0,
         }
     }
 }

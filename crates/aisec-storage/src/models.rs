@@ -428,6 +428,75 @@ pub struct UpdateJudgeRoleWeights {
     pub default_llm: f64,
 }
 
+/// Session-scoped agent working memory (short-term).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct AgentShortTermMemory {
+    pub id: String,
+    pub session_id: String,
+    pub agent_id: String,
+    pub project_id: Option<String>,
+    pub target_id: Option<String>,
+    pub scan_id: Option<String>,
+    pub role: String,
+    pub memory_key: Option<String>,
+    pub content: String,
+    pub content_json: Option<String>,
+    pub importance: f64,
+    pub expires_at: Option<OffsetDateTime>,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateAgentShortTermMemory {
+    pub session_id: String,
+    pub agent_id: String,
+    pub project_id: Option<String>,
+    pub target_id: Option<String>,
+    pub scan_id: Option<String>,
+    pub role: String,
+    pub memory_key: Option<String>,
+    pub content: String,
+    pub content_json: Option<serde_json::Value>,
+    pub importance: Option<f64>,
+    pub expires_at: Option<OffsetDateTime>,
+}
+
+/// Durable agent knowledge (long-term), unique per agent + scope + key.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct AgentLongTermMemory {
+    pub id: String,
+    pub agent_id: String,
+    pub scope_type: String,
+    pub scope_id: String,
+    pub memory_key: String,
+    pub content: String,
+    pub content_json: Option<String>,
+    pub importance: f64,
+    pub access_count: i64,
+    pub last_accessed_at: Option<OffsetDateTime>,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpsertAgentLongTermMemory {
+    pub agent_id: String,
+    pub scope_type: String,
+    pub scope_id: String,
+    pub memory_key: String,
+    pub content: String,
+    pub content_json: Option<serde_json::Value>,
+    pub importance: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UpdateAgentLongTermMemory {
+    pub content: Option<String>,
+    pub content_json: Option<serde_json::Value>,
+    pub importance: Option<f64>,
+}
+
 /// Helper for serializing optional JSON columns.
 pub(crate) fn json_string(value: &Option<serde_json::Value>) -> aisec_core::AisecResult<Option<String>> {
     match value {

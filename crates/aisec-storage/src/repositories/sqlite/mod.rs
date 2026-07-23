@@ -1,5 +1,7 @@
 use sqlx::SqlitePool;
 
+mod agent_long_term_memory;
+mod agent_short_term_memory;
 mod attack_catalog;
 mod attack_result;
 mod auth;
@@ -15,6 +17,8 @@ mod runtime_traffic;
 mod scan;
 mod target;
 
+pub use agent_long_term_memory::SqliteAgentLongTermMemoryRepository;
+pub use agent_short_term_memory::SqliteAgentShortTermMemoryRepository;
 pub use attack_catalog::SqliteAttackCatalogRepository;
 pub use attack_result::SqliteAttackResultRepository;
 pub use auth::{
@@ -105,5 +109,13 @@ impl Repositories {
 
     pub fn judge_role_weights(&self) -> SqliteJudgeRoleWeightsRepository {
         SqliteJudgeRoleWeightsRepository::new(self.pool.clone())
+    }
+
+    pub fn agent_short_term_memory(&self) -> SqliteAgentShortTermMemoryRepository {
+        SqliteAgentShortTermMemoryRepository::new(self.pool.clone())
+    }
+
+    pub fn agent_long_term_memory(&self) -> SqliteAgentLongTermMemoryRepository {
+        SqliteAgentLongTermMemoryRepository::new(self.pool.clone())
     }
 }

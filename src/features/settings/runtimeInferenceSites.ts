@@ -31,9 +31,16 @@ export const RUNTIME_INFERENCE_SITES: RuntimeInferenceSite[] = [
   {
     id: "agentic-execution",
     title: "Agentic scan execution",
-    location: "Scan execution · Agentic · AttackExecutionAgent",
+    location: "Scan execution · Agentic · AgenticAttackExecutionAgent",
     description:
-      "When the attack plan uses agentic execution, Yazg delegates to AttackExecutionAgent, which ReActs across generate → attack → ReflectionAgent → AttackPlanAgent adapt → retry. HTTP attack stays a host harness tool (cancel/pause safe).",
+      "When the attack plan uses agentic execution, Yazg delegates to AgenticAttackExecutionAgent, which ReActs across generate → attack → ReflectionAgent → AttackPlanAgent adapt → retry. HTTP attack stays a host harness tool (cancel/pause safe).",
+  },
+  {
+    id: "sequential-execution",
+    title: "Sequential scan execution",
+    location: "Scan execution · Sequential · SequentialAttackExecutionAgent",
+    description:
+      "When the attack plan uses sequential execution, Yazg delegates to SequentialAttackExecutionAgent for a single generate → attack(+JudgeCoordinator) pass per category. No reflection/adapt loop.",
   },
   {
     id: "judge",

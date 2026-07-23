@@ -7,11 +7,12 @@ use aisec_target_profile::{
     execute_capability_probe, execute_verify_http, has_ai_response, list_provider_templates,
     TargetProfile, VerificationError, VerifyHttpSuccess,
 };
-use aisec_agent::{YazgDelegation, YazgSupervisor};
+use aisec_agent::{MemoryContext, YazgDelegation, YazgSupervisor};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tracing::{info, warn};
 
+use crate::agent_memory::SqliteAgentMemoryStore;
 use crate::dto::{TargetDto, TargetProfileDto, VerificationConsoleEntryDto};
 use crate::error::{CommandError, CommandResult};
 use crate::inference_host::{is_inference_ready, YazgHostLlms};
@@ -511,8 +512,13 @@ pub async fn target_profile_verify_ai_classify_op(
         state.runtime_manager().clone(),
     );
     let llms = hosts.react_llms();
+    let memory = SqliteAgentMemoryStore::new(state.repositories());
+    let memory_ctx = MemoryContext::new(format!("wizard-verify:{target_id}"))
+        .with_target(Some(target_id.clone()));
 
-    let delegation = YazgSupervisor::react_classify_probe(&profile, &http, &llms).await;
+    let delegation =
+        YazgSupervisor::react_classify_probe(&profile, &http, &llms, Some(&memory), memory_ctx)
+            .await;
     match delegation {
         Ok(YazgDelegation::AnalyzedEndpoint { outcome, .. }) => {
             profile.verification = outcome.verification;
@@ -697,6 +703,10 @@ pub async fn planner_generate_from_profile_op(
         state.runtime_manager().clone(),
     );
     let llms = hosts.react_llms();
+    let memory = SqliteAgentMemoryStore::new(state.repositories());
+    let memory_ctx = MemoryContext::new(format!("wizard-plan:{target_id}"))
+        .with_project(Some(target.project_id.clone()))
+        .with_target(Some(target_id.clone()));
 
     info!(
         target_id = %target_id,
@@ -704,7 +714,7 @@ pub async fn planner_generate_from_profile_op(
         "wizard attack plan: Yazg supervisor (soft AttackPlan hint)"
     );
 
-    let plan = match YazgSupervisor::react_plan(&profile, &llms).await {
+    let plan = match YazgSupervisor::react_plan(&profile, &llms, Some(&memory), memory_ctx).await {
         Ok(YazgDelegation::Planned { outcome, .. }) => outcome.plan,
         Ok(other) => {
             let message = match other {

@@ -156,6 +156,10 @@ impl<T: TargetTransport + Clone + 'static> AttackExecutor<T> {
                 let Some(item) = items.next() else {
                     break;
                 };
+                let delay_ms = ctx.budget.inter_request_delay_ms;
+                if delay_ms > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                }
                 let attack = attack.clone();
                 let ctx = ctx.clone();
                 let transport = transport.clone();

@@ -39,7 +39,7 @@ struct LlmReflectionResponse {
     focus_hints: Vec<String>,
 }
 
-/// Agentic reflection sub-agent under AttackExecutionAgent / Yazg.
+/// Agentic reflection sub-agent under AgenticAttackExecutionAgent / Yazg.
 pub struct ReflectionAgent;
 
 impl ReflectionAgent {

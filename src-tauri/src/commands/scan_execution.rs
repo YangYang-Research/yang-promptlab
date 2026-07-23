@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use aisec_agent::{
     AttackAttemptObservation, AttackExecutionLlms, AttackExecutionRequest, AttackExecutionTools,
-    AdaptPlanOutcome, YazgSupervisor,
+    AdaptPlanOutcome, EndpointPacing, MemoryContext, SequentialAttackExecutionRequest,
+    YazgSupervisor,
 };
 use aisec_attack::{AttackCategory, AttackPayload};
 use aisec_inference::InferenceRuntimeManager;
@@ -23,6 +24,7 @@ use async_trait::async_trait;
 use tauri::async_runtime::Mutex as AsyncMutex;
 use tracing::{info, warn};
 
+use crate::agent_memory::SqliteAgentMemoryStore;
 use crate::commands::attack::{
     CategoryRunOptions, CategoryRunResult, JudgedAttemptSummary, run_category_on_target_profile,
 };
@@ -184,6 +186,64 @@ fn category_payload_map(
 
 fn category_any_vulnerable(result: &CategoryRunResult) -> bool {
     result.judged.iter().any(|item| item.vulnerable)
+}
+
+fn observation_from_category_result(result: &CategoryRunResult) -> AttackAttemptObservation {
+    let high_confidence_vuln = result
+        .judged
+        .iter()
+        .any(|item| item.vulnerable && item.confidence >= 0.5);
+    let summary = result
+        .judged
+        .iter()
+        .take(8)
+        .map(|j| {
+            format!(
+                "{} vul={} conf={:.2} ({})",
+                j.payload_id, j.vulnerable, j.confidence, j.summary
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" | ");
+    AttackAttemptObservation {
+        successes: result.successes,
+        attempts: result.attempts as u64,
+        any_vulnerable: category_any_vulnerable(result),
+        high_confidence_vuln,
+        summary,
+        http_successes: result.http_successes,
+        transport_errors: result.transport_errors,
+        rate_limited: result.rate_limited,
+        server_errors: result.server_errors,
+        avg_latency_ms: result.avg_latency_ms,
+        max_latency_ms: result.max_latency_ms,
+        endpoint_unhealthy: result.endpoint_unhealthy,
+        endpoint_error: None,
+    }
+}
+
+fn merge_run_options_with_pacing(
+    base: Option<&CategoryRunOptions>,
+    pacing: &EndpointPacing,
+    category: AttackCategory,
+    disabled_tests: &[String],
+    strategy: Option<&PayloadStrategy>,
+) -> CategoryRunOptions {
+    let mut opts = if let Some(base) = base {
+        base.clone()
+    } else if let Some(strategy) = strategy {
+        CategoryRunOptions::from_strategy(category, disabled_tests, strategy)
+    } else {
+        CategoryRunOptions {
+            max_payloads: 20,
+            variants_per_test: 1,
+            max_concurrent_requests: None,
+            inter_request_delay_ms: None,
+            timeout_ms: None,
+        }
+    };
+    opts = opts.with_pacing(pacing);
+    opts
 }
 
 fn technique_id_from_payload_id(payload_id: &str) -> &str {
@@ -647,28 +707,210 @@ async fn run_sequential_category(
     generated_payloads: &HashMap<AttackCategory, Vec<AttackPayload>>,
     run_options: Option<&CategoryRunOptions>,
 ) -> Result<CategoryRunResult, String> {
-    run_category_on_target_profile(
-        ctx.repos,
-        ctx.scan_id,
-        ctx.project_id,
-        ctx.target_id,
-        ctx.profile,
+    let tools = SequentialCategoryTools {
+        ctx,
         category,
-        ctx.attack_runtime.clone(),
-        ctx.data_dir,
+        initial_payloads: generated_payloads,
+        initial_run_options: run_options,
+        state: Mutex::new(SequentialCategoryState {
+            payloads: category_payload_map(generated_payloads, category),
+            last_result: None,
+            pacing: EndpointPacing::default(),
+        }),
+    };
+
+    let memory = SqliteAgentMemoryStore::new(ctx.repos.clone());
+    let memory_ctx = MemoryContext::new(format!(
+        "scan-seq:{}:{}",
+        ctx.scan_id,
+        category.as_str()
+    ))
+    .with_project(Some(ctx.project_id.to_string()))
+    .with_target(Some(ctx.target_id.to_string()))
+    .with_scan(Some(ctx.scan_id.to_string()));
+
+    let request = SequentialAttackExecutionRequest {
+        category: category.as_str().to_string(),
+        max_react_steps: 24,
+    };
+
+    let llm_ready = {
+        let inference = ctx.inference_manager.lock().await;
+        is_inference_ready(&inference)
+    };
+    let hosts = YazgHostLlms::from_app(
+        ctx.data_dir.to_path_buf(),
         Arc::clone(&ctx.inference_manager),
         Arc::clone(&ctx.model_manager),
         ctx.model_provider.clone(),
         Arc::clone(&ctx.runtime_manager),
-        ctx.plugin_manager.clone(),
-        Some(generated_payloads),
-        Some(&ctx.emitter),
-        run_options,
-        Some(&ctx.progress),
-        ctx.job_controls.as_ref(),
+    );
+    let react = hosts.react_llms();
+
+    ctx.emitter.info(format!(
+        "Yazg → SequentialAttackExecutionAgent for {} (endpoint recovery ReAct)",
+        category.display_name()
+    ));
+
+    let outcome = YazgSupervisor::execute_sequential_attack(
+        &request,
+        &tools,
+        Some(react.supervisor),
+        llm_ready,
+        Some(&memory),
+        memory_ctx,
     )
     .await
-    .map_err(|err| err.to_string())
+    .map_err(|err| err.to_string())?;
+
+    for event in &outcome.events {
+        ctx.emitter.info(format!(
+            "[{}] {:?}: {}",
+            event.agent.as_str(),
+            event.kind,
+            event.message
+        ));
+    }
+
+    tools
+        .state
+        .lock()
+        .ok()
+        .and_then(|s| s.last_result.clone())
+        .ok_or_else(|| "sequential category produced no attempts".into())
+}
+
+struct SequentialCategoryState {
+    payloads: HashMap<AttackCategory, Vec<AttackPayload>>,
+    last_result: Option<CategoryRunResult>,
+    pacing: EndpointPacing,
+}
+
+struct SequentialCategoryTools<'a> {
+    ctx: &'a TargetProfileScanContext<'a>,
+    category: AttackCategory,
+    initial_payloads: &'a HashMap<AttackCategory, Vec<AttackPayload>>,
+    initial_run_options: Option<&'a CategoryRunOptions>,
+    state: Mutex<SequentialCategoryState>,
+}
+
+#[async_trait]
+impl AttackExecutionTools for SequentialCategoryTools<'_> {
+    fn is_cancelled(&self) -> bool {
+        self.ctx.cancel.load(Ordering::Relaxed)
+    }
+
+    async fn wait_if_paused(&self) {
+        wait_if_paused(&self.ctx.paused, &self.ctx.cancel).await;
+    }
+
+    async fn set_phase(&self, phase: &str, attempt: u32, retry: u32) {
+        let label = self.category.display_name();
+        set_scan_phase(
+            &self.ctx.progress,
+            phase,
+            Some(label),
+            Some(attempt),
+            Some(retry),
+        );
+    }
+
+    async fn bump_progress(&self, delta: u64) {
+        bump_scan_progress(&self.ctx.progress, delta);
+    }
+
+    async fn emit_info(&self, message: String) {
+        self.ctx.emitter.info(message);
+    }
+
+    async fn generate_payloads(
+        &self,
+        _attempt: u32,
+        _focus_hints: &[String],
+    ) -> Result<(), String> {
+        // Sequential uses pre-generated payloads from the scan prepare phase.
+        let map = category_payload_map(self.initial_payloads, self.category);
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        state.payloads = map;
+        Ok(())
+    }
+
+    async fn run_attack_attempt(
+        &self,
+        _attempt: u32,
+    ) -> Result<AttackAttemptObservation, String> {
+        let (payloads, pacing) = {
+            let state = self.state.lock().map_err(|e| e.to_string())?;
+            (state.payloads.clone(), state.pacing.clone())
+        };
+
+        let owned_options = merge_run_options_with_pacing(
+            self.initial_run_options,
+            &pacing,
+            self.category,
+            &[],
+            None,
+        );
+
+        let result = run_category_on_target_profile(
+            self.ctx.repos,
+            self.ctx.scan_id,
+            self.ctx.project_id,
+            self.ctx.target_id,
+            self.ctx.profile,
+            self.category,
+            self.ctx.attack_runtime.clone(),
+            self.ctx.data_dir,
+            Arc::clone(&self.ctx.inference_manager),
+            Arc::clone(&self.ctx.model_manager),
+            self.ctx.model_provider.clone(),
+            Arc::clone(&self.ctx.runtime_manager),
+            self.ctx.plugin_manager.clone(),
+            Some(&payloads),
+            Some(&self.ctx.emitter),
+            Some(&owned_options),
+            Some(&self.ctx.progress),
+            self.ctx.job_controls.as_ref(),
+        )
+        .await
+        .map_err(|err| err.to_string())?;
+
+        let obs = observation_from_category_result(&result);
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        state.last_result = Some(result);
+        Ok(obs)
+    }
+
+    async fn apply_adapt(&self, _adapt: &AdaptPlanOutcome) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn current_pacing(&self) -> EndpointPacing {
+        self.state
+            .lock()
+            .map(|s| s.pacing.clone())
+            .unwrap_or_default()
+    }
+
+    async fn apply_pacing(&self, pacing: &EndpointPacing) -> Result<(), String> {
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        state.pacing = pacing.clone();
+        self.ctx.emitter.info(format!(
+            "Sequential pacing updated: {}",
+            pacing.summary()
+        ));
+        Ok(())
+    }
+
+    async fn wait_backoff(&self, delay_ms: u64) {
+        if delay_ms == 0 {
+            return;
+        }
+        self.ctx.emitter.info(format!(
+            "Sequential endpoint backoff waiting {delay_ms}ms before retry"
+        ));
+        tokio::time::sleep(Duration::from_millis(delay_ms.min(60_000))).await;
+    }
 }
 
 async fn run_agentic_category(
@@ -698,6 +940,7 @@ async fn run_agentic_category(
             payloads: category_payload_map(generated_payloads, category),
             last_result: None,
             focus_hints: Vec::new(),
+            pacing: EndpointPacing::default(),
         }),
     };
 
@@ -736,13 +979,24 @@ async fn run_agentic_category(
     };
 
     ctx.emitter.info(format!(
-        "Yazg → AttackExecutionAgent for {} (agentic)",
+        "Yazg → AgenticAttackExecutionAgent for {} (agentic)",
         category.display_name()
     ));
 
-    let outcome = YazgSupervisor::execute_attack(&request, &tools, &exec_llms)
-        .await
-        .map_err(|err| err.to_string())?;
+    let memory = SqliteAgentMemoryStore::new(ctx.repos.clone());
+    let memory_ctx = MemoryContext::new(format!(
+        "scan-exec:{}:{}",
+        ctx.scan_id,
+        category.as_str()
+    ))
+    .with_project(Some(ctx.project_id.to_string()))
+    .with_target(Some(ctx.target_id.to_string()))
+    .with_scan(Some(ctx.scan_id.to_string()));
+
+    let outcome =
+        YazgSupervisor::execute_attack(&request, &tools, &exec_llms, Some(&memory), memory_ctx)
+            .await
+            .map_err(|err| err.to_string())?;
 
     for event in &outcome.events {
         ctx.emitter.info(format!(
@@ -767,6 +1021,7 @@ struct AgenticCategoryState {
     payloads: HashMap<AttackCategory, Vec<AttackPayload>>,
     last_result: Option<CategoryRunResult>,
     focus_hints: Vec<String>,
+    pacing: EndpointPacing,
 }
 
 struct AgenticCategoryTools<'a> {
@@ -884,21 +1139,32 @@ impl AttackExecutionTools for AgenticCategoryTools<'_> {
         &self,
         attempt: u32,
     ) -> Result<AttackAttemptObservation, String> {
-        let (payloads, strategy, plan) = {
+        let (payloads, strategy, plan, pacing) = {
             let state = self.state.lock().map_err(|e| e.to_string())?;
             (
                 state.payloads.clone(),
                 state.strategy.clone(),
                 state.plan.clone(),
+                state.pacing.clone(),
             )
         };
 
-        let attempt_options =
-            CategoryRunOptions::from_strategy(self.category, &plan.disabled_tests, &strategy);
-        let options_ref = if attempt <= 1 {
-            self.initial_run_options
+        let attempt_options = CategoryRunOptions::from_strategy(
+            self.category,
+            &plan.disabled_tests,
+            &strategy,
+        )
+        .with_pacing(&pacing);
+        let owned_options = if attempt <= 1 {
+            merge_run_options_with_pacing(
+                self.initial_run_options,
+                &pacing,
+                self.category,
+                &plan.disabled_tests,
+                Some(&strategy),
+            )
         } else {
-            Some(&attempt_options)
+            attempt_options
         };
 
         let result = run_category_on_target_profile(
@@ -917,38 +1183,14 @@ impl AttackExecutionTools for AgenticCategoryTools<'_> {
             self.ctx.plugin_manager.clone(),
             Some(&payloads),
             Some(&self.ctx.emitter),
-            options_ref,
+            Some(&owned_options),
             Some(&self.ctx.progress),
             self.ctx.job_controls.as_ref(),
         )
         .await
         .map_err(|err| err.to_string())?;
 
-        let high_confidence_vuln = result
-            .judged
-            .iter()
-            .any(|item| item.vulnerable && item.confidence >= 0.5);
-        let summary = result
-            .judged
-            .iter()
-            .take(8)
-            .map(|j| {
-                format!(
-                    "{} vul={} conf={:.2} ({})",
-                    j.payload_id, j.vulnerable, j.confidence, j.summary
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(" | ");
-
-        let obs = AttackAttemptObservation {
-            successes: result.successes,
-            attempts: result.attempts as u64,
-            any_vulnerable: category_any_vulnerable(&result),
-            high_confidence_vuln,
-            summary,
-        };
-
+        let obs = observation_from_category_result(&result);
         let mut state = self.state.lock().map_err(|e| e.to_string())?;
         state.last_result = Some(result);
         Ok(obs)
@@ -986,24 +1228,20 @@ impl AttackExecutionTools for AgenticCategoryTools<'_> {
         if let Some(ref last) = state.last_result {
             // Technique rotation only — strategy escalation already applied from AttackPlanAgent.
             let (rotated, _, rot_notes) = adapt_plan_for_retry(
-                &base_plan,
+                &next_plan,
                 self.category,
-                &base_strategy,
+                &next_strategy,
                 last,
                 self.catalog,
             );
-            next_plan.disabled_tests = rotated.disabled_tests;
-            for id in &adapt.disable_technique_ids {
-                if !next_plan.disabled_tests.iter().any(|d| d == id) {
-                    next_plan.disabled_tests.push(id.clone());
-                }
-            }
+            next_plan = rotated;
             for note in rot_notes {
-                self.ctx
-                    .emitter
-                    .info(format!("Adaptive technique rotate: {note}"));
+                self.ctx.emitter.info(format!("adapt: {note}"));
             }
         }
+
+        state.plan = next_plan;
+        state.strategy = next_strategy;
 
         for note in &adapt.notes {
             self.ctx
@@ -1011,9 +1249,33 @@ impl AttackExecutionTools for AgenticCategoryTools<'_> {
                 .info(format!("AttackPlanAgent adapt: {note}"));
         }
 
-        state.plan = next_plan;
-        state.strategy = next_strategy;
         Ok(())
+    }
+
+    async fn current_pacing(&self) -> EndpointPacing {
+        self.state
+            .lock()
+            .map(|s| s.pacing.clone())
+            .unwrap_or_default()
+    }
+
+    async fn apply_pacing(&self, pacing: &EndpointPacing) -> Result<(), String> {
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        state.pacing = pacing.clone();
+        self.ctx
+            .emitter
+            .info(format!("Agentic pacing updated: {}", pacing.summary()));
+        Ok(())
+    }
+
+    async fn wait_backoff(&self, delay_ms: u64) {
+        if delay_ms == 0 {
+            return;
+        }
+        self.ctx.emitter.info(format!(
+            "Agentic endpoint backoff waiting {delay_ms}ms before retry"
+        ));
+        tokio::time::sleep(Duration::from_millis(delay_ms.min(60_000))).await;
     }
 }
 
@@ -1055,6 +1317,7 @@ mod tests {
                 confidence: 0.1,
                 summary: "refused".into(),
             }],
+            ..Default::default()
         };
         let (next_plan, next_strategy, notes) = adapt_plan_for_retry(
             &plan,

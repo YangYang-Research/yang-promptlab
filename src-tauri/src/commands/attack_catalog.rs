@@ -3,9 +3,10 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use aisec_agent::{TechniquePromptContext, YazgDelegation, YazgSupervisor};
+use aisec_agent::{MemoryContext, TechniquePromptContext, YazgDelegation, YazgSupervisor};
 use aisec_storage::{AttackCatalogRepository, AttackCatalogTechnique, UpdateAttackCatalogTechnique};
 
+use crate::agent_memory::SqliteAgentMemoryStore;
 use crate::error::{CommandError, CommandResult};
 use crate::inference_host::{is_inference_ready, YazgHostLlms};
 use crate::state::AppState;
@@ -216,10 +217,13 @@ pub async fn attack_catalog_generate_prompt_op(
         state.runtime_manager().clone(),
     );
     let llms = hosts.react_llms();
+    let memory = SqliteAgentMemoryStore::new(state.repositories());
+    let memory_ctx = MemoryContext::new(format!("factory:{}", technique.id));
 
-    let delegation = YazgSupervisor::react_generate_prompt(&technique, &llms)
-        .await
-        .map_err(|err| CommandError::invalid_input(err.to_string()))?;
+    let delegation =
+        YazgSupervisor::react_generate_prompt(&technique, &llms, Some(&memory), memory_ctx)
+            .await
+            .map_err(|err| CommandError::invalid_input(err.to_string()))?;
 
     match delegation {
         YazgDelegation::GeneratedPrompt { outcome, .. } => Ok(AttackCatalogGeneratePromptDto {

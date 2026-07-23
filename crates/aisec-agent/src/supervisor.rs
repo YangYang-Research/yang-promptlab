@@ -3,21 +3,26 @@
 use std::collections::HashMap;
 
 use aisec_judge::{JudgeEngine, JudgeRequest};
+use aisec_planner::PlannerLlm;
 use aisec_target_profile::{AttackResultsSummary, TargetProfile, VerificationResult, WizardAttackPlan};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use crate::analyze_endpoint::{AnalyzeEndpointAgent, AnalyzeEndpointAgentOutcome};
 use crate::attack_execution::{
-    AttackExecutionAgent, AttackExecutionLlms, AttackExecutionOutcome, AttackExecutionRequest,
+    AgenticAttackExecutionAgent, AttackExecutionLlms, AttackExecutionOutcome, AttackExecutionRequest,
     AttackExecutionTools,
 };
 use crate::attack_plan::AttackPlanAgentOutcome;
 use crate::error::AgentResult;
 use crate::generate_prompt::{GeneratePromptAgentOutcome, TechniquePromptContext};
 use crate::judge_coordinator::JudgeCoordinatorAgentOutcome;
+use crate::memory::{AgentMemoryStore, MemoryContext};
 use crate::react::{run_react, ReactActionKind, ReactArtifacts, ReactLlms, ReactRequest};
 use crate::recommend::RecommendAgentOutcome;
+use crate::sequential_attack_execution::{
+    SequentialAttackExecutionAgent, SequentialAttackExecutionRequest,
+};
 use crate::summary::{SummaryAgentOutcome, SummaryRequest};
 use crate::types::{AgentEvent, AgentId};
 
@@ -139,7 +144,7 @@ impl YazgSupervisor {
                 "User preference hint: consensus judging via JudgeCoordinatorAgent may be appropriate."
             }
             SupervisorIntent::ExecuteAttack => {
-                "User preference hint: agentic scan execution via AttackExecutionAgent may be appropriate."
+                "User preference hint: agentic scan execution via AgenticAttackExecutionAgent may be appropriate."
             }
             SupervisorIntent::Chat => "User preference hint: conversational reply may be enough.",
             SupervisorIntent::Auto => "No forced action — choose freely via ReAct.",
@@ -164,11 +169,14 @@ impl YazgSupervisor {
         profile: Option<&TargetProfile>,
         auth_headers: HashMap<String, String>,
         llms: &ReactLlms<'_>,
+        memory: Option<&dyn AgentMemoryStore>,
+        memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
         let goal = Self::build_goal(message, intent_hint);
         let request = ReactRequest::new(goal)
             .with_profile(profile)
-            .with_auth(auth_headers);
+            .with_auth(auth_headers)
+            .with_memory(memory, memory_ctx);
         Self::react(request, llms).await
     }
 
@@ -178,6 +186,8 @@ impl YazgSupervisor {
         profile: &TargetProfile,
         http: &aisec_target_profile::VerifyHttpSuccess,
         llms: &ReactLlms<'_>,
+        memory: Option<&dyn AgentMemoryStore>,
+        memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
         let message = format!(
             "Scan wizard Verification / endpoint analysis: a capability HTTP response was already \
@@ -191,6 +201,7 @@ impl YazgSupervisor {
         let request = ReactRequest::new(goal)
             .with_profile(Some(profile))
             .with_capability_probe(Some(http))
+            .with_memory(memory, memory_ctx)
             .with_max_steps(4);
         let delegation = Self::react(request, llms).await?;
         if matches!(delegation, YazgDelegation::AnalyzedEndpoint { .. }) {
@@ -227,6 +238,8 @@ impl YazgSupervisor {
     pub async fn react_plan(
         profile: &TargetProfile,
         llms: &ReactLlms<'_>,
+        memory: Option<&dyn AgentMemoryStore>,
+        memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
         Self::handle(
             "Scan wizard Attack Plan: generate an attack plan for the current verified target, \
@@ -235,6 +248,8 @@ impl YazgSupervisor {
             Some(profile),
             HashMap::new(),
             llms,
+            memory,
+            memory_ctx,
         )
         .await
     }
@@ -244,6 +259,8 @@ impl YazgSupervisor {
     pub async fn react_generate_prompt(
         technique: &TechniquePromptContext,
         llms: &ReactLlms<'_>,
+        memory: Option<&dyn AgentMemoryStore>,
+        memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
         let message = format!(
             "Attack Factory: invent an improved adversarial factory prompt for technique \
@@ -254,6 +271,7 @@ impl YazgSupervisor {
         let goal = Self::build_goal(&message, SupervisorIntent::GeneratePrompt);
         let request = ReactRequest::new(goal)
             .with_technique(Some(technique))
+            .with_memory(memory, memory_ctx)
             .with_max_steps(4);
         Self::react(request, llms).await
     }
@@ -263,6 +281,8 @@ impl YazgSupervisor {
     pub async fn react_recommend(
         results: &AttackResultsSummary,
         llms: &ReactLlms<'_>,
+        memory: Option<&dyn AgentMemoryStore>,
+        memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
         let message = format!(
             "Scan results: produce prioritized remediation recommendations for this completed \
@@ -273,6 +293,7 @@ impl YazgSupervisor {
         let goal = Self::build_goal(&message, SupervisorIntent::Recommend);
         let request = ReactRequest::new(goal)
             .with_attack_results(Some(results))
+            .with_memory(memory, memory_ctx)
             .with_max_steps(4);
         Self::react(request, llms).await
     }
@@ -282,6 +303,8 @@ impl YazgSupervisor {
     pub async fn react_summarize(
         summary_request: &SummaryRequest,
         llms: &ReactLlms<'_>,
+        memory: Option<&dyn AgentMemoryStore>,
+        memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
         let message = match summary_request {
             SummaryRequest::Project { project_name, .. } => format!(
@@ -299,6 +322,7 @@ impl YazgSupervisor {
         let goal = Self::build_goal(&message, SupervisorIntent::Summary);
         let request = ReactRequest::new(goal)
             .with_summary_request(Some(summary_request))
+            .with_memory(memory, memory_ctx)
             .with_max_steps(4);
         Self::react(request, llms).await
     }
@@ -309,6 +333,8 @@ impl YazgSupervisor {
         judge_request: &JudgeRequest,
         judge_engine: &JudgeEngine,
         llms: &ReactLlms<'_>,
+        memory: Option<&dyn AgentMemoryStore>,
+        memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
         let message = format!(
             "Judge probe `{}` (category={}): run JudgeCoordinatorAgent so JudgeWorker, \
@@ -319,30 +345,69 @@ impl YazgSupervisor {
         let goal = Self::build_goal(&message, SupervisorIntent::Judge);
         let request = ReactRequest::new(goal)
             .with_judge(Some(judge_request), Some(judge_engine))
+            .with_memory(memory, memory_ctx)
             .with_max_steps(4);
         Self::react(request, llms).await
     }
 
-    /// Hard-gate agentic scan execution: Yazg delegates to AttackExecutionAgent.
+    /// Hard-gate agentic scan execution: Yazg delegates to AgenticAttackExecutionAgent.
     /// Host supplies HTTP/generate tools; ReflectionAgent + AttackPlanAgent::adapt run inside.
     pub async fn execute_attack(
         request: &AttackExecutionRequest,
         tools: &dyn AttackExecutionTools,
         llms: &AttackExecutionLlms<'_>,
+        memory: Option<&dyn AgentMemoryStore>,
+        memory_ctx: MemoryContext,
     ) -> AgentResult<AttackExecutionOutcome> {
         info!(
             category = %request.category,
             max_attempts = request.max_attempts,
-            "Yazg delegating to AttackExecutionAgent"
+            "Yazg delegating to AgenticAttackExecutionAgent"
         );
         let mut events = vec![AgentEvent::info(
             AgentId::Yazg,
             format!(
-                "ExecuteAttack → AttackExecutionAgent ({})",
+                "ExecuteAttack → AgenticAttackExecutionAgent ({})",
                 request.category
             ),
         )];
-        let mut outcome = AttackExecutionAgent::run(request, tools, llms).await?;
+        let mut outcome =
+            AgenticAttackExecutionAgent::run(request, tools, llms, memory, memory_ctx).await?;
+        events.append(&mut outcome.events);
+        outcome.events = events;
+        Ok(outcome)
+    }
+
+    /// Hard-gate sequential scan execution: Yazg delegates to SequentialAttackExecutionAgent.
+    /// Generate → attack(+judge); ReAct recover on endpoint failures (no reflection/adapt).
+    pub async fn execute_sequential_attack(
+        request: &SequentialAttackExecutionRequest,
+        tools: &dyn AttackExecutionTools,
+        orchestrator: Option<&dyn PlannerLlm>,
+        llm_ready: bool,
+        memory: Option<&dyn AgentMemoryStore>,
+        memory_ctx: MemoryContext,
+    ) -> AgentResult<AttackExecutionOutcome> {
+        info!(
+            category = %request.category,
+            "Yazg delegating to SequentialAttackExecutionAgent"
+        );
+        let mut events = vec![AgentEvent::info(
+            AgentId::Yazg,
+            format!(
+                "ExecuteSequentialAttack → SequentialAttackExecutionAgent ({})",
+                request.category
+            ),
+        )];
+        let mut outcome = SequentialAttackExecutionAgent::run(
+            request,
+            tools,
+            orchestrator,
+            llm_ready,
+            memory,
+            memory_ctx,
+        )
+        .await?;
         events.append(&mut outcome.events);
         outcome.events = events;
         Ok(outcome)

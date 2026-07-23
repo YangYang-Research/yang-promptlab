@@ -132,3 +132,48 @@ pub trait JudgeRoleWeightsRepository: Send + Sync {
     async fn get(&self) -> AisecResult<JudgeRoleWeights>;
     async fn update(&self, input: UpdateJudgeRoleWeights) -> AisecResult<JudgeRoleWeights>;
 }
+
+#[async_trait]
+pub trait AgentShortTermMemoryRepository: Send + Sync {
+    async fn create(&self, input: CreateAgentShortTermMemory) -> AisecResult<AgentShortTermMemory>;
+    async fn get(&self, id: &str) -> AisecResult<AgentShortTermMemory>;
+    async fn list_by_session(&self, session_id: &str) -> AisecResult<Vec<AgentShortTermMemory>>;
+    async fn list_by_session_agent(
+        &self,
+        session_id: &str,
+        agent_id: &str,
+    ) -> AisecResult<Vec<AgentShortTermMemory>>;
+    async fn delete(&self, id: &str) -> AisecResult<()>;
+    async fn delete_by_session(&self, session_id: &str) -> AisecResult<u64>;
+    /// Remove rows with `expires_at` at or before `cutoff`.
+    async fn prune_expired(&self, cutoff: time::OffsetDateTime) -> AisecResult<u64>;
+}
+
+#[async_trait]
+pub trait AgentLongTermMemoryRepository: Send + Sync {
+    async fn upsert(&self, input: UpsertAgentLongTermMemory) -> AisecResult<AgentLongTermMemory>;
+    async fn get(&self, id: &str) -> AisecResult<AgentLongTermMemory>;
+    async fn get_by_key(
+        &self,
+        agent_id: &str,
+        scope_type: &str,
+        scope_id: &str,
+        memory_key: &str,
+    ) -> AisecResult<AgentLongTermMemory>;
+    async fn list_by_scope(
+        &self,
+        scope_type: &str,
+        scope_id: &str,
+    ) -> AisecResult<Vec<AgentLongTermMemory>>;
+    async fn list_by_agent_scope(
+        &self,
+        agent_id: &str,
+        scope_type: &str,
+        scope_id: &str,
+    ) -> AisecResult<Vec<AgentLongTermMemory>>;
+    async fn update(&self, id: &str, input: UpdateAgentLongTermMemory) -> AisecResult<AgentLongTermMemory>;
+    /// Bump access_count + last_accessed_at for retrieval feedback.
+    async fn touch(&self, id: &str) -> AisecResult<AgentLongTermMemory>;
+    async fn delete(&self, id: &str) -> AisecResult<()>;
+    async fn delete_by_scope(&self, scope_type: &str, scope_id: &str) -> AisecResult<u64>;
+}

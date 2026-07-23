@@ -40,9 +40,13 @@ use crate::jobs::{bump_scan_progress, ScanBatchCheckpoint, ScanJobControls, Scan
 use crate::scan_playbook::persist_scan_playbook_state;
 use crate::state::AppState;
 
+#[derive(Clone)]
 pub struct CategoryRunOptions {
     pub max_payloads: usize,
     pub variants_per_test: usize,
+    pub max_concurrent_requests: Option<usize>,
+    pub inter_request_delay_ms: Option<u64>,
+    pub timeout_ms: Option<u64>,
 }
 
 impl CategoryRunOptions {
@@ -59,7 +63,35 @@ impl CategoryRunOptions {
         Self {
             max_payloads: enabled.saturating_mul(variants).saturating_mul(budget),
             variants_per_test: variants,
+            max_concurrent_requests: None,
+            inter_request_delay_ms: None,
+            timeout_ms: None,
         }
+    }
+
+    pub fn with_pacing(mut self, pacing: &aisec_agent::EndpointPacing) -> Self {
+        self.max_concurrent_requests = Some(pacing.effective_concurrency());
+        self.inter_request_delay_ms = Some(pacing.inter_request_delay_ms);
+        self.timeout_ms = Some(pacing.timeout_ms);
+        self
+    }
+}
+
+fn apply_options_to_budget(ctx: &mut AttackContext, options: Option<&CategoryRunOptions>) {
+    if let Some(opts) = options {
+        ctx.budget.max_payloads = opts.max_payloads;
+        ctx.budget.max_concurrent_requests = opts
+            .max_concurrent_requests
+            .unwrap_or(DEFAULT_ATTACK_CONCURRENCY)
+            .max(1);
+        if let Some(delay) = opts.inter_request_delay_ms {
+            ctx.budget.inter_request_delay_ms = delay;
+        }
+        if let Some(timeout) = opts.timeout_ms {
+            ctx.budget.timeout_ms = timeout.max(1_000);
+        }
+    } else {
+        ctx.budget.max_concurrent_requests = DEFAULT_ATTACK_CONCURRENCY;
     }
 }
 
@@ -103,12 +135,19 @@ pub struct JudgedAttemptSummary {
     pub summary: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct CategoryRunResult {
     pub attempts: usize,
     pub successes: u64,
     pub findings: Vec<FindingDto>,
     pub judged: Vec<JudgedAttemptSummary>,
+    pub http_successes: u64,
+    pub transport_errors: u64,
+    pub rate_limited: u64,
+    pub server_errors: u64,
+    pub avg_latency_ms: u64,
+    pub max_latency_ms: u64,
+    pub endpoint_unhealthy: bool,
 }
 
 /// Apply descriptor auth without aborting the scan when keychain entries are missing.
@@ -252,6 +291,66 @@ struct CategoryJudgeAccum {
     successes: u64,
     created_findings: Vec<FindingDto>,
     judged: Vec<JudgedAttemptSummary>,
+    http_successes: u64,
+    transport_errors: u64,
+    rate_limited: u64,
+    server_errors: u64,
+    latency_total_ms: u64,
+    max_latency_ms: u64,
+    attempt_count: u64,
+}
+
+impl CategoryJudgeAccum {
+    fn new() -> Self {
+        Self {
+            successes: 0,
+            created_findings: Vec::new(),
+            judged: Vec::new(),
+            http_successes: 0,
+            transport_errors: 0,
+            rate_limited: 0,
+            server_errors: 0,
+            latency_total_ms: 0,
+            max_latency_ms: 0,
+            attempt_count: 0,
+        }
+    }
+
+    fn ingest_attempts(&mut self, attempts: &[PayloadAttempt]) {
+        for attempt in attempts {
+            self.attempt_count = self.attempt_count.saturating_add(1);
+            let status = attempt.response.status;
+            let latency = attempt.response.duration_ms;
+            self.latency_total_ms = self.latency_total_ms.saturating_add(latency);
+            self.max_latency_ms = self.max_latency_ms.max(latency);
+            if status == 0 {
+                self.transport_errors = self.transport_errors.saturating_add(1);
+            } else if status == 429 || status == 503 {
+                self.rate_limited = self.rate_limited.saturating_add(1);
+            } else if status >= 500 {
+                self.server_errors = self.server_errors.saturating_add(1);
+            } else if (200..400).contains(&status) {
+                self.http_successes = self.http_successes.saturating_add(1);
+            }
+        }
+    }
+
+    fn avg_latency_ms(&self) -> u64 {
+        if self.attempt_count == 0 {
+            0
+        } else {
+            self.latency_total_ms / self.attempt_count
+        }
+    }
+
+    fn endpoint_unhealthy(&self) -> bool {
+        self.transport_errors > 0
+            || self.rate_limited > 0
+            || self.server_errors > 0
+            || (self.attempt_count > 0
+                && self.http_successes == 0
+                && (self.avg_latency_ms() >= 10_000 || self.max_latency_ms >= 20_000))
+    }
 }
 
 struct CategoryJudgeEnv<'a> {
@@ -627,11 +726,7 @@ async fn execute_category_then_judge(
     env: &CategoryJudgeEnv<'_>,
 ) -> CommandResult<CategoryRunResult> {
     let category_label = env.category.display_name();
-    let mut accum = CategoryJudgeAccum {
-        successes: 0,
-        created_findings: Vec::new(),
-        judged: Vec::new(),
-    };
+    let mut accum = CategoryJudgeAccum::new();
 
     'category: loop {
         let (attempts, judge_start) = if let Some(ctrl) = env.job_controls {
@@ -696,6 +791,11 @@ async fn execute_category_then_judge(
 
         if attempts.is_empty() {
             return Ok(category_result_from_accum(&accum));
+        }
+
+        // Ingest once per category run (checkpoint resume must not double-count).
+        if accum.attempt_count == 0 {
+            accum.ingest_attempts(&attempts);
         }
 
         if judge_start == 0 {
@@ -778,6 +878,13 @@ fn category_result_from_accum(accum: &CategoryJudgeAccum) -> CategoryRunResult {
         successes: accum.successes,
         findings: accum.created_findings.clone(),
         judged: accum.judged.clone(),
+        http_successes: accum.http_successes,
+        transport_errors: accum.transport_errors,
+        rate_limited: accum.rate_limited,
+        server_errors: accum.server_errors,
+        avg_latency_ms: accum.avg_latency_ms(),
+        max_latency_ms: accum.max_latency_ms,
+        endpoint_unhealthy: accum.endpoint_unhealthy(),
     }
 }
 
@@ -830,10 +937,7 @@ pub async fn run_category_on_endpoint(
     if let Some(payloads) = generated_payloads {
         ctx = ctx.with_generated_payloads(payloads.clone());
     }
-    if let Some(opts) = options {
-        ctx.budget.max_payloads = opts.max_payloads;
-    }
-    ctx.budget.max_concurrent_requests = DEFAULT_ATTACK_CONCURRENCY;
+    apply_options_to_budget(&mut ctx, options);
     let executor = if let Some(opts) = options {
         attack_executor_for_options(runtime.transport, opts)
     } else {
@@ -954,10 +1058,7 @@ pub async fn run_category_on_target_profile(
     if let Some(payloads) = generated_payloads {
         ctx = ctx.with_generated_payloads(payloads.clone());
     }
-    if let Some(opts) = options {
-        ctx.budget.max_payloads = opts.max_payloads;
-    }
-    ctx.budget.max_concurrent_requests = DEFAULT_ATTACK_CONCURRENCY;
+    apply_options_to_budget(&mut ctx, options);
     let executor = if let Some(opts) = options {
         attack_executor_for_options(runtime.transport, opts)
     } else {

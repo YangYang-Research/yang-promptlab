@@ -1,6 +1,6 @@
 //! AI-backed remediation recommendations for scan results (wizard step 6).
 
-use aisec_agent::{YazgDelegation, YazgSupervisor};
+use aisec_agent::{MemoryContext, YazgDelegation, YazgSupervisor};
 use aisec_report::{generate_recommendations, data::StorageFindingRow};
 use aisec_storage::{Finding, FindingRepository, ScanRepository, TargetRepository, UpdateScan};
 use aisec_target_profile::{
@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use tracing::warn;
 
+use crate::agent_memory::SqliteAgentMemoryStore;
 use crate::error::CommandResult;
 use crate::inference_host::{is_inference_ready, YazgHostLlms};
 use crate::session_auth::seed_url_from_descriptor;
@@ -132,7 +133,14 @@ pub async fn scan_recommendations_generate_op(
                 state.runtime_manager().clone(),
             );
             let llms = hosts.react_llms();
-            match YazgSupervisor::react_recommend(&summary, &llms).await {
+            let memory = SqliteAgentMemoryStore::new(state.repositories());
+            let memory_ctx = MemoryContext::new(format!("scan-recommend:{}", request.scan_id))
+                .with_project(Some(scan.project_id.clone()))
+                .with_target(scan.target_id.clone())
+                .with_scan(Some(request.scan_id.clone()));
+            match YazgSupervisor::react_recommend(&summary, &llms, Some(&memory), memory_ctx)
+                .await
+            {
                 Ok(YazgDelegation::Recommended { outcome, .. }) => {
                     Some(("ai", outcome.bundle))
                 }

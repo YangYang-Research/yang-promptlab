@@ -1,17 +1,20 @@
 //! AI-backed project posture summary (Project Details → Summary).
 
-use aisec_agent::{SummaryRequest, YazgDelegation, YazgSupervisor};
+use aisec_agent::{MemoryContext, SummaryRequest, YazgDelegation, YazgSupervisor};
 use aisec_storage::{
     FindingRepository, ProjectRepository, ScanRepository, TargetRepository, UpdateProject,
 };
 use aisec_target_profile::{
-    ensure_failed_project_summary_action, is_retryable_scan_status, SummaryAction, SummaryBundle,
+    build_attack_results_summary, ensure_failed_project_summary_action,
+    ensure_failed_scan_action_recommendation, is_retryable_scan_status, FindingSummaryInput,
+    SummaryAction, SummaryBundle,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::State;
 use tracing::warn;
 
+use crate::agent_memory::SqliteAgentMemoryStore;
 use crate::error::{CommandError, CommandResult};
 use crate::inference_host::{is_inference_ready, YazgHostLlms};
 use crate::state::AppState;
@@ -386,7 +389,18 @@ pub async fn project_summary_generate_op(
                         project_name: input.project_name.clone(),
                         input_json,
                     };
-                    match YazgSupervisor::react_summarize(&summary_request, &llms).await {
+                    let memory = SqliteAgentMemoryStore::new(state.repositories());
+                    let memory_ctx =
+                        MemoryContext::new(format!("project-summary:{project_id}"))
+                            .with_project(Some(project_id.to_string()));
+                    match YazgSupervisor::react_summarize(
+                        &summary_request,
+                        &llms,
+                        Some(&memory),
+                        memory_ctx,
+                    )
+                    .await
+                    {
                         Ok(YazgDelegation::Summarized { outcome, .. }) => {
                             Some(LlmProjectSummary {
                                 overview: outcome.bundle.overview,

@@ -12,28 +12,36 @@
 //! │   ├── JudgeWorker
 //! │   ├── ClassifierWorker
 //! │   └── AttackerWorker
-//! ├── AttackExecutionAgent  — ReAct orchestrator for agentic scan execution
+//! ├── AgenticAttackExecutionAgent    — ReAct generate→attack→recover→reflect→adapt
+//! ├── SequentialAttackExecutionAgent — ReAct generate→attack→recover→finish
 //! └── ReflectionAgent       — agentic retry reflection
 //! ```
 
 pub mod analyze_endpoint;
 pub mod attack_execution;
 pub mod attack_plan;
+pub mod endpoint_recovery;
 pub mod error;
 pub mod generate_prompt;
 pub mod judge_coordinator;
 pub mod judge_workers;
+pub mod memory;
 pub mod recommend;
 pub mod react;
 pub mod reflection;
+pub mod sequential_attack_execution;
 pub mod summary;
 pub mod supervisor;
 pub mod types;
 
 pub use analyze_endpoint::{AnalyzeEndpointAgent, AnalyzeEndpointAgentOutcome};
 pub use attack_execution::{
-    AttackAttemptObservation, AttackExecutionAgent, AttackExecutionLlms, AttackExecutionOutcome,
-    AttackExecutionRequest, AttackExecutionTools,
+    AgenticAttackExecutionAgent, AttackAttemptObservation, AttackExecutionLlms,
+    AttackExecutionOutcome, AttackExecutionRequest, AttackExecutionTools,
+};
+pub use endpoint_recovery::{
+    heuristic_recovery, observation_needs_recovery, EndpointPacing, RecoveryPlan,
+    DEFAULT_ATTACK_CONCURRENCY, DEFAULT_TIMEOUT_MS, MAX_ENDPOINT_RECOVERIES,
 };
 pub use attack_plan::{
     AdaptPlanOutcome, AdaptPlanRequest, AttackPlanAgent, AttackPlanAgentOutcome,
@@ -46,9 +54,16 @@ pub use judge_coordinator::{JudgeCoordinatorAgent, JudgeCoordinatorAgentOutcome}
 pub use judge_workers::{
     AttackerWorker, ClassifierWorker, JudgeWorker, JudgeWorkerOutcome,
 };
+pub use memory::{
+    AgentMemoryStore, LtmEntry, LtmWrite, MemoryContext, MemoryScopeType, StmEntry, StmRole,
+    StmWrite,
+};
 pub use recommend::{RecommendAgent, RecommendAgentOutcome};
 pub use react::{ReactActionKind, ReactArtifacts, ReactLlms, ReactRequest};
 pub use reflection::{ReflectionAgent, ReflectionOutcome, ReflectionRequest};
+pub use sequential_attack_execution::{
+    SequentialAttackExecutionAgent, SequentialAttackExecutionRequest,
+};
 pub use summary::{SummaryAgent, SummaryAgentOutcome, SummaryRequest};
 pub use supervisor::{SupervisorIntent, YazgDelegation, YazgSupervisor, YazgTurn};
 pub use types::{AgentEvent, AgentEventKind, AgentId};

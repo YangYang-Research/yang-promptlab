@@ -15,6 +15,10 @@ use crate::generate_prompt::{
     GeneratePromptAgent, GeneratePromptAgentOutcome, TechniquePromptContext,
 };
 use crate::judge_coordinator::{JudgeCoordinatorAgent, JudgeCoordinatorAgentOutcome};
+use crate::memory::{
+    load_memory_prompt_block, remember_ltm, remember_stm, AgentMemoryStore, LtmWrite,
+    MemoryContext, MemoryScopeType, StmRole, StmWrite,
+};
 use crate::recommend::{RecommendAgent, RecommendAgentOutcome};
 use crate::summary::{SummaryAgent, SummaryAgentOutcome, SummaryRequest};
 use crate::types::{AgentEvent, AgentId};
@@ -72,6 +76,10 @@ pub struct ReactRequest<'a> {
     pub judge_request: Option<&'a JudgeRequest>,
     /// Runtime/role pool for JudgeCoordinatorAgent workers.
     pub judge_engine: Option<&'a JudgeEngine>,
+    /// Optional host memory store (STM/LTM).
+    pub memory: Option<&'a dyn AgentMemoryStore>,
+    /// Session / entity scope for memory ops.
+    pub memory_ctx: MemoryContext,
     pub max_steps: usize,
 }
 
@@ -87,6 +95,8 @@ impl<'a> ReactRequest<'a> {
             summary_request: None,
             judge_request: None,
             judge_engine: None,
+            memory: None,
+            memory_ctx: MemoryContext::default(),
             max_steps: DEFAULT_MAX_STEPS,
         }
     }
@@ -131,6 +141,16 @@ impl<'a> ReactRequest<'a> {
         self
     }
 
+    pub fn with_memory(
+        mut self,
+        store: Option<&'a dyn AgentMemoryStore>,
+        ctx: MemoryContext,
+    ) -> Self {
+        self.memory = store;
+        self.memory_ctx = ctx;
+        self
+    }
+
     pub fn with_max_steps(mut self, max_steps: usize) -> Self {
         self.max_steps = max_steps.max(1);
         self
@@ -155,8 +175,28 @@ pub async fn run_react(
         "ReAct loop started",
     ));
 
+    remember_stm(
+        request.memory,
+        &request.memory_ctx,
+        StmWrite {
+            agent_id: AgentId::Yazg,
+            role: StmRole::User,
+            memory_key: Some("goal".into()),
+            content: request.goal.clone(),
+            content_json: None,
+            importance: 0.7,
+        },
+    )
+    .await;
+
+    let memory_block =
+        load_memory_prompt_block(request.memory, &request.memory_ctx, AgentId::Yazg).await;
+
     let mut transcript = String::new();
     transcript.push_str(&format!("Goal:\n{}\n\n", request.goal.trim()));
+    if !memory_block.is_empty() {
+        transcript.push_str(&memory_block);
+    }
     transcript.push_str(&format_context(
         request.profile,
         request.capability_probe.is_some(),
@@ -211,7 +251,21 @@ pub async fn run_react(
                     .reply
                     .filter(|r| !r.trim().is_empty())
                     .unwrap_or_else(|| thought.clone());
-                artifacts.final_reply = reply;
+                artifacts.final_reply = reply.clone();
+                remember_stm(
+                    request.memory,
+                    &request.memory_ctx,
+                    StmWrite {
+                        agent_id: AgentId::Yazg,
+                        role: StmRole::Assistant,
+                        memory_key: Some("reply".into()),
+                        content: reply,
+                        content_json: None,
+                        importance: 0.6,
+                    },
+                )
+                .await;
+                persist_react_ltm(&request, &artifacts).await;
                 artifacts.events.push(AgentEvent::completed(
                     AgentId::Yazg,
                     "ReAct finished",
@@ -222,30 +276,36 @@ pub async fn run_react(
                 let observation =
                     execute_analyze(&request, llms.analyze, &mut artifacts).await?;
                 push_observation(&mut transcript, &mut artifacts, &observation);
+                remember_observation(&request, AgentId::AnalyzeEndpoint, &observation).await;
             }
             ReactActionKind::AttackPlan => {
                 let observation =
                     execute_attack_plan(&request, llms.plan, &mut artifacts).await?;
                 push_observation(&mut transcript, &mut artifacts, &observation);
+                remember_observation(&request, AgentId::AttackPlan, &observation).await;
             }
             ReactActionKind::GeneratePrompt => {
                 let observation =
                     execute_generate_prompt(&request, llms.prompt, &mut artifacts).await?;
                 push_observation(&mut transcript, &mut artifacts, &observation);
+                remember_observation(&request, AgentId::GeneratePrompt, &observation).await;
             }
             ReactActionKind::Recommend => {
                 let observation =
                     execute_recommend(&request, llms.recommend, &mut artifacts).await?;
                 push_observation(&mut transcript, &mut artifacts, &observation);
+                remember_observation(&request, AgentId::Recommend, &observation).await;
             }
             ReactActionKind::Summary => {
                 let observation =
                     execute_summary(&request, llms.summary, &mut artifacts).await?;
                 push_observation(&mut transcript, &mut artifacts, &observation);
+                remember_observation(&request, AgentId::Summary, &observation).await;
             }
             ReactActionKind::Judge => {
                 let observation = execute_judge(&request, &mut artifacts).await?;
                 push_observation(&mut transcript, &mut artifacts, &observation);
+                remember_observation(&request, AgentId::JudgeCoordinator, &observation).await;
             }
         }
 
@@ -262,7 +322,185 @@ pub async fn run_react(
     if artifacts.final_reply.trim().is_empty() {
         artifacts.final_reply = summarize_partial(&artifacts);
     }
+    persist_react_ltm(&request, &artifacts).await;
     Ok(artifacts)
+}
+
+async fn remember_observation(
+    request: &ReactRequest<'_>,
+    agent_id: AgentId,
+    observation: &str,
+) {
+    remember_stm(
+        request.memory,
+        &request.memory_ctx,
+        StmWrite {
+            agent_id,
+            role: StmRole::Observation,
+            memory_key: Some("observation".into()),
+            content: observation.to_string(),
+            content_json: None,
+            importance: 0.55,
+        },
+    )
+    .await;
+}
+
+async fn persist_react_ltm(request: &ReactRequest<'_>, artifacts: &ReactArtifacts) {
+    let (scope_type, scope_id) = request.memory_ctx.primary_scope();
+
+    if let Some(analyze) = artifacts.analyze.as_ref() {
+        remember_ltm(
+            request.memory,
+            LtmWrite {
+                agent_id: AgentId::AnalyzeEndpoint,
+                scope_type,
+                scope_id: scope_id.clone(),
+                memory_key: "target.verification".into(),
+                content: format!(
+                    "verified status={} provider={} model={}",
+                    analyze.verification.status_code,
+                    analyze.verification.provider,
+                    analyze.verification.model.as_deref().unwrap_or("unknown")
+                ),
+                content_json: Some(serde_json::json!({
+                    "status_code": analyze.verification.status_code,
+                    "provider": analyze.verification.provider,
+                    "model": analyze.verification.model,
+                })),
+                importance: 0.85,
+            },
+        )
+        .await;
+    }
+
+    if let Some(plan) = artifacts.plan.as_ref() {
+        remember_ltm(
+            request.memory,
+            LtmWrite {
+                agent_id: AgentId::AttackPlan,
+                scope_type,
+                scope_id: scope_id.clone(),
+                memory_key: "target.attack_plan".into(),
+                content: format!(
+                    "profile={} categories={} source={}",
+                    plan.plan.profile_id,
+                    plan.plan.categories.len(),
+                    plan.plan.planner_source
+                ),
+                content_json: Some(serde_json::json!({
+                    "profile_id": plan.plan.profile_id,
+                    "recommended_profile_id": plan.plan.recommended_profile_id,
+                    "categories": plan.plan.categories.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
+                    "planner_source": plan.plan.planner_source,
+                })),
+                importance: 0.9,
+            },
+        )
+        .await;
+    }
+
+    if let Some(recommend) = artifacts.recommend.as_ref() {
+        let scope = if let Some(scan_id) = request.memory_ctx.scan_id.as_ref() {
+            (MemoryScopeType::Scan, scan_id.clone())
+        } else {
+            (scope_type, scope_id.clone())
+        };
+        remember_ltm(
+            request.memory,
+            LtmWrite {
+                agent_id: AgentId::Recommend,
+                scope_type: scope.0,
+                scope_id: scope.1,
+                memory_key: "scan.recommendations".into(),
+                content: truncate(&recommend.bundle.overview, 400),
+                content_json: Some(serde_json::json!({
+                    "overview": recommend.bundle.overview,
+                    "count": recommend.bundle.recommendations.len(),
+                })),
+                importance: 0.8,
+            },
+        )
+        .await;
+    }
+
+    if let Some(summary) = artifacts.summary.as_ref() {
+        let (st, sid) = match summary.kind.as_str() {
+            "project" => {
+                if let Some(project_id) = request.memory_ctx.project_id.as_ref() {
+                    (MemoryScopeType::Project, project_id.clone())
+                } else {
+                    (scope_type, scope_id.clone())
+                }
+            }
+            "scan" => {
+                if let Some(scan_id) = request.memory_ctx.scan_id.as_ref() {
+                    (MemoryScopeType::Scan, scan_id.clone())
+                } else {
+                    (scope_type, scope_id.clone())
+                }
+            }
+            _ => (scope_type, scope_id.clone()),
+        };
+        remember_ltm(
+            request.memory,
+            LtmWrite {
+                agent_id: AgentId::Summary,
+                scope_type: st,
+                scope_id: sid,
+                memory_key: format!("summary.{}", summary.kind),
+                content: truncate(&summary.bundle.overview, 400),
+                content_json: Some(serde_json::json!({
+                    "kind": summary.kind,
+                    "overview": summary.bundle.overview,
+                    "highlights": summary.bundle.highlights.len(),
+                })),
+                importance: 0.75,
+            },
+        )
+        .await;
+    }
+
+    if let Some(gen) = artifacts.generate_prompt.as_ref() {
+        remember_ltm(
+            request.memory,
+            LtmWrite {
+                agent_id: AgentId::GeneratePrompt,
+                scope_type: MemoryScopeType::Global,
+                scope_id: String::new(),
+                memory_key: format!("factory.{}", gen.technique_id),
+                content: truncate(&gen.content, 400),
+                content_json: Some(serde_json::json!({
+                    "technique_id": gen.technique_id,
+                    "chars": gen.content.chars().count(),
+                })),
+                importance: 0.65,
+            },
+        )
+        .await;
+    }
+
+    if let Some(judge) = artifacts.judge.as_ref() {
+        remember_ltm(
+            request.memory,
+            LtmWrite {
+                agent_id: AgentId::JudgeCoordinator,
+                scope_type,
+                scope_id,
+                memory_key: "judge.last_verdict".into(),
+                content: format!(
+                    "vulnerable={} confidence={:.2}",
+                    judge.verdict.vulnerable, judge.verdict.confidence
+                ),
+                content_json: Some(serde_json::json!({
+                    "vulnerable": judge.verdict.vulnerable,
+                    "confidence": judge.verdict.confidence,
+                })),
+                importance: 0.7,
+            },
+        )
+        .await;
+    }
 }
 
 fn push_observation(

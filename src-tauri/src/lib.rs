@@ -1,5 +1,6 @@
 //! PromptLab desktop application library.
 
+pub mod agent_memory;
 pub mod attack_catalog;
 pub mod commands;
 pub mod db;
