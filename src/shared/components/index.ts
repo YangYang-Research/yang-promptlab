@@ -1,4 +1,5 @@
 export { ActionsDropdown, type ActionsDropdownItem } from "./ActionsDropdown";
+export { scanOpenActionIcon } from "./actionIcons";
 export { Badge, SeverityBadge, StatusBadge, FindingStatusBadge, TargetScanStatusBadge, AuthTypeBadge } from "./Badge";
 export { Button } from "./Button";
 export { Card, StatCard } from "./Card";
@@ -6,7 +7,35 @@ export { ConnectivityStatus, connectivityStatusVariant } from "./ConnectivitySta
 export { ContentToolbar, PageSizeSelect, Pagination } from "./Pagination";
 export { DataTable } from "./DataTable";
 export { EmptyState } from "./EmptyState";
-export { IconAi, IconArrowRight, IconBack, IconCloud, IconDiscovery, IconDownload, IconExternalLink, IconImport, IconList, IconMore, IconOnDevice, IconRefresh, IconTable, IconWarning } from "./Icons";
+export {
+  IconAi,
+  IconArrowRight,
+  IconBack,
+  IconCheck,
+  IconCloud,
+  IconDiscovery,
+  IconDownload,
+  IconEdit,
+  IconExternalLink,
+  IconFolder,
+  IconImport,
+  IconInfo,
+  IconList,
+  IconMore,
+  IconOnDevice,
+  IconPause,
+  IconPlay,
+  IconPlus,
+  IconProgress,
+  IconRefresh,
+  IconRobot,
+  IconSend,
+  IconStatus,
+  IconStop,
+  IconTable,
+  IconTrash,
+  IconWarning,
+} from "./Icons";
 export { IconButton } from "./IconButton";
 export { RefreshButton } from "./RefreshButton";
 export { ListCard } from "./ListCard";

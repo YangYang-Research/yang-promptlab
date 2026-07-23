@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { IconMore } from "./Icons";
@@ -8,6 +8,7 @@ export type ActionsDropdownItem = {
   id: string;
   label: string;
   onClick: () => void;
+  icon?: ReactNode;
   tone?: "default" | "danger";
   disabled?: boolean;
 };
@@ -128,7 +129,12 @@ export function ActionsDropdown({ label = "Actions", items, disabled }: ActionsD
                   item.onClick();
                 }}
               >
-                {item.label}
+                {item.icon ? (
+                  <span className="actions-dropdown__item-icon" aria-hidden="true">
+                    {item.icon}
+                  </span>
+                ) : null}
+                <span className="actions-dropdown__item-label">{item.label}</span>
               </button>
             ))}
           </div>,

@@ -6,7 +6,7 @@ import {
   reportExportLabel,
   type ReportExportFormat,
 } from "@/features/reports/reportDownloads";
-import { Button } from "@/shared/components";
+import { Button, IconDownload } from "@/shared/components";
 import { useToast } from "@/shared/notifications";
 
 const EXPORT_FORMATS: ReportExportFormat[] = ["html", "pdf", "sarif", "csv"];
@@ -148,7 +148,12 @@ export function ReportExportDropdown({
                 disabled={exporting !== null}
                 onClick={() => void handleExport(format)}
               >
-                {exporting === format ? "Generating…" : reportExportLabel(format)}
+                <span className="actions-dropdown__item-icon" aria-hidden="true">
+                  <IconDownload />
+                </span>
+                <span className="actions-dropdown__item-label">
+                  {exporting === format ? "Generating…" : reportExportLabel(format)}
+                </span>
               </button>
             ))}
           </div>,

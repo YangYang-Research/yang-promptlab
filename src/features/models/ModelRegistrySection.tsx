@@ -6,6 +6,9 @@ import {
   ContentToolbar,
   DataTable,
   EmptyState,
+  IconCheck,
+  IconEdit,
+  IconTrash,
   ListCard,
   Pagination,
 } from "@/shared/components";
@@ -122,18 +125,21 @@ export function ModelRegistrySection({
           {
             id: "edit",
             label: "Edit",
+            icon: <IconEdit />,
             onClick: () => onEdit(model),
             disabled: !thirdParty || actionsDisabled(model.id),
           },
           {
             id: "verify",
             label: "Verify",
+            icon: <IconCheck />,
             onClick: () => onTest(model),
             disabled: testRemoveDisabled,
           },
           {
             id: "remove",
             label: "Remove",
+            icon: <IconTrash />,
             onClick: () => onRemove(model.id),
             tone: "danger",
             disabled: testRemoveDisabled,

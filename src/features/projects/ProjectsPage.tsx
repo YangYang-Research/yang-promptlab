@@ -11,6 +11,8 @@ import {
   ContentToolbar,
   DataTable,
   EmptyState,
+  IconEdit,
+  IconTrash,
   ListCard,
   PageHeader,
   Pagination,
@@ -110,11 +112,13 @@ export function ProjectsPage() {
       {
         id: "edit",
         label: "Edit Project",
+        icon: <IconEdit />,
         onClick: () => setEditingProject(project),
       },
       {
         id: "delete",
         label: "Delete Project",
+        icon: <IconTrash />,
         tone: "danger",
         disabled: deletingProjectId === project.id,
         onClick: () => void handleDelete(project),

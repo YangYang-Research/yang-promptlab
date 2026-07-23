@@ -11,6 +11,11 @@ import {
   ContentToolbar,
   DataTable,
   EmptyState,
+  IconArrowRight,
+  IconEdit,
+  IconProgress,
+  IconRefresh,
+  IconTrash,
   ListCard,
   PageHeader,
   PageLoadingSkeleton,
@@ -249,8 +254,19 @@ export function ProjectDetailsPage() {
             </Button>
             <ActionsDropdown
               items={[
-                { id: "edit", label: "Edit Project", onClick: () => setEditOpen(true) },
-                { id: "delete", label: "Delete Project", onClick: () => void handleDelete(), tone: "danger" },
+                {
+                  id: "edit",
+                  label: "Edit Project",
+                  icon: <IconEdit />,
+                  onClick: () => setEditOpen(true),
+                },
+                {
+                  id: "delete",
+                  label: "Delete Project",
+                  icon: <IconTrash />,
+                  onClick: () => void handleDelete(),
+                  tone: "danger",
+                },
               ]}
             />
           </div>
@@ -546,6 +562,7 @@ function TargetActionsDropdown({
       scanItems.push({
         id: "view-scan",
         label: "View Scan Progress",
+        icon: <IconProgress />,
         onClick: () =>
           onNavigate(buildScanProgressUrl(projectId, action.scanId, target.id)),
       });
@@ -553,6 +570,7 @@ function TargetActionsDropdown({
       scanItems.push({
         id: "retry",
         label: "Retry Scan",
+        icon: <IconRefresh />,
         onClick: () =>
           onNavigate(
             buildScanWizardUrl(projectId, target.id, {
@@ -565,6 +583,7 @@ function TargetActionsDropdown({
       scanItems.push({
         id: "setup",
         label: "Continue Setup",
+        icon: <IconArrowRight />,
         onClick: () =>
           onNavigate(
             buildScanWizardUrl(projectId, target.id, {
@@ -578,6 +597,7 @@ function TargetActionsDropdown({
     scanItems.push({
       id: "delete",
       label: "Delete Target",
+      icon: <IconTrash />,
       tone: "danger",
       disabled: deleting,
       onClick: () => onDelete(target),

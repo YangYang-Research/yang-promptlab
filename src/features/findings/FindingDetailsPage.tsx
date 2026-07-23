@@ -8,6 +8,8 @@ import {
   Card,
   EmptyState,
   FindingStatusBadge,
+  IconStatus,
+  IconTrash,
   PageHeader,
   PageLoadingSkeleton,
   SeverityBadge,
@@ -74,12 +76,14 @@ export function FindingDetailsPage() {
       {
         id: "update-status",
         label: "Update status",
+        icon: <IconStatus />,
         disabled: busy !== null,
         onClick: () => setStatusModalOpen(true),
       },
       {
         id: "delete",
         label: "Delete finding",
+        icon: <IconTrash />,
         tone: "danger",
         disabled: busy !== null,
         onClick: () => void handleDelete(),

@@ -12,9 +12,14 @@ import {
   EmptyState,
   IconButton,
   IconDownload,
+  IconPause,
+  IconPlay,
+  IconStop,
+  IconTrash,
   PageHeader,
   Pagination,
   ProgressBar,
+  scanOpenActionIcon,
   SeverityBadge,
   StatusBadge,
   YazgBadge,
@@ -282,16 +287,18 @@ export function ScanDetailsPage() {
     const detailsPath = `/scans/${scan.id}`;
 
     if (openPath !== detailsPath) {
+      const openLabel =
+        scan.status === "draft"
+          ? "Continue Setup"
+          : isLiveScanStatus(effectiveStatus)
+            ? "View Scan Progress"
+            : isRetryableScanStatus(effectiveStatus)
+              ? "Retry Scan"
+              : "Open Scan";
       items.push({
         id: "open",
-        label:
-          scan.status === "draft"
-            ? "Continue Setup"
-            : isLiveScanStatus(effectiveStatus)
-              ? "View Scan Progress"
-              : isRetryableScanStatus(effectiveStatus)
-                ? "Retry Scan"
-                : "Open Scan",
+        label: openLabel,
+        icon: scanOpenActionIcon(openLabel),
         onClick: openScanAction,
       });
     }
@@ -300,6 +307,7 @@ export function ScanDetailsPage() {
       items.push({
         id: "pause",
         label: "Pause Scan",
+        icon: <IconPause />,
         disabled: controlPending,
         onClick: () => void runControl("pause"),
       });
@@ -308,6 +316,7 @@ export function ScanDetailsPage() {
       items.push({
         id: "resume",
         label: "Resume Scan",
+        icon: <IconPlay />,
         disabled: controlPending,
         onClick: () => void runControl("resume"),
       });
@@ -320,6 +329,7 @@ export function ScanDetailsPage() {
       items.push({
         id: "stop",
         label: "Stop Scan",
+        icon: <IconStop />,
         disabled: controlPending,
         onClick: () => void runControl("stop"),
       });
@@ -329,6 +339,7 @@ export function ScanDetailsPage() {
       items.push({
         id: "export-scan",
         label: "Export Scan",
+        icon: <IconDownload />,
         disabled: exportConfigPending,
         onClick: () => void handleExportScanConfig(),
       });
@@ -337,6 +348,7 @@ export function ScanDetailsPage() {
     items.push({
       id: "delete",
       label: "Delete Scan",
+      icon: <IconTrash />,
       tone: "danger",
       disabled: deletePending,
       onClick: () => void handleDeleteScan(),

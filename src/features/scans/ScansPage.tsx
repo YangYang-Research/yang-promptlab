@@ -10,9 +10,14 @@ import {
   ContentToolbar,
   DataTable,
   EmptyState,
+  IconPause,
+  IconPlay,
+  IconStop,
+  IconTrash,
   PageHeader,
   Pagination,
   RefreshButton,
+  scanOpenActionIcon,
   StatusBadge,
 } from "@/shared/components";
 import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
@@ -168,17 +173,20 @@ export function ScansPage() {
 
   const buildScanActionItems = useCallback(
     (scan: ScanRun): ActionsDropdownItem[] => {
+      const openLabel =
+        scan.status === "draft"
+          ? "Continue Setup"
+          : isLiveScanStatus(effectiveScanStatus(scan))
+            ? "View Scan Progress"
+            : isRetryableScanStatus(effectiveScanStatus(scan))
+              ? "Retry Scan"
+              : "View Scan Details";
+
       const items: ActionsDropdownItem[] = [
         {
           id: "open",
-          label:
-            scan.status === "draft"
-              ? "Continue Setup"
-              : isLiveScanStatus(effectiveScanStatus(scan))
-                ? "View Scan Progress"
-                : isRetryableScanStatus(effectiveScanStatus(scan))
-                  ? "Retry Scan"
-                  : "View Scan Details",
+          label: openLabel,
+          icon: scanOpenActionIcon(openLabel),
           onClick: () => openScanAction(scan),
         },
       ];
@@ -187,6 +195,7 @@ export function ScansPage() {
         items.push({
           id: "pause",
           label: "Pause Scan",
+          icon: <IconPause />,
           disabled: controlPending === scan.id,
           onClick: () => void runControl(scan.id, "pause"),
         });
@@ -195,6 +204,7 @@ export function ScansPage() {
         items.push({
           id: "resume",
           label: "Resume Scan",
+          icon: <IconPlay />,
           disabled: controlPending === scan.id,
           onClick: () => void runControl(scan.id, "resume"),
         });
@@ -207,6 +217,7 @@ export function ScansPage() {
         items.push({
           id: "stop",
           label: "Stop Scan",
+          icon: <IconStop />,
           disabled: controlPending === scan.id,
           onClick: () => void runControl(scan.id, "stop"),
         });
@@ -215,6 +226,7 @@ export function ScansPage() {
       items.push({
         id: "delete",
         label: "Delete Scan",
+        icon: <IconTrash />,
         tone: "danger",
         disabled: deletingScanId === scan.id,
         onClick: () => void handleDeleteScan(scan),

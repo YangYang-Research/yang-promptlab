@@ -12,6 +12,11 @@ import {
   ContentToolbar,
   DataTable,
   EmptyState,
+  IconArrowRight,
+  IconFolder,
+  IconPlus,
+  IconProgress,
+  IconTrash,
   ListCard,
   PageHeader,
   PageLoadingSkeleton,
@@ -161,6 +166,7 @@ export function TargetDetailsPage() {
       items.push({
         id: "view-progress",
         label: "View Scan Progress",
+        icon: <IconProgress />,
         onClick: () =>
           navigate(buildScanProgressUrl(target.projectId, scanAction.scanId, target.id)),
       });
@@ -169,12 +175,14 @@ export function TargetDetailsPage() {
       items.push({
         id: "new-scan",
         label: "New Scan",
+        icon: <IconPlus />,
         onClick: startNewScan,
       });
     } else if (scanAction.kind === "setup") {
       items.push({
         id: "continue-setup",
         label: "Continue Setup",
+        icon: <IconArrowRight />,
         onClick: () =>
           navigate(
             buildScanWizardUrl(target.projectId, target.id, {
@@ -189,6 +197,7 @@ export function TargetDetailsPage() {
       items.push({
         id: "view-project",
         label: "View Project",
+        icon: <IconFolder />,
         onClick: () => navigate(`/projects/${project.id}`),
       });
     }
@@ -196,6 +205,7 @@ export function TargetDetailsPage() {
     items.push({
       id: "delete",
       label: "Delete Target",
+      icon: <IconTrash />,
       tone: "danger",
       disabled: deleting,
       onClick: () => void handleDeleteTarget(),

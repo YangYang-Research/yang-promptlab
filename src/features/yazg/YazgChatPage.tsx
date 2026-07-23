@@ -1,10 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  ActionsDropdown,
   Button,
   Card,
+  IconButton,
+  IconEdit,
+  IconInfo,
+  IconPlus,
+  IconRobot,
+  IconSend,
+  IconTrash,
+  Modal,
   PageHeader,
   PageLoadingSkeleton,
+  SearchInput,
 } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
 import { useAiInferenceRoute } from "@/shared/hooks/useAiInferenceRoute";
@@ -46,16 +56,6 @@ function newId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function welcomeMessage(): ChatMessage {
-  return {
-    id: newId(),
-    role: "yazg",
-    text: "I am Yazg, your AI Assistant. Ask me how to work across the app.",
-    events: [{ agent: "yazg", kind: "info", message: "Supervisor ready" }],
-    at: Date.now(),
-  };
-}
-
 function createThread(): ChatThread {
   const now = Date.now();
   return {
@@ -63,13 +63,18 @@ function createThread(): ChatThread {
     title: "New chat",
     createdAt: now,
     updatedAt: now,
-    messages: [welcomeMessage()],
+    messages: [],
   };
 }
 
 function createStore(): ChatStore {
   const thread = createThread();
   return { threads: [thread], activeThreadId: thread.id };
+}
+
+/** Empty draft: no user turns yet. */
+function isBlankThread(thread: ChatThread): boolean {
+  return !thread.messages.some((message) => message.role === "user");
 }
 
 function titleFromPrompt(text: string): string {
@@ -141,12 +146,20 @@ function loadStore(): ChatStore {
         }))
       : [];
     if (threads.length === 0) return createStore();
+    const blanks = threads.filter(isBlankThread);
+    const conversations = threads.filter((thread) => !isBlankThread(thread));
+    const blank =
+      blanks.find((thread) => thread.id === parsed.activeThreadId) ??
+      blanks.sort((a, b) => b.updatedAt - a.updatedAt)[0] ??
+      null;
+    const normalized = blank ? [blank, ...conversations] : conversations;
+    if (normalized.length === 0) return createStore();
     const activeThreadId =
       typeof parsed.activeThreadId === "string" &&
-      threads.some((thread) => thread.id === parsed.activeThreadId)
+      normalized.some((thread) => thread.id === parsed.activeThreadId)
         ? parsed.activeThreadId
-        : threads[0].id;
-    return { threads, activeThreadId };
+        : normalized[0].id;
+    return { threads: normalized, activeThreadId };
   } catch {
     return createStore();
   }
@@ -178,6 +191,10 @@ export function YazgChatPage() {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [store, setStore] = useState<ChatStore>(() => loadStore());
+  const [renameThreadId, setRenameThreadId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [infoThreadId, setInfoThreadId] = useState<string | null>(null);
+  const [historyQuery, setHistoryQuery] = useState("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const activeThread = useMemo(() => {
@@ -189,10 +206,18 @@ export function YazgChatPage() {
   }, [store]);
 
   const historyThreads = useMemo(() => {
+    const query = historyQuery.trim().toLowerCase();
     return store.threads
       .slice()
-      .sort((a, b) => b.updatedAt - a.updatedAt);
-  }, [store.threads]);
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .filter((thread) => {
+        if (!query) return true;
+        if (thread.title.toLowerCase().includes(query)) return true;
+        return thread.messages.some((message) =>
+          message.text.toLowerCase().includes(query),
+        );
+      });
+  }, [historyQuery, store.threads]);
 
   useEffect(() => {
     void healthCheck()
@@ -228,11 +253,25 @@ export function YazgChatPage() {
 
   const startNewChat = () => {
     if (busy) return;
-    const thread = createThread();
-    setStore((prev) => ({
-      activeThreadId: thread.id,
-      threads: [thread, ...prev.threads],
-    }));
+    setStore((prev) => {
+      const blanks = prev.threads.filter(isBlankThread);
+      const conversations = prev.threads.filter((thread) => !isBlankThread(thread));
+      if (blanks.length > 0) {
+        const keep =
+          blanks.find((thread) => thread.id === prev.activeThreadId) ??
+          blanks.slice().sort((a, b) => b.updatedAt - a.updatedAt)[0];
+        const refreshed = { ...keep, updatedAt: Date.now() };
+        return {
+          activeThreadId: refreshed.id,
+          threads: [refreshed, ...conversations],
+        };
+      }
+      const thread = createThread();
+      return {
+        activeThreadId: thread.id,
+        threads: [thread, ...conversations],
+      };
+    });
     setDraft("");
   };
 
@@ -242,11 +281,68 @@ export function YazgChatPage() {
     setDraft("");
   };
 
-  const clearHistory = () => {
+  const openRename = (threadId: string) => {
+    const thread = store.threads.find((item) => item.id === threadId);
+    if (!thread) return;
+    setRenameThreadId(threadId);
+    setRenameDraft(thread.title);
+  };
+
+  const closeRename = () => {
+    setRenameThreadId(null);
+    setRenameDraft("");
+  };
+
+  const openInfo = (threadId: string) => {
+    setInfoThreadId(threadId);
+  };
+
+  const closeInfo = () => {
+    setInfoThreadId(null);
+  };
+
+  const infoThread = useMemo(
+    () => store.threads.find((thread) => thread.id === infoThreadId) ?? null,
+    [store.threads, infoThreadId],
+  );
+
+  const submitRename = () => {
+    if (!renameThreadId) return;
+    const nextTitle = renameDraft.trim().replace(/\s+/g, " ");
+    if (!nextTitle) return;
+    setStore((prev) => ({
+      ...prev,
+      threads: prev.threads.map((thread) =>
+        thread.id === renameThreadId
+          ? { ...thread, title: nextTitle, updatedAt: Date.now() }
+          : thread,
+      ),
+    }));
+    closeRename();
+  };
+
+  const deleteThread = (threadId: string) => {
     if (busy) return;
-    const thread = createThread();
-    setStore({ threads: [thread], activeThreadId: thread.id });
-    setDraft("");
+    setStore((prev) => {
+      const remaining = prev.threads.filter((thread) => thread.id !== threadId);
+      if (remaining.length === 0) {
+        const thread = createThread();
+        return { threads: [thread], activeThreadId: thread.id };
+      }
+      const activeThreadId =
+        prev.activeThreadId === threadId
+          ? remaining
+              .slice()
+              .sort((a, b) => b.updatedAt - a.updatedAt)[0].id
+          : prev.activeThreadId;
+      return { threads: remaining, activeThreadId };
+    });
+    if (renameThreadId === threadId) {
+      closeRename();
+    }
+    if (infoThreadId === threadId) {
+      closeInfo();
+    }
   };
 
   const send = async (message: string, intent: YazgIntent = "auto") => {
@@ -401,64 +497,97 @@ export function YazgChatPage() {
 
       <div className="yazg-chat-page__layout">
         <Card className="detail-section yazg-chat-page__sidebar">
+          <SearchInput
+            value={historyQuery}
+            onChange={setHistoryQuery}
+            placeholder="Search recents…"
+          />
+
           <div className="yazg-chat-page__history-header">
-            <h2 className="detail-section__title">History</h2>
+            <h2 className="detail-section__title">Recents</h2>
             <div className="yazg-chat-page__history-actions">
-              <Button variant="secondary" size="sm" disabled={busy} onClick={startNewChat}>
-                New chat
-              </Button>
-              <Button
-                variant="ghost"
+              <IconButton
+                ariaLabel="New chat"
                 size="sm"
-                disabled={busy || historyThreads.length === 0}
-                onClick={clearHistory}
+                disabled={busy}
+                onClick={startNewChat}
               >
-                Clear
-              </Button>
+                <IconPlus />
+              </IconButton>
             </div>
           </div>
 
-          {historyThreads.length === 0 ? (
+          {store.threads.length === 0 ? (
             <p className="text-muted text-sm">No conversations yet.</p>
+          ) : historyThreads.length === 0 ? (
+            <p className="text-muted text-sm">No matching conversations.</p>
           ) : (
-            <ul className="yazg-chat-page__history-list" aria-label="Conversation history">
+            <ul className="yazg-chat-page__history-list" aria-label="Recent conversations">
               {historyThreads.map((thread) => {
-                const lastUser = [...thread.messages]
-                  .reverse()
-                  .find((msg) => msg.role === "user");
                 return (
                   <li key={thread.id}>
-                    <button
-                      type="button"
+                    <div
                       className={`yazg-chat-page__history-item${
                         store.activeThreadId === thread.id
                           ? " yazg-chat-page__history-item--active"
                           : ""
                       }`}
-                      onClick={() => selectThread(thread.id)}
                     >
-                      <span className="yazg-chat-page__history-preview">
-                        {previewText(thread.title)}
-                      </span>
-                      <span className="yazg-chat-page__history-time">
-                        {lastUser
-                          ? new Date(thread.updatedAt).toLocaleString()
-                          : "Just started"}
-                      </span>
-                    </button>
+                      <button
+                        type="button"
+                        className="yazg-chat-page__history-main"
+                        onClick={() => selectThread(thread.id)}
+                      >
+                        <span className="yazg-chat-page__history-preview">
+                          {previewText(thread.title)}
+                        </span>
+                      </button>
+                      <div className="yazg-chat-page__history-menu">
+                        <ActionsDropdown
+                          label={`Options for ${thread.title}`}
+                          disabled={busy}
+                          items={[
+                            {
+                              id: "info",
+                              label: "Info",
+                              icon: <IconInfo />,
+                              onClick: () => openInfo(thread.id),
+                            },
+                            {
+                              id: "rename",
+                              label: "Rename",
+                              icon: <IconEdit />,
+                              onClick: () => openRename(thread.id),
+                            },
+                            {
+                              id: "delete",
+                              label: "Delete",
+                              icon: <IconTrash />,
+                              tone: "danger",
+                              onClick: () => deleteThread(thread.id),
+                            },
+                          ]}
+                        />
+                      </div>
+                    </div>
                   </li>
                 );
               })}
             </ul>
           )}
-
-          <p className="detail-section__hint">
-            Each history item is one conversation. Use New chat to start another.
-          </p>
         </Card>
 
         <Card className="detail-section yazg-chat-page__thread">
           <div className="yazg-chat-page__messages" role="log" aria-live="polite">
+            {(activeThread?.messages ?? []).length === 0 && !busy ? (
+              <div className="yazg-chat-page__empty">
+                <p className="yazg-chat-page__empty-title">
+                  Hello, I am Yazg
+                  <IconRobot className="yazg-chat-page__empty-icon" />
+                </p>
+                <p className="yazg-chat-page__empty-hint">How can I help you today?</p>
+              </div>
+            ) : null}
             {(activeThread?.messages ?? []).map((msg) => (
               <article
                 key={msg.id}
@@ -472,17 +601,28 @@ export function YazgChatPage() {
                 </header>
                 <p className="yazg-chat-bubble__text">{msg.text}</p>
                 {msg.events && msg.events.length > 0 ? (
-                  <ul className="yazg-chat-events">
-                    {msg.events.map((event, index) => (
-                      <li key={`${msg.id}-${index}`} className="yazg-chat-events__item">
-                        <span className="yazg-chat-events__agent">
-                          {event.agent}
+                  <>
+                    <hr className="yazg-chat-bubble__divider" />
+                    <details className="yazg-chat-thinking">
+                      <summary className="yazg-chat-thinking__summary">
+                        Thinking
+                        <span className="yazg-chat-thinking__count">
+                          {msg.events.length}
                         </span>
-                        <span className="yazg-chat-events__kind">{event.kind}</span>
-                        <span className="yazg-chat-events__msg">{event.message}</span>
-                      </li>
-                    ))}
-                  </ul>
+                      </summary>
+                      <ul className="yazg-chat-events">
+                        {msg.events.map((event, index) => (
+                          <li key={`${msg.id}-${index}`} className="yazg-chat-events__item">
+                            <span className="yazg-chat-events__agent">
+                              {event.agent}
+                            </span>
+                            <span className="yazg-chat-events__kind">{event.kind}</span>
+                            <span className="yazg-chat-events__msg">{event.message}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  </>
                 ) : null}
               </article>
             ))}
@@ -492,37 +632,119 @@ export function YazgChatPage() {
             <div ref={bottomRef} />
           </div>
 
-          <form
-            className="yazg-chat-page__composer"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void send(draft, "auto");
-            }}
-          >
-            <textarea
-              className="yazg-chat-page__input"
-              rows={2}
-              placeholder="Message Yazg…"
-              value={draft}
-              disabled={!backendConnected || busy}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  void send(draft, "auto");
-                }
+          <div className="yazg-chat-page__composer-wrap">
+            <form
+              className="yazg-chat-page__composer"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void send(draft, "auto");
               }}
-            />
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={!backendConnected || busy || !draft.trim()}
             >
-              Send
-            </Button>
-          </form>
+              <div className="yazg-chat-page__input-shell">
+                <textarea
+                  className="yazg-chat-page__input"
+                  rows={1}
+                  placeholder="Ask me anything"
+                  value={draft}
+                  disabled={!backendConnected || busy}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      void send(draft, "auto");
+                    }
+                  }}
+                />
+                <IconButton
+                  type="submit"
+                  ariaLabel="Send message"
+                  variant="primary"
+                  size="sm"
+                  disabled={!backendConnected || busy || !draft.trim()}
+                >
+                  <IconSend />
+                </IconButton>
+              </div>
+            </form>
+            <p className="yazg-chat-page__composer-hint">
+              Yazg is an AI and may make mistakes.
+            </p>
+          </div>
         </Card>
       </div>
+
+      <Modal
+        open={renameThreadId != null}
+        title="Rename conversation"
+        onClose={closeRename}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeRename}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!renameDraft.trim()}
+              onClick={submitRename}
+            >
+              Save
+            </Button>
+          </>
+        }
+      >
+        <label className="yazg-chat-page__rename-field">
+          <span className="yazg-chat-page__label">Title</span>
+          <input
+            className="yazg-chat-page__rename-input"
+            value={renameDraft}
+            autoFocus
+            maxLength={80}
+            onChange={(event) => setRenameDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                submitRename();
+              }
+            }}
+          />
+        </label>
+      </Modal>
+
+      <Modal
+        open={infoThread != null}
+        title="Conversation info"
+        onClose={closeInfo}
+        footer={
+          <Button variant="primary" onClick={closeInfo}>
+            Close
+          </Button>
+        }
+      >
+        {infoThread ? (
+          <dl className="yazg-chat-page__info-list">
+            <div>
+              <dt>Title</dt>
+              <dd>{infoThread.title}</dd>
+            </div>
+            <div>
+              <dt>Conversation ID</dt>
+              <dd className="mono text-sm">{infoThread.id}</dd>
+            </div>
+            <div>
+              <dt>Created</dt>
+              <dd>{new Date(infoThread.createdAt).toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Updated</dt>
+              <dd>{new Date(infoThread.updatedAt).toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Messages</dt>
+              <dd>{infoThread.messages.length}</dd>
+            </div>
+          </dl>
+        ) : null}
+      </Modal>
     </div>
   );
 }
