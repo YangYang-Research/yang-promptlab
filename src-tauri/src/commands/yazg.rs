@@ -79,6 +79,7 @@ fn turn_to_response(turn: YazgTurn) -> YazgChatResponse {
             SupervisorIntent::Recommend => "recommend".into(),
             SupervisorIntent::Summary => "summary".into(),
             SupervisorIntent::Judge => "judge".into(),
+            SupervisorIntent::ExecuteAttack => "execute_attack".into(),
         },
         events: turn.events.into_iter().map(event_dto).collect(),
         verified: turn.verified,
@@ -166,7 +167,8 @@ pub async fn yazg_chat_op(
         | YazgDelegation::GeneratedPrompt { turn, .. }
         | YazgDelegation::Recommended { turn, .. }
         | YazgDelegation::Summarized { turn, .. }
-        | YazgDelegation::Judged { turn, .. } => turn,
+        | YazgDelegation::Judged { turn, .. }
+        | YazgDelegation::ExecutedAttack { turn, .. } => turn,
     };
     Ok(turn_to_response(turn))
 }

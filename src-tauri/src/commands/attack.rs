@@ -103,6 +103,7 @@ pub struct JudgedAttemptSummary {
     pub summary: String,
 }
 
+#[derive(Clone)]
 pub struct CategoryRunResult {
     pub attempts: usize,
     pub successes: u64,

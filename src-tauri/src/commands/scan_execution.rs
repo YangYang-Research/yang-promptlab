@@ -5,6 +5,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use aisec_agent::{
+    AttackAttemptObservation, AttackExecutionLlms, AttackExecutionRequest, AttackExecutionTools,
+    AdaptPlanOutcome, YazgSupervisor,
+};
 use aisec_attack::{AttackCategory, AttackPayload};
 use aisec_inference::InferenceRuntimeManager;
 use aisec_models::LocalModelManager;
@@ -15,6 +19,7 @@ use aisec_target_profile::{MutationLevel, PayloadGenerationStrategy, PayloadStra
 use aisec_target_profile::wizard_plan::{
     enabled_tests_for_category, estimate_scan_requests, ExecutionStrategy,
 };
+use async_trait::async_trait;
 use tauri::async_runtime::Mutex as AsyncMutex;
 use tracing::{info, warn};
 
@@ -27,6 +32,7 @@ use crate::commands::generator::{
     parse_generator_mode_optional, prompt_payloads_map, validate_payload_map_budget,
 };
 use crate::events::ScanProgressEmitter;
+use crate::inference_host::{is_inference_ready, YazgHostLlms};
 use crate::jobs::{bump_scan_progress, ScanProgress};
 use crate::session_auth::AttackRuntime;
 
@@ -178,27 +184,6 @@ fn category_payload_map(
 
 fn category_any_vulnerable(result: &CategoryRunResult) -> bool {
     result.judged.iter().any(|item| item.vulnerable)
-}
-
-fn reflection_allows_retry(
-    reflection_enabled: bool,
-    result: &CategoryRunResult,
-    emitter: &ScanProgressEmitter,
-) -> bool {
-    if !reflection_enabled {
-        return !category_any_vulnerable(result);
-    }
-    let vulnerable = category_any_vulnerable(result);
-    let high_confidence = result
-        .judged
-        .iter()
-        .any(|item| item.vulnerable && item.confidence >= 0.5);
-    if vulnerable && high_confidence {
-        emitter.info("Reflection: vulnerability confirmed — stopping agentic retries");
-        return false;
-    }
-    emitter.info("Reflection: no confirmed vulnerability — preparing retry");
-    true
 }
 
 fn technique_id_from_payload_id(payload_id: &str) -> &str {
@@ -695,190 +680,341 @@ async fn run_agentic_category(
     catalog: &aisec_payload::PayloadDatabase,
     run_options: Option<&CategoryRunOptions>,
 ) -> Result<CategoryRunResult, String> {
-    let mut strategy = config
+    let strategy = config
         .payload_strategy
         .clone()
         .ok_or_else(|| "agentic execution requires payload strategy".to_string())?;
-    let mut active_plan = plan.clone();
-    let mut last_result: Option<CategoryRunResult> = None;
-    let category_label = category.display_name();
 
-    for attempt in 1..=config.max_attempts {
-        if ctx.cancel.load(Ordering::Relaxed) {
-            break;
-        }
+    let tools = AgenticCategoryTools {
+        ctx,
+        config,
+        catalog,
+        category,
+        initial_payloads: generated_payloads,
+        initial_run_options: run_options,
+        state: Mutex::new(AgenticCategoryState {
+            plan: plan.clone(),
+            strategy: strategy.clone(),
+            payloads: category_payload_map(generated_payloads, category),
+            last_result: None,
+            focus_hints: Vec::new(),
+        }),
+    };
 
-        let retry = attempt.saturating_sub(1);
+    let llm_ready = {
+        let inference = ctx.inference_manager.lock().await;
+        is_inference_ready(&inference)
+    };
+
+    let hosts = YazgHostLlms::from_app(
+        ctx.data_dir.to_path_buf(),
+        Arc::clone(&ctx.inference_manager),
+        Arc::clone(&ctx.model_manager),
+        ctx.model_provider.clone(),
+        Arc::clone(&ctx.runtime_manager),
+    );
+    let react = hosts.react_llms();
+    let exec_llms = AttackExecutionLlms {
+        orchestrator: react.supervisor,
+        reflection: react.supervisor,
+        plan: react.plan,
+        llm_ready,
+    };
+
+    let request = AttackExecutionRequest {
+        category: category.as_str().to_string(),
+        max_attempts: config.max_attempts.max(1),
+        reflection_enabled: config.reflection_enabled,
+        adaptive_planning: config.adaptive_planning,
+        mutation_level: format!("{:?}", strategy.mutation_level),
+        generation_strategy: format!("{:?}", strategy.strategy),
+        variants_per_test: strategy.variants_per_test.min(20) as u8,
+        response_adaptation: strategy.enable_response_adaptation,
+        max_react_steps: (config.max_attempts.max(1) as usize)
+            .saturating_mul(8)
+            .max(16),
+    };
+
+    ctx.emitter.info(format!(
+        "Yazg → AttackExecutionAgent for {} (agentic)",
+        category.display_name()
+    ));
+
+    let outcome = YazgSupervisor::execute_attack(&request, &tools, &exec_llms)
+        .await
+        .map_err(|err| err.to_string())?;
+
+    for event in &outcome.events {
+        ctx.emitter.info(format!(
+            "[{}] {:?}: {}",
+            event.agent.as_str(),
+            event.kind,
+            event.message
+        ));
+    }
+
+    tools
+        .state
+        .lock()
+        .ok()
+        .and_then(|s| s.last_result.clone())
+        .ok_or_else(|| "agentic category produced no attempts".into())
+}
+
+struct AgenticCategoryState {
+    plan: AttackPlan,
+    strategy: PayloadStrategy,
+    payloads: HashMap<AttackCategory, Vec<AttackPayload>>,
+    last_result: Option<CategoryRunResult>,
+    focus_hints: Vec<String>,
+}
+
+struct AgenticCategoryTools<'a> {
+    ctx: &'a TargetProfileScanContext<'a>,
+    config: &'a ScanExecutionConfig,
+    catalog: &'a aisec_payload::PayloadDatabase,
+    category: AttackCategory,
+    initial_payloads: &'a HashMap<AttackCategory, Vec<AttackPayload>>,
+    initial_run_options: Option<&'a CategoryRunOptions>,
+    state: Mutex<AgenticCategoryState>,
+}
+
+#[async_trait]
+impl AttackExecutionTools for AgenticCategoryTools<'_> {
+    fn is_cancelled(&self) -> bool {
+        self.ctx.cancel.load(Ordering::Relaxed)
+    }
+
+    async fn wait_if_paused(&self) {
+        wait_if_paused(&self.ctx.paused, &self.ctx.cancel).await;
+    }
+
+    async fn set_phase(&self, phase: &str, attempt: u32, retry: u32) {
+        let label = self.category.display_name();
         set_scan_phase(
-            &ctx.progress,
-            "generate",
-            Some(&category_label),
+            &self.ctx.progress,
+            phase,
+            Some(label),
             Some(attempt),
             Some(retry),
         );
-        ctx.emitter.info(format!(
-            "Agentic attempt {attempt}/{} — generating payloads for {category_label}",
-            config.max_attempts
-        ));
+    }
 
-        let payloads_for_run = if attempt == 1 {
-            category_payload_map(generated_payloads, category)
-        } else {
-            let feedback = if strategy.enable_response_adaptation || config.adaptive_planning {
-                last_result.as_ref().map(|result| {
-                    let judged: Vec<(bool, f32, &str)> = result
-                        .judged
-                        .iter()
-                        .map(|j| (j.vulnerable, j.confidence, j.summary.as_str()))
-                        .collect();
-                    aisec_generator::feedback_from_judged(&judged).unwrap_or_else(|| {
-                        format!(
-                            "attempt {} inconclusive: {} successes / {} attempts",
-                            attempt - 1,
-                            result.successes,
-                            result.attempts
-                        )
-                    })
-                })
-            } else {
-                None
-            };
-            regenerate_category_payloads(
-                ctx.data_dir,
-                Arc::clone(&ctx.inference_manager),
-                Arc::clone(&ctx.model_manager),
-                ctx.model_provider.clone(),
-                Arc::clone(&ctx.runtime_manager),
-                &active_plan,
-                category,
-                &strategy,
-                ctx.profile,
-                catalog.clone(),
-                feedback,
-                retry,
+    async fn bump_progress(&self, delta: u64) {
+        bump_scan_progress(&self.ctx.progress, delta);
+    }
+
+    async fn emit_info(&self, message: String) {
+        self.ctx.emitter.info(message);
+    }
+
+    async fn generate_payloads(
+        &self,
+        attempt: u32,
+        focus_hints: &[String],
+    ) -> Result<(), String> {
+        {
+            let mut state = self.state.lock().map_err(|e| e.to_string())?;
+            state.focus_hints = focus_hints.to_vec();
+        }
+
+        if attempt <= 1 {
+            let map = category_payload_map(self.initial_payloads, self.category);
+            let mut state = self.state.lock().map_err(|e| e.to_string())?;
+            state.payloads = map;
+            return Ok(());
+        }
+
+        let (plan, strategy, last_result) = {
+            let state = self.state.lock().map_err(|e| e.to_string())?;
+            (
+                state.plan.clone(),
+                state.strategy.clone(),
+                state.last_result.clone(),
             )
-            .await?
         };
 
-        bump_scan_progress(&ctx.progress, 1);
+        let feedback = if strategy.enable_response_adaptation || self.config.adaptive_planning {
+            last_result.as_ref().map(|result| {
+                let judged: Vec<(bool, f32, &str)> = result
+                    .judged
+                    .iter()
+                    .map(|j| (j.vulnerable, j.confidence, j.summary.as_str()))
+                    .collect();
+                let mut text = aisec_generator::feedback_from_judged(&judged).unwrap_or_else(|| {
+                    format!(
+                        "attempt {} inconclusive: {} successes / {} attempts",
+                        attempt - 1,
+                        result.successes,
+                        result.attempts
+                    )
+                });
+                if !focus_hints.is_empty() {
+                    text.push_str(&format!(" | focus_hints: {}", focus_hints.join("; ")));
+                }
+                text
+            })
+        } else {
+            None
+        };
 
-        let attempt_options = CategoryRunOptions::from_strategy(
-            category,
-            &active_plan.disabled_tests,
+        let retry = attempt.saturating_sub(1);
+        let payloads = regenerate_category_payloads(
+            self.ctx.data_dir,
+            Arc::clone(&self.ctx.inference_manager),
+            Arc::clone(&self.ctx.model_manager),
+            self.ctx.model_provider.clone(),
+            Arc::clone(&self.ctx.runtime_manager),
+            &plan,
+            self.category,
             &strategy,
-        );
-        let options_ref = if attempt == 1 {
-            run_options
+            self.ctx.profile,
+            self.catalog.clone(),
+            feedback,
+            retry,
+        )
+        .await?;
+
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        state.payloads = payloads;
+        Ok(())
+    }
+
+    async fn run_attack_attempt(
+        &self,
+        attempt: u32,
+    ) -> Result<AttackAttemptObservation, String> {
+        let (payloads, strategy, plan) = {
+            let state = self.state.lock().map_err(|e| e.to_string())?;
+            (
+                state.payloads.clone(),
+                state.strategy.clone(),
+                state.plan.clone(),
+            )
+        };
+
+        let attempt_options =
+            CategoryRunOptions::from_strategy(self.category, &plan.disabled_tests, &strategy);
+        let options_ref = if attempt <= 1 {
+            self.initial_run_options
         } else {
             Some(&attempt_options)
         };
 
-        set_scan_phase(
-            &ctx.progress,
-            "attack",
-            Some(&category_label),
-            Some(attempt),
-            Some(retry),
-        );
-
         let result = run_category_on_target_profile(
-            ctx.repos,
-            ctx.scan_id,
-            ctx.project_id,
-            ctx.target_id,
-            ctx.profile,
-            category,
-            ctx.attack_runtime.clone(),
-            ctx.data_dir,
-            Arc::clone(&ctx.inference_manager),
-            Arc::clone(&ctx.model_manager),
-            ctx.model_provider.clone(),
-            Arc::clone(&ctx.runtime_manager),
-            ctx.plugin_manager.clone(),
-            Some(&payloads_for_run),
-            Some(&ctx.emitter),
+            self.ctx.repos,
+            self.ctx.scan_id,
+            self.ctx.project_id,
+            self.ctx.target_id,
+            self.ctx.profile,
+            self.category,
+            self.ctx.attack_runtime.clone(),
+            self.ctx.data_dir,
+            Arc::clone(&self.ctx.inference_manager),
+            Arc::clone(&self.ctx.model_manager),
+            self.ctx.model_provider.clone(),
+            Arc::clone(&self.ctx.runtime_manager),
+            self.ctx.plugin_manager.clone(),
+            Some(&payloads),
+            Some(&self.ctx.emitter),
             options_ref,
-            Some(&ctx.progress),
-            ctx.job_controls.as_ref(),
+            Some(&self.ctx.progress),
+            self.ctx.job_controls.as_ref(),
         )
         .await
         .map_err(|err| err.to_string())?;
 
-        if ctx.paused.load(Ordering::Relaxed) {
-            break;
-        }
+        let high_confidence_vuln = result
+            .judged
+            .iter()
+            .any(|item| item.vulnerable && item.confidence >= 0.5);
+        let summary = result
+            .judged
+            .iter()
+            .take(8)
+            .map(|j| {
+                format!(
+                    "{} vul={} conf={:.2} ({})",
+                    j.payload_id, j.vulnerable, j.confidence, j.summary
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
 
-        set_scan_phase(
-            &ctx.progress,
-            "judge",
-            Some(&category_label),
-            Some(attempt),
-            Some(retry),
-        );
+        let obs = AttackAttemptObservation {
+            successes: result.successes,
+            attempts: result.attempts as u64,
+            any_vulnerable: category_any_vulnerable(&result),
+            high_confidence_vuln,
+            summary,
+        };
 
-        if config.reflection_enabled {
-            set_scan_phase(
-                &ctx.progress,
-                "reflection",
-                Some(&category_label),
-                Some(attempt),
-                Some(retry),
-            );
-            bump_scan_progress(&ctx.progress, 1);
-        }
-
-        let should_retry = reflection_allows_retry(config.reflection_enabled, &result, &ctx.emitter);
-        last_result = Some(result);
-
-        if !should_retry {
-            break;
-        }
-
-        if attempt >= config.max_attempts {
-            break;
-        }
-
-        if config.adaptive_planning {
-            set_scan_phase(
-                &ctx.progress,
-                "adaptive",
-                Some(&category_label),
-                Some(attempt + 1),
-                Some(attempt),
-            );
-            if let Some(ref prior) = last_result {
-                let (next_plan, next_strategy, notes) =
-                    adapt_plan_for_retry(&active_plan, category, &strategy, prior, catalog);
-                active_plan = next_plan;
-                strategy = next_strategy;
-                ctx.emitter.info(format!(
-                    "Adaptive planning for {category_label}: {}",
-                    if notes.is_empty() {
-                        "strategy refreshed for next attempt".into()
-                    } else {
-                        notes.join("; ")
-                    }
-                ));
-            }
-            bump_scan_progress(&ctx.progress, 1);
-        }
-
-        set_scan_phase(
-            &ctx.progress,
-            "retry",
-            Some(&category_label),
-            Some(attempt + 1),
-            Some(attempt),
-        );
-        bump_scan_progress(&ctx.progress, 1);
-        ctx.emitter.info(format!(
-            "Retrying {category_label} (attempt {} of {})",
-            attempt + 1,
-            config.max_attempts
-        ));
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        state.last_result = Some(result);
+        Ok(obs)
     }
 
-    last_result.ok_or_else(|| "agentic category produced no attempts".into())
+    async fn apply_adapt(&self, adapt: &AdaptPlanOutcome) -> Result<(), String> {
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        let base_plan = state.plan.clone();
+        let base_strategy = state.strategy.clone();
+
+        let mut next_strategy = base_strategy.clone();
+        if adapt.escalate_mutation {
+            next_strategy.mutation_level = next_strategy.mutation_level.escalate();
+        }
+        if adapt.escalate_strategy {
+            next_strategy.strategy = next_strategy.strategy.escalate();
+        }
+        if adapt.increase_variants {
+            next_strategy.variants_per_test =
+                (next_strategy.variants_per_test.saturating_add(2)).min(20);
+        }
+        if adapt.enable_response_adaptation {
+            next_strategy.enable_response_adaptation = true;
+            next_strategy.enable_context_awareness = true;
+        }
+        next_strategy = next_strategy.clamp();
+
+        let mut next_plan = base_plan.clone();
+        for id in &adapt.disable_technique_ids {
+            if !next_plan.disabled_tests.iter().any(|d| d == id) {
+                next_plan.disabled_tests.push(id.clone());
+            }
+        }
+
+        if let Some(ref last) = state.last_result {
+            // Technique rotation only — strategy escalation already applied from AttackPlanAgent.
+            let (rotated, _, rot_notes) = adapt_plan_for_retry(
+                &base_plan,
+                self.category,
+                &base_strategy,
+                last,
+                self.catalog,
+            );
+            next_plan.disabled_tests = rotated.disabled_tests;
+            for id in &adapt.disable_technique_ids {
+                if !next_plan.disabled_tests.iter().any(|d| d == id) {
+                    next_plan.disabled_tests.push(id.clone());
+                }
+            }
+            for note in rot_notes {
+                self.ctx
+                    .emitter
+                    .info(format!("Adaptive technique rotate: {note}"));
+            }
+        }
+
+        for note in &adapt.notes {
+            self.ctx
+                .emitter
+                .info(format!("AttackPlanAgent adapt: {note}"));
+        }
+
+        state.plan = next_plan;
+        state.strategy = next_strategy;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

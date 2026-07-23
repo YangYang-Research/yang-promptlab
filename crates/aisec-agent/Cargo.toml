@@ -1,6 +1,6 @@
 [package]
 name = "aisec-agent"
-description = "Yazg supervisor and sub-agents (AnalyzeEndpoint, AttackPlan, GeneratePrompt, Recommend, Summary, JudgeCoordinator, …)"
+description = "Yazg supervisor and sub-agents (AttackExecution, Reflection, AttackPlan, JudgeCoordinator, …)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

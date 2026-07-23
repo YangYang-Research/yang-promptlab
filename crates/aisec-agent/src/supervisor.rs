@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use crate::analyze_endpoint::{AnalyzeEndpointAgent, AnalyzeEndpointAgentOutcome};
+use crate::attack_execution::{
+    AttackExecutionAgent, AttackExecutionLlms, AttackExecutionOutcome, AttackExecutionRequest,
+    AttackExecutionTools,
+};
 use crate::attack_plan::AttackPlanAgentOutcome;
 use crate::error::AgentResult;
 use crate::generate_prompt::{GeneratePromptAgentOutcome, TechniquePromptContext};
@@ -30,6 +34,7 @@ pub enum SupervisorIntent {
     Recommend,
     Summary,
     Judge,
+    ExecuteAttack,
 }
 
 impl SupervisorIntent {
@@ -49,6 +54,11 @@ impl SupervisorIntent {
             }
             "summary" | "summarize" | "project_summary" | "scan_summary" => Self::Summary,
             "judge" | "judging" | "judge_coordinator" => Self::Judge,
+            "execute_attack"
+            | "execute-attack"
+            | "attack_execution"
+            | "agentic_scan"
+            | "run_scan" => Self::ExecuteAttack,
             "chat" | "help" => Self::Chat,
             "auto" | "" => Self::Auto,
             _ => Self::Auto,
@@ -97,6 +107,10 @@ pub enum YazgDelegation {
         turn: YazgTurn,
         outcome: JudgeCoordinatorAgentOutcome,
     },
+    ExecutedAttack {
+        turn: YazgTurn,
+        outcome: AttackExecutionOutcome,
+    },
 }
 
 /// Yazg — top-level supervisor agent (ReAct).
@@ -123,6 +137,9 @@ impl YazgSupervisor {
             }
             SupervisorIntent::Judge => {
                 "User preference hint: consensus judging via JudgeCoordinatorAgent may be appropriate."
+            }
+            SupervisorIntent::ExecuteAttack => {
+                "User preference hint: agentic scan execution via AttackExecutionAgent may be appropriate."
             }
             SupervisorIntent::Chat => "User preference hint: conversational reply may be enough.",
             SupervisorIntent::Auto => "No forced action — choose freely via ReAct.",
@@ -304,6 +321,31 @@ impl YazgSupervisor {
             .with_judge(Some(judge_request), Some(judge_engine))
             .with_max_steps(4);
         Self::react(request, llms).await
+    }
+
+    /// Hard-gate agentic scan execution: Yazg delegates to AttackExecutionAgent.
+    /// Host supplies HTTP/generate tools; ReflectionAgent + AttackPlanAgent::adapt run inside.
+    pub async fn execute_attack(
+        request: &AttackExecutionRequest,
+        tools: &dyn AttackExecutionTools,
+        llms: &AttackExecutionLlms<'_>,
+    ) -> AgentResult<AttackExecutionOutcome> {
+        info!(
+            category = %request.category,
+            max_attempts = request.max_attempts,
+            "Yazg delegating to AttackExecutionAgent"
+        );
+        let mut events = vec![AgentEvent::info(
+            AgentId::Yazg,
+            format!(
+                "ExecuteAttack → AttackExecutionAgent ({})",
+                request.category
+            ),
+        )];
+        let mut outcome = AttackExecutionAgent::run(request, tools, llms).await?;
+        events.append(&mut outcome.events);
+        outcome.events = events;
+        Ok(outcome)
     }
 
     /// Offline fallback when AI Runtime is unavailable (no ReAct).

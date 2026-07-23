@@ -14,6 +14,8 @@ pub enum AgentId {
     JudgeWorker,
     ClassifierWorker,
     AttackerWorker,
+    AttackExecution,
+    Reflection,
 }
 
 impl AgentId {
@@ -29,6 +31,8 @@ impl AgentId {
             Self::JudgeWorker => "judge_worker",
             Self::ClassifierWorker => "classifier_worker",
             Self::AttackerWorker => "attacker_worker",
+            Self::AttackExecution => "attack_execution",
+            Self::Reflection => "reflection",
         }
     }
 
@@ -44,6 +48,8 @@ impl AgentId {
             Self::JudgeWorker => "JudgeWorker",
             Self::ClassifierWorker => "ClassifierWorker",
             Self::AttackerWorker => "AttackerWorker",
+            Self::AttackExecution => "AttackExecutionAgent",
+            Self::Reflection => "ReflectionAgent",
         }
     }
 }

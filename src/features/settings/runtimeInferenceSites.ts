@@ -29,6 +29,13 @@ export const RUNTIME_INFERENCE_SITES: RuntimeInferenceSite[] = [
       "When the attack plan enables local LLM payload mode, Yazg generates context-aware payload variants before each attack batch.",
   },
   {
+    id: "agentic-execution",
+    title: "Agentic scan execution",
+    location: "Scan execution · Agentic · AttackExecutionAgent",
+    description:
+      "When the attack plan uses agentic execution, Yazg delegates to AttackExecutionAgent, which ReActs across generate → attack → ReflectionAgent → AttackPlanAgent adapt → retry. HTTP attack stays a host harness tool (cancel/pause safe).",
+  },
+  {
     id: "judge",
     title: "Response judging",
     location: "Scan execution · Judge phase · JudgeCoordinatorAgent",
