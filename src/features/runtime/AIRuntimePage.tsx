@@ -138,6 +138,7 @@ type RuntimeModeOption = {
 
 /** Soft recommendation for Local runtime; does not block switching. */
 const LOCAL_RUNTIME_MIN_RAM_BYTES = 8 * 1024 * 1024 * 1024;
+const LOCAL_RUNTIME_MIN_DISK_BYTES = 10 * 1024 * 1024 * 1024;
 
 const RUNTIME_MODE_OPTIONS: RuntimeModeOption[] = [
   {
@@ -178,7 +179,7 @@ const RUNTIME_MODE_OPTIONS: RuntimeModeOption[] = [
       },
       {
         label: "Hardware",
-        body: "8 GB RAM and ~6 GB free disk for the runtime plus a compact Q4 model. Larger models need 16 GB+ RAM or Apple Silicon / CUDA acceleration.",
+        body: "8 GB RAM and at least 10 GB free disk for the runtime plus a compact Q4 model. Larger models need 16 GB+ RAM or Apple Silicon / CUDA acceleration.",
       },
     ],
   },
@@ -446,7 +447,7 @@ export function AIRuntimePage() {
       if (mode !== "local") setLocalRamWarning(null);
       return;
     }
-    void evaluateLocalRamWarning().then((warning) => {
+    void evaluateLocalHardwareWarning().then((warning) => {
       setLocalRamWarning(warning);
     });
     // Only re-check when entering/staying on local after connect.
@@ -469,7 +470,7 @@ export function AIRuntimePage() {
     }
   }
 
-  async function evaluateLocalRamWarning(): Promise<string | null> {
+  async function evaluateLocalHardwareWarning(): Promise<string | null> {
     let profile: RuntimeHardwareDto | null = hardware;
     try {
       profile = await refreshRuntimeHardware();
@@ -482,14 +483,26 @@ export function AIRuntimePage() {
         return null;
       }
     }
-    if (!profile || profile.ramBytes >= LOCAL_RUNTIME_MIN_RAM_BYTES) return null;
+    if (!profile) return null;
 
-    const detectedGb = (profile.ramBytes / (1024 * 1024 * 1024)).toFixed(1);
-    return `Local runtime recommends at least 8 GB RAM. This device reports ${detectedGb} GB — you can continue, but models may run slowly or fail to load.`;
+    const parts: string[] = [];
+    if (profile.ramBytes < LOCAL_RUNTIME_MIN_RAM_BYTES) {
+      const detectedGb = (profile.ramBytes / (1024 * 1024 * 1024)).toFixed(1);
+      parts.push(`RAM ${detectedGb} GB (need ≥ 8 GB)`);
+    }
+
+    const diskFree = profile.diskFreeBytes;
+    if (diskFree != null && diskFree <= LOCAL_RUNTIME_MIN_DISK_BYTES) {
+      const detectedGb = (diskFree / (1024 * 1024 * 1024)).toFixed(1);
+      parts.push(`disk free ${detectedGb} GB (need > 10 GB)`);
+    }
+
+    if (parts.length === 0) return null;
+    return `Local runtime: ${parts.join("; ")}. You can continue, but performance or downloads may fail.`;
   }
 
-  async function warnIfLocalRamBelowRecommendation() {
-    const warning = await evaluateLocalRamWarning();
+  async function warnIfLocalHardwareBelowRecommendation() {
+    const warning = await evaluateLocalHardwareWarning();
     setLocalRamWarning(warning);
     if (warning) {
       notify(warning, "warning");
@@ -505,7 +518,7 @@ export function AIRuntimePage() {
     try {
       if (route === "local") {
         if (mode !== "local") {
-          await warnIfLocalRamBelowRecommendation();
+          await warnIfLocalHardwareBelowRecommendation();
         }
       } else {
         setLocalRamWarning(null);
@@ -980,6 +993,14 @@ export function AIRuntimePage() {
                       <div>
                         <dt>RAM</dt>
                         <dd>{formatBytes(hardware.ramBytes)}</dd>
+                      </div>
+                      <div>
+                        <dt>Free disk</dt>
+                        <dd>
+                          {hardware.diskFreeBytes != null
+                            ? formatBytes(hardware.diskFreeBytes)
+                            : "N/A"}
+                        </dd>
                       </div>
                       <div>
                         <dt>GPU</dt>

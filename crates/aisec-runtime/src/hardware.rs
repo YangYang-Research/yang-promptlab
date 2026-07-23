@@ -23,6 +23,9 @@ pub struct RuntimeHardwareProfile {
     pub metal: bool,
     pub vulkan: bool,
     pub avx2: bool,
+    /// Free space on the volume that holds `data_dir` (models / runtime cache).
+    #[serde(default)]
+    pub disk_free_bytes: Option<u64>,
     #[serde(with = "time::serde::rfc3339")]
     pub detected_at: OffsetDateTime,
 }
@@ -83,6 +86,7 @@ impl HardwareDetector {
             metal,
             vulkan,
             avx2: detect_avx2(),
+            disk_free_bytes: detect_free_disk_bytes(&self.data_dir),
             detected_at: OffsetDateTime::now_utc(),
         };
 
@@ -116,5 +120,78 @@ fn detect_avx2() -> bool {
     #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
     {
         false
+    }
+}
+
+fn detect_free_disk_bytes(path: &Path) -> Option<u64> {
+    let probe = if path.exists() {
+        path.to_path_buf()
+    } else {
+        path.parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::ffi::OsStrExt;
+
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetDiskFreeSpaceExW(
+                directory: *const u16,
+                free_bytes_available: *mut u64,
+                total_bytes: *mut u64,
+                total_free_bytes: *mut u64,
+            ) -> i32;
+        }
+
+        let wide: Vec<u16> = probe
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut free_available = 0u64;
+        let mut total = 0u64;
+        let mut total_free = 0u64;
+        let ok = unsafe {
+            GetDiskFreeSpaceExW(
+                wide.as_ptr(),
+                &mut free_available,
+                &mut total,
+                &mut total_free,
+            )
+        };
+        if ok != 0 && free_available > 0 {
+            return Some(free_available);
+        }
+        return None;
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use std::ffi::CString;
+        use std::mem::MaybeUninit;
+
+        let c_path = CString::new(probe.to_str()?).ok()?;
+        let mut stat = MaybeUninit::<libc::statvfs>::uninit();
+        let rc = unsafe { libc::statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
+        if rc != 0 {
+            return None;
+        }
+        let stat = unsafe { stat.assume_init() };
+        let free = stat.f_bavail as u64 * stat.f_frsize as u64;
+        if free > 0 {
+            Some(free)
+        } else {
+            None
+        }
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        let _ = probe;
+        None
     }
 }

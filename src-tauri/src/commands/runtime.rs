@@ -58,6 +58,7 @@ pub struct RuntimeHardwareDto {
     pub metal: bool,
     pub vulkan: bool,
     pub avx2: bool,
+    pub disk_free_bytes: Option<u64>,
     pub detected_at: String,
 }
 
@@ -76,6 +77,7 @@ impl From<RuntimeHardwareProfile> for RuntimeHardwareDto {
             metal: value.metal,
             vulkan: value.vulkan,
             avx2: value.avx2,
+            disk_free_bytes: value.disk_free_bytes,
             detected_at: value.detected_at.to_string(),
         }
     }

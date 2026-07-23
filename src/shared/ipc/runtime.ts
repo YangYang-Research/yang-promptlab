@@ -52,6 +52,7 @@ export type RuntimeHardwareDto = {
   metal: boolean;
   vulkan: boolean;
   avx2: boolean;
+  diskFreeBytes?: number | null;
   detectedAt: string;
 };
 

@@ -19,6 +19,9 @@ tokio = { workspace = true, features = ["fs", "time", "macros", "rt-multi-thread
 reqwest = { workspace = true }
 tracing = { workspace = true }
 
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
