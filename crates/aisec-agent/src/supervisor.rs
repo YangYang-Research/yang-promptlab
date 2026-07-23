@@ -147,7 +147,10 @@ impl YazgSupervisor {
                 "User preference hint: agentic scan execution via AgenticAttackExecutionAgent may be appropriate."
             }
             SupervisorIntent::Chat => "User preference hint: conversational reply may be enough.",
-            SupervisorIntent::Auto => "No forced action — choose freely via ReAct.",
+            SupervisorIntent::Auto => {
+                "No forced action — read the user prompt carefully, use STM/LTM for prior facts, \
+                 call specialist tools only when needed, then finish with a clear reply."
+            }
         };
         format!("{}\n\n({hint})", message.trim())
     }
@@ -432,9 +435,7 @@ impl YazgSupervisor {
                 "help" | "?" | "hi" | "hello"
             ) {
             format!(
-                "I am Yazg (offline). Start AI Runtime so I can ReAct-route to \
-                 AnalyzeEndpointAgent / AttackPlanAgent / GeneratePromptAgent / \
-                 RecommendAgent / SummaryAgent / JudgeCoordinatorAgent.\n\n{target_line}"
+                "I am Yazg (offline). Start AI Runtime so I can read your prompt, use memory, and call tools.\n\n{target_line}"
             )
         } else {
             format!(

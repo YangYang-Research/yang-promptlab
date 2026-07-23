@@ -12,7 +12,7 @@ use tauri::State;
 
 use crate::agent_memory::SqliteAgentMemoryStore;
 use crate::error::{CommandError, CommandResult};
-use crate::inference_host::{is_inference_ready, YazgHostLlms};
+use crate::inference_host::{gateway_complete, is_inference_ready, YazgHostLlms};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -21,6 +21,9 @@ pub struct YazgChatRequest {
     pub message: String,
     #[serde(default)]
     pub target_id: Option<String>,
+    /// Stable chat-thread session id for STM continuity within one conversation.
+    #[serde(default)]
+    pub session_id: Option<String>,
     /// Soft hint only — Yazg ReAct still chooses the action.
     /// `auto` | `chat` | `analyze_endpoint` | `verify` | `attack_plan` | `plan` |
     /// `generate_prompt` | `recommend` | `summary`
@@ -133,12 +136,17 @@ pub async fn yazg_chat_op(
     );
     let llms = hosts.react_llms();
     let memory = SqliteAgentMemoryStore::new(state.repositories());
-    let memory_ctx = MemoryContext::new(format!(
-        "yazg-chat:{}",
-        request.target_id.as_deref().unwrap_or("global")
-    ))
-    .with_project(project_id)
-    .with_target(request.target_id.clone());
+    let session_id = request
+        .session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("yazg-chat:assistant")
+        .to_string();
+    // One conversation thread → one STM session.
+    let memory_ctx = MemoryContext::new(session_id)
+        .with_project(project_id)
+        .with_target(request.target_id.clone());
 
     let delegation = YazgSupervisor::handle(
         &request.message,
@@ -183,10 +191,128 @@ pub async fn yazg_chat_op(
     Ok(turn_to_response(turn))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct YazgGenerateChatTitleRequest {
+    pub message: String,
+    #[serde(default)]
+    pub reply: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct YazgGenerateChatTitleResponse {
+    pub title: String,
+}
+
+fn fallback_chat_title(message: &str) -> String {
+    let trimmed = message.trim().replace('\n', " ");
+    let collapsed = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return "New chat".into();
+    }
+    let words: Vec<&str> = collapsed.split_whitespace().take(8).collect();
+    let title = words.join(" ");
+    if collapsed.split_whitespace().count() > 8 {
+        format!("{title}…")
+    } else {
+        title
+    }
+}
+
+fn sanitize_chat_title(raw: &str, fallback: &str) -> String {
+    let mut title = raw
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_matches(|c| c == '"' || c == '\'' || c == '`' || c == '*')
+        .trim()
+        .to_string();
+    // Drop common prefixes models add.
+    for prefix in ["Title:", "title:", "Conversation title:", "Chat title:"] {
+        if let Some(rest) = title.strip_prefix(prefix) {
+            title = rest.trim().to_string();
+        }
+    }
+    title = title
+        .trim_matches(|c| c == '"' || c == '\'' || c == '`' || c == '*' || c == '.')
+        .trim()
+        .to_string();
+    let words: Vec<&str> = title.split_whitespace().take(8).collect();
+    if words.is_empty() {
+        return fallback.to_string();
+    }
+    words.join(" ")
+}
+
+pub async fn yazg_generate_chat_title_op(
+    state: &AppState,
+    request: YazgGenerateChatTitleRequest,
+) -> CommandResult<YazgGenerateChatTitleResponse> {
+    let message = request.message.trim();
+    let fallback = fallback_chat_title(message);
+    if message.is_empty() {
+        return Ok(YazgGenerateChatTitleResponse { title: fallback });
+    }
+
+    let inference = state.inference_manager().lock().await;
+    let runtime_ready = is_inference_ready(&inference);
+    drop(inference);
+    if !runtime_ready {
+        return Ok(YazgGenerateChatTitleResponse { title: fallback });
+    }
+
+    let mut prompt = format!(
+        "Generate a short, concise title (maximum 6-8 words) that capture the main topic. \
+         Return only the title text nothing else. Do not use quotes.\n\n\
+         User message:\n{message}\n"
+    );
+    if let Some(reply) = request
+        .reply
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let clipped: String = reply.chars().take(400).collect();
+        prompt.push_str(&format!("\nAssistant reply:\n{clipped}\n"));
+    }
+
+    let inference = state.inference_manager().lock().await;
+    let manager = state.model_manager().lock().await;
+    let mut runtime_mgr = state.runtime_manager().lock().await;
+    match gateway_complete(
+        state.data_dir(),
+        &inference,
+        &manager,
+        state.model_provider().clone(),
+        &mut runtime_mgr,
+        None,
+        &prompt,
+        32,
+        0.2,
+    )
+    .await
+    {
+        Ok(raw) => Ok(YazgGenerateChatTitleResponse {
+            title: sanitize_chat_title(&raw, &fallback),
+        }),
+        Err(_) => Ok(YazgGenerateChatTitleResponse { title: fallback }),
+    }
+}
+
 #[tauri::command]
 pub async fn yazg_chat(
     state: State<'_, AppState>,
     request: YazgChatRequest,
 ) -> CommandResult<YazgChatResponse> {
     yazg_chat_op(state.inner(), request).await
+}
+
+#[tauri::command]
+pub async fn yazg_generate_chat_title(
+    state: State<'_, AppState>,
+    request: YazgGenerateChatTitleRequest,
+) -> CommandResult<YazgGenerateChatTitleResponse> {
+    yazg_generate_chat_title_op(state.inner(), request).await
 }

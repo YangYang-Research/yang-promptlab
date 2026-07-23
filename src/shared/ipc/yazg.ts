@@ -18,6 +18,8 @@ export type YazgAgentEventDto = {
 export type YazgChatRequest = {
   message: string;
   targetId?: string | null;
+  /** Stable conversation session for STM (one thread = one session). */
+  sessionId?: string | null;
   intent?: YazgIntent | null;
 };
 
@@ -29,6 +31,23 @@ export type YazgChatResponse = {
   planSummary?: string | null;
 };
 
+export type YazgGenerateChatTitleRequest = {
+  message: string;
+  reply?: string | null;
+};
+
+export type YazgGenerateChatTitleResponse = {
+  title: string;
+};
+
 export function yazgChat(request: YazgChatRequest): Promise<YazgChatResponse> {
   return invokeCommand<YazgChatResponse>("yazg_chat", { request });
+}
+
+export function yazgGenerateChatTitle(
+  request: YazgGenerateChatTitleRequest,
+): Promise<YazgGenerateChatTitleResponse> {
+  return invokeCommand<YazgGenerateChatTitleResponse>("yazg_generate_chat_title", {
+    request,
+  });
 }

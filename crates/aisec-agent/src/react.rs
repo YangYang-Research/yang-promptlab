@@ -193,7 +193,17 @@ pub async fn run_react(
         load_memory_prompt_block(request.memory, &request.memory_ctx, AgentId::Yazg).await;
 
     let mut transcript = String::new();
-    transcript.push_str(&format!("Goal:\n{}\n\n", request.goal.trim()));
+    transcript.push_str(
+        "You are Yazg, the in-app AI Assistant.\n\
+         Workflow each turn:\n\
+         1) Read and analyze the user prompt.\n\
+         2) Use short-term / long-term memory for facts already known about this workspace.\n\
+         3) Call a specialist tool only when needed for fresh work \
+         (analyze_endpoint, attack_plan, generate_prompt, recommend, summary, judge).\n\
+         4) When you have enough to answer, finish with a concise reply.\n\
+         Do not invent tool results. Prefer finish for general app questions.\n\n",
+    );
+    transcript.push_str(&format!("User prompt:\n{}\n\n", request.goal.trim()));
     if !memory_block.is_empty() {
         transcript.push_str(&memory_block);
     }
@@ -525,13 +535,13 @@ fn format_context(
 ) -> String {
     let mut out = match profile {
         Some(p) => format!(
-            "Context:\n- target: {}\n- provider: {}\n- verified: {}\n- capability_probe_ready: {}\n",
+            "Runtime context:\n- bound_target: {}\n- provider: {}\n- verified: {}\n- capability_probe_ready: {}\n",
             p.full_url(),
             p.provider.as_str(),
             p.is_verified(),
             has_probe
         ),
-        None => "Context:\n- target: (none selected)\n- verified: false\n- capability_probe_ready: false\n"
+        None => "Runtime context:\n- bound_target: (none — resolve from prompt + STM/LTM, or ask the user)\n- verified: false\n- capability_probe_ready: false\n"
             .into(),
     };
     if has_probe {
