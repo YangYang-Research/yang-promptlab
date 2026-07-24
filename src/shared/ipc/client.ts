@@ -96,6 +96,8 @@ export type ScanStartRequest = {
   reflectionEnabled?: boolean;
   adaptivePlanning?: boolean;
   draftScanId?: string;
+  /** Re-run only categories listed in scan progress `categories_failed`. */
+  retryFailedOnly?: boolean;
 };
 
 export type ScanStatusDto = {
@@ -241,6 +243,7 @@ export const startScan = (request: ScanStartRequest) =>
     reflectionEnabled: request.reflectionEnabled ?? false,
     adaptivePlanning: request.adaptivePlanning ?? false,
     draftScanId: request.draftScanId,
+    retryFailedOnly: request.retryFailedOnly ?? false,
   });
 
 export const getScanStatus = (scanId: string) =>

@@ -27,6 +27,8 @@ type SubmitStepProps = {
   consoleResetKey?: number;
   onViewResult: () => void;
   onClose: () => void;
+  onRetryFailedCategories?: () => void;
+  retryFailedPending?: boolean;
 };
 
 export function SubmitStep({
@@ -37,6 +39,8 @@ export function SubmitStep({
   consoleResetKey,
   onViewResult,
   onClose,
+  onRetryFailedCategories,
+  retryFailedPending = false,
 }: SubmitStepProps) {
   const statuses = useScanStatuses(submittedScanId ? [submittedScanId] : [], submittedScanId !== null);
   const liveStatus = submittedScanId ? statuses.get(submittedScanId) : undefined;
@@ -80,8 +84,15 @@ export function SubmitStep({
       status.status === "failed" ||
       status.status === "stopped" ||
       status.status === "cancelled";
+    const failedCategories = status.categories_failed ?? [];
+    const showRetryFailed =
+      !isRunning &&
+      failedCategories.length > 0 &&
+      typeof onRetryFailedCategories === "function";
     const statusTitle = isSuccess
-      ? "Attack complete"
+      ? failedCategories.length > 0
+        ? "Attack complete with failures"
+        : "Attack complete"
       : isFailed
         ? "Attack stopped"
         : status.status === "paused"
@@ -129,6 +140,13 @@ export function SubmitStep({
               <span className="wizard-attack-estimate__value">{status.findings_count}</span>
             </div>
           </dl>
+          {showRetryFailed && (
+            <p className="text-sm text-muted" style={{ marginTop: "0.75rem" }}>
+              {failedCategories.length} categor
+              {failedCategories.length === 1 ? "y" : "ies"} failed after auto-retry. You can retry
+              only those categories without re-running the full attack.
+            </p>
+          )}
         </section>
 
         <ExecutionStrategyPipeline attackPlan={attackPlan} status={status} compact />
@@ -144,6 +162,15 @@ export function SubmitStep({
             </span>
           )}
           <div className="wizard-submitted__actions-buttons">
+            {showRetryFailed && (
+              <Button
+                variant="secondary"
+                disabled={retryFailedPending}
+                onClick={onRetryFailedCategories}
+              >
+                {retryFailedPending ? "Retrying…" : "Retry Failed Categories"}
+              </Button>
+            )}
             {isSuccess && (
               <Button variant="primary" onClick={onViewResult}>
                 View Result

@@ -18,7 +18,7 @@ use tracing::{info, instrument, warn};
 
 use crate::commands::scan_execution::{
     run_target_profile_attack_scan, scan_attack_requests_total, scan_progress_total,
-    scan_testcases_total, ScanExecutionConfig, TargetProfileScanContext,
+    scan_testcases_total, ScanExecutionConfig, ScanPacingCache, TargetProfileScanContext,
 };
 use promptlab_target_profile::PayloadStrategy;
 use serde::Serialize;
@@ -204,6 +204,7 @@ async fn run_scan_job(
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
     runtime_manager: Arc<AsyncMutex<promptlab_runtime::RuntimeManager>>,
+    skip_completed_categories: bool,
 ) {
     let repos = db.repositories();
     let progress_emitter = ScanProgressEmitter::new(app.clone(), scan_id.clone());
@@ -284,6 +285,8 @@ async fn run_scan_job(
                 job_controls: job_controls.clone(),
                 progress: progress.clone(),
                 emitter: progress_emitter.clone(),
+                skip_completed_categories,
+                pacing_cache: Arc::new(Mutex::new(ScanPacingCache::default())),
             },
             execution_config,
         )
@@ -378,17 +381,9 @@ pub async fn scan_start_op(
     reflection_enabled: Option<bool>,
     adaptive_planning: Option<bool>,
     draft_scan_id: Option<String>,
+    retry_failed_only: Option<bool>,
 ) -> CommandResult<ScanStartDto> {
-    let parsed_categories: Vec<AttackCategory> = categories
-        .iter()
-        .filter_map(|value| parse_category(value))
-        .collect();
-
-    if parsed_categories.is_empty() {
-        return Err(CommandError::invalid_input(
-            "At least one valid attack category is required",
-        ));
-    }
+    let retry_failed_only = retry_failed_only.unwrap_or(false);
 
     let repos = state.repositories();
     repos
@@ -407,6 +402,97 @@ pub async fn scan_start_op(
         return Err(CommandError::invalid_input(
             "Target profile must be verified before starting a scan",
         ));
+    }
+
+    let mut seeded_progress: Option<ScanProgress> = None;
+    let job_categories: Vec<AttackCategory>;
+    let mut playbook_categories = categories.clone();
+
+    if retry_failed_only {
+        let draft_id = draft_scan_id
+            .as_ref()
+            .filter(|id| !id.trim().is_empty())
+            .ok_or_else(|| {
+                CommandError::invalid_input(
+                    "draftScanId is required when retrying failed categories",
+                )
+            })?;
+        let existing = repos
+            .scans()
+            .get(draft_id)
+            .await
+            .map_err(CommandError::from)?;
+        if existing.project_id != project_id {
+            return Err(CommandError::invalid_input("draft scan project mismatch"));
+        }
+        if !is_restartable_scan_status(&existing.status)
+            && !(existing.status == "running" && !state.jobs().contains(draft_id))
+        {
+            return Err(CommandError::invalid_input(format!(
+                "scan cannot retry failed categories from status '{}'",
+                existing.status
+            )));
+        }
+        if existing.status == "running" && state.jobs().contains(draft_id) {
+            return Err(CommandError::invalid_input(
+                "scan is still running; wait for it to finish before retrying failed categories",
+            ));
+        }
+        if existing.status == "paused" {
+            return Err(CommandError::invalid_input(
+                "scan is paused; resume it instead of retrying failed categories",
+            ));
+        }
+
+        let progress = progress_from_playbook(existing.playbook_json.as_deref()).ok_or_else(|| {
+            CommandError::invalid_input("scan has no progress to retry failed categories from")
+        })?;
+        if progress.categories_failed.is_empty() {
+            return Err(CommandError::invalid_input(
+                "No failed categories to retry",
+            ));
+        }
+
+        job_categories = progress
+            .categories_failed
+            .iter()
+            .filter_map(|value| parse_category(value))
+            .collect();
+        if job_categories.is_empty() {
+            return Err(CommandError::invalid_input(
+                "No valid failed categories to retry",
+            ));
+        }
+
+        if let Some(params) = existing
+            .playbook_json
+            .as_deref()
+            .and_then(|raw| execution_params_from_playbook(raw).ok())
+        {
+            if !params.categories.is_empty() {
+                playbook_categories = params.categories;
+            }
+        }
+
+        let mut restored = progress;
+        restored.status = "running".into();
+        restored.pause_pending = false;
+        restored.current_phase = None;
+        restored.current_attempt = None;
+        restored.current_retry = None;
+        restored.current_endpoint = None;
+        restored.current_test = None;
+        seeded_progress = Some(restored);
+    } else {
+        job_categories = categories
+            .iter()
+            .filter_map(|value| parse_category(value))
+            .collect();
+        if job_categories.is_empty() {
+            return Err(CommandError::invalid_input(
+                "At least one valid attack category is required",
+            ));
+        }
     }
 
     let agentic = agent_mode.unwrap_or(false);
@@ -434,7 +520,7 @@ pub async fn scan_start_op(
     let mut execution_playbook = {
         let mut playbook = serde_json::json!({
             "profile": profile,
-            "categories": categories,
+            "categories": playbook_categories,
             "disabled_tests": disabled_tests,
             "target_profile": true,
             "generator_mode": effective_generator_mode,
@@ -480,15 +566,16 @@ pub async fn scan_start_op(
 
         let is_draft = existing.status == crate::commands::wizard_scan::WIZARD_SCAN_STATUS;
         let is_restart = is_restartable_scan_status(&existing.status);
-        clear_console_log = is_restart
-            || (!is_draft
-                && existing.status == "running"
-                && !state.jobs().contains(&draft_id));
-        if is_restart {
+        clear_console_log = !retry_failed_only
+            && (is_restart
+                || (!is_draft
+                    && existing.status == "running"
+                    && !state.jobs().contains(&draft_id)));
+        if is_restart || retry_failed_only {
             execution_config.pipeline_warmup_secs = 0;
         }
 
-        if !is_draft && !is_restart {
+        if !is_draft && !is_restart && !retry_failed_only {
             if existing.status == "running" && state.jobs().contains(&draft_id) {
                 return Ok(ScanStartDto {
                     scan_id: draft_id.clone(),
@@ -508,10 +595,11 @@ pub async fn scan_start_op(
             warn!(scan_id = %draft_id, "restarting scan marked running without active job");
         }
 
+        let clear_progress = is_restart && !retry_failed_only;
         let playbook = merge_scan_execution_playbook(
             existing.playbook_json.as_deref(),
             &mut execution_playbook,
-            is_restart,
+            clear_progress,
         );
 
         let mut update = UpdateScan {
@@ -522,7 +610,7 @@ pub async fn scan_start_op(
             started_at: Some(Some(OffsetDateTime::now_utc())),
             ..Default::default()
         };
-        if is_restart {
+        if is_restart || retry_failed_only {
             update.completed_at = Some(None);
         }
 
@@ -532,6 +620,11 @@ pub async fn scan_start_op(
             .await
             .map_err(CommandError::from)?
     } else {
+        if retry_failed_only {
+            return Err(CommandError::invalid_input(
+                "draftScanId is required when retrying failed categories",
+            ));
+        }
         repos
             .scans()
             .create(CreateScan {
@@ -564,17 +657,32 @@ pub async fn scan_start_op(
         }
     }
 
-    let total = scan_progress_total(&parsed_categories, &disabled_tests, &execution_config);
-    let attacks_total = scan_attack_requests_total(&parsed_categories, &disabled_tests, &execution_config);
-    let testcases_total = scan_testcases_total(&parsed_categories, &disabled_tests);
+    let total = scan_progress_total(&job_categories, &disabled_tests, &execution_config);
+    let attacks_total = scan_attack_requests_total(&job_categories, &disabled_tests, &execution_config);
+    let testcases_total = scan_testcases_total(&job_categories, &disabled_tests);
     let cancel = Arc::new(AtomicBool::new(false));
     let paused = Arc::new(AtomicBool::new(false));
     let pause_requested = Arc::new(AtomicBool::new(false));
     let batch_checkpoint = Arc::new(Mutex::new(None::<ScanBatchCheckpoint>));
-    let mut progress_state = ScanProgress::new(total.max(1));
-    progress_state.agent_mode = agentic;
-    progress_state.attacks_total = attacks_total;
-    progress_state.testcases_total = testcases_total;
+    let progress_state = if let Some(mut seeded) = seeded_progress {
+        if seeded.total == 0 {
+            seeded.total = total.max(1);
+        }
+        if seeded.attacks_total == 0 {
+            seeded.attacks_total = attacks_total;
+        }
+        if seeded.testcases_total == 0 {
+            seeded.testcases_total = testcases_total;
+        }
+        seeded.agent_mode = agentic;
+        seeded
+    } else {
+        let mut fresh = ScanProgress::new(total.max(1));
+        fresh.agent_mode = agentic;
+        fresh.attacks_total = attacks_total;
+        fresh.testcases_total = testcases_total;
+        fresh
+    };
     let progress = Arc::new(Mutex::new(progress_state));
     state.jobs().register(
         scan.id.clone(),
@@ -601,8 +709,18 @@ pub async fn scan_start_op(
     let profile_for_job = profile.clone();
     let execution_config_for_job = execution_config;
     let app_for_job = app.clone();
+    let skip_completed_categories = !retry_failed_only;
 
     emit_app_data_changed(app, "scan_created");
+
+    if retry_failed_only {
+        let failed_labels: Vec<&str> = job_categories.iter().map(|c| c.display_name()).collect();
+        let emitter = ScanProgressEmitter::new(app.clone(), scan.id.clone());
+        emitter.info(format!(
+            "Retrying failed categories only: {}",
+            failed_labels.join(", ")
+        ));
+    }
 
     tauri::async_runtime::spawn(async move {
         run_scan_job(
@@ -612,7 +730,7 @@ pub async fn scan_start_op(
             scan_id,
             project_id,
             Some(target_id),
-            parsed_categories,
+            job_categories,
             disabled_for_job,
             profile_for_job,
             execution_config_for_job,
@@ -627,6 +745,7 @@ pub async fn scan_start_op(
             model_manager,
             model_provider,
             runtime_manager,
+            skip_completed_categories,
         )
         .await;
     });
@@ -635,6 +754,7 @@ pub async fn scan_start_op(
         scan_id = %scan.id,
         total_units = total,
         agentic = agentic,
+        retry_failed_only,
         "scan started in background"
     );
     Ok(ScanStartDto {
@@ -833,6 +953,7 @@ async fn spawn_resumed_scan_job(
             model_manager,
             model_provider,
             runtime_manager,
+            true,
         )
         .await;
     });
@@ -1036,6 +1157,7 @@ pub async fn scan_start(
     reflection_enabled: Option<bool>,
     adaptive_planning: Option<bool>,
     draft_scan_id: Option<String>,
+    retry_failed_only: Option<bool>,
 ) -> CommandResult<ScanStartDto> {
     let parsed_strategy = payload_strategy
         .map(serde_json::from_value)
@@ -1056,6 +1178,7 @@ pub async fn scan_start(
         reflection_enabled,
         adaptive_planning,
         draft_scan_id,
+        retry_failed_only,
     )
     .await
 }

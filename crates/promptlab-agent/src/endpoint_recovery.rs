@@ -48,6 +48,11 @@ impl EndpointPacing {
             self.serial_wait
         )
     }
+
+    /// True when pacing still matches the host default (no recover / inherit applied).
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
 }
 
 /// Concrete recovery step to apply before retrying the attack.
@@ -274,5 +279,16 @@ mod tests {
         assert_eq!(plan.wait_before_retry_ms, 0);
         assert!(plan.pacing.effective_concurrency() <= DEFAULT_ATTACK_CONCURRENCY);
         assert!(plan.notes.iter().any(|n| n.contains("not counted as recover")));
+    }
+
+    #[test]
+    fn default_pacing_detects_unmodified_state() {
+        assert!(EndpointPacing::default().is_default());
+        let mut escalated = EndpointPacing::default();
+        escalated.serial_wait = true;
+        escalated.max_concurrent_requests = 1;
+        escalated.inter_request_delay_ms = 5_500;
+        escalated.timeout_ms = 120_000;
+        assert!(!escalated.is_default());
     }
 }

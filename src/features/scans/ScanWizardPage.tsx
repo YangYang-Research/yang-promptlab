@@ -1282,13 +1282,13 @@ export function ScanWizardPage() {
     await submitScanJob();
   }
 
-  async function submitScanJob(options?: { restart?: boolean }) {
+  async function submitScanJob(options?: { restart?: boolean; retryFailedOnly?: boolean }) {
     if (!store.savedTarget || !session.attackPlan) return;
     if (startingScanRef.current) return;
 
     const scanIdToReuse = session.submittedScanId ?? session.draftScanId ?? undefined;
 
-    if (!options?.restart) {
+    if (!options?.restart && !options?.retryFailedOnly) {
       updateSession({ currentStep: 5 });
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => {
@@ -1297,7 +1297,7 @@ export function ScanWizardPage() {
       });
     }
 
-    if (scanIdToReuse && !options?.restart) {
+    if (scanIdToReuse && !options?.restart && !options?.retryFailedOnly) {
       try {
         const live = await getScanStatus(scanIdToReuse);
         if (["running", "paused", "pending"].includes(live.status)) {
@@ -1312,9 +1312,14 @@ export function ScanWizardPage() {
     startingScanRef.current = true;
     setStartingScan(true);
     setScanSubmitError(null);
+    const activityLabel = options?.retryFailedOnly
+      ? "Retrying failed categories…"
+      : options?.restart
+        ? "Restarting attack…"
+        : "Starting attack…";
     logWizardEvent({
       activityName: "wizard_attack_start",
-      message: options?.restart ? "Restarting attack…" : "Starting attack…",
+      message: activityLabel,
       projectId: activeProjectId || null,
       scanId: scanIdToReuse ?? null,
       attributes: {
@@ -1322,6 +1327,7 @@ export function ScanWizardPage() {
         profileId: session.attackPlan.profileId,
         categories: session.attackPlan.categories.length,
         restart: Boolean(options?.restart),
+        retryFailedOnly: Boolean(options?.retryFailedOnly),
       },
     });
     try {
@@ -1337,19 +1343,29 @@ export function ScanWizardPage() {
         reflectionEnabled: session.attackPlan.reflectionEnabled,
         adaptivePlanning: session.attackPlan.adaptivePlanning,
         draftScanId: scanIdToReuse,
+        retryFailedOnly: options?.retryFailedOnly,
       });
       await actions.refresh();
       updateSession({ submittedScanId: result.scan_id, currentStep: 5 });
-      if (options?.restart) {
+      if (options?.restart && !options?.retryFailedOnly) {
         setConsoleResetKey((key) => key + 1);
       }
       logWizardEvent({
         activityName: "wizard_attack_started",
-        message: `Attack started (${result.scan_id})`,
+        message: options?.retryFailedOnly
+          ? `Failed-category retry started (${result.scan_id})`
+          : `Attack started (${result.scan_id})`,
         projectId: activeProjectId || null,
         scanId: result.scan_id,
       });
-      notify(options?.restart ? "Attack restarted" : "Attack started in the background", "success");
+      notify(
+        options?.retryFailedOnly
+          ? "Retrying failed categories"
+          : options?.restart
+            ? "Attack restarted"
+            : "Attack started in the background",
+        "success",
+      );
     } catch (err) {
       const message = toAppError(err).message || "Failed to start scan";
       setScanSubmitError(message);
@@ -1370,6 +1386,11 @@ export function ScanWizardPage() {
   async function handleRetryScan() {
     if (!store.savedTarget || !session.attackPlan) return;
     await submitScanJob({ restart: true });
+  }
+
+  async function handleRetryFailedCategories() {
+    if (!store.savedTarget || !session.attackPlan) return;
+    await submitScanJob({ retryFailedOnly: true });
   }
 
   useEffect(() => {
@@ -1547,6 +1568,10 @@ export function ScanWizardPage() {
               consoleResetKey={consoleResetKey}
               onViewResult={goToResultsStep}
               onClose={handleCancel}
+              onRetryFailedCategories={() => {
+                void handleRetryFailedCategories();
+              }}
+              retryFailedPending={startingScan}
             />
             {scanSubmitError && <p className="text-danger">{scanSubmitError}</p>}
           </>

@@ -256,18 +256,27 @@ impl AgenticAttackExecutionAgent {
                 ))
                 .await;
             let current = tools.current_pacing().await;
-            let seed = seed_pacing_from_prior_failure(&current);
-            if let Err(err) = tools.apply_pacing(&seed.pacing).await {
-                return Err(AgentError::AttackExecution(format!(
-                    "agentic seed pacing failed: {err}"
-                )));
+            if current.is_default() {
+                let seed = seed_pacing_from_prior_failure(&current);
+                if let Err(err) = tools.apply_pacing(&seed.pacing).await {
+                    return Err(AgentError::AttackExecution(format!(
+                        "agentic seed pacing failed: {err}"
+                    )));
+                }
+                tools
+                    .emit_info(format!(
+                        "AgenticAttackExecutionAgent: seeded initial pacing from prior failure — {}",
+                        seed.summary()
+                    ))
+                    .await;
+            } else {
+                tools
+                    .emit_info(format!(
+                        "AgenticAttackExecutionAgent: keeping inherited pacing — {}",
+                        current.summary()
+                    ))
+                    .await;
             }
-            tools
-                .emit_info(format!(
-                    "AgenticAttackExecutionAgent: seeded initial pacing from prior failure — {}",
-                    seed.summary()
-                ))
-                .await;
         }
 
         let mut attempt: u32 = 0;

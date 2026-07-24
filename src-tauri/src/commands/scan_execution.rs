@@ -471,6 +471,32 @@ async fn regenerate_category_payloads(
     Ok(category_payload_map(&prompt_payloads_map(&pack), category))
 }
 
+/// Auto re-runs for a category after it fails in the host category loop.
+pub const MAX_CATEGORY_AUTO_RETRIES: u32 = 3;
+
+/// Per-scan pacing memory so auto-retry / next category keep escalated endpoint limits.
+#[derive(Debug, Default, Clone)]
+pub struct ScanPacingCache {
+    by_category: HashMap<String, EndpointPacing>,
+    last: Option<EndpointPacing>,
+}
+
+impl ScanPacingCache {
+    fn resolve_initial(&self, category: &str) -> EndpointPacing {
+        self.by_category
+            .get(category)
+            .cloned()
+            .or_else(|| self.last.clone())
+            .unwrap_or_default()
+    }
+
+    fn remember(&mut self, category: &str, pacing: EndpointPacing) {
+        self.by_category
+            .insert(category.to_string(), pacing.clone());
+        self.last = Some(pacing);
+    }
+}
+
 pub struct TargetProfileScanContext<'a> {
     pub repos: &'a Repositories,
     pub scan_id: &'a str,
@@ -492,6 +518,11 @@ pub struct TargetProfileScanContext<'a> {
     pub job_controls: Option<crate::jobs::ScanJobControls>,
     pub progress: Arc<Mutex<ScanProgress>>,
     pub emitter: ScanProgressEmitter,
+    /// When true (default), skip categories already counted in `categories_completed`.
+    /// Set false for manual "retry failed only" jobs that pass only failed categories.
+    pub skip_completed_categories: bool,
+    /// Survives across categories and host auto-retries within one scan job.
+    pub pacing_cache: Arc<Mutex<ScanPacingCache>>,
 }
 
 pub struct TargetProfileScanOutcome {
@@ -626,7 +657,11 @@ pub async fn run_target_profile_attack_scan(
         bump_scan_progress(&ctx.progress, 1);
     }
 
-    let mut findings_total = 0u64;
+    let mut findings_total = ctx
+        .progress
+        .lock()
+        .map(|state| state.findings)
+        .unwrap_or(0);
     let mut had_error = false;
 
     let categories_completed = ctx
@@ -636,7 +671,7 @@ pub async fn run_target_profile_attack_scan(
         .unwrap_or(0);
 
     for (category_index, category) in ctx.categories.iter().enumerate() {
-        if category_index < categories_completed {
+        if ctx.skip_completed_categories && category_index < categories_completed {
             continue;
         }
         if ctx.cancel.load(Ordering::Relaxed) {
@@ -647,72 +682,231 @@ pub async fn run_target_profile_attack_scan(
             break;
         }
 
-        if let Ok(mut state) = ctx.progress.lock() {
-            state.status = if ctx.paused.load(Ordering::Relaxed) {
-                "paused".into()
-            } else {
-                "running".into()
-            };
-            state.current_endpoint = Some(ctx.profile.full_url());
-        }
-
-        let run_options = config
-            .payload_strategy
-            .as_ref()
-            .map(|strategy| CategoryRunOptions::from_strategy(*category, ctx.disabled_tests, strategy));
-
-        let category_label = category.display_name();
-
-        let result = if config.execution == ExecutionStrategy::Agentic {
-            run_agentic_category(
-                &ctx,
-                &config,
-                &plan,
-                *category,
-                &generated_payloads,
-                &catalog,
-                run_options.as_ref(),
-            )
-            .await
-        } else {
-            run_sequential_category(
-                &ctx,
-                *category,
-                &generated_payloads,
-                run_options.as_ref(),
-            )
-            .await
-        };
+        let outcome = run_category_pass(
+            &ctx,
+            &config,
+            &plan,
+            *category,
+            &generated_payloads,
+            &catalog,
+            CategoryPassKind::Initial,
+        )
+        .await;
 
         if ctx.paused.load(Ordering::Relaxed) {
             break;
         }
 
-        match result {
+        match outcome {
             Ok(category_result) => {
                 findings_total += category_result.findings.len() as u64;
-                if let Ok(mut state) = ctx.progress.lock() {
-                    state.findings = findings_total;
-                    state.categories_completed = state.categories_completed.saturating_add(1);
-                }
+                record_category_success(
+                    &ctx.progress,
+                    findings_total,
+                    category,
+                    ctx.skip_completed_categories,
+                );
             }
             Err(err) => {
                 had_error = true;
-                ctx.emitter.error(format!("{category_label} failed: {err}"));
-                if let Ok(mut state) = ctx.progress.lock() {
-                    state.categories_completed = state.categories_completed.saturating_add(1);
-                    let id = category.as_str().to_string();
-                    if !state.categories_failed.iter().any(|c| c == &id) {
-                        state.categories_failed.push(id);
-                    }
-                }
+                record_category_failure(&ctx, *category, &err, ctx.skip_completed_categories);
             }
         }
     }
 
+    // Auto-retry failed categories up to MAX_CATEGORY_AUTO_RETRIES times each.
+    let mut auto_retries: HashMap<String, u32> = HashMap::new();
+    loop {
+        if ctx.cancel.load(Ordering::Relaxed) || ctx.paused.load(Ordering::Relaxed) {
+            break;
+        }
+
+        let failed_ids = ctx
+            .progress
+            .lock()
+            .map(|state| state.categories_failed.clone())
+            .unwrap_or_default();
+        if failed_ids.is_empty() {
+            break;
+        }
+
+        let mut retried_any = false;
+        for failed_id in failed_ids {
+            let attempts = auto_retries.get(&failed_id).copied().unwrap_or(0);
+            if attempts >= MAX_CATEGORY_AUTO_RETRIES {
+                continue;
+            }
+            let Some(category) = ctx
+                .categories
+                .iter()
+                .copied()
+                .find(|c| c.as_str() == failed_id)
+                .or_else(|| parse_category_id(&failed_id))
+            else {
+                continue;
+            };
+
+            retried_any = true;
+            let attempt = attempts.saturating_add(1);
+            auto_retries.insert(failed_id.clone(), attempt);
+
+            ctx.emitter.info(format!(
+                "Yazg auto-retry {} ({attempt}/{MAX_CATEGORY_AUTO_RETRIES}) after failure",
+                category.display_name()
+            ));
+
+            wait_if_paused(&ctx.paused, &ctx.cancel).await;
+            if ctx.cancel.load(Ordering::Relaxed) || ctx.paused.load(Ordering::Relaxed) {
+                break;
+            }
+
+            let outcome = run_category_pass(
+                &ctx,
+                &config,
+                &plan,
+                category,
+                &generated_payloads,
+                &catalog,
+                CategoryPassKind::AutoRetry { attempt },
+            )
+            .await;
+
+            if ctx.paused.load(Ordering::Relaxed) {
+                break;
+            }
+
+            match outcome {
+                Ok(category_result) => {
+                    findings_total += category_result.findings.len() as u64;
+                    record_category_success(&ctx.progress, findings_total, &category, false);
+                    ctx.emitter.info(format!(
+                        "{} recovered on auto-retry {attempt}/{MAX_CATEGORY_AUTO_RETRIES}",
+                        category.display_name()
+                    ));
+                }
+                Err(err) => {
+                    had_error = true;
+                    record_category_failure(&ctx, category, &err, false);
+                    if attempt >= MAX_CATEGORY_AUTO_RETRIES {
+                        ctx.emitter.error(format!(
+                            "{} still failing after {MAX_CATEGORY_AUTO_RETRIES} auto-retries",
+                            category.display_name()
+                        ));
+                    }
+                }
+            }
+        }
+
+        if !retried_any {
+            break;
+        }
+    }
+
+    had_error = ctx
+        .progress
+        .lock()
+        .map(|state| !state.categories_failed.is_empty())
+        .unwrap_or(had_error);
+
     TargetProfileScanOutcome {
         findings_total,
         had_error,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CategoryPassKind {
+    Initial,
+    AutoRetry { attempt: u32 },
+}
+
+fn parse_category_id(id: &str) -> Option<AttackCategory> {
+    AttackCategory::all()
+        .iter()
+        .copied()
+        .find(|c| c.as_str() == id || c.display_name().eq_ignore_ascii_case(id))
+}
+
+fn record_category_success(
+    progress: &Arc<Mutex<ScanProgress>>,
+    findings_total: u64,
+    category: &AttackCategory,
+    bump_completed: bool,
+) {
+    let id = category.as_str();
+    if let Ok(mut state) = progress.lock() {
+        state.findings = findings_total;
+        if bump_completed {
+            state.categories_completed = state.categories_completed.saturating_add(1);
+        }
+        state.categories_failed.retain(|c| c != id);
+    }
+}
+
+fn record_category_failure(
+    ctx: &TargetProfileScanContext<'_>,
+    category: AttackCategory,
+    err: &str,
+    bump_completed: bool,
+) {
+    let category_label = category.display_name();
+    ctx.emitter
+        .error(format!("{category_label} failed: {err}"));
+    if let Ok(mut state) = ctx.progress.lock() {
+        if bump_completed {
+            state.categories_completed = state.categories_completed.saturating_add(1);
+        }
+        let id = category.as_str().to_string();
+        if !state.categories_failed.iter().any(|c| c == &id) {
+            state.categories_failed.push(id);
+        }
+    }
+}
+
+async fn run_category_pass(
+    ctx: &TargetProfileScanContext<'_>,
+    config: &ScanExecutionConfig,
+    plan: &AttackPlan,
+    category: AttackCategory,
+    generated_payloads: &HashMap<AttackCategory, Vec<AttackPayload>>,
+    catalog: &promptlab_payload::PayloadDatabase,
+    kind: CategoryPassKind,
+) -> Result<CategoryRunResult, String> {
+    if let Ok(mut state) = ctx.progress.lock() {
+        state.status = if ctx.paused.load(Ordering::Relaxed) {
+            "paused".into()
+        } else {
+            "running".into()
+        };
+        state.current_endpoint = Some(ctx.profile.full_url());
+        // Clear failed marker while this category is actively being (re)attempted.
+        let id = category.as_str();
+        state.categories_failed.retain(|c| c != id);
+        if let CategoryPassKind::AutoRetry { attempt } = kind {
+            state.current_retry = Some(attempt);
+        } else {
+            state.current_retry = None;
+        }
+    }
+
+    let run_options = config
+        .payload_strategy
+        .as_ref()
+        .map(|strategy| CategoryRunOptions::from_strategy(category, ctx.disabled_tests, strategy));
+
+    if config.execution == ExecutionStrategy::Agentic {
+        run_agentic_category(
+            ctx,
+            config,
+            plan,
+            category,
+            generated_payloads,
+            catalog,
+            run_options.as_ref(),
+        )
+        .await
+    } else {
+        run_sequential_category(ctx, category, generated_payloads, run_options.as_ref()).await
     }
 }
 
@@ -722,6 +916,19 @@ async fn run_sequential_category(
     generated_payloads: &HashMap<AttackCategory, Vec<AttackPayload>>,
     run_options: Option<&CategoryRunOptions>,
 ) -> Result<CategoryRunResult, String> {
+    let initial_pacing = ctx
+        .pacing_cache
+        .lock()
+        .map(|cache| cache.resolve_initial(category.as_str()))
+        .unwrap_or_default();
+    if !initial_pacing.is_default() {
+        ctx.emitter.info(format!(
+            "SequentialAttackExecutionAgent: inheriting pacing for {} — {}",
+            category.display_name(),
+            initial_pacing.summary()
+        ));
+    }
+
     let tools = SequentialCategoryTools {
         ctx,
         category,
@@ -730,7 +937,7 @@ async fn run_sequential_category(
         state: Mutex::new(SequentialCategoryState {
             payloads: category_payload_map(generated_payloads, category),
             last_result: None,
-            pacing: EndpointPacing::default(),
+            pacing: initial_pacing,
         }),
     };
 
@@ -767,7 +974,7 @@ async fn run_sequential_category(
         category.display_name()
     ));
 
-    let outcome = YazgSupervisor::execute_sequential_attack(
+    let agent_result = YazgSupervisor::execute_sequential_attack(
         &request,
         &tools,
         Some(react.supervisor),
@@ -775,24 +982,33 @@ async fn run_sequential_category(
         Some(&memory),
         memory_ctx,
     )
-    .await
-    .map_err(|err| err.to_string())?;
+    .await;
 
-    for event in &outcome.events {
-        ctx.emitter.info(format!(
-            "[{}] {:?}: {}",
-            event.agent.as_str(),
-            event.kind,
-            event.message
-        ));
+    if let Ok(mut cache) = ctx.pacing_cache.lock() {
+        if let Ok(state) = tools.state.lock() {
+            cache.remember(category.as_str(), state.pacing.clone());
+        }
     }
 
-    tools
-        .state
-        .lock()
-        .ok()
-        .and_then(|s| s.last_result.clone())
-        .ok_or_else(|| "sequential category produced no attempts".into())
+    match agent_result {
+        Ok(outcome) => {
+            for event in &outcome.events {
+                ctx.emitter.info(format!(
+                    "[{}] {:?}: {}",
+                    event.agent.as_str(),
+                    event.kind,
+                    event.message
+                ));
+            }
+            tools
+                .state
+                .lock()
+                .ok()
+                .and_then(|s| s.last_result.clone())
+                .ok_or_else(|| "sequential category produced no attempts".into())
+        }
+        Err(err) => Err(err.to_string()),
+    }
 }
 
 struct SequentialCategoryState {
@@ -957,6 +1173,19 @@ async fn run_agentic_category(
         .clone()
         .ok_or_else(|| "agentic execution requires payload strategy".to_string())?;
 
+    let initial_pacing = ctx
+        .pacing_cache
+        .lock()
+        .map(|cache| cache.resolve_initial(category.as_str()))
+        .unwrap_or_default();
+    if !initial_pacing.is_default() {
+        ctx.emitter.info(format!(
+            "AgenticAttackExecutionAgent: inheriting pacing for {} — {}",
+            category.display_name(),
+            initial_pacing.summary()
+        ));
+    }
+
     let tools = AgenticCategoryTools {
         ctx,
         config,
@@ -970,7 +1199,7 @@ async fn run_agentic_category(
             payloads: category_payload_map(generated_payloads, category),
             last_result: None,
             focus_hints: Vec::new(),
-            pacing: EndpointPacing::default(),
+            pacing: initial_pacing,
         }),
     };
 
@@ -1023,26 +1252,35 @@ async fn run_agentic_category(
     .with_target(Some(ctx.target_id.to_string()))
     .with_scan(Some(ctx.scan_id.to_string()));
 
-    let outcome =
+    let agent_result =
         YazgSupervisor::execute_attack(&request, &tools, &exec_llms, Some(&memory), memory_ctx)
-            .await
-            .map_err(|err| err.to_string())?;
+            .await;
 
-    for event in &outcome.events {
-        ctx.emitter.info(format!(
-            "[{}] {:?}: {}",
-            event.agent.as_str(),
-            event.kind,
-            event.message
-        ));
+    if let Ok(mut cache) = ctx.pacing_cache.lock() {
+        if let Ok(state) = tools.state.lock() {
+            cache.remember(category.as_str(), state.pacing.clone());
+        }
     }
 
-    tools
-        .state
-        .lock()
-        .ok()
-        .and_then(|s| s.last_result.clone())
-        .ok_or_else(|| "agentic category produced no attempts".into())
+    match agent_result {
+        Ok(outcome) => {
+            for event in &outcome.events {
+                ctx.emitter.info(format!(
+                    "[{}] {:?}: {}",
+                    event.agent.as_str(),
+                    event.kind,
+                    event.message
+                ));
+            }
+            tools
+                .state
+                .lock()
+                .ok()
+                .and_then(|s| s.last_result.clone())
+                .ok_or_else(|| "agentic category produced no attempts".into())
+        }
+        Err(err) => Err(err.to_string()),
+    }
 }
 
 struct AgenticCategoryState {

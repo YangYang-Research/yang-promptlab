@@ -135,16 +135,27 @@ impl SequentialAttackExecutionAgent {
                 ))
                 .await;
             let current = tools.current_pacing().await;
-            let seed = seed_pacing_from_prior_failure(&current);
-            tools.apply_pacing(&seed.pacing).await.map_err(|err| {
-                AgentError::AttackExecution(format!("sequential seed pacing failed: {err}"))
-            })?;
-            tools
-                .emit_info(format!(
-                    "SequentialAttackExecutionAgent: seeded initial pacing from prior failure — {}",
-                    seed.summary()
-                ))
-                .await;
+            // Host may already have inherited escalated pacing (auto-retry / prior category).
+            // Never downgrade back to the mild prior-failure seed.
+            if current.is_default() {
+                let seed = seed_pacing_from_prior_failure(&current);
+                tools.apply_pacing(&seed.pacing).await.map_err(|err| {
+                    AgentError::AttackExecution(format!("sequential seed pacing failed: {err}"))
+                })?;
+                tools
+                    .emit_info(format!(
+                        "SequentialAttackExecutionAgent: seeded initial pacing from prior failure — {}",
+                        seed.summary()
+                    ))
+                    .await;
+            } else {
+                tools
+                    .emit_info(format!(
+                        "SequentialAttackExecutionAgent: keeping inherited pacing — {}",
+                        current.summary()
+                    ))
+                    .await;
+            }
         }
 
         let attempt = 1u32;
