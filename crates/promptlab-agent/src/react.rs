@@ -208,7 +208,7 @@ pub async fn run_react(
     .await;
 
     let memory_block =
-        load_memory_prompt_block(request.memory, &request.memory_ctx, AgentId::Yazg).await;
+        load_memory_prompt_block(request.memory, &request.memory_ctx, AgentId::Yazg, None).await;
 
     let mut transcript = String::new();
     transcript.push_str(

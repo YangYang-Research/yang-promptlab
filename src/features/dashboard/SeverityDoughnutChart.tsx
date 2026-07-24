@@ -7,12 +7,13 @@ export type SeveritySlice = {
   color: string;
 };
 
+/** Severity Spectrum — https://colormagic.app/palette/67bd867d5ce83338b13894fc */
 const SEVERITY_COLORS: Record<Severity, string> = {
-  critical: "#f87171",
-  high: "#fbbf24",
-  medium: "#38bdf8",
-  low: "#a78bfa",
-  info: "#71717a",
+  critical: "#c72929",
+  high: "#f47f1f",
+  medium: "#ffb300",
+  low: "#4cae4f",
+  info: "#1975d2",
 };
 
 type SeverityDoughnutChartProps = {

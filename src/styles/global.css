@@ -25,6 +25,13 @@
   --danger: #f87171;
   --info: #38bdf8;
 
+  /* Severity Spectrum — https://colormagic.app/palette/67bd867d5ce83338b13894fc */
+  --severity-critical: #c72929;
+  --severity-high: #f47f1f;
+  --severity-medium: #ffb300;
+  --severity-low: #4cae4f;
+  --severity-info: #1975d2;
+
   --sidebar-width: 248px;
   --sidebar-collapsed: 68px;
   --topbar-height: 60px;
@@ -73,6 +80,12 @@
   --warning: #d97706;
   --danger: #dc2626;
   --info: #0284c7;
+
+  --severity-critical: #c72929;
+  --severity-high: #f47f1f;
+  --severity-medium: #ffb300;
+  --severity-low: #4cae4f;
+  --severity-info: #1975d2;
 
   --shadow: 0 1px 0 color-mix(in srgb, var(--border) 80%, transparent);
   --shadow-elevated: 0 12px 40px color-mix(in srgb, #18181b 12%, transparent);
@@ -837,7 +850,7 @@ a:hover {
   margin-top: 0.375rem;
 }
 
-.stat-card--critical .stat-card__value { color: var(--danger); }
+.stat-card--critical .stat-card__value { color: var(--severity-critical); }
 .stat-card--warning .stat-card__value { color: var(--warning); }
 .stat-card--success .stat-card__value { color: var(--success); }
 
@@ -1069,11 +1082,11 @@ a:hover {
   min-width: 4px;
 }
 
-.severity-chart__bar--critical { background: var(--danger); }
-.severity-chart__bar--high { background: var(--warning); }
-.severity-chart__bar--medium { background: var(--info); }
-.severity-chart__bar--low { background: #a78bfa; }
-.severity-chart__bar--info { background: var(--text-subtle); }
+.severity-chart__bar--critical { background: var(--severity-critical); }
+.severity-chart__bar--high { background: var(--severity-high); }
+.severity-chart__bar--medium { background: var(--severity-medium); }
+.severity-chart__bar--low { background: var(--severity-low); }
+.severity-chart__bar--info { background: var(--severity-info); }
 
 .severity-chart__count {
   font-size: 0.8125rem;
@@ -1286,6 +1299,27 @@ a:hover {
 .badge--danger { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
 .badge--info { background: color-mix(in srgb, var(--info) 16%, transparent); color: var(--info); }
 .badge--muted { background: var(--bg-elevated); color: var(--text-subtle); }
+
+.badge--severity-critical {
+  background: color-mix(in srgb, var(--severity-critical) 16%, transparent);
+  color: var(--severity-critical);
+}
+.badge--severity-high {
+  background: color-mix(in srgb, var(--severity-high) 16%, transparent);
+  color: var(--severity-high);
+}
+.badge--severity-medium {
+  background: color-mix(in srgb, var(--severity-medium) 16%, transparent);
+  color: var(--severity-medium);
+}
+.badge--severity-low {
+  background: color-mix(in srgb, var(--severity-low) 16%, transparent);
+  color: var(--severity-low);
+}
+.badge--severity-info {
+  background: color-mix(in srgb, var(--severity-info) 16%, transparent);
+  color: var(--severity-info);
+}
 
 /* Auth type badges — colors match Scan wizard Authentication Type buttons */
 .badge--auth {

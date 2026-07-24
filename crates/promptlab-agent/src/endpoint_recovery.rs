@@ -196,6 +196,30 @@ pub fn heuristic_recovery(
     }
 }
 
+/// Mild pacing seed from a prior-scan failure for this category.
+///
+/// Applied once at category start — does **not** consume a recovery slot.
+/// Recover ReAct actions remain reserved for unhealthy observations in the current run.
+pub fn seed_pacing_from_prior_failure(current: &EndpointPacing) -> RecoveryPlan {
+    let mut plan = heuristic_recovery(
+        &AttackAttemptObservation {
+            endpoint_unhealthy: true,
+            transport_errors: 1,
+            attempts: 1,
+            http_successes: 0,
+            ..Default::default()
+        },
+        current,
+        0,
+    );
+    plan.wait_before_retry_ms = 0;
+    plan.notes.insert(
+        0,
+        "seeded from prior category failure (not counted as recover)".into(),
+    );
+    plan
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,5 +266,13 @@ mod tests {
         let plan = heuristic_recovery(&obs, &EndpointPacing::default(), 0);
         assert!(plan.pacing.serial_wait);
         assert!(plan.pacing.inter_request_delay_ms >= 4_000);
+    }
+
+    #[test]
+    fn seed_pacing_does_not_wait() {
+        let plan = seed_pacing_from_prior_failure(&EndpointPacing::default());
+        assert_eq!(plan.wait_before_retry_ms, 0);
+        assert!(plan.pacing.effective_concurrency() <= DEFAULT_ATTACK_CONCURRENCY);
+        assert!(plan.notes.iter().any(|n| n.contains("not counted as recover")));
     }
 }

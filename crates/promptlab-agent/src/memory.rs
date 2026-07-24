@@ -288,7 +288,10 @@ pub async fn remember_attack_category_outcome(
     }
 }
 
-/// Load prior category failure/outcome for Retry context (Target + Scan scopes).
+/// Load prior **failure** for this category only (Target + Scan scopes).
+///
+/// Does not load successful `last_outcome` entries — those confuse ReAct into
+/// early recover / cross-talk with other categories.
 pub async fn load_prior_attack_failure_block(
     store: Option<&dyn AgentMemoryStore>,
     ctx: &MemoryContext,
@@ -303,10 +306,7 @@ pub async fn load_prior_attack_failure_block(
         return String::new();
     }
 
-    let keys = [
-        format!("attack.{category}.last_failure"),
-        format!("attack.{category}.last_outcome"),
-    ];
+    let failure_key = format!("attack.{category}.last_failure");
     // Same-strategy first, then sibling execution agent (user may switch Sequential↔Agentic).
     let agents: Vec<AgentId> = match agent_id {
         AgentId::SequentialAttackExecution => vec![
@@ -342,10 +342,11 @@ pub async fn load_prior_attack_failure_block(
             {
                 Ok(entries) => {
                     for entry in entries {
-                        if !keys.iter().any(|k| k == &entry.memory_key) {
+                        if entry.memory_key != failure_key {
                             continue;
                         }
-                        let dedupe = format!("{}:{}:{}", agent.as_str(), entry.memory_key, entry.content);
+                        let dedupe =
+                            format!("{}:{}:{}", agent.as_str(), entry.memory_key, entry.content);
                         if !seen.insert(dedupe) {
                             continue;
                         }
@@ -368,9 +369,10 @@ pub async fn load_prior_attack_failure_block(
     }
 
     let mut out = String::from(
-        "Prior attack failure context (use on Retry — adjust pacing/recover before repeating the same error):\n",
+        "Prior endpoint failure for THIS category only (initial pacing may already be seeded; \
+         do NOT call recover before the first attack observation in this run):\n",
     );
-    for line in lines.into_iter().take(6) {
+    for line in lines.into_iter().take(4) {
         out.push_str(&line);
         out.push('\n');
     }
@@ -379,10 +381,14 @@ pub async fn load_prior_attack_failure_block(
 }
 
 /// Load STM + LTM into a prompt block for ReAct / orchestrators.
+///
+/// When `category` is set, LTM keys under `attack.*` are limited to that category
+/// so sibling category failures do not leak into the transcript.
 pub async fn load_memory_prompt_block(
     store: Option<&dyn AgentMemoryStore>,
     ctx: &MemoryContext,
     agent_id: AgentId,
+    category: Option<&str>,
 ) -> String {
     let Some(store) = store else {
         return String::new();
@@ -429,6 +435,9 @@ pub async fn load_memory_prompt_block(
         {
             Ok(entries) => {
                 for entry in entries {
+                    if !ltm_key_relevant_for_category(&entry.memory_key, category) {
+                        continue;
+                    }
                     let dedupe = format!("{}:{}", entry.memory_key, entry.content);
                     if seen.insert(dedupe) {
                         ltm_lines.push(format!(
@@ -463,6 +472,9 @@ pub async fn load_memory_prompt_block(
             {
                 Ok(entries) => {
                     for entry in entries {
+                        if !ltm_key_relevant_for_category(&entry.memory_key, category) {
+                            continue;
+                        }
                         let dedupe = format!("{}:{}", entry.memory_key, entry.content);
                         if yazg_seen.insert(dedupe) {
                             yazg_lines.push(format!(
@@ -488,6 +500,16 @@ pub async fn load_memory_prompt_block(
     }
 
     out
+}
+
+fn ltm_key_relevant_for_category(memory_key: &str, category: Option<&str>) -> bool {
+    let Some(category) = category.map(str::trim).filter(|c| !c.is_empty()) else {
+        return true;
+    };
+    if memory_key.starts_with("attack.") {
+        return memory_key.starts_with(&format!("attack.{category}."));
+    }
+    true
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -530,6 +552,26 @@ mod tests {
         assert!(!is_attack_failure_outcome(
             "vulnerability confirmed",
             false,
+            None
+        ));
+    }
+
+    #[test]
+    fn ltm_category_filter_keeps_only_matching_attack_keys() {
+        assert!(ltm_key_relevant_for_category(
+            "attack.prompt_injection.last_failure",
+            Some("prompt_injection")
+        ));
+        assert!(!ltm_key_relevant_for_category(
+            "attack.jailbreak.last_failure",
+            Some("prompt_injection")
+        ));
+        assert!(ltm_key_relevant_for_category(
+            "endpoint.notes",
+            Some("prompt_injection")
+        ));
+        assert!(ltm_key_relevant_for_category(
+            "attack.jailbreak.last_failure",
             None
         ));
     }

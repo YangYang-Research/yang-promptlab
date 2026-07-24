@@ -79,6 +79,7 @@ import {
   sessionReadyForWizardEntry,
 } from "./wizardResume";
 import {
+  canReuseWizardDraft,
   resolveOrCreateDraftScanId,
   storeDraftScanId,
 } from "./wizardDraftScan";
@@ -208,7 +209,12 @@ export function ScanWizardPage() {
 
   const applyDraftScanId = useCallback(
     (scanId: string, projectId: string, patch: Partial<ScanWizardSession> = {}) => {
-      storeDraftScanId(projectId, scanId);
+      const targetId =
+        (typeof patch.savedTargetId === "string" && patch.savedTargetId) ||
+        lockedTargetId ||
+        sessionRef.current.savedTargetId ||
+        null;
+      storeDraftScanId(projectId, scanId, targetId);
       setSession((prev) => {
         const next = {
           ...prev,
@@ -220,7 +226,7 @@ export function ScanWizardPage() {
         return next;
       });
     },
-    [],
+    [lockedTargetId],
   );
 
   useEffect(() => {
@@ -292,7 +298,11 @@ export function ScanWizardPage() {
               : next,
           );
           const projectId = lockedProjectId || loaded.scan.project_id;
-          storeDraftScanId(projectId, lockedScanId);
+          storeDraftScanId(
+            projectId,
+            lockedScanId,
+            loaded.scan.target_id ?? (lockedTargetId || null),
+          );
           setSession(merged);
           saveWizardSession(merged);
           wizardResumeHydratedRef.current = resumeKey;
@@ -310,30 +320,55 @@ export function ScanWizardPage() {
       const projectId = lockedProjectId || session.selectedProjectId;
       if (!projectId) return;
 
-      if (session.draftScanId) {
-        storeDraftScanId(projectId, session.draftScanId);
+      // Wait until target deep-link hydrates before binding/creating a draft.
+      if (lockedTargetId && session.savedTargetId !== lockedTargetId) {
+        return;
+      }
+
+      const draftScanTargetId =
+        scans.find((scan) => scan.id === session.draftScanId)?.targetId ?? null;
+      if (
+        canReuseWizardDraft({
+          draftScanId: session.draftScanId,
+          sessionTargetId: session.savedTargetId,
+          lockedTargetId,
+          entryStep,
+          draftScanTargetId,
+        })
+      ) {
+        storeDraftScanId(projectId, session.draftScanId!, lockedTargetId || session.savedTargetId);
         wizardDbBootstrap.current = true;
-        const params = new URLSearchParams({ projectId, scanId: session.draftScanId });
+        const params = new URLSearchParams({ projectId, scanId: session.draftScanId! });
         appendWizardUrlParams(params);
         navigate(`/scans/new?${params.toString()}`, { replace: true });
         return;
       }
 
       wizardDbBootstrap.current = true;
+      const draftTargetId = lockedTargetId || session.savedTargetId;
       try {
-        const scanId = await resolveOrCreateDraftScanId(projectId, async () => {
-          const created = await createWizardScan({
-            projectId,
-            targetId: session.savedTargetId,
-            wizard: wizardStateToPersisted({
-              ...createInitialSession(projectId),
-              selectedProjectId: projectId,
-              draftScanId: null,
-            }),
-          });
-          return created.id;
+        const scanId = await resolveOrCreateDraftScanId(
+          projectId,
+          async () => {
+            const created = await createWizardScan({
+              projectId,
+              targetId: draftTargetId,
+              wizard: wizardStateToPersisted({
+                ...createInitialSession(projectId),
+                selectedProjectId: projectId,
+                savedTargetId: draftTargetId,
+                draftScanId: null,
+                currentStep: entryStep ?? session.currentStep,
+              }),
+            });
+            return created.id;
+          },
+          draftTargetId,
+        );
+        applyDraftScanId(scanId, projectId, {
+          savedTargetId: draftTargetId,
+          draftScanId: scanId,
         });
-        applyDraftScanId(scanId, projectId);
         const params = new URLSearchParams({ projectId, scanId });
         appendWizardUrlParams(params);
         navigate(`/scans/new?${params.toString()}`, { replace: true });
@@ -357,6 +392,7 @@ export function ScanWizardPage() {
     session.attackPlan,
     session.submittedScanId,
     session.targetProfile.verification.verified,
+    session.currentStep,
     targets,
     scans,
     actions,

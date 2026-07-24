@@ -222,6 +222,14 @@ fn observation_from_category_result(result: &CategoryRunResult) -> AttackAttempt
     }
 }
 
+fn category_result_produced_no_requests(result: &CategoryRunResult) -> bool {
+    result.attempts == 0
+        && result.http_successes == 0
+        && result.transport_errors == 0
+        && result.rate_limited == 0
+        && result.server_errors == 0
+}
+
 fn merge_run_options_with_pacing(
     base: Option<&CategoryRunOptions>,
     pacing: &EndpointPacing,
@@ -691,6 +699,13 @@ pub async fn run_target_profile_attack_scan(
             Err(err) => {
                 had_error = true;
                 ctx.emitter.error(format!("{category_label} failed: {err}"));
+                if let Ok(mut state) = ctx.progress.lock() {
+                    state.categories_completed = state.categories_completed.saturating_add(1);
+                    let id = category.as_str().to_string();
+                    if !state.categories_failed.iter().any(|c| c == &id) {
+                        state.categories_failed.push(id);
+                    }
+                }
             }
         }
     }
@@ -844,6 +859,14 @@ impl AttackExecutionTools for SequentialCategoryTools<'_> {
             (state.payloads.clone(), state.pacing.clone())
         };
 
+        let payload_count = payloads.get(&self.category).map(|v| v.len()).unwrap_or(0);
+        if payload_count == 0 {
+            return Err(format!(
+                "no payloads available for {}",
+                self.category.as_str()
+            ));
+        }
+
         let owned_options = merge_run_options_with_pacing(
             self.initial_run_options,
             &pacing,
@@ -874,6 +897,13 @@ impl AttackExecutionTools for SequentialCategoryTools<'_> {
         )
         .await
         .map_err(|err| err.to_string())?;
+
+        if category_result_produced_no_requests(&result) {
+            return Err(format!(
+                "attack produced no requests for {}",
+                self.category.as_str()
+            ));
+        }
 
         let obs = observation_from_category_result(&result);
         let mut state = self.state.lock().map_err(|e| e.to_string())?;
@@ -1189,6 +1219,13 @@ impl AttackExecutionTools for AgenticCategoryTools<'_> {
         )
         .await
         .map_err(|err| err.to_string())?;
+
+        if category_result_produced_no_requests(&result) {
+            return Err(format!(
+                "attack produced no requests for {}",
+                self.category.as_str()
+            ));
+        }
 
         let obs = observation_from_category_result(&result);
         let mut state = self.state.lock().map_err(|e| e.to_string())?;

@@ -59,7 +59,7 @@ describe("attack graph progress", () => {
     expect(attackGraphStateLabel("active", status, "jailbreak")).toBe("Running");
   });
 
-  it("marks all nodes done when attack completes", () => {
+  it("marks all nodes done when every category completed successfully", () => {
     const states = resolveAttackGraphStates([...categories], {
       scan_id: "scan-1",
       status: "completed",
@@ -80,5 +80,29 @@ describe("attack graph progress", () => {
     expect(states.get("prompt_injection")).toBe("done");
     expect(states.get("jailbreak")).toBe("done");
     expect(states.get("system_prompt_extraction")).toBe("done");
+  });
+
+  it("does not mark failed categories done when scan completed with findings", () => {
+    const states = resolveAttackGraphStates([...categories], {
+      scan_id: "scan-1",
+      status: "completed",
+      progress_percent: 100,
+      completed: 20,
+      total: 30,
+      categories_completed: 2,
+      categories_failed: ["jailbreak"],
+      findings_count: 2,
+      current_endpoint: null,
+      current_test: null,
+      current_phase: null,
+      started_at: null,
+      agent_mode: false,
+      current_attempt: null,
+      current_retry: null,
+    });
+
+    expect(states.get("prompt_injection")).toBe("done");
+    expect(states.get("jailbreak")).toBe("failed");
+    expect(states.get("system_prompt_extraction")).toBe("pending");
   });
 });

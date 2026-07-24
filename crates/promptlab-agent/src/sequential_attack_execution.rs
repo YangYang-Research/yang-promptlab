@@ -11,7 +11,8 @@ use crate::attack_execution::{
     AttackAttemptObservation, AttackExecutionOutcome, AttackExecutionTools,
 };
 use crate::endpoint_recovery::{
-    heuristic_recovery, observation_needs_recovery, MAX_ENDPOINT_RECOVERIES,
+    heuristic_recovery, observation_needs_recovery, seed_pacing_from_prior_failure,
+    MAX_ENDPOINT_RECOVERIES,
 };
 use crate::error::{AgentError, AgentResult};
 use crate::memory::{
@@ -99,9 +100,13 @@ impl SequentialAttackExecutionAgent {
         )
         .await;
 
-        let memory_block =
-            load_memory_prompt_block(memory, &memory_ctx, AgentId::SequentialAttackExecution)
-                .await;
+        let memory_block = load_memory_prompt_block(
+            memory,
+            &memory_ctx,
+            AgentId::SequentialAttackExecution,
+            Some(request.category.as_str()),
+        )
+        .await;
         let prior_failure = load_prior_attack_failure_block(
             memory,
             &memory_ctx,
@@ -129,6 +134,17 @@ impl SequentialAttackExecutionAgent {
                     request.category
                 ))
                 .await;
+            let current = tools.current_pacing().await;
+            let seed = seed_pacing_from_prior_failure(&current);
+            tools.apply_pacing(&seed.pacing).await.map_err(|err| {
+                AgentError::AttackExecution(format!("sequential seed pacing failed: {err}"))
+            })?;
+            tools
+                .emit_info(format!(
+                    "SequentialAttackExecutionAgent: seeded initial pacing from prior failure — {}",
+                    seed.summary()
+                ))
+                .await;
         }
 
         let attempt = 1u32;
@@ -152,19 +168,23 @@ impl SequentialAttackExecutionAgent {
         if !prior_failure.is_empty() {
             transcript.push_str(&prior_failure);
             transcript.push_str(
-                "If prior failure context is present, prefer recover early (serial wait, higher delay,\n\
-                 longer timeout) before or immediately after the first unhealthy attack.\n\n",
+                "Prior failure pacing is already seeded. Always generate then attack first.\n\
+                 Call recover only after an unhealthy attack observation in THIS run.\n\
+                 Ignore failures from other categories.\n\n",
             );
         }
         transcript.push_str(
             "Respond with one JSON step each turn:\n\
              {\"thought\":\"...\",\"action\":\"generate|attack|recover|finish\"}\n\n\
              Policy:\n\
+             - Only those four actions. Never use Yazg/Attack-Factory verbs \
+               (generate_prompt, analyze_endpoint, attack_plan, recommend, …).\n\
              - generate once, then attack.\n\
              - If attack errors or observation is unhealthy (timeouts, 429, 5xx, high latency),\n\
                recover: lower concurrency / serial wait / raise delay from response latency /\n\
                raise timeout / backoff, then attack again with the same payloads.\n\
-             - finish after a healthy attack (or when recoveries are exhausted).\n\
+             - Never recover before the first attack observation; never recover twice without a new unhealthy attack.\n\
+             - finish only after at least one attack observation (healthy, or recoveries exhausted).\n\
              - Never invent HTTP results.\n",
         );
 
@@ -197,6 +217,10 @@ impl SequentialAttackExecutionAgent {
                                 error = %err,
                                 "SequentialAttackExecutionAgent ReAct parse failed; using policy"
                             );
+                            transcript.push_str(&format!(
+                                "\n--- Step {step} ---\nInvalid ReAct response: {err}\n\
+                                 Valid actions: generate|attack|recover|finish. Using policy.\n"
+                            ));
                             policy_next_action(
                                 generated,
                                 attacked,
@@ -224,12 +248,15 @@ impl SequentialAttackExecutionAgent {
                     &last_obs,
                 )
             };
-            // Hard-gate: never skip endpoint recovery when the last attack was unhealthy.
-            let action = if needs_recover && recoveries_used < MAX_ENDPOINT_RECOVERIES {
-                SeqAction::Recover
-            } else {
-                action
-            };
+            // Hard-gate: recover only after an unhealthy observation; never Finish before attack.
+            let action = gate_seq_action(
+                action,
+                generated,
+                attacked,
+                needs_recover,
+                recoveries_used,
+                &last_obs,
+            );
 
             events.push(AgentEvent::info(
                 AgentId::SequentialAttackExecution,
@@ -284,6 +311,49 @@ impl SequentialAttackExecutionAgent {
                     }
                     tools.set_phase("attack", attempt, recoveries_used).await;
                     match tools.run_attack_attempt(attempt).await {
+                        Ok(obs) if obs.produced_no_requests() => {
+                            let err = "attack produced no requests (empty payload batch or executor skipped all)".to_string();
+                            last_obs = obs;
+                            last_obs.endpoint_error = Some(err.clone());
+                            last_obs.endpoint_unhealthy = true;
+                            attacked = false;
+                            // Empty batch is not fixed by pacing recover — fail the category.
+                            stopped_reason = format!("attack_failed: {err}");
+                            events.push(AgentEvent::info(
+                                AgentId::SequentialAttackExecution,
+                                format!("attack failed attempt={attempt}: {err}"),
+                            ));
+                            events.push(AgentEvent::failed(
+                                AgentId::SequentialAttackExecution,
+                                stopped_reason.clone(),
+                            ));
+                            remember_attack_category_outcome(
+                                memory,
+                                &memory_ctx,
+                                AgentId::SequentialAttackExecution,
+                                &request.category,
+                                &stopped_reason,
+                                format!(
+                                    "sequential fatal {stopped_reason} recoveries={} {}",
+                                    recoveries_used,
+                                    last_obs.health_line()
+                                ),
+                                serde_json::json!({
+                                    "mode": "sequential",
+                                    "category": request.category,
+                                    "stopped_reason": stopped_reason,
+                                    "recoveries_used": recoveries_used,
+                                    "endpoint_unhealthy": true,
+                                    "endpoint_error": err,
+                                    "health": last_obs.health_line(),
+                                }),
+                                0.95,
+                                true,
+                                Some(err.as_str()),
+                            )
+                            .await;
+                            return Err(AgentError::AttackExecution(stopped_reason));
+                        }
                         Ok(obs) => {
                             tools.set_phase("judge", attempt, recoveries_used).await;
                             last_obs = obs;
@@ -323,7 +393,11 @@ impl SequentialAttackExecutionAgent {
                             last_obs.endpoint_error = Some(err.clone());
                             last_obs.endpoint_unhealthy = true;
                             attacked = false;
-                            needs_recover = recoveries_used < MAX_ENDPOINT_RECOVERIES;
+                            let empty_batch = err.contains("no requests")
+                                || err.contains("no payloads")
+                                || err.contains("empty payload");
+                            needs_recover =
+                                !empty_batch && recoveries_used < MAX_ENDPOINT_RECOVERIES;
                             let line = format!("attack failed attempt={attempt}: {err}");
                             transcript.push_str(&format!(
                                 "Observation: {line}\nNeeds recover: {needs_recover}\n"
@@ -455,7 +529,11 @@ impl SequentialAttackExecutionAgent {
                 }
             }
 
-            if attacked && !needs_recover && !observation_needs_recovery(&last_obs) {
+            if attacked
+                && last_obs.attempts > 0
+                && !needs_recover
+                && !observation_needs_recovery(&last_obs)
+            {
                 stopped_reason = if last_obs.high_confidence_vuln {
                     "vulnerability confirmed".into()
                 } else if last_obs.any_vulnerable {
@@ -466,6 +544,7 @@ impl SequentialAttackExecutionAgent {
                 break;
             }
             if attacked
+                && last_obs.attempts > 0
                 && observation_needs_recovery(&last_obs)
                 && recoveries_used >= MAX_ENDPOINT_RECOVERIES
             {
@@ -474,6 +553,46 @@ impl SequentialAttackExecutionAgent {
                 );
                 break;
             }
+        }
+
+        if (!attacked || last_obs.attempts == 0) && stopped_reason != "cancelled" {
+            let reason = last_obs
+                .endpoint_error
+                .as_ref()
+                .map(|err| format!("attack_failed: {err}"))
+                .unwrap_or_else(|| {
+                    "sequential category produced no successful attack attempts".into()
+                });
+            events.push(AgentEvent::failed(
+                AgentId::SequentialAttackExecution,
+                reason.clone(),
+            ));
+            remember_attack_category_outcome(
+                memory,
+                &memory_ctx,
+                AgentId::SequentialAttackExecution,
+                &request.category,
+                &reason,
+                format!(
+                    "sequential fatal {reason} recoveries={} {}",
+                    recoveries_used,
+                    last_obs.health_line()
+                ),
+                serde_json::json!({
+                    "mode": "sequential",
+                    "category": request.category,
+                    "stopped_reason": reason,
+                    "recoveries_used": recoveries_used,
+                    "endpoint_unhealthy": last_obs.endpoint_unhealthy,
+                    "endpoint_error": last_obs.endpoint_error,
+                    "health": last_obs.health_line(),
+                }),
+                0.95,
+                true,
+                last_obs.endpoint_error.as_deref(),
+            )
+            .await;
+            return Err(AgentError::AttackExecution(reason));
         }
 
         events.push(AgentEvent::completed(
@@ -581,6 +700,31 @@ fn policy_next_action(
     SeqAction::Finish
 }
 
+fn gate_seq_action(
+    action: SeqAction,
+    generated: bool,
+    attacked: bool,
+    needs_recover: bool,
+    recoveries_used: u32,
+    last_obs: &AttackAttemptObservation,
+) -> SeqAction {
+    if needs_recover && recoveries_used < MAX_ENDPOINT_RECOVERIES {
+        return SeqAction::Recover;
+    }
+    if matches!(action, SeqAction::Recover)
+        || (matches!(action, SeqAction::Finish) && !attacked)
+    {
+        return policy_next_action(
+            generated,
+            attacked,
+            needs_recover,
+            recoveries_used,
+            last_obs,
+        );
+    }
+    action
+}
+
 async fn decide_action(
     llm: &dyn PlannerLlm,
     transcript: &str,
@@ -607,13 +751,77 @@ async fn decide_action(
 
 fn parse_seq_action(raw: &str) -> Result<SeqAction, String> {
     match raw.trim().to_ascii_lowercase().replace('-', "_").as_str() {
-        "generate" | "generate_payloads" | "payloads" => Ok(SeqAction::Generate),
+        // generate_prompt is a Yazg/Attack-Factory verb; treat as payload generate here.
+        "generate" | "generate_payloads" | "payloads" | "generate_prompt" | "prompt" => {
+            Ok(SeqAction::Generate)
+        }
         "attack" | "run_attack" | "execute" => Ok(SeqAction::Attack),
         "recover" | "recovery" | "pace" | "backoff" | "throttle" => Ok(SeqAction::Recover),
         "finish" | "done" | "stop" => Ok(SeqAction::Finish),
         other => Err(format!(
             "unknown SequentialAttackExecutionAgent action '{other}'"
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_seq_action_accepts_yazg_generate_alias() {
+        assert_eq!(
+            parse_seq_action("generate_prompt").unwrap(),
+            SeqAction::Generate
+        );
+        assert_eq!(parse_seq_action("GENERATE").unwrap(), SeqAction::Generate);
+        assert_eq!(parse_seq_action("attack").unwrap(), SeqAction::Attack);
+        assert_eq!(parse_seq_action("finish").unwrap(), SeqAction::Finish);
+    }
+
+    #[test]
+    fn parse_seq_action_rejects_unknown() {
+        assert!(parse_seq_action("analyze_endpoint").is_err());
+    }
+
+    #[test]
+    fn policy_never_finishes_before_attack() {
+        let obs = AttackAttemptObservation::default();
+        assert_eq!(
+            policy_next_action(false, false, false, 0, &obs),
+            SeqAction::Generate
+        );
+        assert_eq!(
+            policy_next_action(true, false, false, 0, &obs),
+            SeqAction::Attack
+        );
+    }
+
+    #[test]
+    fn speculative_recover_rewrites_to_generate() {
+        let obs = AttackAttemptObservation::default();
+        assert_eq!(
+            gate_seq_action(SeqAction::Recover, false, false, false, 0, &obs),
+            SeqAction::Generate
+        );
+        assert_eq!(
+            gate_seq_action(SeqAction::Recover, true, false, false, 0, &obs),
+            SeqAction::Attack
+        );
+        assert_eq!(
+            gate_seq_action(SeqAction::Recover, true, true, true, 0, &obs),
+            SeqAction::Recover
+        );
+    }
+
+    #[test]
+    fn empty_observation_is_produced_no_requests() {
+        assert!(AttackAttemptObservation::default().produced_no_requests());
+        assert!(!AttackAttemptObservation {
+            attempts: 1,
+            ..Default::default()
+        }
+        .produced_no_requests());
     }
 }
 

@@ -61,7 +61,10 @@ impl CategoryRunOptions {
         let variants = strategy.variants_per_test.max(1) as usize;
         let budget = strategy.max_total_payloads.max(1) as usize;
         Self {
-            max_payloads: enabled.saturating_mul(variants).saturating_mul(budget),
+            max_payloads: enabled
+                .saturating_mul(variants)
+                .saturating_mul(budget)
+                .max(1),
             variants_per_test: variants,
             max_concurrent_requests: None,
             inter_request_delay_ms: None,
@@ -79,7 +82,8 @@ impl CategoryRunOptions {
 
 fn apply_options_to_budget(ctx: &mut AttackContext, options: Option<&CategoryRunOptions>) {
     if let Some(opts) = options {
-        ctx.budget.max_payloads = opts.max_payloads;
+        // Never clamp to zero — that yields an empty attack batch and a false "completed".
+        ctx.budget.max_payloads = opts.max_payloads.max(1);
         ctx.budget.max_concurrent_requests = opts
             .max_concurrent_requests
             .unwrap_or(DEFAULT_ATTACK_CONCURRENCY)
@@ -790,7 +794,19 @@ async fn execute_category_then_judge(
         };
 
         if attempts.is_empty() {
-            return Ok(category_result_from_accum(&accum));
+            let cancelled = env
+                .job_controls
+                .map(|ctrl| ctrl.cancel.load(Ordering::Relaxed))
+                .unwrap_or(false);
+            if cancelled {
+                return Ok(category_result_from_accum(&accum));
+            }
+            return Err(CommandError::from(promptlab_core::PromptLabError::internal(
+                format!(
+                    "no attack attempts collected for {} (empty payload batch or executor skipped all)",
+                    category_label
+                ),
+            )));
         }
 
         // Ingest once per category run (checkpoint resume must not double-count).
@@ -874,7 +890,10 @@ async fn execute_category_then_judge(
 
 fn category_result_from_accum(accum: &CategoryJudgeAccum) -> CategoryRunResult {
     CategoryRunResult {
-        attempts: accum.judged.len(),
+        // Prefer HTTP attempt count so an empty judge list cannot look like "no work".
+        attempts: accum
+            .attempt_count
+            .max(accum.judged.len() as u64) as usize,
         successes: accum.successes,
         findings: accum.created_findings.clone(),
         judged: accum.judged.clone(),

@@ -42,7 +42,8 @@ pub use attack_execution::{
     AttackExecutionOutcome, AttackExecutionRequest, AttackExecutionTools,
 };
 pub use endpoint_recovery::{
-    heuristic_recovery, observation_needs_recovery, EndpointPacing, RecoveryPlan,
+    heuristic_recovery, observation_needs_recovery, seed_pacing_from_prior_failure, EndpointPacing,
+    RecoveryPlan,
     DEFAULT_ATTACK_CONCURRENCY, DEFAULT_TIMEOUT_MS, MAX_ENDPOINT_RECOVERIES,
 };
 pub use attack_plan::{

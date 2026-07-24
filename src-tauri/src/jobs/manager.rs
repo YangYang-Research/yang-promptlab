@@ -17,6 +17,9 @@ pub struct ScanProgress {
     /// Attack-plan categories fully finished (attack + judge) in the current scan.
     #[serde(default)]
     pub categories_completed: u64,
+    /// Category ids that finished with an error (still counted in categories_completed).
+    #[serde(default)]
+    pub categories_failed: Vec<String>,
     pub findings: u64,
     pub started_at: Option<String>,
     #[serde(default)]
@@ -50,6 +53,7 @@ impl ScanProgress {
             completed: 0,
             total,
             categories_completed: 0,
+            categories_failed: Vec::new(),
             findings: 0,
             started_at: Some(
                 OffsetDateTime::now_utc()

@@ -10,7 +10,8 @@ use tracing::{info, warn};
 
 use crate::attack_plan::{AdaptPlanOutcome, AdaptPlanRequest, AttackPlanAgent};
 use crate::endpoint_recovery::{
-    heuristic_recovery, observation_needs_recovery, EndpointPacing, MAX_ENDPOINT_RECOVERIES,
+    heuristic_recovery, observation_needs_recovery, seed_pacing_from_prior_failure, EndpointPacing,
+    MAX_ENDPOINT_RECOVERIES,
 };
 use crate::error::{AgentError, AgentResult};
 use crate::memory::{
@@ -56,6 +57,15 @@ impl AttackAttemptObservation {
             self.endpoint_unhealthy,
             self.endpoint_error.as_deref().unwrap_or("-")
         )
+    }
+
+    /// True when the host returned Ok but executed zero HTTP attempts.
+    pub fn produced_no_requests(&self) -> bool {
+        self.attempts == 0
+            && self.http_successes == 0
+            && self.transport_errors == 0
+            && self.rate_limited == 0
+            && self.server_errors == 0
     }
 }
 
@@ -211,8 +221,13 @@ impl AgenticAttackExecutionAgent {
         )
         .await;
 
-        let memory_block =
-            load_memory_prompt_block(memory, &memory_ctx, AgentId::AgenticAttackExecution).await;
+        let memory_block = load_memory_prompt_block(
+            memory,
+            &memory_ctx,
+            AgentId::AgenticAttackExecution,
+            Some(request.category.as_str()),
+        )
+        .await;
         let prior_failure = load_prior_attack_failure_block(
             memory,
             &memory_ctx,
@@ -240,6 +255,19 @@ impl AgenticAttackExecutionAgent {
                     request.category
                 ))
                 .await;
+            let current = tools.current_pacing().await;
+            let seed = seed_pacing_from_prior_failure(&current);
+            if let Err(err) = tools.apply_pacing(&seed.pacing).await {
+                return Err(AgentError::AttackExecution(format!(
+                    "agentic seed pacing failed: {err}"
+                )));
+            }
+            tools
+                .emit_info(format!(
+                    "AgenticAttackExecutionAgent: seeded initial pacing from prior failure — {}",
+                    seed.summary()
+                ))
+                .await;
         }
 
         let mut attempt: u32 = 0;
@@ -265,18 +293,22 @@ impl AgenticAttackExecutionAgent {
         if !prior_failure.is_empty() {
             transcript.push_str(&prior_failure);
             transcript.push_str(
-                "If prior failure context is present, prefer recover early (serial wait, higher delay,\n\
-                 longer timeout) before repeating the same unhealthy attack pattern.\n\n",
+                "Prior failure pacing is already seeded. Always generate then attack first.\n\
+                 Call recover only after an unhealthy attack observation in THIS run.\n\
+                 Ignore failures from other categories.\n\n",
             );
         }
         transcript.push_str(
             "Respond with one JSON step each turn:\n\
              {\"thought\":\"...\",\"action\":\"generate|attack|recover|reflect|adapt|finish\"}\n\n\
              Policy:\n\
+             - Only those actions. Never use Yazg/Attack-Factory verbs \
+               (generate_prompt, analyze_endpoint, attack_plan, recommend, …).\n\
              - Start with generate then attack for each attempt.\n\
              - If attack fails or observation shows endpoint unhealthy (timeouts, 429, 5xx, high latency),\n\
                call recover to adjust pacing (lower concurrency, add inter-request delay, serial wait,\n\
                raise timeout, backoff), then attack again with the same payloads.\n\
+             - Never recover before the first attack observation; never recover twice without a new unhealthy attack.\n\
              - After a healthy attack, call reflect when reflection is enabled (else finish or adapt/retry).\n\
              - If reflect says retry and attempts remain, call adapt when adaptive_planning is on, then generate again.\n\
              - Call finish when done (confirmed finding, no retry, cancel, or max attempts).\n\
@@ -316,6 +348,10 @@ impl AgenticAttackExecutionAgent {
                     }
                     Err(err) => {
                         warn!(error = %err, "AgenticAttackExecutionAgent ReAct parse failed; using policy");
+                        transcript.push_str(&format!(
+                            "\n--- Step {step} ---\nInvalid ReAct response: {err}\n\
+                             Valid actions: generate|attack|recover|reflect|adapt|finish. Using policy.\n"
+                        ));
                         policy_next_action(
                             request,
                             attempt,
@@ -346,9 +382,25 @@ impl AgenticAttackExecutionAgent {
                     &last_obs,
                 )
             };
-            // Hard-gate: never skip endpoint recovery when the last attack was unhealthy.
+            // Hard-gate: recover only after an unhealthy observation; never Finish before attack.
             let action = if needs_recover && recoveries_used < MAX_ENDPOINT_RECOVERIES {
                 ExecAction::Recover
+            } else if matches!(action, ExecAction::Recover)
+                || (matches!(action, ExecAction::Finish) && attacked_for_attempt.is_none())
+            {
+                policy_next_action(
+                    request,
+                    attempt,
+                    max_attempts,
+                    generated_for_attempt,
+                    attacked_for_attempt,
+                    reflected_for_attempt,
+                    adapted_after_attempt,
+                    last_reflection.as_ref(),
+                    needs_recover,
+                    recoveries_used,
+                    &last_obs,
+                )
             } else {
                 action
             };
@@ -429,6 +481,23 @@ impl AgenticAttackExecutionAgent {
                     let retry = attempt.saturating_sub(1);
                     tools.set_phase("attack", attempt, retry).await;
                     match tools.run_attack_attempt(attempt).await {
+                        Ok(obs) if obs.produced_no_requests() => {
+                            let err = "attack produced no requests (empty payload batch or executor skipped all)".to_string();
+                            last_obs = obs;
+                            last_obs.endpoint_error = Some(err.clone());
+                            last_obs.endpoint_unhealthy = true;
+                            attacked_for_attempt = None;
+                            stopped_reason = format!("attack_failed: {err}");
+                            events.push(AgentEvent::info(
+                                AgentId::AgenticAttackExecution,
+                                format!("attack failed attempt={attempt}: {err}"),
+                            ));
+                            events.push(AgentEvent::failed(
+                                AgentId::AgenticAttackExecution,
+                                stopped_reason.clone(),
+                            ));
+                            return Err(AgentError::AttackExecution(stopped_reason));
+                        }
                         Ok(obs) => {
                             tools.set_phase("judge", attempt, retry).await;
                             last_obs = obs;
@@ -465,7 +534,11 @@ impl AgenticAttackExecutionAgent {
                             last_obs.endpoint_error = Some(err.clone());
                             last_obs.endpoint_unhealthy = true;
                             attacked_for_attempt = None;
-                            needs_recover = recoveries_used < MAX_ENDPOINT_RECOVERIES;
+                            let empty_batch = err.contains("no requests")
+                                || err.contains("no payloads")
+                                || err.contains("empty payload");
+                            needs_recover =
+                                !empty_batch && recoveries_used < MAX_ENDPOINT_RECOVERIES;
                             let line = format!("attack failed attempt={attempt}: {err}");
                             transcript.push_str(&format!(
                                 "Observation: {line}\nNeeds recover: {needs_recover}\n"
@@ -930,7 +1003,10 @@ async fn decide_action(
 
 fn parse_exec_action(raw: &str) -> Result<ExecAction, String> {
     match raw.trim().to_ascii_lowercase().replace('-', "_").as_str() {
-        "generate" | "generate_payloads" | "payloads" => Ok(ExecAction::Generate),
+        // generate_prompt is a Yazg/Attack-Factory verb; treat as payload generate here.
+        "generate" | "generate_payloads" | "payloads" | "generate_prompt" | "prompt" => {
+            Ok(ExecAction::Generate)
+        }
         "attack" | "run_attack" | "execute" => Ok(ExecAction::Attack),
         "recover" | "recovery" | "pace" | "backoff" | "throttle" => Ok(ExecAction::Recover),
         "reflect" | "reflection" => Ok(ExecAction::Reflect),

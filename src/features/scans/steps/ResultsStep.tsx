@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Badge, RefreshButton, YazgBadge } from "@/shared/components";
+import { Badge, RefreshButton, SeverityBadge, YazgBadge } from "@/shared/components";
 import { IconCheck } from "@/shared/components/Icons";
 import { resolveAttackGraphStates } from "@/features/scans/attackGraphProgress";
 import { getCategory, type AttackCategoryId } from "@/features/scans/attackProfiles";
@@ -19,13 +19,6 @@ type ResultsStepProps = {
 };
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
-
-function severityVariant(severity: Severity): "danger" | "warning" | "info" | "muted" {
-  if (severity === "critical" || severity === "high") return "danger";
-  if (severity === "medium") return "warning";
-  if (severity === "low") return "info";
-  return "muted";
-}
 
 function severityRank(severity: Severity): number {
   const idx = SEVERITY_ORDER.indexOf(severity);
@@ -195,7 +188,7 @@ export function ResultsStep({
                   setSelectedSeverity((current) => (current === severity ? null : severity))
                 }
               >
-                <Badge variant={severityVariant(severity)}>{severity}</Badge>
+                <SeverityBadge severity={severity} />
                 <span className="wizard-results__severity-count">{count}</span>
               </button>
             );
@@ -266,7 +259,7 @@ export function ResultsStep({
                         className="wizard-results__finding-button"
                         onClick={() => navigate(`/findings/${finding.id}`)}
                       >
-                        <Badge variant={severityVariant(finding.severity)}>{finding.severity}</Badge>
+                        <SeverityBadge severity={finding.severity} />
                         <span className="wizard-results__finding-title">{finding.title}</span>
                       </button>
                     </li>

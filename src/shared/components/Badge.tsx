@@ -12,24 +12,12 @@ export function Badge({ children, variant = "default", className }: BadgeProps) 
   return <span className={classes}>{children}</span>;
 }
 
-const severityVariant: Record<Severity, BadgeProps["variant"]> = {
-  critical: "danger",
-  high: "warning",
-  medium: "info",
-  low: "muted",
-  info: "default",
-};
-
 type SeverityBadgeProps = {
   severity: Severity;
 };
 
 export function SeverityBadge({ severity }: SeverityBadgeProps) {
-  return (
-    <Badge variant={severityVariant[severity]}>
-      {severity}
-    </Badge>
-  );
+  return <span className={`badge badge--severity-${severity}`}>{severity}</span>;
 }
 
 const targetScanStatusVariant: Record<TargetScanStatusLabel, BadgeProps["variant"]> = {
