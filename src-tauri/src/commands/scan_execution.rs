@@ -248,6 +248,7 @@ fn merge_run_options_with_pacing(
             max_concurrent_requests: None,
             inter_request_delay_ms: None,
             timeout_ms: None,
+            enabled_mutators: None,
         }
     };
     opts = opts.with_pacing(pacing);
@@ -270,6 +271,7 @@ fn escalate_payload_strategy(strategy: &PayloadStrategy) -> PayloadStrategy {
         enable_payload_deduplication: strategy.enable_payload_deduplication,
         enable_cross_category_mutation: strategy.enable_cross_category_mutation
             || matches!(strategy.mutation_level, MutationLevel::High | MutationLevel::Extreme),
+        enabled_mutators: strategy.enabled_mutators.clone(),
     }
     .clamp()
 }

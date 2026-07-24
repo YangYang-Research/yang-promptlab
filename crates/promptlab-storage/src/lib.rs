@@ -15,8 +15,8 @@ pub use repositories::{
     AgentLongTermMemoryRepository, AgentShortTermMemoryRepository, AttackCatalogRepository,
     AttackResultRepository, AuthProfileRepository, AuthRecordingRepository, AuthSessionRepository,
     EndpointRepository, FindingRepository, JudgeRoleWeightsRepository, ModelRepository,
-    PayloadRepository, PluginRepository, ProjectRepository, ReportRepository, Repositories,
-    RuntimeTrafficRepository, ScanRepository, TargetRepository,
+    MutatorSettingsRepository, PayloadRepository, PluginRepository, ProjectRepository,
+    ReportRepository, Repositories, RuntimeTrafficRepository, ScanRepository, TargetRepository,
 };
 
 #[cfg(test)]

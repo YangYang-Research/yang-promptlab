@@ -6,6 +6,43 @@ const PAYLOAD_BUDGET_MIN: u32 = 1;
 const PAYLOAD_BUDGET_MAX: u32 = 50;
 const PAYLOAD_BUDGET_DEFAULT: u32 = 20;
 
+/// Attack-time mutator ids (snake_case) — must match `promptlab_attack::MutatorKind`.
+pub fn all_attack_mutator_ids() -> Vec<String> {
+    [
+        "base64_wrap",
+        "unicode_homoglyph",
+        "delimiter_injection",
+        "role_swap",
+        "chunk_split",
+        "json_escape",
+        "repeat_amplify",
+        "hex_wrap",
+        "html_wrap",
+        "rot13_wrap",
+        "leetspeak",
+        "reversed_text",
+        "token_split",
+        "markdown_code_fence",
+        "zero_width_dense",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+fn quick_attack_mutator_ids() -> Vec<String> {
+    [
+        "delimiter_injection",
+        "role_swap",
+        "base64_wrap",
+        "json_escape",
+        "markdown_code_fence",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MutationLevel {
@@ -57,6 +94,10 @@ pub struct PayloadStrategy {
     pub enable_response_adaptation: bool,
     pub enable_payload_deduplication: bool,
     pub enable_cross_category_mutation: bool,
+    /// Attack-time HTTP mutator allowlist (snake_case ids).
+    /// `None` = category plan defaults; `Some([])` = no expand; `Some([...])` = filter.
+    #[serde(default)]
+    pub enabled_mutators: Option<Vec<String>>,
 }
 
 impl Default for PayloadStrategy {
@@ -71,6 +112,7 @@ impl Default for PayloadStrategy {
             enable_response_adaptation: false,
             enable_payload_deduplication: true,
             enable_cross_category_mutation: false,
+            enabled_mutators: Some(all_attack_mutator_ids()),
         }
     }
 }
@@ -119,6 +161,7 @@ pub fn payload_strategy_for_attack_profile(
             enable_response_adaptation: false,
             enable_payload_deduplication: true,
             enable_cross_category_mutation: false,
+            enabled_mutators: Some(quick_attack_mutator_ids()),
         },
         "deep" | "red_team" => PayloadStrategy {
             strategy: PayloadGenerationStrategy::Adaptive,
@@ -130,6 +173,7 @@ pub fn payload_strategy_for_attack_profile(
             enable_response_adaptation: true,
             enable_payload_deduplication: true,
             enable_cross_category_mutation: true,
+            enabled_mutators: Some(all_attack_mutator_ids()),
         },
         "custom" => recommended.clone(),
         _ => PayloadStrategy {
@@ -142,6 +186,12 @@ pub fn payload_strategy_for_attack_profile(
             enable_response_adaptation: false,
             enable_payload_deduplication: true,
             enable_cross_category_mutation: false,
+            enabled_mutators: Some(
+                recommended
+                    .enabled_mutators
+                    .clone()
+                    .unwrap_or_else(all_attack_mutator_ids),
+            ),
         },
     }
 }
@@ -150,6 +200,19 @@ impl PayloadStrategy {
     pub fn clamp(mut self) -> Self {
         self.variants_per_test = self.variants_per_test.clamp(1, 20);
         self.max_total_payloads = self.max_total_payloads.clamp(PAYLOAD_BUDGET_MIN, PAYLOAD_BUDGET_MAX);
+        if let Some(ids) = self.enabled_mutators.take() {
+            let known: std::collections::HashSet<_> =
+                all_attack_mutator_ids().into_iter().collect();
+            let mut cleaned = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for id in ids {
+                let normalized = id.trim().to_ascii_lowercase().replace('-', "_");
+                if known.contains(&normalized) && seen.insert(normalized.clone()) {
+                    cleaned.push(normalized);
+                }
+            }
+            self.enabled_mutators = Some(cleaned);
+        }
         self
     }
 

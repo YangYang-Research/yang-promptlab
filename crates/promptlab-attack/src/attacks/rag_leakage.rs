@@ -33,7 +33,13 @@ impl Attack for RagLeakageAttack {
         Ok(AttackPlan {
             attack_id: self.id().into(),
             category: self.category(),
-            mutators: vec![MutatorKind::DelimiterInjection],
+            mutators: vec![
+                MutatorKind::RepeatAmplify,
+                MutatorKind::DelimiterInjection,
+                MutatorKind::MarkdownCodeFence,
+                MutatorKind::ZeroWidthDense,
+                MutatorKind::TokenSplit,
+            ],
             payload_ids: vec![],
             notes: None,
         })

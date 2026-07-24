@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use crate::attacks::common::{contains_any, extract_response_text, matching_indicators};
 use crate::category::AttackCategory;
 use crate::error::AttackResult;
+use crate::payload::MutatorKind;
 use crate::traits::Attack;
 use crate::types::{
     AttackContext, AttackEvaluation, AttackPayload, AttackPlan, AttackResponse, FindingSeverity,
@@ -32,7 +33,13 @@ impl Attack for CrossUserLeakageAttack {
         Ok(AttackPlan {
             attack_id: self.id().into(),
             category: self.category(),
-            mutators: vec![],
+            mutators: vec![
+                MutatorKind::RoleSwap,
+                MutatorKind::DelimiterInjection,
+                MutatorKind::RepeatAmplify,
+                MutatorKind::MarkdownCodeFence,
+                MutatorKind::ZeroWidthDense,
+            ],
             payload_ids: vec![],
             notes: None,
         })

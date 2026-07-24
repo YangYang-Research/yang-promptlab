@@ -33,7 +33,14 @@ impl Attack for SystemPromptExtractionAttack {
         Ok(AttackPlan {
             attack_id: self.id().into(),
             category: self.category(),
-            mutators: vec![MutatorKind::RepeatAmplify, MutatorKind::DelimiterInjection],
+            mutators: vec![
+                MutatorKind::RepeatAmplify,
+                MutatorKind::DelimiterInjection,
+                MutatorKind::RoleSwap,
+                MutatorKind::MarkdownCodeFence,
+                MutatorKind::Base64Wrap,
+                MutatorKind::HexWrap,
+            ],
             payload_ids: vec![],
             notes: None,
         })

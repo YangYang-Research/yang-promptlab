@@ -36,7 +36,11 @@ impl Attack for PromptInjectionAttack {
             mutators: vec![
                 MutatorKind::DelimiterInjection,
                 MutatorKind::RoleSwap,
+                MutatorKind::MarkdownCodeFence,
                 MutatorKind::Base64Wrap,
+                MutatorKind::HtmlWrap,
+                MutatorKind::HexWrap,
+                MutatorKind::TokenSplit,
             ],
             payload_ids: vec![],
             notes: Some("Tests instruction override and delimiter boundaries".into()),

@@ -28,6 +28,7 @@ describe("resolveCategoriesForAdjust", () => {
         enableResponseAdaptation: false,
         enablePayloadDeduplication: true,
         enableCrossCategoryMutation: false,
+        enabledMutators: [],
       },
     },
     {
@@ -47,6 +48,7 @@ describe("resolveCategoriesForAdjust", () => {
         enableResponseAdaptation: false,
         enablePayloadDeduplication: true,
         enableCrossCategoryMutation: false,
+        enabledMutators: [],
       },
     },
   ];

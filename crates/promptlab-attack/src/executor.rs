@@ -210,13 +210,14 @@ fn build_work_items(
 ) -> AttackResult<Vec<WorkItem>> {
     let mut work_items = Vec::new();
     let mut seq = 0usize;
+    let allowed_mutators = resolve_mutators(plan, ctx);
 
     for payload in payloads {
         if work_items.len() >= ctx.budget.max_payloads {
             break;
         }
 
-        let variants = mutator.expand(&payload.content, &plan.mutators)?;
+        let variants = mutator.expand(&payload.content, &allowed_mutators)?;
         for (content, mutators) in variants {
             if work_items.len() >= ctx.budget.max_payloads {
                 break;
@@ -232,6 +233,26 @@ fn build_work_items(
     }
 
     Ok(work_items)
+}
+
+/// Category plan mutators (DB override or built-in), optionally filtered by allowlist.
+fn resolve_mutators(
+    plan: &crate::types::AttackPlan,
+    ctx: &AttackContext,
+) -> Vec<crate::payload::MutatorKind> {
+    let base = ctx
+        .mutator_plan_override
+        .as_ref()
+        .unwrap_or(&plan.mutators);
+    match &ctx.enabled_mutators {
+        None => base.clone(),
+        Some(enabled) if enabled.is_empty() => Vec::new(),
+        Some(enabled) => base
+            .iter()
+            .copied()
+            .filter(|kind| enabled.contains(kind))
+            .collect(),
+    }
 }
 
 async fn run_work_item<T: TargetTransport>(

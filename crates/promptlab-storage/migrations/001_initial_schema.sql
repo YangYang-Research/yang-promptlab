@@ -1,4 +1,5 @@
--- PromptLab / PromptLab consolidated schema (fresh installs).
+-- PromptLab consolidated schema (fresh installs).
+-- Includes core tables, agent memory, and mutator settings.
 
 PRAGMA foreign_keys = ON;
 
@@ -276,3 +277,82 @@ CREATE TABLE IF NOT EXISTS judge_role_weights (
 
 INSERT OR IGNORE INTO judge_role_weights (id, judge, classifier, attacker, default_llm, updated_at)
 VALUES (1, 0.85, 0.80, 0.75, 0.65, '1970-01-01T00:00:00Z');
+
+-- Agent short-term memory: session-scoped working memory (chat / scan / ReAct scratchpad).
+CREATE TABLE IF NOT EXISTS agent_short_term_memory (
+    id              TEXT PRIMARY KEY NOT NULL,
+    session_id      TEXT NOT NULL,
+    agent_id        TEXT NOT NULL,
+    project_id      TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    target_id       TEXT REFERENCES targets(id) ON DELETE SET NULL,
+    scan_id         TEXT REFERENCES scans(id) ON DELETE SET NULL,
+    role            TEXT NOT NULL,
+    memory_key      TEXT,
+    content         TEXT NOT NULL,
+    content_json    TEXT,
+    importance      REAL NOT NULL DEFAULT 0.5,
+    expires_at      TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_stm_session_id
+    ON agent_short_term_memory(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_stm_agent_session
+    ON agent_short_term_memory(agent_id, session_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_stm_expires_at
+    ON agent_short_term_memory(expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_agent_stm_project_id
+    ON agent_short_term_memory(project_id);
+
+-- Agent long-term memory: durable facts across sessions (keyed upsert).
+CREATE TABLE IF NOT EXISTS agent_long_term_memory (
+    id               TEXT PRIMARY KEY NOT NULL,
+    agent_id         TEXT NOT NULL,
+    scope_type       TEXT NOT NULL CHECK (
+        scope_type IN ('global', 'project', 'target', 'scan')
+    ),
+    scope_id         TEXT NOT NULL DEFAULT '',
+    memory_key       TEXT NOT NULL,
+    content          TEXT NOT NULL,
+    content_json     TEXT,
+    importance       REAL NOT NULL DEFAULT 0.5,
+    access_count     INTEGER NOT NULL DEFAULT 0,
+    last_accessed_at TEXT,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    UNIQUE (agent_id, scope_type, scope_id, memory_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_ltm_scope
+    ON agent_long_term_memory(scope_type, scope_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_ltm_agent_scope
+    ON agent_long_term_memory(agent_id, scope_type, scope_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_ltm_importance
+    ON agent_long_term_memory(importance DESC);
+
+-- App-wide attack mutator settings (Advanced → Mutators).
+CREATE TABLE IF NOT EXISTS mutator_settings (
+    id                       INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled_mutators_json    TEXT NOT NULL,
+    category_mutators_json   TEXT NOT NULL,
+    updated_at               TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO mutator_settings (
+    id,
+    enabled_mutators_json,
+    category_mutators_json,
+    updated_at
+)
+VALUES (
+    1,
+    '["base64_wrap","unicode_homoglyph","delimiter_injection","role_swap","chunk_split","json_escape","repeat_amplify","hex_wrap","html_wrap","rot13_wrap","leetspeak","reversed_text","token_split","markdown_code_fence","zero_width_dense"]',
+    '{"prompt_injection":["delimiter_injection","role_swap","markdown_code_fence","base64_wrap","html_wrap","hex_wrap","token_split"],"jailbreak":["role_swap","unicode_homoglyph","base64_wrap","html_wrap","leetspeak","chunk_split","zero_width_dense","rot13_wrap","reversed_text"],"system_prompt_extraction":["repeat_amplify","delimiter_injection","role_swap","markdown_code_fence","base64_wrap","hex_wrap"],"tool_abuse":["json_escape","html_wrap","base64_wrap","delimiter_injection","token_split","markdown_code_fence"],"mcp_abuse":["json_escape","html_wrap","base64_wrap","delimiter_injection","token_split","markdown_code_fence"],"rag_leakage":["repeat_amplify","delimiter_injection","markdown_code_fence","zero_width_dense","token_split"],"memory_poisoning":["repeat_amplify","role_swap","delimiter_injection","markdown_code_fence","chunk_split"],"cross_user_leakage":["role_swap","delimiter_injection","repeat_amplify","markdown_code_fence","zero_width_dense"],"agent_goal_hijacking":["role_swap","delimiter_injection","markdown_code_fence","repeat_amplify","token_split"]}',
+    '1970-01-01T00:00:00Z'
+);

@@ -428,6 +428,30 @@ pub struct UpdateJudgeRoleWeights {
     pub default_llm: f64,
 }
 
+/// App-wide attack mutator allowlist (Advanced → Mutators).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct MutatorSettingsRow {
+    pub id: i64,
+    pub enabled_mutators_json: String,
+    pub category_mutators_json: String,
+    pub updated_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MutatorSettings {
+    pub id: i64,
+    pub enabled_mutators: Vec<String>,
+    /// category_id → ordered mutator ids.
+    pub category_mutators: std::collections::BTreeMap<String, Vec<String>>,
+    pub updated_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateMutatorSettings {
+    pub enabled_mutators: Vec<String>,
+    pub category_mutators: std::collections::BTreeMap<String, Vec<String>>,
+}
+
 /// Session-scoped agent working memory (short-term).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct AgentShortTermMemory {

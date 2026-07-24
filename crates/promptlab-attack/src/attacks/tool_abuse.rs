@@ -32,7 +32,14 @@ impl Attack for ToolAbuseAttack {
         Ok(AttackPlan {
             attack_id: self.id().into(),
             category: self.category(),
-            mutators: vec![crate::payload::MutatorKind::JsonEscape],
+            mutators: vec![
+                crate::payload::MutatorKind::JsonEscape,
+                crate::payload::MutatorKind::HtmlWrap,
+                crate::payload::MutatorKind::Base64Wrap,
+                crate::payload::MutatorKind::DelimiterInjection,
+                crate::payload::MutatorKind::TokenSplit,
+                crate::payload::MutatorKind::MarkdownCodeFence,
+            ],
             payload_ids: vec![],
             notes: None,
         })

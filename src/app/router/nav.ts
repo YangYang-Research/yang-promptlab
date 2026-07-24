@@ -24,6 +24,13 @@ export const navItems: NavItem[] = [
     icon: "attacks",
     section: "advanced",
   },
+  {
+    id: "mutators",
+    label: "Mutators",
+    path: "/mutators",
+    icon: "mutators",
+    section: "advanced",
+  },
   { id: "settings", label: "Settings", path: "/settings", icon: "settings", section: "system" },
 ];
 

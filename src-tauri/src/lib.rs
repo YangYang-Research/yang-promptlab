@@ -313,6 +313,8 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::runtime::runtime_set_inference_route,
             commands::runtime::runtime_judge_role_weights,
             commands::runtime::runtime_set_judge_role_weights,
+            commands::mutators::mutator_settings_get,
+            commands::mutators::mutator_settings_set,
             commands::runtime::runtime_test_connectivity,
             commands::runtime::runtime_test_inference,
             commands::security::security_audit,

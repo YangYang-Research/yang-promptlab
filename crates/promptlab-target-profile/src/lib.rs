@@ -22,7 +22,7 @@ pub mod verification_llm;
 pub use capabilities::{default_capabilities_for_provider, effective_capabilities};
 pub use harness::harness_kind_for_profile;
 pub use payload_strategy::{
-    capability_influences_strategy, payload_strategy_for_attack_profile,
+    all_attack_mutator_ids, capability_influences_strategy, payload_strategy_for_attack_profile,
     recommend_payload_strategy, MutationLevel, PayloadGenerationStrategy, PayloadStrategy,
 };
 pub use planner::{plan_from_target_profile, summary_for_api_endpoint};

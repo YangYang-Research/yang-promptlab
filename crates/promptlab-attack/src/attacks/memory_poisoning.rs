@@ -33,7 +33,13 @@ impl Attack for MemoryPoisoningAttack {
         Ok(AttackPlan {
             attack_id: self.id().into(),
             category: self.category(),
-            mutators: vec![MutatorKind::RepeatAmplify],
+            mutators: vec![
+                MutatorKind::RepeatAmplify,
+                MutatorKind::RoleSwap,
+                MutatorKind::DelimiterInjection,
+                MutatorKind::MarkdownCodeFence,
+                MutatorKind::ChunkSplit,
+            ],
             payload_ids: vec![],
             notes: Some("Multi-turn memory persistence probes".into()),
         })

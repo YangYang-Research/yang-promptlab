@@ -39,6 +39,7 @@ const samplePayloadStrategy = {
   enableResponseAdaptation: false,
   enablePayloadDeduplication: true,
   enableCrossCategoryMutation: false,
+  enabledMutators: [] as string[],
 };
 
 const samplePlaybook = {

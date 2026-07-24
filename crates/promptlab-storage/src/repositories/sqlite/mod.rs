@@ -9,6 +9,7 @@ mod endpoint;
 mod finding;
 mod judge_role_weights;
 mod model;
+mod mutator_settings;
 mod payload;
 mod plugin;
 mod project;
@@ -28,6 +29,7 @@ pub use endpoint::SqliteEndpointRepository;
 pub use finding::SqliteFindingRepository;
 pub use judge_role_weights::SqliteJudgeRoleWeightsRepository;
 pub use model::SqliteModelRepository;
+pub use mutator_settings::SqliteMutatorSettingsRepository;
 pub use payload::SqlitePayloadRepository;
 pub use plugin::SqlitePluginRepository;
 pub use project::SqliteProjectRepository;
@@ -109,6 +111,10 @@ impl Repositories {
 
     pub fn judge_role_weights(&self) -> SqliteJudgeRoleWeightsRepository {
         SqliteJudgeRoleWeightsRepository::new(self.pool.clone())
+    }
+
+    pub fn mutator_settings(&self) -> SqliteMutatorSettingsRepository {
+        SqliteMutatorSettingsRepository::new(self.pool.clone())
     }
 
     pub fn agent_short_term_memory(&self) -> SqliteAgentShortTermMemoryRepository {

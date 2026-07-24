@@ -134,6 +134,12 @@ pub trait JudgeRoleWeightsRepository: Send + Sync {
 }
 
 #[async_trait]
+pub trait MutatorSettingsRepository: Send + Sync {
+    async fn get(&self) -> PromptLabResult<MutatorSettings>;
+    async fn update(&self, input: UpdateMutatorSettings) -> PromptLabResult<MutatorSettings>;
+}
+
+#[async_trait]
 pub trait AgentShortTermMemoryRepository: Send + Sync {
     async fn create(&self, input: CreateAgentShortTermMemory) -> PromptLabResult<AgentShortTermMemory>;
     async fn get(&self, id: &str) -> PromptLabResult<AgentShortTermMemory>;

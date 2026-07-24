@@ -115,6 +115,14 @@ pub struct AttackContext {
     /// Payloads produced by `promptlab-generator`; override attack builtins per category.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generated_payloads: Option<HashMap<AttackCategory, Vec<AttackPayload>>>,
+    /// Optional allowlist from payload strategy Advanced UI.
+    /// When set (even empty), filters category `plan.mutators` to this set (order preserved from plan).
+    /// When `None`, category plan mutators are used unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled_mutators: Option<Vec<crate::payload::MutatorKind>>,
+    /// Optional DB override for category → mutators ordered plan (replaces `plan.mutators`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mutator_plan_override: Option<Vec<crate::payload::MutatorKind>>,
     #[serde(default)]
     pub metadata: HashMap<String, serde_json::Value>,
 }
@@ -128,6 +136,8 @@ impl AttackContext {
             target,
             budget: AttackBudget::default(),
             generated_payloads: None,
+            enabled_mutators: None,
+            mutator_plan_override: None,
             metadata: HashMap::new(),
         }
     }
@@ -137,6 +147,22 @@ impl AttackContext {
         payloads: HashMap<AttackCategory, Vec<AttackPayload>>,
     ) -> Self {
         self.generated_payloads = Some(payloads);
+        self
+    }
+
+    pub fn with_enabled_mutators(
+        mut self,
+        mutators: impl Into<Option<Vec<crate::payload::MutatorKind>>>,
+    ) -> Self {
+        self.enabled_mutators = mutators.into();
+        self
+    }
+
+    pub fn with_mutator_plan_override(
+        mut self,
+        mutators: impl Into<Option<Vec<crate::payload::MutatorKind>>>,
+    ) -> Self {
+        self.mutator_plan_override = mutators.into();
         self
     }
 }

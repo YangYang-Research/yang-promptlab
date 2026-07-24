@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use crate::attacks::common::{extract_response_text, json_pointer_exists, matching_indicators};
 use crate::category::AttackCategory;
 use crate::error::AttackResult;
+use crate::payload::MutatorKind;
 use crate::traits::Attack;
 use crate::types::{
     AttackContext, AttackEvaluation, AttackPayload, AttackPlan, AttackResponse, FindingSeverity,
@@ -32,7 +33,14 @@ impl Attack for McpAbuseAttack {
         Ok(AttackPlan {
             attack_id: self.id().into(),
             category: self.category(),
-            mutators: vec![],
+            mutators: vec![
+                MutatorKind::JsonEscape,
+                MutatorKind::HtmlWrap,
+                MutatorKind::Base64Wrap,
+                MutatorKind::DelimiterInjection,
+                MutatorKind::TokenSplit,
+                MutatorKind::MarkdownCodeFence,
+            ],
             payload_ids: vec![],
             notes: Some("Targets MCP JSON-RPC tool/resource endpoints".into()),
         })

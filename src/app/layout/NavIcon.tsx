@@ -63,6 +63,8 @@ export function NavIcon({ name }: NavIconProps) {
       "M6 2h8l4 4v14a2 2 0 01-2 2H6a2 2 0 01-2-2V4a2 2 0 012-2zm7 1.5V8h3.5",
     plugins:
       "M4 7h6V3H4v4zm10 0h6V3h-6v4zM4 13h6v8H4v-8zm10 0h6v8h-6v-8z",
+    mutators:
+      "M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 3l2-2 2 2 2-2v5h-8v-3z",
     judge:
       "M9 3l2 2 4-4 2 2-6 6-4-4 2-2zm-5 9h12v2H4v-2zm0 4h8v2H4v-2z",
   };

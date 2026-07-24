@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom";
+
 import {
   ADVANCED_OPTIONS,
   clampPayloadBudget,
@@ -116,6 +118,21 @@ export function PayloadStrategySection({
               <span>{option.label}</span>
             </label>
           ))}
+        </div>
+
+        <div className="wizard-mutator-config" style={{ marginTop: "1rem" }}>
+          <div className="wizard-attack-categories__header">
+            <h5 className="wizard-endpoints__title text-sm">Attack mutators</h5>
+            {!readOnly ? (
+              <Link to="/mutators" className="text-sm link">
+                Manage in Advanced
+              </Link>
+            ) : null}
+          </div>
+          <p className="text-muted text-sm">
+            Category assignments live under Advanced → Mutators. Variants per test still
+            caps how many shapes run per payload.
+          </p>
         </div>
       </details>
     </section>

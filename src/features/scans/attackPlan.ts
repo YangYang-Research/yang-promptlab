@@ -5,6 +5,7 @@ import type {
 } from "./attackProfiles";
 import { ALL_ATTACK_CATEGORY_IDS, getCategory } from "./attackProfiles";
 import {
+  loadAppEnabledMutators,
   payloadStrategyForAttackProfile,
   payloadStrategyFromDto,
   payloadStrategyToDto,
@@ -764,6 +765,7 @@ export function attackPlanFromExecutionPlaybook(
     enableResponseAdaptation: false,
     enablePayloadDeduplication: true,
     enableCrossCategoryMutation: false,
+    enabledMutators: loadAppEnabledMutators(),
   };
   const payloadStrategy =
     payloadRaw && typeof payloadRaw === "object"

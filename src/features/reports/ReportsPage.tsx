@@ -215,7 +215,7 @@ export function ReportsPage() {
     <div className="page">
       <PageHeader
         title="Reports"
-        description="Read-only report exports generated from SQLite findings via promptlab-report"
+        description="Export scan findings as HTML, PDF, SARIF, or CSV."
         actions={
           <RefreshButton loading={loading} onClick={() => void actions.refresh()} />
         }

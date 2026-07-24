@@ -948,6 +948,7 @@ fn parse_payload_strategy_strict(
         enable_response_adaptation: raw.enable_response_adaptation,
         enable_payload_deduplication: raw.enable_payload_deduplication,
         enable_cross_category_mutation: raw.enable_cross_category_mutation,
+        enabled_mutators: None,
     })
 }
 

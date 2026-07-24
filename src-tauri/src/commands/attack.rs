@@ -2,7 +2,7 @@
 
 use promptlab_attack::{
     apply_descriptor_auth, AttackCategory, AttackContext, AttackPayload, AttackTarget,
-    AttackExecutor, FindingSeverity, PayloadAttempt, DEFAULT_ATTACK_CONCURRENCY,
+    AttackExecutor, FindingSeverity, MutatorKind, PayloadAttempt, DEFAULT_ATTACK_CONCURRENCY,
 };
 use promptlab_endpoint_metadata::body_template_from_metadata;
 use crate::dto::metadata_from_endpoint;
@@ -47,6 +47,9 @@ pub struct CategoryRunOptions {
     pub max_concurrent_requests: Option<usize>,
     pub inter_request_delay_ms: Option<u64>,
     pub timeout_ms: Option<u64>,
+    /// Attack-time mutator allowlist from payload strategy.
+    /// `None` = category defaults; `Some([])` = no expand.
+    pub enabled_mutators: Option<Vec<String>>,
 }
 
 impl CategoryRunOptions {
@@ -70,6 +73,7 @@ impl CategoryRunOptions {
             max_concurrent_requests: None,
             inter_request_delay_ms: None,
             timeout_ms: None,
+            enabled_mutators: strategy.enabled_mutators.clone(),
         }
     }
 
@@ -95,9 +99,33 @@ fn apply_options_to_budget(ctx: &mut AttackContext, options: Option<&CategoryRun
         if let Some(timeout) = opts.timeout_ms {
             ctx.budget.timeout_ms = timeout.max(1_000);
         }
+        ctx.enabled_mutators = parse_enabled_mutators(opts.enabled_mutators.as_ref());
     } else {
         ctx.budget.max_concurrent_requests = DEFAULT_ATTACK_CONCURRENCY;
     }
+}
+
+fn parse_enabled_mutators(raw: Option<&Vec<String>>) -> Option<Vec<MutatorKind>> {
+    let Some(ids) = raw else {
+        return None;
+    };
+    Some(ids.iter().filter_map(|id| MutatorKind::parse(id)).collect())
+}
+
+async fn apply_category_mutator_plan(
+    repos: &Repositories,
+    category: AttackCategory,
+    ctx: &mut AttackContext,
+) {
+    use promptlab_storage::MutatorSettingsRepository;
+
+    let Ok(settings) = repos.mutator_settings().get().await else {
+        return;
+    };
+    let Some(ids) = settings.category_mutators.get(category.as_str()) else {
+        return;
+    };
+    ctx.mutator_plan_override = Some(ids.iter().filter_map(|id| MutatorKind::parse(id)).collect());
 }
 
 fn update_scan_phase(
@@ -982,6 +1010,7 @@ pub async fn run_category_on_endpoint(
         ctx = ctx.with_generated_payloads(payloads.clone());
     }
     apply_options_to_budget(&mut ctx, options);
+    apply_category_mutator_plan(repos, category, &mut ctx).await;
     let variants = options
         .map(|opts| opts.variants_per_test.max(1))
         .unwrap_or(1);
@@ -1102,6 +1131,7 @@ pub async fn run_category_on_target_profile(
         ctx = ctx.with_generated_payloads(payloads.clone());
     }
     apply_options_to_budget(&mut ctx, options);
+    apply_category_mutator_plan(repos, category, &mut ctx).await;
     let variants = options
         .map(|opts| opts.variants_per_test.max(1))
         .unwrap_or(1);

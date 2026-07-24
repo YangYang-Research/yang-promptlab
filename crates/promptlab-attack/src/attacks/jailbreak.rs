@@ -36,7 +36,13 @@ impl Attack for JailbreakAttack {
             mutators: vec![
                 MutatorKind::RoleSwap,
                 MutatorKind::UnicodeHomoglyph,
+                MutatorKind::Base64Wrap,
+                MutatorKind::HtmlWrap,
+                MutatorKind::Leetspeak,
                 MutatorKind::ChunkSplit,
+                MutatorKind::ZeroWidthDense,
+                MutatorKind::Rot13Wrap,
+                MutatorKind::ReversedText,
             ],
             payload_ids: vec![],
             notes: None,

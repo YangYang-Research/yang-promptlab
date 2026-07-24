@@ -82,6 +82,8 @@ pub struct PayloadStrategyDto {
     pub enable_response_adaptation: bool,
     pub enable_payload_deduplication: bool,
     pub enable_cross_category_mutation: bool,
+    #[serde(default)]
+    pub enabled_mutators: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -138,6 +140,7 @@ fn payload_strategy_to_dto(strategy: PayloadStrategy) -> PayloadStrategyDto {
         enable_response_adaptation: strategy.enable_response_adaptation,
         enable_payload_deduplication: strategy.enable_payload_deduplication,
         enable_cross_category_mutation: strategy.enable_cross_category_mutation,
+        enabled_mutators: strategy.enabled_mutators,
     }
 }
 
@@ -165,6 +168,7 @@ fn parse_payload_strategy(dto: PayloadStrategyDto) -> CommandResult<PayloadStrat
         enable_response_adaptation: dto.enable_response_adaptation,
         enable_payload_deduplication: dto.enable_payload_deduplication,
         enable_cross_category_mutation: dto.enable_cross_category_mutation,
+        enabled_mutators: dto.enabled_mutators,
     }
     .clamp())
 }

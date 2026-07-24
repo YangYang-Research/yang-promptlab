@@ -26,6 +26,7 @@ function samplePayload() {
     enableResponseAdaptation: false,
     enablePayloadDeduplication: true,
     enableCrossCategoryMutation: false,
+    enabledMutators: [] as import("@/features/scans/payloadStrategy").AttackMutatorId[],
   };
 }
 

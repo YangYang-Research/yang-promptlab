@@ -14,6 +14,7 @@ pub mod domain;
 pub mod environment;
 pub mod generator;
 pub mod models;
+pub mod mutators;
 pub mod planner;
 pub mod plugins;
 pub mod projects;

@@ -44,6 +44,9 @@ const AttackCategoriesPage = lazy(() =>
     default: m.AttackCategoriesPage,
   })),
 );
+const MutatorsPage = lazy(() =>
+  import("@/features/mutators/MutatorsPage").then((m) => ({ default: m.MutatorsPage })),
+);
 const AIRuntimePage = lazy(() =>
   import("@/features/runtime/AIRuntimePage").then((m) => ({ default: m.AIRuntimePage })),
 );
@@ -202,6 +205,14 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <AttackCategoriesPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="mutators"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <MutatorsPage />
               </Suspense>
             }
           />
