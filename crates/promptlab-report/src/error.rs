@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use aisec_core::AisecError;
+use promptlab_core::PromptLabError;
 
 #[derive(Debug, Error)]
 pub enum ReportError {
@@ -17,7 +17,7 @@ pub enum ReportError {
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
-    Core(#[from] AisecError),
+    Core(#[from] PromptLabError),
 }
 
 pub type ReportResult<T> = Result<T, ReportError>;

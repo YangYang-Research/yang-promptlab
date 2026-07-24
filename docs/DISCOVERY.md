@@ -1,6 +1,6 @@
-# AISec Discovery Engine
+# PromptLab Discovery Engine
 
-**Crate:** `aisec-discovery`  
+**Crate:** `promptlab-discovery`  
 **Status:** MVP  
 **Aligns with:** `docs/ARCHITECTURE.md` §2.3 (`SecurityEngine::discover()`)
 
@@ -62,10 +62,10 @@ flowchart TB
 ## Usage
 
 ```rust
-use aisec_discovery::{DiscoveryConfig, DiscoveryEngine, EndpointKind};
+use promptlab_discovery::{DiscoveryConfig, DiscoveryEngine, EndpointKind};
 
 #[tokio::main]
-async fn main() -> aisec_core::AisecResult<()> {
+async fn main() -> promptlab_core::PromptLabResult<()> {
     let config = DiscoveryConfig {
         max_depth: 3,
         max_pages: 200,
@@ -175,10 +175,10 @@ Enable `allow_private_network: true` only for local/lab targets (e.g. WireMock t
 
 ```bash
 # Unit tests (detectors, extractors, retry, URL policy)
-cargo test -p aisec-discovery
+cargo test -p promptlab-discovery
 
 # Integration tests (WireMock HTTP server)
-cargo test -p aisec-discovery --test integration
+cargo test -p promptlab-discovery --test integration
 ```
 
 Tests cover:
@@ -191,11 +191,11 @@ Tests cover:
 
 ---
 
-## Integration with AISec
+## Integration with PromptLab
 
 The engine implements `SurfaceDiscovery` trait, mapping to the architecture's `SecurityEngine::discover()` phase. Future work:
 
-- Persist discoveries into `aisec-storage` `targets` table
+- Persist discoveries into `promptlab-storage` `targets` table
 - Feed discovered endpoints to LLM/Chatbot/API engines
 - Respect `robots.txt` and scope definitions from project config
 - Playwright-assisted SPA route discovery
@@ -210,4 +210,4 @@ Structured logs via `tracing`:
 - `debug` — per-page fetch, link extraction counts
 - `warn` — retry attempts, task failures
 
-Enable with `RUST_LOG=aisec_discovery=debug`.
+Enable with `RUST_LOG=promptlab_discovery=debug`.

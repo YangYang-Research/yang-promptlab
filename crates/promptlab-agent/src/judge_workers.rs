@@ -1,8 +1,8 @@
 //! Role workers under JudgeCoordinatorAgent.
 //!
-//! Each worker runs one [`aisec_judge::ModelRole`] evaluator and returns a vote.
+//! Each worker runs one [`promptlab_judge::ModelRole`] evaluator and returns a vote.
 
-use aisec_judge::{EvaluatorResult, JudgeEngine, JudgeRequest, ModelRole};
+use promptlab_judge::{EvaluatorResult, JudgeEngine, JudgeRequest, ModelRole};
 use tracing::info;
 
 use crate::error::{AgentError, AgentResult};

@@ -1,7 +1,7 @@
 # Attack Engine Status
 
-**Crate:** `aisec-attack` v0.1.0  
-**Companion:** `aisec-payload` (mutation helpers only)  
+**Crate:** `promptlab-attack` v0.1.0  
+**Companion:** `promptlab-payload` (mutation helpers only)  
 **Date:** 2026-06-10  
 **Classification:** **Partial implementation**
 
@@ -15,7 +15,7 @@
 | **2. Partial implementation** | **Yes** | Core pipeline works; config gaps, no HTTP tests, no app integration, lib tests broken |
 | **3. Skeleton** | No | ~2,600 LOC, full trait pipeline, 9 categories with payloads and evaluators |
 
-`aisec-attack` is a **working attack framework library**, not a skeleton. It is **not production-complete** because orchestration config is partially ignored, results are not auto-persisted, evaluation is heuristic-only (no judge), and all automated tests use `MockTransport` instead of live HTTP.
+`promptlab-attack` is a **working attack framework library**, not a skeleton. It is **not production-complete** because orchestration config is partially ignored, results are not auto-persisted, evaluation is heuristic-only (no judge), and all automated tests use `MockTransport` instead of live HTTP.
 
 ---
 
@@ -152,9 +152,9 @@ Request generation for **LLM chat API POST with JSON template** is **real and co
 | Issue | Severity | Detail |
 |-------|----------|--------|
 | **Collector not auto-wired** | High | `AttackExecutor` and `AttackOrchestrator` do not call `ResultCollector` |
-| **No storage sink impl** | High | `ResultSink` trait defined; no `aisec-storage` adapter despite optional dep |
-| **`storage` feature unused** | Medium | `Cargo.toml` declares `storage = ["dep:aisec-storage"]` — no `#[cfg(feature = "storage")]` code |
-| **No judge integration** | High | Heuristic eval only; `aisec-judge` not called from executor |
+| **No storage sink impl** | High | `ResultSink` trait defined; no `promptlab-storage` adapter despite optional dep |
+| **`storage` feature unused** | Medium | `Cargo.toml` declares `storage = ["dep:promptlab-storage"]` — no `#[cfg(feature = "storage")]` code |
+| **No judge integration** | High | Heuristic eval only; `promptlab-judge` not called from executor |
 | Lifecycle `Collecting` phase | Low | Set in `lifecycle.complete()` but no I/O during it |
 | Response size limits | Low | No cap on body size (unlike discovery's 2 MB limit) |
 
@@ -242,7 +242,7 @@ Multi-category **sequential orchestration** with lifecycle and error isolation i
 | Orchestrator | `orchestrator.rs` | Multi-category sequential runs |
 | Request builder | `payload/runner.rs` | Template injection, headers, timeout |
 | HTTP transport | `transport/http.rs` | reqwest-based production transport |
-| Payload mutator | `payload/mutator.rs` | 7 strategies; uses `aisec_payload::{base64_encode, unicode_obfuscate}` |
+| Payload mutator | `payload/mutator.rs` | 7 strategies; uses `promptlab_payload::{base64_encode, unicode_obfuscate}` |
 | Registry | `registry.rs` | Builtin registration, lookup by id/category |
 | Response parsing | `attacks/common.rs` | Multi-vendor LLM JSON extraction |
 | Heuristic evaluation | `attacks/*.rs` | Regex + keyword scoring per category |
@@ -255,7 +255,7 @@ Multi-category **sequential orchestration** with lifecycle and error isolation i
 |-----------|------|---------|------------------------|
 | `MockTransport` | `transport/mock.rs` | Returns canned HTTP responses; captures requests | `HttpTransport` |
 | All unit/integration tests | `*_test`, `tests/integration.rs` | Use `MockTransport::ok(...)` | `HttpTransport` + wiremock or live target |
-| Heuristic evaluators | `attacks/*.rs` | Regex/keyword scoring (not LLM) | Optional: `aisec-judge` consensus (not wired) |
+| Heuristic evaluators | `attacks/*.rs` | Regex/keyword scoring (not LLM) | Optional: `promptlab-judge` consensus (not wired) |
 
 **Note:** Built-in attack **payload strings** (e.g. DAN jailbreak, MCP JSON-RPC) are **real attack content**, not mocks. They are static defaults, not generated fakes.
 
@@ -269,7 +269,7 @@ Multi-category **sequential orchestration** with lifecycle and error isolation i
 | `AttackBudget.max_mutations_per_payload` wiring | `executor.rs` | ❌ Field unused |
 | `PayloadFormat::JsonTemplate` / `MultiTurn` | `payload/runner.rs` | ❌ Enum unused beyond default |
 | `TargetKind`-aware request routing | `payload/runner.rs` | ❌ All targets use same template path |
-| `aisec-payload` library integration | `payload/` or `attacks/` | ❌ Only 2 encoding functions used; `payloads.json` not loaded |
+| `promptlab-payload` library integration | `payload/` or `attacks/` | ❌ Only 2 encoding functions used; `payloads.json` not loaded |
 | HTTP integration tests | `tests/` | ❌ `wiremock` declared, unused |
 | Progress / cancellation API | `orchestrator.rs`, `executor.rs` | ❌ |
 | Tauri IPC commands | `src-tauri/` | ❌ |
@@ -334,9 +334,9 @@ ResultSink                                  ← TRAIT ONLY, no storage impl
 | Dependency | Declared | Actually used |
 |------------|----------|---------------|
 | `reqwest` | ✅ | `HttpTransport` |
-| `aisec-payload` | ✅ | `base64_encode`, `unicode_obfuscate` in mutator only |
-| `aisec-core` | ✅ | Error re-export |
-| `aisec-storage` | Optional feature | **Not referenced in code** |
+| `promptlab-payload` | ✅ | `base64_encode`, `unicode_obfuscate` in mutator only |
+| `promptlab-core` | ✅ | Error re-export |
+| `promptlab-storage` | Optional feature | **Not referenced in code** |
 | `wiremock` | dev-dep | **Not referenced in tests** |
 | `regex`, `serde_json` | ✅ | Evaluators, JSON parsing |
 | `tracing` | ✅ | Executor/orchestrator instrumentation |
@@ -354,8 +354,8 @@ ResultSink                                  ← TRAIT ONLY, no storage impl
 | HTTP / wiremock tests | ❌ None | No live transport verification |
 
 ```bash
-cargo test -p aisec-attack --test integration   # 2/2 pass
-cargo test -p aisec-attack --lib                  # compile error
+cargo test -p promptlab-attack --test integration   # 2/2 pass
+cargo test -p promptlab-attack --lib                  # compile error
 ```
 
 ---
@@ -366,9 +366,9 @@ cargo test -p aisec-attack --lib                  # compile error
 |-------|--------|
 | Library API (`default_executor()`, `AttackOrchestrator`) | ✅ Callable |
 | `HttpTransport` to real LLM API | ✅ Implemented, untested in CI |
-| `aisec-judge` evaluation | ❌ Not wired |
-| `aisec-storage` persistence | ❌ Feature stub only |
-| `aisec-payload` library payloads | ❌ Not loaded |
+| `promptlab-judge` evaluation | ❌ Not wired |
+| `promptlab-storage` persistence | ❌ Feature stub only |
+| `promptlab-payload` library payloads | ❌ Not loaded |
 | Tauri IPC | ❌ Not wired |
 | UI Attacks page | ❌ Mock data (`src/shared/mock/data.ts`) |
 
@@ -399,7 +399,7 @@ Missing for production-ready attack engine:
 | HTTP integration tests (wiremock) | ❌ |
 | Honor `concurrency` and `max_mutations_per_payload` | ❌ |
 | Auto-wire `ResultCollector` in orchestrator | ❌ |
-| `StorageResultSink` via `aisec-storage` | ❌ |
+| `StorageResultSink` via `promptlab-storage` | ❌ |
 | Judge consensus instead of/in addition to heuristics | ❌ |
 | TargetKind-specific request builders | ❌ |
 | Multi-turn / MCP-native transport | ❌ |
@@ -411,7 +411,7 @@ Missing for production-ready attack engine:
 ## Final Classification
 
 ```
-aisec-attack
+promptlab-attack
 ├── Overall ...................... PARTIAL IMPLEMENTATION
 ├── Payload execution ............ REAL (HttpTransport + PayloadRunner)
 ├── Request generation ........... REAL (LLM JSON template path)
@@ -422,7 +422,7 @@ aisec-attack
 └── Missing ...................... storage sink, judge, concurrency, IPC
 ```
 
-**Recommendation:** Use `AttackExecutor` + `HttpTransport` for MVP Step 4 (prompt injection against discovered LLM endpoint). Wire results into `ResultCollector` manually in Tauri `scan_run`. Fix lib test borrow, add wiremock HTTP test, and connect `aisec-judge` before marking COMPLETE.
+**Recommendation:** Use `AttackExecutor` + `HttpTransport` for MVP Step 4 (prompt injection against discovered LLM endpoint). Wire results into `ResultCollector` manually in Tauri `scan_run`. Fix lib test borrow, add wiremock HTTP test, and connect `promptlab-judge` before marking COMPLETE.
 
 ---
 

@@ -1,4 +1,4 @@
-/** Matches `aisec-attack` `AttackCategory` serde names. */
+/** Matches `promptlab-attack` `AttackCategory` serde names. */
 export type AttackCategoryId =
   | "prompt_injection"
   | "system_prompt_extraction"

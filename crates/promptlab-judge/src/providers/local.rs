@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use aisec_models::runtime::InferenceRuntime;
-use aisec_models::types::InferenceRequest;
+use promptlab_models::runtime::InferenceRuntime;
+use promptlab_models::types::InferenceRequest;
 use tokio::sync::Mutex;
 
 use super::LlmBackend;

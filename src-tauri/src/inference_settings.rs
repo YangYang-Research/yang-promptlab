@@ -1,7 +1,7 @@
-//! IPC DTOs and helpers for AI runtime configuration (`aisec_inference`).
+//! IPC DTOs and helpers for AI runtime configuration (`promptlab_inference`).
 
-use aisec_inference::config::{AiRuntimeConfiguration, InferenceMode};
-use aisec_models::{ModelEntry, ModelProvider};
+use promptlab_inference::config::{AiRuntimeConfiguration, InferenceMode};
+use promptlab_models::{ModelEntry, ModelProvider};
 use serde::{Deserialize, Serialize};
 
 use crate::third_party_credentials::{

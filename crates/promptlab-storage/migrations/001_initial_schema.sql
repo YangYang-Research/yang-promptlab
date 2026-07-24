@@ -1,4 +1,4 @@
--- PromptLab / AISec consolidated schema (fresh installs).
+-- PromptLab / PromptLab consolidated schema (fresh installs).
 
 PRAGMA foreign_keys = ON;
 

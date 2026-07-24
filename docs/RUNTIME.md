@@ -1,6 +1,6 @@
 # Embedded Runtime
 
-AISec runs local LLM inference through an embedded **Ollama** process managed by `aisec-runtime::RuntimeSupervisor`.
+PromptLab runs local LLM inference through an embedded **Ollama** process managed by `promptlab-runtime::RuntimeSupervisor`.
 
 ## Binary layout
 
@@ -58,7 +58,7 @@ Environment:
 
 Vault models (`models_list`) and Ollama tags are complementary:
 
-- **Vault** — AISec registry + GGUF/Ollama install tracking under `{app_data}/models/`
+- **Vault** — PromptLab registry + GGUF/Ollama install tracking under `{app_data}/models/`
 - **Ollama tags** — live list from the running embedded server
 
 `models_install` defaults to the supervisor's `baseUrl` when the client omits `ollamaBaseUrl`.
@@ -70,8 +70,8 @@ On app exit, `RuntimeSupervisor::stop()` kills the child process before the SQLi
 ## Tests
 
 ```bash
-cargo test -p aisec-runtime
-cargo check -p aisec-desktop
+cargo test -p promptlab-runtime
+cargo check -p promptlab-desktop
 ```
 
 ## Related

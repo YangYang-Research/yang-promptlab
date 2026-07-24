@@ -1,20 +1,20 @@
-//! Desktop bridge to [`aisec_inference::AiInferenceGateway`].
+//! Desktop bridge to [`promptlab_inference::AiInferenceGateway`].
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use aisec_auth::SecretStore;
-use aisec_core::AisecError;
-use aisec_inference::{
+use promptlab_auth::SecretStore;
+use promptlab_core::PromptLabError;
+use promptlab_inference::{
     CompleteRequest, ConnectivityTestResult, DefaultAiInferenceGateway, GatewaySession,
     InferenceMode, InferenceProvider, InferenceRuntimeManager, InferenceSession,
     PromptRegistry, RemoteAdapterSettings,
 };
-use aisec_judge::{build_judge_engine_with_adapter, JudgeEngine, JudgeMode, JudgeProviderConfig};
-use aisec_models::{BuiltinCatalog, LocalModelManager, ModelEntry, ModelProvider};
-use aisec_planner::PlannerLlm;
-use aisec_generator::GeneratorLlm;
-use aisec_runtime::{RuntimeManager, SharedModelProvider};
+use promptlab_judge::{build_judge_engine_with_adapter, JudgeEngine, JudgeMode, JudgeProviderConfig};
+use promptlab_models::{BuiltinCatalog, LocalModelManager, ModelEntry, ModelProvider};
+use promptlab_planner::PlannerLlm;
+use promptlab_generator::GeneratorLlm;
+use promptlab_runtime::{RuntimeManager, SharedModelProvider};
 use async_trait::async_trait;
 use tauri::async_runtime::Mutex as AsyncMutex;
 
@@ -33,7 +33,7 @@ pub fn open_model_manager(
 ) -> CommandResult<LocalModelManager> {
     LocalModelManager::new(models_vault_path(data_dir))
         .map(|mgr| mgr.with_catalog(catalog))
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 
 pub async fn resolve_remote_settings(
@@ -55,7 +55,7 @@ pub async fn resolve_remote_settings(
         Some(credentials.aws_secret_access_key).filter(|s| !s.trim().is_empty()),
         Some(credentials.aws_session_token).filter(|s| !s.trim().is_empty()),
     )
-    .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
+    .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 
 fn model_entry<'a>(
@@ -119,7 +119,7 @@ pub async fn build_judge_engine_from_gateway(
     .await?;
     let adapter = DefaultAiInferenceGateway::adapter_for(&mut session.inner)
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     let mut config = JudgeProviderConfig::default();
     config.mode = if entry.provider == ModelProvider::Remote {
         JudgeMode::RemoteLlm
@@ -128,7 +128,7 @@ pub async fn build_judge_engine_from_gateway(
     };
     build_judge_engine_with_adapter(adapter, &config)
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 
 pub async fn gateway_complete(
@@ -158,7 +158,7 @@ pub async fn gateway_complete(
             temperature: Some(temperature),
         })
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 
 /// Wizard attack-plan LLM — higher token budget and JSON-focused system prompt.
@@ -190,7 +190,7 @@ impl HostWizardPlannerLlm {
 
 #[async_trait]
 impl PlannerLlm for HostWizardPlannerLlm {
-    async fn complete(&self, prompt: &str) -> aisec_planner::PlannerResult<String> {
+    async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
@@ -206,7 +206,7 @@ impl PlannerLlm for HostWizardPlannerLlm {
             0.1,
         )
         .await
-        .map_err(|e| aisec_planner::PlannerError::Llm(e.to_string()))
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
     }
 }
 
@@ -239,7 +239,7 @@ impl HostEndpointVerifyLlm {
 
 #[async_trait]
 impl PlannerLlm for HostEndpointVerifyLlm {
-    async fn complete(&self, prompt: &str) -> aisec_planner::PlannerResult<String> {
+    async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
@@ -255,7 +255,7 @@ impl PlannerLlm for HostEndpointVerifyLlm {
             0.1,
         )
         .await
-        .map_err(|e| aisec_planner::PlannerError::Llm(e.to_string()))
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
     }
 }
 
@@ -288,7 +288,7 @@ impl HostYazgReactLlm {
 
 #[async_trait]
 impl PlannerLlm for HostYazgReactLlm {
-    async fn complete(&self, prompt: &str) -> aisec_planner::PlannerResult<String> {
+    async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
@@ -304,7 +304,7 @@ impl PlannerLlm for HostYazgReactLlm {
             0.2,
         )
         .await
-        .map_err(|e| aisec_planner::PlannerError::Llm(e.to_string()))
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
     }
 }
 
@@ -337,7 +337,7 @@ impl HostGeneratePromptLlm {
 
 #[async_trait]
 impl PlannerLlm for HostGeneratePromptLlm {
-    async fn complete(&self, prompt: &str) -> aisec_planner::PlannerResult<String> {
+    async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
@@ -353,7 +353,7 @@ impl PlannerLlm for HostGeneratePromptLlm {
             0.35,
         )
         .await
-        .map_err(|e| aisec_planner::PlannerError::Llm(e.to_string()))
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
     }
 }
 
@@ -386,7 +386,7 @@ impl HostAttackRecommendLlm {
 
 #[async_trait]
 impl PlannerLlm for HostAttackRecommendLlm {
-    async fn complete(&self, prompt: &str) -> aisec_planner::PlannerResult<String> {
+    async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
@@ -402,7 +402,7 @@ impl PlannerLlm for HostAttackRecommendLlm {
             0.15,
         )
         .await
-        .map_err(|e| aisec_planner::PlannerError::Llm(e.to_string()))
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
     }
 }
 
@@ -435,7 +435,7 @@ impl HostProjectSummaryLlm {
 
 #[async_trait]
 impl PlannerLlm for HostProjectSummaryLlm {
-    async fn complete(&self, prompt: &str) -> aisec_planner::PlannerResult<String> {
+    async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
@@ -451,7 +451,7 @@ impl PlannerLlm for HostProjectSummaryLlm {
             0.15,
         )
         .await
-        .map_err(|e| aisec_planner::PlannerError::Llm(e.to_string()))
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
     }
 }
 
@@ -484,7 +484,7 @@ impl HostScanSummaryLlm {
 
 #[async_trait]
 impl PlannerLlm for HostScanSummaryLlm {
-    async fn complete(&self, prompt: &str) -> aisec_planner::PlannerResult<String> {
+    async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
@@ -500,7 +500,7 @@ impl PlannerLlm for HostScanSummaryLlm {
             0.15,
         )
         .await
-        .map_err(|e| aisec_planner::PlannerError::Llm(e.to_string()))
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
     }
 }
 
@@ -568,8 +568,8 @@ impl YazgHostLlms {
         }
     }
 
-    pub fn react_llms(&self) -> aisec_agent::ReactLlms<'_> {
-        aisec_agent::ReactLlms {
+    pub fn react_llms(&self) -> promptlab_agent::ReactLlms<'_> {
+        promptlab_agent::ReactLlms {
             supervisor: &self.supervisor,
             analyze: &self.analyze,
             plan: &self.plan,
@@ -644,8 +644,8 @@ impl YazgHostLlmsScanSummary {
         }
     }
 
-    pub fn react_llms(&self) -> aisec_agent::ReactLlms<'_> {
-        aisec_agent::ReactLlms {
+    pub fn react_llms(&self) -> promptlab_agent::ReactLlms<'_> {
+        promptlab_agent::ReactLlms {
             supervisor: &self.supervisor,
             analyze: &self.analyze,
             plan: &self.plan,
@@ -685,7 +685,7 @@ impl HostGeneratorLlm {
 
 #[async_trait]
 impl GeneratorLlm for HostGeneratorLlm {
-    async fn complete(&self, prompt: &str) -> aisec_generator::GeneratorResult<String> {
+    async fn complete(&self, prompt: &str) -> promptlab_generator::GeneratorResult<String> {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
@@ -701,7 +701,7 @@ impl GeneratorLlm for HostGeneratorLlm {
             0.2,
         )
         .await
-        .map_err(|e| aisec_generator::GeneratorError::Llm(e.to_string()))
+        .map_err(|e| promptlab_generator::GeneratorError::Llm(e.to_string()))
     }
 }
 
@@ -746,16 +746,16 @@ pub async fn test_remote_connectivity_only(
     entry: &ModelEntry,
     remote: RemoteAdapterSettings,
 ) -> CommandResult<ConnectivityTestResult> {
-    use aisec_inference::{ProviderAdapter, RemoteProviderAdapter};
+    use promptlab_inference::{ProviderAdapter, RemoteProviderAdapter};
 
     let adapter = RemoteProviderAdapter::new(remote.clone());
     let started = std::time::Instant::now();
     let latency_ms = || started.elapsed().as_millis() as u64;
 
-    aisec_inference::record_sent();
+    promptlab_inference::record_sent();
     let result = ProviderAdapter::health(&adapter).await;
     if result.is_ok() {
-        aisec_inference::record_received();
+        promptlab_inference::record_received();
     }
 
     match result {
@@ -821,7 +821,7 @@ pub async fn test_connectivity_with_remote(
     session
         .test_connectivity()
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 
 pub async fn test_inference_for_entry(
@@ -849,11 +849,11 @@ pub async fn test_inference_for_entry(
     session
         .test_inference()
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 
-pub fn connectivity_to_judge(result: ConnectivityTestResult) -> aisec_judge::JudgeConnectivityResult {
-    aisec_judge::JudgeConnectivityResult {
+pub fn connectivity_to_judge(result: ConnectivityTestResult) -> promptlab_judge::JudgeConnectivityResult {
+    promptlab_judge::JudgeConnectivityResult {
         ok: result.ok,
         provider: result.provider,
         model: result.model,

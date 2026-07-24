@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AISec auth-engine demo target — serves http://localhost:3200
+"""PromptLab auth-engine demo target — serves http://localhost:3200
 
 A minimal username/password login flow:
   GET  /login      -> HTML form (#user, #pass, #submit)
@@ -67,5 +67,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print("Serving AISec auth login target on http://localhost:3200")
+    print("Serving PromptLab auth login target on http://localhost:3200")
     HTTPServer(("127.0.0.1", 3200), Handler).serve_forever()

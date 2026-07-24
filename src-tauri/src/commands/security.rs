@@ -1,6 +1,6 @@
 //! Secret audit and migration IPC commands.
 
-use aisec_auth::{
+use promptlab_auth::{
     audit_database_secrets, run_database_secret_migration, SecretMigrationAudit, SessionStore,
 };
 use serde::{Deserialize, Serialize};

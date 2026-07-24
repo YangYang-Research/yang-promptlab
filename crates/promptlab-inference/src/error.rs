@@ -20,14 +20,14 @@ pub enum InferenceError {
 
 pub type InferenceResult<T> = Result<T, InferenceError>;
 
-impl From<aisec_models::error::ModelError> for InferenceError {
-    fn from(value: aisec_models::error::ModelError) -> Self {
+impl From<promptlab_models::error::ModelError> for InferenceError {
+    fn from(value: promptlab_models::error::ModelError) -> Self {
         Self::Provider(value.to_string())
     }
 }
 
-impl From<aisec_runtime::error::RuntimeError> for InferenceError {
-    fn from(value: aisec_runtime::error::RuntimeError) -> Self {
+impl From<promptlab_runtime::error::RuntimeError> for InferenceError {
+    fn from(value: promptlab_runtime::error::RuntimeError) -> Self {
         Self::Internal(value.to_string())
     }
 }

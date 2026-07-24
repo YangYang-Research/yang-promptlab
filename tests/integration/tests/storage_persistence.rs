@@ -1,11 +1,11 @@
-use aisec_storage::{
+use promptlab_storage::{
     CreateProject, Database, ProjectRepository,
 };
 
 #[tokio::test]
 async fn storage_persists_to_file() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let db_path = temp.path().join("aisec.db");
+    let db_path = temp.path().join("promptlab.db");
     let url = format!("sqlite://{}", db_path.display());
 
     let db = Database::connect(&url).await.expect("connect");

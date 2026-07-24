@@ -1,6 +1,6 @@
 //! Persist scan progress and batch checkpoints in `playbook_json`.
 
-use aisec_storage::{Repositories, ScanRepository, UpdateScan};
+use promptlab_storage::{Repositories, ScanRepository, UpdateScan};
 use serde_json::Value;
 
 use crate::jobs::{ScanBatchCheckpoint, ScanProgress};
@@ -21,7 +21,7 @@ pub async fn persist_playbook_progress(
     repos: &Repositories,
     scan_id: &str,
     progress: &ScanProgress,
-) -> Result<(), aisec_core::AisecError> {
+) -> Result<(), promptlab_core::PromptLabError> {
     persist_scan_playbook_state(repos, scan_id, Some(progress), None).await
 }
 
@@ -29,7 +29,7 @@ pub async fn persist_playbook_checkpoint(
     repos: &Repositories,
     scan_id: &str,
     checkpoint: Option<&ScanBatchCheckpoint>,
-) -> Result<(), aisec_core::AisecError> {
+) -> Result<(), promptlab_core::PromptLabError> {
     persist_scan_playbook_state(repos, scan_id, None, Some(checkpoint)).await
 }
 
@@ -40,7 +40,7 @@ pub async fn persist_scan_playbook_state(
     scan_id: &str,
     progress: Option<&ScanProgress>,
     batch_checkpoint: Option<Option<&ScanBatchCheckpoint>>,
-) -> Result<(), aisec_core::AisecError> {
+) -> Result<(), promptlab_core::PromptLabError> {
     let scan = repos.scans().get(scan_id).await?;
     let mut playbook = scan
         .playbook_json

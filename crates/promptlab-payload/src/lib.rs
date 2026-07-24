@@ -1,4 +1,4 @@
-//! AISec Payload Engine — static library, mutations, and generation pipeline.
+//! PromptLab Payload Engine — static library, mutations, and generation pipeline.
 //!
 //! Provides a catalog of adversarial payloads, encoding/obfuscation mutations,
 //! and a pipeline to produce attack-ready variants.

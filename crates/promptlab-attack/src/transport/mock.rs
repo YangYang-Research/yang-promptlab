@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use aisec_harness::NormalizedResponse;
+use promptlab_harness::NormalizedResponse;
 
 use crate::error::AttackResult;
 use crate::transport::{TargetTransport, TransportRequest, TransportResponse};

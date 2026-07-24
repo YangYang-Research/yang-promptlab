@@ -1,4 +1,4 @@
-# AISec Platform Architecture — Execution Harness Layer
+# PromptLab Platform Architecture — Execution Harness Layer
 
 ## Target pipeline
 
@@ -28,23 +28,23 @@ AttackExecutor
           → NormalizedResponse
 ```
 
-There is **no** direct `reqwest` transport in `aisec-attack`. HTTP I/O lives inside `aisec-harness` providers only.
+There is **no** direct `reqwest` transport in `promptlab-attack`. HTTP I/O lives inside `promptlab-harness` providers only.
 
 | Layer | Crate / module |
 |-------|----------------|
-| Attack orchestration | `aisec-attack` (`AttackExecutor`, `PayloadRunner`) |
-| Transport trait impl | `aisec-attack::HarnessTransport` |
-| Harness resolution | `aisec-harness::HarnessFactory` |
-| Target delivery | `aisec-harness` providers |
-| Judge input | `aisec-harness::NormalizedResponse` (end-to-end, no reconstruction) |
+| Attack orchestration | `promptlab-attack` (`AttackExecutor`, `PayloadRunner`) |
+| Transport trait impl | `promptlab-attack::HarnessTransport` |
+| Harness resolution | `promptlab-harness::HarnessFactory` |
+| Target delivery | `promptlab-harness` providers |
+| Judge input | `promptlab-harness::NormalizedResponse` (end-to-end, no reconstruction) |
 
 ## New crates
 
 | Crate | Role |
 |-------|------|
-| `aisec-harness` | Unified attack delivery (`HttpHarness`, `OpenAiHarness`, `PlaywrightHarness`) |
-| `aisec-browser` | Persistent browser auth sessions (`AuthSessions/` vault) |
-| `aisec-runtime` | Embedded runtime supervisor + offline model registry |
+| `promptlab-harness` | Unified attack delivery (`HttpHarness`, `OpenAiHarness`, `PlaywrightHarness`) |
+| `promptlab-browser` | Persistent browser auth sessions (`AuthSessions/` vault) |
+| `promptlab-runtime` | Embedded runtime supervisor + offline model registry |
 
 ## Harness trait
 
@@ -72,32 +72,32 @@ The Judge Engine consumes **only** the original `NormalizedResponse` from the tr
 
 Browser sessions are stored under platform data roots:
 
-- Windows: `%LOCALAPPDATA%/AISec/AuthSessions`
-- macOS: `~/Library/Application Support/AISec/AuthSessions`
-- Linux: `~/.local/share/aisec/AuthSessions`
+- Windows: `%LOCALAPPDATA%/PromptLab/AuthSessions`
+- macOS: `~/Library/Application Support/PromptLab/AuthSessions`
+- Linux: `~/.local/share/promptlab/AuthSessions`
 
 APIs: `record_session`, `finish_record_session`, `validate_session`, `load_session`, `delete_session`.
 
 ## Local runtime
 
-`aisec-runtime` bundles:
+`promptlab-runtime` bundles:
 
 - `RuntimeSupervisor` — starts/monitors embedded Ollama binary when present under `runtime/`
-- `EmbeddedModelProvider` — wraps `LocalModelManager` from `aisec-models`
+- `EmbeddedModelProvider` — wraps `LocalModelManager` from `promptlab-models`
 - `BuiltinModelRegistry` — loads `resources/models.json` offline-first; optional remote merge
 
 ## Integration points
 
-- **Attack path**: `src-tauri/src/harness_runtime.rs` builds `aisec_attack::HarnessTransport` with session-aware `HarnessFactory`
-- **Scanner**: `aisec-attack::PromptInjectionScanner` builds `HarnessTransport::for_attack_target` per scan
+- **Attack path**: `src-tauri/src/harness_runtime.rs` builds `promptlab_attack::HarnessTransport` with session-aware `HarnessFactory`
+- **Scanner**: `promptlab-attack::PromptInjectionScanner` builds `HarnessTransport::for_attack_target` per scan
 - **Discovery**: unchanged HTTP/browser auth injection via `session_auth.rs`
 - **Judge**: `attempt.response.normalized` → `judge_normalized()`
 - **Scan wizard**: Playwright recording IPC unchanged; sessions reusable via descriptor `auth.session_id`
 
 ## Test doubles
 
-`MockTransport` remains in `aisec-attack` for unit tests only. It returns a synthetic `NormalizedResponse` alongside canned HTTP bodies.
+`MockTransport` remains in `promptlab-attack` for unit tests only. It returns a synthetic `NormalizedResponse` alongside canned HTTP bodies.
 
 ## Extension without rewriting attacks
 
-Add a provider under `crates/aisec-harness/src/providers/`, register in `HarnessFactory` + `HarnessRegistry`, map surface in `TargetDescriptor::preferred_harness()`.
+Add a provider under `crates/promptlab-harness/src/providers/`, register in `HarnessFactory` + `HarnessRegistry`, map surface in `TargetDescriptor::preferred_harness()`.

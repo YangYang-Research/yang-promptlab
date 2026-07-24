@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{PluginError, PluginResult};
 use crate::types::{PluginHooks, PluginLanguage, PluginPermissions, PluginType};
 
-pub const MANIFEST_FILE: &str = "aisec-plugin.toml";
+pub const MANIFEST_FILE: &str = "promptlab-plugin.toml";
 pub const HOST_API_VERSION: &str = "1";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -45,7 +45,7 @@ pub struct RuntimeSection {
     #[serde(default)]
     pub interpreter: Option<String>,
     #[serde(default)]
-    pub min_aisec: Option<String>,
+    pub min_promptlab: Option<String>,
 }
 
 fn default_runtime_type() -> String {
@@ -90,13 +90,13 @@ impl PluginManifest {
                 self.runtime.r#type
             )));
         }
-        if let Some(min) = &self.runtime.min_aisec {
+        if let Some(min) = &self.runtime.min_promptlab {
             let req = VersionReq::parse(min)
-                .map_err(|e| PluginError::InvalidManifest(format!("invalid min_aisec: {e}")))?;
+                .map_err(|e| PluginError::InvalidManifest(format!("invalid min_promptlab: {e}")))?;
             let host = Version::parse(env!("CARGO_PKG_VERSION")).unwrap_or_else(|_| Version::new(0, 1, 0));
             if !req.matches(&host) {
                 return Err(PluginError::VersionIncompatible(format!(
-                    "plugin requires aisec {min}, host is {host}"
+                    "plugin requires promptlab {min}, host is {host}"
                 )));
             }
         }

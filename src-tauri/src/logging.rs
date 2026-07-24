@@ -1,4 +1,4 @@
-use aisec_core::{init_logging, EnvironmentPaths, LogGuard, LogOptions};
+use promptlab_core::{init_logging, EnvironmentPaths, LogGuard, LogOptions};
 use tauri::App;
 
 use crate::error::CommandResult;
@@ -9,7 +9,7 @@ pub fn init_app_logging(environment: &EnvironmentPaths) -> CommandResult<LogGuar
         LogOptions::bootstrap("promptlab-desktop")
             .with_log_dir(environment.logs.clone())
             .with_default_filter(
-                "info,promptlab_desktop=debug,promptlab_core=debug,aisec_desktop=debug,aisec_core=debug",
+                "info,promptlab_desktop=debug,promptlab_core=debug,promptlab_desktop=debug,promptlab_core=debug",
             ),
     )
     .map_err(crate::error::CommandError::from)

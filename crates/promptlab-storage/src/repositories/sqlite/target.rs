@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 
 use crate::error::StorageResultExt;
 use crate::models::{CreateTarget, Target, UpdateTarget};
@@ -21,7 +21,7 @@ impl SqliteTargetRepository {
 
 #[async_trait]
 impl TargetRepository for SqliteTargetRepository {
-    async fn create(&self, input: CreateTarget) -> AisecResult<Target> {
+    async fn create(&self, input: CreateTarget) -> PromptLabResult<Target> {
         let id = new_id();
         let timestamp = now();
         let descriptor_json = match &input.descriptor_json {
@@ -54,7 +54,7 @@ impl TargetRepository for SqliteTargetRepository {
         self.get(&id).await
     }
 
-    async fn get(&self, id: &str) -> AisecResult<Target> {
+    async fn get(&self, id: &str) -> PromptLabResult<Target> {
         sqlx::query_as::<_, Target>("SELECT * FROM targets WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
@@ -62,7 +62,7 @@ impl TargetRepository for SqliteTargetRepository {
             .map_storage()
     }
 
-    async fn list_by_project(&self, project_id: &str) -> AisecResult<Vec<Target>> {
+    async fn list_by_project(&self, project_id: &str) -> PromptLabResult<Vec<Target>> {
         sqlx::query_as::<_, Target>(
             "SELECT * FROM targets WHERE project_id = ? ORDER BY created_at DESC",
         )
@@ -72,14 +72,14 @@ impl TargetRepository for SqliteTargetRepository {
         .map_storage()
     }
 
-    async fn list_all(&self) -> AisecResult<Vec<Target>> {
+    async fn list_all(&self) -> PromptLabResult<Vec<Target>> {
         sqlx::query_as::<_, Target>("SELECT * FROM targets ORDER BY created_at DESC")
             .fetch_all(&self.pool)
             .await
             .map_storage()
     }
 
-    async fn update(&self, id: &str, input: UpdateTarget) -> AisecResult<Target> {
+    async fn update(&self, id: &str, input: UpdateTarget) -> PromptLabResult<Target> {
         let existing = self.get(id).await?;
         let name = input.name.unwrap_or(existing.name);
         let target_type = input.target_type.unwrap_or(existing.target_type);
@@ -114,7 +114,7 @@ impl TargetRepository for SqliteTargetRepository {
         self.get(id).await
     }
 
-    async fn update_descriptor(&self, id: &str, descriptor_json: &str) -> AisecResult<Target> {
+    async fn update_descriptor(&self, id: &str, descriptor_json: &str) -> PromptLabResult<Target> {
         let updated_at = now();
         let result = sqlx::query(
             "UPDATE targets SET descriptor_json = ?, updated_at = ? WHERE id = ?",
@@ -129,7 +129,7 @@ impl TargetRepository for SqliteTargetRepository {
         self.get(id).await
     }
 
-    async fn update_profile(&self, id: &str, profile_json: &str) -> AisecResult<Target> {
+    async fn update_profile(&self, id: &str, profile_json: &str) -> PromptLabResult<Target> {
         let updated_at = now();
         let result = sqlx::query(
             "UPDATE targets SET profile_json = ?, updated_at = ? WHERE id = ?",
@@ -144,7 +144,7 @@ impl TargetRepository for SqliteTargetRepository {
         self.get(id).await
     }
 
-    async fn delete(&self, id: &str) -> AisecResult<()> {
+    async fn delete(&self, id: &str) -> PromptLabResult<()> {
         let result = sqlx::query("DELETE FROM targets WHERE id = ?")
             .bind(id)
             .execute(&self.pool)

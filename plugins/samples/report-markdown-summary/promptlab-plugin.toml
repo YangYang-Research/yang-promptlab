@@ -1,12 +1,12 @@
 [plugin]
-id = "com.aisec.sample.report-markdown"
+id = "com.promptlab.sample.report-markdown"
 name = "Markdown Summary Report"
 version = "1.0.0"
 api_version = "1"
 plugin_type = "report"
 language = "javascript"
 description = "Renders a Markdown executive summary from findings"
-author = "AISec"
+author = "PromptLab"
 
 [runtime]
 type = "subprocess"

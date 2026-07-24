@@ -1,8 +1,8 @@
 //! LLM-assisted wizard attack planning from verified API request/response.
 
-use aisec_attack::AttackCategory;
-use aisec_planner::types::CategoryRationale;
-use aisec_planner::{parse_attack_category, PlannerError, PlannerLlm, PlannerResult};
+use promptlab_attack::AttackCategory;
+use promptlab_planner::types::CategoryRationale;
+use promptlab_planner::{parse_attack_category, PlannerError, PlannerLlm, PlannerResult};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use tracing::warn;
@@ -297,7 +297,7 @@ pub async fn build_wizard_attack_plan_with_llm(
         .unwrap_or("unknown");
     let techniques_catalog = technique_catalog_for_prompt();
 
-    let initial_prompt = aisec_inference::PromptRegistry::wizard_profile_user(
+    let initial_prompt = promptlab_inference::PromptRegistry::wizard_profile_user(
         profile.provider.as_str(),
         &profile.framework,
         &profile.full_url(),
@@ -316,7 +316,7 @@ pub async fn build_wizard_attack_plan_with_llm(
         let prompt = if attempt == 0 {
             initial_prompt.clone()
         } else {
-            aisec_inference::PromptRegistry::wizard_profile_repair(
+            promptlab_inference::PromptRegistry::wizard_profile_repair(
                 &format!("{allowed:?}"),
                 &techniques_catalog,
                 &truncate_for_repair(&last_raw),
@@ -603,7 +603,7 @@ fn build_modes_from_llm_strict(
 }
 
 fn technique_catalog_for_prompt() -> String {
-    match aisec_payload::PayloadDatabase::seed_entries() {
+    match promptlab_payload::PayloadDatabase::seed_entries() {
         Ok(entries) => {
             let mut lines: Vec<String> = entries
                 .into_iter()
@@ -620,7 +620,7 @@ fn technique_catalog_for_prompt() -> String {
 }
 
 fn technique_catalog_index() -> PlannerResult<HashMap<String, AttackCategory>> {
-    let entries = aisec_payload::PayloadDatabase::seed_entries().map_err(|e| {
+    let entries = promptlab_payload::PayloadDatabase::seed_entries().map_err(|e| {
         PlannerError::Llm(format!("technique catalog unavailable: {e}"))
     })?;
     let mut index = HashMap::new();

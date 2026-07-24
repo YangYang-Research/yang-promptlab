@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 use async_trait::async_trait;
 use tracing::{info, instrument, warn};
 
@@ -20,7 +20,7 @@ pub struct DiscoveryEngine {
 }
 
 impl DiscoveryEngine {
-    pub fn new(config: DiscoveryConfig) -> AisecResult<Self> {
+    pub fn new(config: DiscoveryConfig) -> PromptLabResult<Self> {
         let client = HttpClient::new(config.clone())?;
         Ok(Self {
             config,
@@ -30,13 +30,13 @@ impl DiscoveryEngine {
     }
 
     /// Attach authenticated session cookies/tokens and optional Playwright storageState.
-    pub fn with_session_auth(mut self, auth: SessionAuthMaterial) -> AisecResult<Self> {
+    pub fn with_session_auth(mut self, auth: SessionAuthMaterial) -> PromptLabResult<Self> {
         self.client = HttpClient::new(self.config.clone())?.with_auth_headers(auth.headers.clone());
         self.session_auth = Some(auth);
         Ok(self)
     }
 
-    pub fn with_defaults() -> AisecResult<Self> {
+    pub fn with_defaults() -> PromptLabResult<Self> {
         Self::new(DiscoveryConfig::default())
     }
 
@@ -46,7 +46,7 @@ impl DiscoveryEngine {
 
     /// Run full discovery against a seed URL.
     #[instrument(skip(self), fields(seed = %seed_url))]
-    pub async fn discover(&self, seed_url: &str) -> AisecResult<DiscoveryReport> {
+    pub async fn discover(&self, seed_url: &str) -> PromptLabResult<DiscoveryReport> {
         if self.uses_browser_session() {
             let browser_config = self.browser_config_from_session();
             return self.discover_with_browser(seed_url, browser_config).await;
@@ -54,7 +54,7 @@ impl DiscoveryEngine {
         self.discover_http_only(seed_url).await
     }
 
-    async fn discover_http_only(&self, seed_url: &str) -> AisecResult<DiscoveryReport> {
+    async fn discover_http_only(&self, seed_url: &str) -> PromptLabResult<DiscoveryReport> {
         let started = Instant::now();
         let seed = validate_target_url(seed_url, &self.config)?;
         let origin = origin_of(&seed);
@@ -132,7 +132,7 @@ impl DiscoveryEngine {
         &self,
         seed_url: &str,
         browser_config: BrowserConfig,
-    ) -> AisecResult<DiscoveryReport> {
+    ) -> PromptLabResult<DiscoveryReport> {
         // Validate up-front under the same SSRF policy as HTTP discovery.
         validate_target_url(seed_url, &self.config)?;
 
@@ -209,15 +209,15 @@ impl DiscoveryEngine {
     }
 }
 
-/// Trait aligned with AISec engine contract (`discover()` phase).
+/// Trait aligned with PromptLab engine contract (`discover()` phase).
 #[async_trait]
 pub trait SurfaceDiscovery: Send + Sync {
-    async fn discover(&self, seed_url: &str) -> AisecResult<DiscoveryReport>;
+    async fn discover(&self, seed_url: &str) -> PromptLabResult<DiscoveryReport>;
 }
 
 #[async_trait]
 impl SurfaceDiscovery for DiscoveryEngine {
-    async fn discover(&self, seed_url: &str) -> AisecResult<DiscoveryReport> {
+    async fn discover(&self, seed_url: &str) -> PromptLabResult<DiscoveryReport> {
         DiscoveryEngine::discover(self, seed_url).await
     }
 }

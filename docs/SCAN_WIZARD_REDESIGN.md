@@ -1,8 +1,8 @@
-# AISec — Workflow-Driven Redesign (Scan Wizard)
+# PromptLab — Workflow-Driven Redesign (Scan Wizard)
 
 > Roles: Principal PM · Principal UX · Principal Frontend Architect · Principal Tauri Architect
-> Scope: UX + workflow redesign. **Reuse** existing engines (`aisec-storage`, `aisec-discovery`,
-> `aisec-attack`, `aisec-judge`, `aisec-report`) and SQLite. **No mock data, no placeholders, no fake backend.**
+> Scope: UX + workflow redesign. **Reuse** existing engines (`promptlab-storage`, `promptlab-discovery`,
+> `promptlab-attack`, `promptlab-judge`, `promptlab-report`) and SQLite. **No mock data, no placeholders, no fake backend.**
 
 This document is the implementation blueprint. It is grounded in the code that exists today on
 `main` (after the desktop integration work): the real Tauri commands, repositories, and engine APIs.
@@ -165,12 +165,12 @@ Legend: **EXISTS** (already implemented & registered) · **NEW** (must be added)
 - `target_get(id)` / `target_update(id, …)` / `target_delete(id)` — **NEW** (repo methods exist; expose)
 
 ### Authentication (Step 2: SSO / credentials)
-- `auth_record_session(targetId, kind, credentials?)` — **NEW** — wraps `aisec-auth` Playwright flow; persists to
+- `auth_record_session(targetId, kind, credentials?)` — **NEW** — wraps `promptlab-auth` Playwright flow; persists to
   `auth_profiles`/`auth_sessions` (tables exist). Returns `sessionId` to attach to the target descriptor.
   Basic/API-key need no browser (stored in descriptor); SSO launches Playwright via this command.
 
 ### Discovery (Step 3)
-- `discovery_run(targetId)` — **EXISTS** (synchronous; runs real `aisec-discovery`, persists endpoints, returns report)
+- `discovery_run(targetId)` — **EXISTS** (synchronous; runs real `promptlab-discovery`, persists endpoints, returns report)
 - `endpoint_list(scanId)` — **EXISTS**
 - `endpoint_create(scanId, targetId, method, path, kind?)` — **NEW** — manual endpoint (repo `EndpointRepository`
   exists; add a create wrapper that builds the URL from target origin + path, marks `source = "manual"`)
@@ -190,8 +190,8 @@ Legend: **EXISTS** (already implemented & registered) · **NEW** (must be added)
 ### Attacks + Judge (executed inside the scan job, not a page)
 - `attack_run_prompt_injection(endpointId)` — **EXISTS** (synchronous, single endpoint, single category; the judge is
   already wired in). This is the **proof-of-concept** the background runner generalizes.
-- The background `scan_start` job **reuses** `aisec-attack` `AttackExecutor::execute_category` across the selected
-  categories × endpoints and `aisec-judge` `deterministic_engine().judge_deterministic` per response, persisting
+- The background `scan_start` job **reuses** `promptlab-attack` `AttackExecutor::execute_category` across the selected
+  categories × endpoints and `promptlab-judge` `deterministic_engine().judge_deterministic` per response, persisting
   `attack_results` + `findings` (exactly as `attack_run_prompt_injection` does today). No new evaluation logic.
 
 ### Findings (read-only)
@@ -202,7 +202,7 @@ Legend: **EXISTS** (already implemented & registered) · **NEW** (must be added)
 ### Reports (read-only)
 - `report_generate(projectId, scanId, format, kind)` — **EXISTS** (HTML proven). `format ∈ {html,pdf,json,sarif}`
 - `report_list(projectId)` / `report_read(id)` / `report_export(id)` — **EXISTS**
-- **Report formats are all real:** `aisec-report` implements `Html`, `Json`, `Sarif`, and `Pdf` (the PDF formatter uses
+- **Report formats are all real:** `promptlab-report` implements `Html`, `Json`, `Sarif`, and `Pdf` (the PDF formatter uses
   `printpdf` + chart rendering). The only **EXTEND** needed: `report_generate` must pass the chosen `format` through
   (it already accepts it), and binary delivery — `report_read` does `read_to_string`, which is fine for HTML/JSON/SARIF
   but would corrupt **PDF**; the Reports "Download PDF" must use `report_export` (file copy, binary-safe) or a new
@@ -211,7 +211,7 @@ Legend: **EXISTS** (already implemented & registered) · **NEW** (must be added)
 ### Estimation (Step 4)
 - Estimated requests/runtime computed **client-side** from real payload counts: `payload_count(category) × selected
   endpoints`, runtime = requests × measured avg latency. Optionally **NEW** `attack_estimate(categories, endpointIds)`
-  to compute server-side from `aisec-payload` (authoritative). No fabricated numbers either way.
+  to compute server-side from `promptlab-payload` (authoritative). No fabricated numbers either way.
 
 ---
 
@@ -222,13 +222,13 @@ The wizard's first four steps reuse **existing** commands. The genuinely new bac
 
 1. **Expose existing repo methods** (trivial): `project_update`, `target_get/update/delete`, `scan_get`,
    `scan_list_all`, `finding_list_by_project`, `finding_search`, `endpoint_create` (manual). These are thin command
-   wrappers over methods that already exist in `aisec-storage`.
+   wrappers over methods that already exist in `promptlab-storage`.
 
 2. **Scan Job Manager** (`src-tauri`, NEW module, the main work):
    - `AppState` gains `jobs: Arc<Mutex<HashMap<ScanId, JobHandle>>>` where `JobHandle` holds a `tokio::task` + a
      `CancellationToken`/pause flag + a live `ScanProgress`.
    - `scan_start` validates inputs, sets scan `status="running"`, spawns a `tokio::spawn` job that: iterates selected
-     endpoints × categories, calls `aisec-attack` executor, runs `aisec-judge`, persists `attack_results` + `findings`
+     endpoints × categories, calls `promptlab-attack` executor, runs `promptlab-judge`, persists `attack_results` + `findings`
      (reusing today's logic from `commands/attack.rs`), updating `ScanProgress` and emitting `scan://*` events after
      each unit. Returns immediately.
    - `scan_pause/resume/stop` toggle the flag / cancel the token; the job checks between units (cooperative
@@ -238,10 +238,10 @@ The wizard's first four steps reuse **existing** commands. The genuinely new bac
      so the Monitor survives an app restart (reads last known state, then resumes live events).
 
 3. **Discovery in the wizard:** keep `discovery_run` synchronous for v1 (Step 3 shows phase chips + spinner). For true
-   live phases, refactor `aisec-discovery` to accept a progress callback and have the command emit `discovery://progress`.
+   live phases, refactor `promptlab-discovery` to accept a progress callback and have the command emit `discovery://progress`.
    This is optional polish; not required for a working wizard.
 
-4. **Auth:** add `auth_record_session` wrapping `aisec-auth` (Playwright). Basic/API-key are stored in the target
+4. **Auth:** add `auth_record_session` wrapping `promptlab-auth` (Playwright). Basic/API-key are stored in the target
    `descriptor_json`; SSO uses the recorded session. The attack executor already supports `AttackTarget.with_auth`/
    headers — feed the stored token/headers into the job.
 
@@ -267,7 +267,7 @@ Incremental, each phase shippable and green (`cargo test` + `tsc`/`vite`), no bi
   `auth_record_session` for SSO), Step 3 (`discovery_run` + `endpoint_list` + `endpoint_create` manual + selection).
   Existing Discovery page logic is **moved** into Step 3 components.
 - **Phase 3 — Wizard Step 4 + estimation:** profile presets mapped to real `AttackCategory` values, category accordion
-  from `aisec-payload` test names/counts, client-side estimate. (Maps spec names → engine: "Goal Hijacking" →
+  from `promptlab-payload` test names/counts, client-side estimate. (Maps spec names → engine: "Goal Hijacking" →
   `AgentGoalHijacking`, "Indirect Injection" → prompt-injection payload subset, etc.)
 - **Phase 4 — Background scan + Monitor (core):** implement Job Manager + `scan_start/status/pause/resume/stop` +
   events; Step 5 "Scan Submitted" (no waiting trap); `/scans` + `/scans/:scanId` live. Generalize the existing
@@ -288,10 +288,10 @@ Incremental, each phase shippable and green (`cargo test` + `tsc`/`vite`), no bi
 
 | Wizard concept | Real engine / table |
 |----------------|---------------------|
-| Discovery phases | `aisec-discovery` (crawler + OpenAPI/GraphQL/AI probes) |
+| Discovery phases | `promptlab-discovery` (crawler + OpenAPI/GraphQL/AI probes) |
 | Endpoints (+manual) | `endpoints` table / `EndpointRepository` |
-| Attack categories | `aisec_attack::AttackCategory` (PromptInjection, SystemPromptExtraction, Jailbreak, RagLeakage, MemoryPoisoning, CrossUserLeakage, AgentGoalHijacking, ToolAbuse, McpAbuse) |
-| Verdict + confidence | `aisec-judge` deterministic engine (rule+regex) → `findings.evidence_json` |
-| Reports | `aisec-report` (`ReportFormat::{Html,Pdf,Json,Sarif}`) → `reports` table |
-| Auth (Basic/SSO/API key) | `aisec-auth` (Playwright) → `auth_profiles`/`auth_sessions` |
-| Persistence | SQLite via `aisec-storage` repositories |
+| Attack categories | `promptlab_attack::AttackCategory` (PromptInjection, SystemPromptExtraction, Jailbreak, RagLeakage, MemoryPoisoning, CrossUserLeakage, AgentGoalHijacking, ToolAbuse, McpAbuse) |
+| Verdict + confidence | `promptlab-judge` deterministic engine (rule+regex) → `findings.evidence_json` |
+| Reports | `promptlab-report` (`ReportFormat::{Html,Pdf,Json,Sarif}`) → `reports` table |
+| Auth (Basic/SSO/API key) | `promptlab-auth` (Playwright) → `auth_profiles`/`auth_sessions` |
+| Persistence | SQLite via `promptlab-storage` repositories |

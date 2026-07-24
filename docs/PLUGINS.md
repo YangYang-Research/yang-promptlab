@@ -1,12 +1,12 @@
-# AISec Plugin SDK
+# PromptLab Plugin SDK
 
-Extend AISec with custom **discovery**, **attack**, **judge**, and **report** plugins in **Python** or **JavaScript**. Plugins run in a sandboxed subprocess with explicit capability permissions and a JSON-lines host protocol.
+Extend PromptLab with custom **discovery**, **attack**, **judge**, and **report** plugins in **Python** or **JavaScript**. Plugins run in a sandboxed subprocess with explicit capability permissions and a JSON-lines host protocol.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Host["aisec-plugin-host"]
+    subgraph Host["promptlab-plugin-host"]
         PM[PluginManager]
         LC[Lifecycle]
         PG[PermissionGuard]
@@ -25,7 +25,7 @@ flowchart LR
 
 | Component | Path | Role |
 |-----------|------|------|
-| Plugin Host | `crates/aisec-plugin-host` | Discovery, lifecycle, sandbox, permissions |
+| Plugin Host | `crates/promptlab-plugin-host` | Discovery, lifecycle, sandbox, permissions |
 | Python SDK | `packages/plugin-sdk-python` | Handler registration, protocol, typed bases |
 | JavaScript SDK | `packages/plugin-sdk-js` | Same API surface for Node |
 | Samples | `plugins/samples/` | Reference plugins (all four types) |
@@ -39,7 +39,7 @@ flowchart LR
 | `judge` | `evaluate` | Score model responses for vulnerability |
 | `report` | `render_report` | Custom report formats |
 
-## Manifest (`aisec-plugin.toml`)
+## Manifest (`promptlab-plugin.toml`)
 
 ```toml
 [plugin]
@@ -54,7 +54,7 @@ language = "javascript"
 type = "subprocess"
 entry = "plugin.js"
 interpreter = "node"
-min_aisec = "0.1.0"
+min_promptlab = "0.1.0"
 
 [capabilities]
 log = true
@@ -68,9 +68,9 @@ execute_attack = "execute_attack"
 
 - **`plugin.version`** — SemVer for the plugin release.
 - **`plugin.api_version`** — Host protocol version (currently `"1"`).
-- **`runtime.min_aisec`** — Minimum AISec host version (SemVer requirement).
+- **`runtime.min_promptlab`** — Minimum PromptLab host version (SemVer requirement).
 
-The host rejects manifests with mismatched `api_version` or incompatible `min_aisec`.
+The host rejects manifests with mismatched `api_version` or incompatible `min_promptlab`.
 
 ## Lifecycle
 
@@ -96,11 +96,11 @@ Subprocess plugins receive a stripped environment:
 
 | Variable | Description |
 |----------|-------------|
-| `AISEC_PLUGIN_ID` | Plugin identifier |
-| `AISEC_PLUGIN_DIR` | Install directory |
-| `AISEC_HOST_API` | Host API version |
-| `AISEC_SANDBOX` | `"1"` when sandboxed |
-| `AISEC_NO_NETWORK` | Set when network is blocked |
+| `PROMPTLAB_PLUGIN_ID` | Plugin identifier |
+| `PROMPTLAB_PLUGIN_DIR` | Install directory |
+| `PROMPTLAB_HOST_API` | Host API version |
+| `PROMPTLAB_SANDBOX` | `"1"` when sandboxed |
+| `PROMPTLAB_NO_NETWORK` | Set when network is blocked |
 
 Defaults:
 
@@ -163,7 +163,7 @@ pip install -e packages/plugin-sdk-python
 Discovery plugin:
 
 ```python
-from aisec_plugin.discovery import DiscoveryPlugin
+from promptlab_plugin.discovery import DiscoveryPlugin
 
 @DiscoveryPlugin.register("discover")
 def discover(ctx):
@@ -197,14 +197,14 @@ AttackPlugin.run();
 ## Plugin Manager (Rust)
 
 ```rust
-use aisec_plugin_host::{PluginManager, PluginType};
+use promptlab_plugin_host::{PluginManager, PluginType};
 
 let mut mgr = PluginManager::new("./plugins")?;
 let ids = mgr.discover()?;
-mgr.enable("com.aisec.sample.discovery-openapi")?;
+mgr.enable("com.promptlab.sample.discovery-openapi")?;
 
 let result = mgr.invoke(
-    "com.aisec.sample.discovery-openapi",
+    "com.promptlab.sample.discovery-openapi",
     serde_json::json!({"target_url": "https://api.example.com"}),
 ).await?;
 
@@ -213,7 +213,7 @@ println!("{:?}", result.result);
 
 Filter helpers: `by_type(PluginType::Judge)`, `by_language(PluginLanguage::Python)`.
 
-Environment override: `AISEC_PLUGINS_DIR`.
+Environment override: `PROMPTLAB_PLUGINS_DIR`.
 
 ## Sample plugins
 
@@ -227,7 +227,7 @@ Environment override: `AISEC_PLUGINS_DIR`.
 ## Testing
 
 ```bash
-cargo test -p aisec-plugin-host
+cargo test -p promptlab-plugin-host
 ```
 
 Integration tests invoke real sample plugins when `python3` and `node` are on `PATH`.
@@ -236,5 +236,5 @@ Integration tests invoke real sample plugins when `python3` and `node` are on `P
 
 - WASM runtime (enterprise)
 - IPC `plugin.list` / `plugin.enable` from Tauri shell
-- Marketplace signing and `aisec-plugin` CLI
-- Persistence via `aisec-storage` `plugins` table
+- Marketplace signing and `promptlab-plugin` CLI
+- Persistence via `promptlab-storage` `plugins` table

@@ -1,7 +1,7 @@
 {
-  "name": "@aisec/plugin-sdk",
+  "name": "@promptlab/plugin-sdk",
   "version": "0.1.0",
-  "description": "AISec Plugin SDK for JavaScript",
+  "description": "PromptLab Plugin SDK for JavaScript",
   "type": "module",
   "main": "src/index.js",
   "exports": {

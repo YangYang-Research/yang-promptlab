@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
-use aisec_judge::{JudgeEngine, JudgeRequest};
-use aisec_planner::PlannerLlm;
-use aisec_target_profile::{AttackResultsSummary, TargetProfile, VerifyHttpSuccess};
+use promptlab_judge::{JudgeEngine, JudgeRequest};
+use promptlab_planner::PlannerLlm;
+use promptlab_target_profile::{AttackResultsSummary, TargetProfile, VerifyHttpSuccess};
 use serde::Deserialize;
 use tracing::{info, warn};
 

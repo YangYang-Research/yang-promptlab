@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use aisec_runtime::RuntimeSupervisor;
+use promptlab_runtime::RuntimeSupervisor;
 
 use super::RuntimeAdapter;
 use crate::error::{InferenceError, InferenceResult};

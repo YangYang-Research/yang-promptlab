@@ -1,19 +1,19 @@
 //! Attack execution commands for scan jobs and category runs.
 
-use aisec_attack::{
+use promptlab_attack::{
     apply_descriptor_auth, AttackCategory, AttackContext, AttackPayload, AttackTarget,
     AttackExecutor, FindingSeverity, PayloadAttempt, DEFAULT_ATTACK_CONCURRENCY,
 };
-use aisec_endpoint_metadata::body_template_from_metadata;
+use promptlab_endpoint_metadata::body_template_from_metadata;
 use crate::dto::metadata_from_endpoint;
-use aisec_target_profile::{TargetProfile, TargetProvider};
-use aisec_auth::{resolve_descriptor_for_runtime, resolve_descriptor_for_wizard, AuthSessionManager, SecretStore};
-use aisec_agent::JudgeCoordinatorAgent;
-use aisec_judge::{JudgeRequest, JudgeVerdict, Severity as JudgeSeverity};
-use aisec_plugin_host::evaluate_with_judge_plugins;
-use aisec_inference::InferenceRuntimeManager;
-use aisec_runtime::{RuntimeManager, SharedModelProvider};
-use aisec_storage::{
+use promptlab_target_profile::{TargetProfile, TargetProvider};
+use promptlab_auth::{resolve_descriptor_for_runtime, resolve_descriptor_for_wizard, AuthSessionManager, SecretStore};
+use promptlab_agent::JudgeCoordinatorAgent;
+use promptlab_judge::{JudgeRequest, JudgeVerdict, Severity as JudgeSeverity};
+use promptlab_plugin_host::evaluate_with_judge_plugins;
+use promptlab_inference::InferenceRuntimeManager;
+use promptlab_runtime::{RuntimeManager, SharedModelProvider};
+use promptlab_storage::{
     AttackResultRepository, CreateAttackResult, CreateFinding, Endpoint,
     EndpointRepository, FindingRepository, JudgeRoleWeightsRepository, Repositories,
     ScanRepository, TargetRepository, UpdateScan,
@@ -53,10 +53,10 @@ impl CategoryRunOptions {
     pub fn from_strategy(
         category: AttackCategory,
         disabled_tests: &[String],
-        strategy: &aisec_target_profile::PayloadStrategy,
+        strategy: &promptlab_target_profile::PayloadStrategy,
     ) -> Self {
         let enabled =
-            aisec_target_profile::wizard_plan::enabled_tests_for_category(category, disabled_tests)
+            promptlab_target_profile::wizard_plan::enabled_tests_for_category(category, disabled_tests)
                 as usize;
         let variants = strategy.variants_per_test.max(1) as usize;
         let budget = strategy.max_total_payloads.max(1) as usize;
@@ -69,7 +69,7 @@ impl CategoryRunOptions {
         }
     }
 
-    pub fn with_pacing(mut self, pacing: &aisec_agent::EndpointPacing) -> Self {
+    pub fn with_pacing(mut self, pacing: &promptlab_agent::EndpointPacing) -> Self {
         self.max_concurrent_requests = Some(pacing.effective_concurrency());
         self.inter_request_delay_ms = Some(pacing.inter_request_delay_ms);
         self.timeout_ms = Some(pacing.timeout_ms);
@@ -253,11 +253,11 @@ pub fn category_id(category: AttackCategory) -> &'static str {
 async fn build_judge_for_category(
     data_dir: &std::path::Path,
     inference_manager: Arc<AsyncMutex<InferenceRuntimeManager>>,
-    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
+    model_manager: Arc<AsyncMutex<promptlab_models::LocalModelManager>>,
     model_provider: SharedModelProvider,
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
     repos: &Repositories,
-) -> CommandResult<aisec_judge::JudgeEngine> {
+) -> CommandResult<promptlab_judge::JudgeEngine> {
     let inference = inference_manager.lock().await;
     let manager = model_manager.lock().await;
     let mut runtime_mgr = runtime_manager.lock().await;
@@ -278,7 +278,7 @@ async fn build_judge_for_category(
         .get()
         .await
         .map_err(CommandError::from)?;
-    judge.set_role_weights(aisec_judge::RoleWeights {
+    judge.set_role_weights(promptlab_judge::RoleWeights {
         judge: stored.judge as f32,
         classifier: stored.classifier as f32,
         attacker: stored.attacker as f32,
@@ -364,8 +364,8 @@ struct CategoryJudgeEnv<'a> {
     method: Option<&'a str>,
     body_template: Option<&'a str>,
     provider: Option<&'a str>,
-    judge: &'a aisec_judge::JudgeEngine,
-    plugin_manager: &'a Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
+    judge: &'a promptlab_judge::JudgeEngine,
+    plugin_manager: &'a Arc<AsyncMutex<promptlab_plugin_host::PluginManager>>,
     progress: Option<&'a ScanProgressEmitter>,
     progress_state: Option<&'a Arc<Mutex<ScanProgress>>>,
     job_controls: Option<&'a ScanJobControls>,
@@ -388,7 +388,7 @@ async fn judge_single_attempt(
     );
     let mut verdict: JudgeVerdict = JudgeCoordinatorAgent::run(&judge_request, env.judge)
         .await
-        .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?
+        .map_err(|err| CommandError::from(promptlab_core::PromptLabError::internal(err.to_string())))?
         .verdict;
 
     {
@@ -597,7 +597,7 @@ async fn collect_category_attempts(
     loop {
         tokio::select! {
             result = exec.as_mut() => {
-                result.map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
+                result.map_err(|err| CommandError::from(promptlab_core::PromptLabError::internal(err.to_string())))?;
                 break;
             }
             item = rx.recv() => {
@@ -899,10 +899,10 @@ pub async fn run_category_on_endpoint(
     runtime: AttackRuntime,
     data_dir: &std::path::Path,
     inference_manager: Arc<AsyncMutex<InferenceRuntimeManager>>,
-    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
+    model_manager: Arc<AsyncMutex<promptlab_models::LocalModelManager>>,
     model_provider: SharedModelProvider,
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
-    plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
+    plugin_manager: Arc<AsyncMutex<promptlab_plugin_host::PluginManager>>,
     generated_payloads: Option<&HashMap<AttackCategory, Vec<AttackPayload>>>,
     progress: Option<&ScanProgressEmitter>,
     options: Option<&CategoryRunOptions>,
@@ -1018,10 +1018,10 @@ pub async fn run_category_on_target_profile(
     runtime: AttackRuntime,
     data_dir: &std::path::Path,
     inference_manager: Arc<AsyncMutex<InferenceRuntimeManager>>,
-    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
+    model_manager: Arc<AsyncMutex<promptlab_models::LocalModelManager>>,
     model_provider: SharedModelProvider,
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
-    plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
+    plugin_manager: Arc<AsyncMutex<promptlab_plugin_host::PluginManager>>,
     generated_payloads: Option<&HashMap<AttackCategory, Vec<AttackPayload>>>,
     progress: Option<&ScanProgressEmitter>,
     options: Option<&CategoryRunOptions>,

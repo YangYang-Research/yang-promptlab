@@ -18,7 +18,7 @@ impl ReportFormatter for HtmlFormatter {
         Ok(GeneratedReport {
             kind,
             format: ReportFormat::Html,
-            filename: format!("aisec-{}-{}.html", kind.as_str(), input.scan_id),
+            filename: format!("promptlab-{}-{}.html", kind.as_str(), input.scan_id),
             bytes: html.into_bytes(),
             content_type: ReportFormat::Html.content_type().into(),
         })

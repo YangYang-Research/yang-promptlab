@@ -2,7 +2,7 @@
 
 ## Overview
 
-AISec attack execution now routes through the **Execution Harness** instead of direct HTTP transport. This is an internal refactor; existing targets and scans continue to work with updated wiring.
+PromptLab attack execution now routes through the **Execution Harness** instead of direct HTTP transport. This is an internal refactor; existing targets and scans continue to work with updated wiring.
 
 ## Breaking changes
 
@@ -13,15 +13,15 @@ None for frontend IPC contracts. Target descriptor JSON format is unchanged.
 ### New workspace members
 
 ```
-crates/aisec-harness
-crates/aisec-browser
-crates/aisec-runtime
+crates/promptlab-harness
+crates/promptlab-browser
+crates/promptlab-runtime
 ```
 
 Add to dependent crates:
 
 ```toml
-aisec-harness = { workspace = true, features = ["playwright"] }
+promptlab-harness = { workspace = true, features = ["playwright"] }
 ```
 
 ### Attack transport
@@ -67,7 +67,7 @@ judge.judge_normalized(probe_id, category, payload, &normalized).await?;
 
 ## Auth session storage
 
-Canonical vault: `{data_dir}/AuthSessions/` via `aisec_auth::auth_sessions_dir`.
+Canonical vault: `{data_dir}/AuthSessions/` via `promptlab_auth::auth_sessions_dir`.
 
 Secrets (passwords, tokens, cookies) are stored in the OS keychain (`keyring`), referenced by `credential_reference_id` in SQLite. Playwright storageState files are AES-256-GCM encrypted as `{session_id}.storage.enc`.
 
@@ -107,12 +107,12 @@ See [RUNTIME.md](./RUNTIME.md).
 
 ## Verification checklist
 
-1. `cargo test -p aisec-harness -p aisec-browser -p aisec-runtime -p aisec-judge`
-2. `cargo check -p aisec-desktop`
+1. `cargo test -p promptlab-harness -p promptlab-browser -p promptlab-runtime -p promptlab-judge`
+2. `cargo check -p promptlab-desktop`
 3. Scan wizard: Record Browser Session → Finish → run scan
 4. Models page: install local judge model → set Judge mode to Local LLM
 5. Settings → AI Models: select installed judge model
 
 ## Rollback
 
-Revert `session_auth.rs` and `harness_runtime.rs` to use `SessionAwareTransport` + direct `judge.judge(JudgeRequest)`. Harness crates can remain in workspace without being linked from `aisec-desktop`.
+Revert `session_auth.rs` and `harness_runtime.rs` to use `SessionAwareTransport` + direct `judge.judge(JudgeRequest)`. Harness crates can remain in workspace without being linked from `promptlab-desktop`.

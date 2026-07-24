@@ -4,12 +4,12 @@
 //! sent payload, captured response, and confidence in evidence_json, exactly as
 //! the attack scanner writes them) -> load them back -> render `reports/*.html`.
 //!
-//! Run: cargo run -p aisec-report --example generate_html_report
+//! Run: cargo run -p promptlab-report --example generate_html_report
 
-use aisec_report::{
+use promptlab_report::{
     ReportDataBuilder, ReportFormat, ReportKind, ReportingEngine, StorageFindingRow,
 };
-use aisec_storage::{
+use promptlab_storage::{
     CreateFinding, CreateProject, CreateScan, CreateTarget, Database, FindingRepository,
     ProjectRepository, ScanRepository, TargetRepository,
 };
@@ -123,7 +123,7 @@ async fn main() {
         .await
         .expect("report generation failed");
 
-    println!("=== AISec HTML Reporting Engine ===");
+    println!("=== PromptLab HTML Reporting Engine ===");
     println!("Project: {}", project.name);
     println!("Target:  {}", target.name);
     println!("Findings: {}", input.findings.len());

@@ -5,7 +5,7 @@ pub enum GeneratorError {
     #[error("invalid input: {0}")]
     InvalidInput(String),
     #[error("payload library: {0}")]
-    Payload(#[from] aisec_payload::PayloadError),
+    Payload(#[from] promptlab_payload::PayloadError),
     #[error("LLM generation failed: {0}")]
     Llm(String),
     #[error("serialization: {0}")]

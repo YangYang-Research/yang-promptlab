@@ -1,4 +1,4 @@
-use aisec_core::{AisecError, AisecResult};
+use promptlab_core::{PromptLabError, PromptLabResult};
 
 use crate::playwright::PlaywrightDriver;
 use crate::session::SessionStore;
@@ -15,7 +15,7 @@ impl<'a> CookieManager<'a> {
         Self { store, driver }
     }
 
-    pub async fn export_cookies(&self, session_id: &str) -> AisecResult<Vec<CookieRecord>> {
+    pub async fn export_cookies(&self, session_id: &str) -> PromptLabResult<Vec<CookieRecord>> {
         let session = self.store.get_session(session_id).await?;
         Ok(session.cookies)
     }
@@ -24,7 +24,7 @@ impl<'a> CookieManager<'a> {
         &self,
         session_id: &str,
         cookies: Vec<CookieRecord>,
-    ) -> AisecResult<Vec<CookieRecord>> {
+    ) -> PromptLabResult<Vec<CookieRecord>> {
         let updated = self.driver.set_cookies(cookies).await?;
         self.store
             .update_session_cookies(session_id, &updated)
@@ -36,7 +36,7 @@ impl<'a> CookieManager<'a> {
         &self,
         session_id: &str,
         url: Option<&str>,
-    ) -> AisecResult<Vec<CookieRecord>> {
+    ) -> PromptLabResult<Vec<CookieRecord>> {
         let cookies = self.driver.get_cookies(url).await?;
         self.store
             .update_session_cookies(session_id, &cookies)
@@ -86,15 +86,15 @@ impl TokenExtractor {
         }
     }
 
-    pub fn validate_jwt_structure(token: &str) -> AisecResult<()> {
+    pub fn validate_jwt_structure(token: &str) -> PromptLabResult<()> {
         use jsonwebtoken::decode_header;
 
         decode_header(token)
-            .map_err(|e| AisecError::invalid_input(format!("invalid JWT header: {e}")))?;
+            .map_err(|e| PromptLabError::invalid_input(format!("invalid JWT header: {e}")))?;
 
         let parts: Vec<&str> = token.split('.').collect();
         if parts.len() < 2 {
-            return Err(AisecError::invalid_input(
+            return Err(PromptLabError::invalid_input(
                 "JWT must contain at least header and payload",
             ));
         }

@@ -1,4 +1,4 @@
-use aisec_attack::AttackCategory;
+use promptlab_attack::AttackCategory;
 use serde::{Deserialize, Serialize};
 
 /// Planner execution mode stored on generated attack plans.

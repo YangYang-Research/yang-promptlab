@@ -2,7 +2,7 @@
 //!
 //! Kind **A**: LLM invents one improved adversarial factory prompt from technique metadata.
 
-use aisec_planner::PlannerLlm;
+use promptlab_planner::PlannerLlm;
 use tracing::info;
 
 use crate::error::{AgentError, AgentResult};

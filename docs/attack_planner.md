@@ -1,4 +1,4 @@
-# AISec Attack Planner
+# PromptLab Attack Planner
 
 Dynamic attack plan generation from fingerprint results, integrated into Scan Wizard step 4.
 
@@ -8,7 +8,7 @@ Dynamic attack plan generation from fingerprint results, integrated into Scan Wi
 FingerprintResult  →  Attack Planner  →  AttackPlan  →  scan_start
 ```
 
-## Crate: `aisec-planner`
+## Crate: `promptlab-planner`
 
 | Module | Role |
 |--------|------|

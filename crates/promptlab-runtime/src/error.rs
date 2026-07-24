@@ -50,8 +50,8 @@ pub enum RuntimeError {
 
 pub type RuntimeResult<T> = Result<T, RuntimeError>;
 
-impl From<aisec_models::error::ModelError> for RuntimeError {
-    fn from(value: aisec_models::error::ModelError) -> Self {
+impl From<promptlab_models::error::ModelError> for RuntimeError {
+    fn from(value: promptlab_models::error::ModelError) -> Self {
         let msg = value.to_string();
         if msg.contains("not found") {
             Self::ModelNotInstalled(msg)
@@ -65,8 +65,8 @@ impl From<aisec_models::error::ModelError> for RuntimeError {
     }
 }
 
-impl From<aisec_core::AisecError> for RuntimeError {
-    fn from(value: aisec_core::AisecError) -> Self {
+impl From<promptlab_core::PromptLabError> for RuntimeError {
+    fn from(value: promptlab_core::PromptLabError) -> Self {
         Self::Config(value.to_string())
     }
 }

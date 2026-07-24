@@ -2,8 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use aisec_auth::AuthEngineConfig;
-use aisec_core::AisecResult;
+use promptlab_auth::AuthEngineConfig;
+use promptlab_core::PromptLabResult;
 use tauri::{AppHandle, Manager};
 use tracing::info;
 
@@ -27,7 +27,7 @@ fn bundled_is_complete(node_bin: &Path, runner: &Path, auth_dir: &Path) -> bool 
 }
 
 fn dev_paths() -> Option<(PathBuf, PathBuf, PathBuf, PathBuf)> {
-    let auth_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../crates/aisec-auth/playwright");
+    let auth_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../crates/promptlab-auth/playwright");
     let runner = auth_dir.join("runner.mjs");
     if !runner.is_file() {
         return None;
@@ -38,7 +38,7 @@ fn dev_paths() -> Option<(PathBuf, PathBuf, PathBuf, PathBuf)> {
     Some((node_bin, runner, auth_dir, browsers))
 }
 
-pub fn resolve_auth_engine_config(app: &AppHandle) -> AisecResult<AuthEngineConfig> {
+pub fn resolve_auth_engine_config(app: &AppHandle) -> PromptLabResult<AuthEngineConfig> {
     if let Ok(resource_dir) = app.path().resource_dir() {
         let (node_bin, runner, auth_dir, browsers) = bundled_paths(&resource_dir);
         if bundled_is_complete(&node_bin, &runner, &auth_dir) {

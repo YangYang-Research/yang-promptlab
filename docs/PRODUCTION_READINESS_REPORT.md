@@ -1,16 +1,16 @@
-# AISec Production Readiness Report
+# PromptLab Production Readiness Report
 
 **Version:** 1.0  
 **Date:** 2026-06-13  
 **Scope:** Beta release hardening review  
-**Product:** AISec Desktop (Tauri 2 + React + Rust workspace)  
+**Product:** PromptLab Desktop (Tauri 2 + React + Rust workspace)  
 **Reviewer:** Automated architecture / security / ops review (codebase evidence)
 
 ---
 
 ## Executive Summary
 
-AISec has a **solid modular foundation**: discovery, attack, judge, fingerprint, auth, and storage are implemented as separate crates with a Tauri IPC shell. Core user flows (discovery → scan → attack → findings → report) work end-to-end when the backend is connected.
+PromptLab has a **solid modular foundation**: discovery, attack, judge, fingerprint, auth, and storage are implemented as separate crates with a Tauri IPC shell. Core user flows (discovery → scan → attack → findings → report) work end-to-end when the backend is connected.
 
 **Beta readiness verdict: Conditional.** Ship Beta only after closing **4 Critical** and the **8 High-priority** items in the [Beta Release Gate](#beta-release-gate). The largest gaps are **non-durable background jobs**, **plaintext secret storage**, **blocking discovery IPC**, and **missing crash reconciliation**.
 
@@ -38,12 +38,12 @@ flowchart TB
   end
 
   subgraph crates [Rust Workspace]
-    DISC[aisec-discovery]
-    ATK[aisec-attack]
-    JUD[aisec-judge]
-    FP[aisec-fingerprint]
-    AUTH[aisec-auth]
-    STO[aisec-storage]
+    DISC[promptlab-discovery]
+    ATK[promptlab-attack]
+    JUD[promptlab-judge]
+    FP[promptlab-fingerprint]
+    AUTH[promptlab-auth]
+    STO[promptlab-storage]
   end
 
   Pages --> Store --> IPC
@@ -80,9 +80,9 @@ Evidence paths refer to the repository at review time (`main` branch, 2026-06-13
 | Field | Detail |
 |-------|--------|
 | **Severity** | Medium |
-| **Impact** | Plugin SDK (`aisec-plugin-host`) and settings UI references exist but plugins cannot load or execute; Beta marketing may over-promise extensibility. |
+| **Impact** | Plugin SDK (`promptlab-plugin-host`) and settings UI references exist but plugins cannot load or execute; Beta marketing may over-promise extensibility. |
 | **Recommendation** | Either wire plugin host into `AppState` with IPC commands, or hide plugin UI until Beta+1. |
-| **Implementation Plan** | 1) Add `aisec-plugin-host` to `src-tauri/Cargo.toml`. 2) Create `commands/plugins.rs` (list, enable, run). 3) Mount plugin directory under `{data_dir}/plugins`. 4) Gate UI in Settings behind feature flag. **Acceptance:** plugin manifest loads; sandbox permissions enforced per `crates/aisec-plugin-host/src/permissions.rs`. |
+| **Implementation Plan** | 1) Add `promptlab-plugin-host` to `src-tauri/Cargo.toml`. 2) Create `commands/plugins.rs` (list, enable, run). 3) Mount plugin directory under `{data_dir}/plugins`. 4) Gate UI in Settings behind feature flag. **Acceptance:** plugin manifest loads; sandbox permissions enforced per `crates/promptlab-plugin-host/src/permissions.rs`. |
 
 ### ARCH-02 — Orchestration concentrated in Tauri commands
 
@@ -140,7 +140,7 @@ Evidence paths refer to the repository at review time (`main` branch, 2026-06-13
 | **Severity** | Medium |
 | **Impact** | Discovery with 50+ endpoints is slow; failure mid-loop yields partial endpoint set. |
 | **Recommendation** | Batch insert inside a transaction. |
-| **Implementation Plan** | Refactor `crates/aisec-storage/src/repositories/sqlite/endpoint.rs` `create_many` to use multi-row `INSERT` or transaction loop. **Acceptance:** atomic endpoint set per discovery run. |
+| **Implementation Plan** | Refactor `crates/promptlab-storage/src/repositories/sqlite/endpoint.rs` `create_many` to use multi-row `INSERT` or transaction loop. **Acceptance:** atomic endpoint set per discovery run. |
 
 ### DB-03 — No persistent job schema
 
@@ -157,7 +157,7 @@ Evidence paths refer to the repository at review time (`main` branch, 2026-06-13
 |-------|--------|
 | **Severity** | Medium |
 | **Impact** | Typos in status strings break UI filters and scan monitor logic. |
-| **Recommendation** | Validate status on write; document enum in `aisec-storage`. |
+| **Recommendation** | Validate status on write; document enum in `promptlab-storage`. |
 | **Implementation Plan** | 1) Rust enum `ScanStatus` with `as_str()`. 2) Repository rejects unknown values. 3) Optional SQLite CHECK constraint in migration. **Acceptance:** invalid status returns `CommandError::invalid_input`. |
 
 ### DB-05 — Connection pool capped at 5
@@ -167,7 +167,7 @@ Evidence paths refer to the repository at review time (`main` branch, 2026-06-13
 | **Severity** | Medium |
 | **Impact** | Concurrent IPC (scan job + status polling + report read + auth) may block waiting for pool connections. |
 | **Recommendation** | Tune pool for desktop workload; document concurrency budget. |
-| **Implementation Plan** | Increase to 10 for Beta; add metric log when acquire waits > 100ms. **Evidence:** `crates/aisec-storage/src/pool.rs`. |
+| **Implementation Plan** | Increase to 10 for Beta; add metric log when acquire waits > 100ms. **Evidence:** `crates/promptlab-storage/src/pool.rs`. |
 
 ### DB-06 — No explicit WAL checkpoint on shutdown
 
@@ -296,7 +296,7 @@ Evidence paths refer to the repository at review time (`main` branch, 2026-06-13
 | **Severity** | Critical |
 | **Impact** | Passwords, API keys, JWTs in `targets.descriptor_json` readable from DB file, backups, and sync folders. |
 | **Recommendation** | Encrypt sensitive fields or store in OS keychain with references in descriptor. |
-| **Implementation Plan** | 1) Add `keyring` crate. 2) On target save, extract secrets → keychain; store `secret_ref` IDs in JSON. 3) Migration path for existing targets. **Evidence:** `aisec-attack/src/target_auth.rs`, schema `001_initial_schema.sql`. **Acceptance:** raw DB dump contains no passwords. |
+| **Implementation Plan** | 1) Add `keyring` crate. 2) On target save, extract secrets → keychain; store `secret_ref` IDs in JSON. 3) Migration path for existing targets. **Evidence:** `promptlab-attack/src/target_auth.rs`, schema `001_initial_schema.sql`. **Acceptance:** raw DB dump contains no passwords. |
 
 ### SEC-02 — Judge config API keys on disk plaintext
 
@@ -305,7 +305,7 @@ Evidence paths refer to the repository at review time (`main` branch, 2026-06-13
 | **Severity** | Critical |
 | **Impact** | `{data_dir}/judge_config.json` contains `api_key` in cleartext. |
 | **Recommendation** | Env-var-only or keychain for Beta; never persist inline key. |
-| **Implementation Plan** | 1) Remove `api_key` from persisted JSON; keep `api_key_env` only. 2) Optional keychain slot for desktop convenience. **Evidence:** `judge_config.rs`, `aisec-judge/src/config.rs`. **Acceptance:** file on disk has no key material. |
+| **Implementation Plan** | 1) Remove `api_key` from persisted JSON; keep `api_key_env` only. 2) Optional keychain slot for desktop convenience. **Evidence:** `judge_config.rs`, `promptlab-judge/src/config.rs`. **Acceptance:** file on disk has no key material. |
 
 ### SEC-03 — Auth session cookies/tokens plaintext in SQLite
 
@@ -314,7 +314,7 @@ Evidence paths refer to the repository at review time (`main` branch, 2026-06-13
 | **Severity** | High |
 | **Impact** | Session hijack if DB or backup leaked; violates user expectation for authenticated scanning. |
 | **Recommendation** | Encrypt `cookies_json` / `tokens_json` at rest. |
-| **Implementation Plan** | 1) Derive key from OS keychain master secret. 2) Encrypt before `auth` repository write. **Evidence:** `aisec-auth/src/session/store.rs`, `002_auth_schema.sql`. **Acceptance:** DB blob is not valid JSON without decryption. |
+| **Implementation Plan** | 1) Derive key from OS keychain master secret. 2) Encrypt before `auth` repository write. **Evidence:** `promptlab-auth/src/session/store.rs`, `002_auth_schema.sql`. **Acceptance:** DB blob is not valid JSON without decryption. |
 
 ### SEC-04 — `report_read` path not confined to reports directory
 
@@ -332,7 +332,7 @@ Evidence paths refer to the repository at review time (`main` branch, 2026-06-13
 | **Severity** | Medium |
 | **Impact** | Attack engine requests user-supplied endpoint URLs without discovery's URL policy; redirects may reach internal hosts. |
 | **Recommendation** | Shared SSRF module for discovery + attack. |
-| **Implementation Plan** | Extract `url_policy` to `aisec-core` or shared crate; call from `aisec-attack/src/transport/http.rs`. **Acceptance:** blocked host list matches discovery. |
+| **Implementation Plan** | Extract `url_policy` to `promptlab-core` or shared crate; call from `promptlab-attack/src/transport/http.rs`. **Acceptance:** blocked host list matches discovery. |
 
 ### SEC-06 — DNS rebinding gap in URL policy
 
@@ -390,7 +390,7 @@ Evidence paths refer to the repository at review time (`main` branch, 2026-06-13
 | **Severity** | Medium |
 | **Impact** | Crawl throughput capped; documented deadlock workaround. |
 | **Recommendation** | Fix crawler concurrency bug; restore `worker_count: 8`. |
-| **Implementation Plan** | Reproduce hang in `aisec-discovery` tests; fix lock order in `crawler.rs`. **Evidence:** `discovery.rs:158-165`. **Acceptance:** `max_depth=2, max_pages=25` completes with `worker_count=4` without hang. |
+| **Implementation Plan** | Reproduce hang in `promptlab-discovery` tests; fix lock order in `crawler.rs`. **Evidence:** `discovery.rs:158-165`. **Acceptance:** `max_depth=2, max_pages=25` completes with `worker_count=4` without hang. |
 
 ### PERF-03 — N+1 queries on bootstrap
 
@@ -421,7 +421,7 @@ Evidence paths refer to the repository at review time (`main` branch, 2026-06-13
 | **Severity** | High |
 | **Impact** | Malicious or buggy target returns multi-GB body → OOM during scan. |
 | **Recommendation** | Cap body size (match discovery 2MB default). |
-| **Implementation Plan** | In `aisec-attack/src/transport/http.rs`, read with `take(max_bytes)` before `text()`. **Evidence:** discovery caps at `max_body_bytes`. **Acceptance:** 10MB response truncated with error logged. |
+| **Implementation Plan** | In `promptlab-attack/src/transport/http.rs`, read with `take(max_bytes)` before `text()`. **Evidence:** discovery caps at `max_body_bytes`. **Acceptance:** 10MB response truncated with error logged. |
 
 ### MEM-02 — Frontend loads all findings on bootstrap
 
@@ -439,7 +439,7 @@ Evidence paths refer to the repository at review time (`main` branch, 2026-06-13
 | **Severity** | Medium |
 | **Impact** | Accidental multi-GB HuggingFace download fills disk. |
 | **Recommendation** | Enforce catalog max size + confirmation above threshold. |
-| **Implementation Plan** | Check `Content-Length` in `aisec-models` download manager; abort if > catalog limit + 10%. **Acceptance:** oversize download fails with clear error. |
+| **Implementation Plan** | Check `Content-Length` in `promptlab-models` download manager; abort if > catalog limit + 10%. **Acceptance:** oversize download fails with clear error. |
 
 ### MEM-04 — Unbounded `evidence_json` in findings
 
@@ -456,7 +456,7 @@ Evidence paths refer to the repository at review time (`main` branch, 2026-06-13
 |-------|--------|
 | **Severity** | Low |
 | **Impact** | Discovery 2MB, fingerprint 256KB, attack unlimited — operator confusion. |
-| **Recommendation** | Central constant in `aisec-core`. |
+| **Recommendation** | Central constant in `promptlab-core`. |
 | **Implementation Plan** | `pub const MAX_HTTP_BODY_BYTES: usize = 2 * 1024 * 1024`; use everywhere. **Acceptance:** single source of truth documented in `docs/SECURITY.md`. |
 
 ---
@@ -508,9 +508,9 @@ Evidence paths refer to the repository at review time (`main` branch, 2026-06-13
 | Field | Detail |
 |-------|--------|
 | **Severity** | Medium |
-| **Impact** | Large log files; `aisec_desktop=debug` in default filter. |
+| **Impact** | Large log files; `promptlab_desktop=debug` in default filter. |
 | **Recommendation** | Release profile: `info` only; debug via `RUST_LOG`. |
-| **Implementation Plan** | `#[cfg(debug_assertions)]` vs release filter in `aisec-core/src/logging.rs`. **Acceptance:** release binary logs ≤ 10MB/day typical use. |
+| **Implementation Plan** | `#[cfg(debug_assertions)]` vs release filter in `promptlab-core/src/logging.rs`. **Acceptance:** release binary logs ≤ 10MB/day typical use. |
 
 ### LOG-02 — JSON structured logging unused
 
@@ -519,7 +519,7 @@ Evidence paths refer to the repository at review time (`main` branch, 2026-06-13
 | **Severity** | Low |
 | **Impact** | Harder log aggregation for enterprise Beta customers. |
 | **Recommendation** | Enable `json_file` option in release. |
-| **Implementation Plan** | Wire `LogOptions.json_file` in release `init_app_logging`. **Acceptance:** `{data_dir}/logs/aisec.json` valid JSON lines. |
+| **Implementation Plan** | Wire `LogOptions.json_file` in release `init_app_logging`. **Acceptance:** `{data_dir}/logs/promptlab.json` valid JSON lines. |
 
 ### LOG-03 — URLs logged at info may contain secrets
 
@@ -688,15 +688,15 @@ These areas are **production-grade or near-ready** and should be preserved durin
 
 | Area | Evidence |
 |------|----------|
-| Modular crate boundaries | `aisec-discovery`, `aisec-attack`, `aisec-judge`, `aisec-fingerprint`, `aisec-auth`, `aisec-storage` |
-| Discovery body size limit | `aisec-discovery/src/client.rs` — `max_body_bytes` |
-| URL policy for discovery | `aisec-discovery/src/url_policy.rs` |
-| SQLite WAL with FS fallback | `aisec-storage/src/pool.rs` |
+| Modular crate boundaries | `promptlab-discovery`, `promptlab-attack`, `promptlab-judge`, `promptlab-fingerprint`, `promptlab-auth`, `promptlab-storage` |
+| Discovery body size limit | `promptlab-discovery/src/client.rs` — `max_body_bytes` |
+| URL policy for discovery | `promptlab-discovery/src/url_policy.rs` |
+| SQLite WAL with FS fallback | `promptlab-storage/src/pool.rs` |
 | Graceful DB shutdown | `src-tauri/src/lib.rs` — pool close on exit |
 | Scan jobs spawned in background | `scan.rs` — `tauri::async_runtime::spawn` |
 | IPC error envelope | `CommandError` + frontend `toAppError` |
 | Hybrid judge + fingerprint engines | Functional crates with unit tests |
-| Plugin permission model (latent) | `aisec-plugin-host/src/permissions.rs` |
+| Plugin permission model (latent) | `promptlab-plugin-host/src/permissions.rs` |
 | Migrations through `005` | Endpoints fingerprint JSON column added |
 
 ---
@@ -715,11 +715,11 @@ These areas are **production-grade or near-ready** and should be preserved durin
 |-------|------------------|
 | `npm run build` | Pass |
 | `npm test` | 29 tests pass |
-| `cargo build -p aisec-desktop` | Pass |
-| `cargo test -p aisec-judge` | Pass |
+| `cargo build -p promptlab-desktop` | Pass |
+| `cargo test -p promptlab-judge` | Pass |
 | `cargo test --workspace` | Partial — pre-existing failures in storage, auth, discovery, integration (`AGENTS.md`) |
 
-**Recommendation:** Add CI gate for `cargo test -p aisec-desktop`, `npm test`, `npm run build`, and critical crate tests before Beta tag.
+**Recommendation:** Add CI gate for `cargo test -p promptlab-desktop`, `npm test`, `npm run build`, and critical crate tests before Beta tag.
 
 ---
 

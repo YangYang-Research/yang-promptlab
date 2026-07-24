@@ -5,19 +5,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use aisec_agent::{
+use promptlab_agent::{
     AttackAttemptObservation, AttackExecutionLlms, AttackExecutionRequest, AttackExecutionTools,
     AdaptPlanOutcome, EndpointPacing, MemoryContext, SequentialAttackExecutionRequest,
     YazgSupervisor,
 };
-use aisec_attack::{AttackCategory, AttackPayload};
-use aisec_inference::InferenceRuntimeManager;
-use aisec_models::LocalModelManager;
-use aisec_planner::AttackPlan;
-use aisec_runtime::{RuntimeManager, SharedModelProvider};
-use aisec_storage::Repositories;
-use aisec_target_profile::{MutationLevel, PayloadGenerationStrategy, PayloadStrategy};
-use aisec_target_profile::wizard_plan::{
+use promptlab_attack::{AttackCategory, AttackPayload};
+use promptlab_inference::InferenceRuntimeManager;
+use promptlab_models::LocalModelManager;
+use promptlab_planner::AttackPlan;
+use promptlab_runtime::{RuntimeManager, SharedModelProvider};
+use promptlab_storage::Repositories;
+use promptlab_target_profile::{MutationLevel, PayloadGenerationStrategy, PayloadStrategy};
+use promptlab_target_profile::wizard_plan::{
     enabled_tests_for_category, estimate_scan_requests, ExecutionStrategy,
 };
 use async_trait::async_trait;
@@ -272,7 +272,7 @@ fn adapt_plan_for_retry(
     category: AttackCategory,
     strategy: &PayloadStrategy,
     last_result: &CategoryRunResult,
-    catalog: &aisec_payload::PayloadDatabase,
+    catalog: &promptlab_payload::PayloadDatabase,
 ) -> (AttackPlan, PayloadStrategy, Vec<String>) {
     let mut notes = Vec::new();
     let next_strategy = escalate_payload_strategy(strategy);
@@ -298,7 +298,7 @@ fn adapt_plan_for_retry(
         notes.push("enabled responseAdaptation for judge-guided retries".into());
     }
 
-    let payload_cat = aisec_generator::convert::attack_to_payload_category(category);
+    let payload_cat = promptlab_generator::convert::attack_to_payload_category(category);
     let catalog_ids: Vec<String> = catalog
         .by_category(payload_cat)
         .into_iter()
@@ -378,8 +378,8 @@ pub async fn generate_scan_payloads(
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
     plan: &AttackPlan,
     config: &ScanExecutionConfig,
-    profile: &aisec_target_profile::TargetProfile,
-    catalog: aisec_payload::PayloadDatabase,
+    profile: &promptlab_target_profile::TargetProfile,
+    catalog: promptlab_payload::PayloadDatabase,
     emitter: &ScanProgressEmitter,
 ) -> Result<HashMap<AttackCategory, Vec<AttackPayload>>, String> {
     emitter.info("Generating attack payloads from Yazg...");
@@ -437,8 +437,8 @@ async fn regenerate_category_payloads(
     plan: &AttackPlan,
     category: AttackCategory,
     strategy: &PayloadStrategy,
-    profile: &aisec_target_profile::TargetProfile,
-    catalog: aisec_payload::PayloadDatabase,
+    profile: &promptlab_target_profile::TargetProfile,
+    catalog: promptlab_payload::PayloadDatabase,
     adaptation_feedback: Option<String>,
     _retry: u32,
 ) -> Result<HashMap<AttackCategory, Vec<AttackPayload>>, String> {
@@ -468,7 +468,7 @@ pub struct TargetProfileScanContext<'a> {
     pub scan_id: &'a str,
     pub project_id: &'a str,
     pub target_id: &'a str,
-    pub profile: &'a aisec_target_profile::TargetProfile,
+    pub profile: &'a promptlab_target_profile::TargetProfile,
     pub categories: &'a [AttackCategory],
     pub disabled_tests: &'a [String],
     pub profile_id: &'a str,
@@ -478,7 +478,7 @@ pub struct TargetProfileScanContext<'a> {
     pub model_manager: Arc<AsyncMutex<LocalModelManager>>,
     pub model_provider: SharedModelProvider,
     pub runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
-    pub plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
+    pub plugin_manager: Arc<AsyncMutex<promptlab_plugin_host::PluginManager>>,
     pub cancel: Arc<AtomicBool>,
     pub paused: Arc<AtomicBool>,
     pub job_controls: Option<crate::jobs::ScanJobControls>,
@@ -919,7 +919,7 @@ async fn run_agentic_category(
     plan: &AttackPlan,
     category: AttackCategory,
     generated_payloads: &HashMap<AttackCategory, Vec<AttackPayload>>,
-    catalog: &aisec_payload::PayloadDatabase,
+    catalog: &promptlab_payload::PayloadDatabase,
     run_options: Option<&CategoryRunOptions>,
 ) -> Result<CategoryRunResult, String> {
     let strategy = config
@@ -1027,7 +1027,7 @@ struct AgenticCategoryState {
 struct AgenticCategoryTools<'a> {
     ctx: &'a TargetProfileScanContext<'a>,
     config: &'a ScanExecutionConfig,
-    catalog: &'a aisec_payload::PayloadDatabase,
+    catalog: &'a promptlab_payload::PayloadDatabase,
     category: AttackCategory,
     initial_payloads: &'a HashMap<AttackCategory, Vec<AttackPayload>>,
     initial_run_options: Option<&'a CategoryRunOptions>,
@@ -1096,7 +1096,7 @@ impl AttackExecutionTools for AgenticCategoryTools<'_> {
                     .iter()
                     .map(|j| (j.vulnerable, j.confidence, j.summary.as_str()))
                     .collect();
-                let mut text = aisec_generator::feedback_from_judged(&judged).unwrap_or_else(|| {
+                let mut text = promptlab_generator::feedback_from_judged(&judged).unwrap_or_else(|| {
                     format!(
                         "attempt {} inconclusive: {} successes / {} attempts",
                         attempt - 1,
@@ -1282,8 +1282,8 @@ impl AttackExecutionTools for AgenticCategoryTools<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aisec_attack::AttackCategory;
-    use aisec_target_profile::{PayloadGenerationStrategy, PayloadStrategy};
+    use promptlab_attack::AttackCategory;
+    use promptlab_target_profile::{PayloadGenerationStrategy, PayloadStrategy};
 
     fn sample_strategy() -> PayloadStrategy {
         PayloadStrategy {
@@ -1294,9 +1294,9 @@ mod tests {
 
     #[test]
     fn adaptive_plan_rotates_failed_techniques_and_escalates_strategy() {
-        let catalog = aisec_payload::PayloadDatabase::builtin().expect("catalog");
+        let catalog = promptlab_payload::PayloadDatabase::builtin().expect("catalog");
         let plan = AttackPlan {
-            mode: aisec_planner::PlannerMode::Deterministic,
+            mode: promptlab_planner::PlannerMode::Deterministic,
             profile_id: "standard".into(),
             categories: vec![AttackCategory::PromptInjection],
             disabled_tests: vec![],

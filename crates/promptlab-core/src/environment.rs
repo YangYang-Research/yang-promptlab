@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{AisecError, AisecResult};
+use crate::error::{PromptLabError, PromptLabResult};
 
 pub const ROOT_DIR_NAME: &str = ".promptlab";
 pub const ENV_CONFIG_FILE: &str = "environment.json";
@@ -166,18 +166,18 @@ pub fn load_environment_config(root: &Path) -> EnvironmentConfig {
     })
 }
 
-pub fn save_environment_config(paths: &EnvironmentPaths, config: &EnvironmentConfig) -> AisecResult<()> {
-    fs::create_dir_all(&paths.config).map_err(AisecError::from)?;
-    let raw = serde_json::to_string_pretty(config).map_err(|e| AisecError::internal(e.to_string()))?;
+pub fn save_environment_config(paths: &EnvironmentPaths, config: &EnvironmentConfig) -> PromptLabResult<()> {
+    fs::create_dir_all(&paths.config).map_err(PromptLabError::from)?;
+    let raw = serde_json::to_string_pretty(config).map_err(|e| PromptLabError::internal(e.to_string()))?;
     let file = paths.environment_config_path();
     let tmp = file.with_extension("json.tmp");
-    fs::write(&tmp, raw).map_err(AisecError::from)?;
-    fs::rename(&tmp, &file).map_err(AisecError::from)?;
+    fs::write(&tmp, raw).map_err(PromptLabError::from)?;
+    fs::rename(&tmp, &file).map_err(PromptLabError::from)?;
     Ok(())
 }
 
 /// Load config, resolve paths, create missing directories, verify permissions.
-pub fn bootstrap_environment() -> AisecResult<EnvironmentPaths> {
+pub fn bootstrap_environment() -> PromptLabResult<EnvironmentPaths> {
     let root = default_root_dir();
     let mut config = load_environment_config(&root);
     if config.root.is_none() {
@@ -190,9 +190,9 @@ pub fn bootstrap_environment() -> AisecResult<EnvironmentPaths> {
     Ok(paths)
 }
 
-pub fn ensure_environment(paths: &EnvironmentPaths) -> AisecResult<()> {
+pub fn ensure_environment(paths: &EnvironmentPaths) -> PromptLabResult<()> {
     fs::create_dir_all(&paths.root).map_err(|e| {
-        AisecError::config(format!(
+        PromptLabError::config(format!(
             "cannot create PromptLab root directory {}: {e}",
             paths.root.display()
         ))
@@ -200,7 +200,7 @@ pub fn ensure_environment(paths: &EnvironmentPaths) -> AisecResult<()> {
 
     for dir in paths.all_dirs() {
         fs::create_dir_all(dir).map_err(|e| {
-            AisecError::config(format!(
+            PromptLabError::config(format!(
                 "cannot create required directory {}: {e}",
                 dir.display()
             ))
@@ -211,15 +211,15 @@ pub fn ensure_environment(paths: &EnvironmentPaths) -> AisecResult<()> {
     verify_writable(&paths.workspaces)?;
     verify_writable(&paths.logs)?;
 
-    fs::create_dir_all(paths.reports_dir()).map_err(AisecError::from)?;
-    fs::create_dir_all(paths.auth_sessions_dir()).map_err(AisecError::from)?;
+    fs::create_dir_all(paths.reports_dir()).map_err(PromptLabError::from)?;
+    fs::create_dir_all(paths.auth_sessions_dir()).map_err(PromptLabError::from)?;
 
     Ok(())
 }
 
-fn verify_writable(path: &Path) -> AisecResult<()> {
+fn verify_writable(path: &Path) -> PromptLabResult<()> {
     if !path.exists() {
-        return Err(AisecError::config(format!(
+        return Err(PromptLabError::config(format!(
             "directory does not exist: {}",
             path.display()
         )));
@@ -231,12 +231,12 @@ fn verify_writable(path: &Path) -> AisecResult<()> {
         .truncate(true)
         .open(&probe)
         .map_err(|e| {
-            AisecError::config(format!(
+            PromptLabError::config(format!(
                 "no write permission for {}: {e}",
                 path.display()
             ))
         })?;
-    file.write_all(b"ok").map_err(AisecError::from)?;
+    file.write_all(b"ok").map_err(PromptLabError::from)?;
     drop(file);
     let _ = fs::remove_file(probe);
     Ok(())

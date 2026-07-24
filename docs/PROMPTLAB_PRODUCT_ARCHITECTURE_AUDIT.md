@@ -1,9 +1,9 @@
-# AISec — Complete Product & Architecture Audit
+# PromptLab — Complete Product & Architecture Audit
 
 **Audit type:** Read-only, evidence-only  
-**Audience:** Architect with zero prior knowledge of AISec  
+**Audience:** Architect with zero prior knowledge of PromptLab  
 **Date:** 2026-06-13  
-**Repository:** `yang-aisec-private`  
+**Repository:** `yang-promptlab-private`  
 **Stack:** Tauri 2 desktop app — React/TypeScript frontend (`src/`), Rust backend (`src-tauri/`, `crates/`)
 
 > **Rule:** Every capability is **NOT IMPLEMENTED** unless cited with file path and line evidence.  
@@ -13,9 +13,9 @@
 
 # 1. Executive Summary
 
-## What AISec Is (from code)
+## What PromptLab Is (from code)
 
-AISec is a **desktop AI security testing application** that:
+PromptLab is a **desktop AI security testing application** that:
 - Manages **projects**, **targets**, and **scans**
 - Runs **discovery** (crawl/API fingerprinting) against web targets
 - Executes **prompt-injection and related attack categories** via a harness
@@ -36,16 +36,16 @@ The UI is a React SPA inside a Tauri webview. All backend operations go through 
 |--------|--------|----------|
 | Projects CRUD | ✅ | `commands/projects.rs`, `ProjectsPage.tsx` |
 | Targets CRUD | ✅ | `commands/domain.rs`, `TargetsPage.tsx` |
-| Discovery engine + UI | ✅ | `aisec-discovery`, `discovery_run` |
-| Fingerprint engine | ✅ | `aisec-fingerprint`, `fingerprint_service.rs` |
+| Discovery engine + UI | ✅ | `promptlab-discovery`, `discovery_run` |
+| Fingerprint engine | ✅ | `promptlab-fingerprint`, `fingerprint_service.rs` |
 | Scan wizard (6 steps) | ✅ | `ScanWizardPage.tsx`, `wizardSteps.ts:16-53` |
 | Linear scan execution | ✅ | `run_scan_job` `scan.rs:106-318` |
 | Agent scan mode | ⚠️ Partial | `run_agent_scan_job` — LLM planner/generator gaps |
-| Attack harness (HTTP/Playwright) | ✅ | `aisec-harness`, `harness_runtime.rs` |
-| Judge engine | ✅ | `aisec-judge`, `attack.rs:151-199` |
+| Attack harness (HTTP/Playwright) | ✅ | `promptlab-harness`, `harness_runtime.rs` |
+| Judge engine | ✅ | `promptlab-judge`, `attack.rs:151-199` |
 | Attack planner (wizard) | ✅ | `planner_generate`, `AttackPlanStep.tsx` |
 | Payload generator | ✅ | `generator_generate`, `scan.rs:155-188` |
-| Reports (non-AI) | ✅ | `aisec-report`, `report_generate` |
+| Reports (non-AI) | ✅ | `promptlab-report`, `report_generate` |
 | Models vault + downloads | ✅ | `ModelsPage.tsx`, `commands/models.rs` |
 | AI Runtime (local llama.cpp) | ✅ | `AIRuntimePage.tsx`, `commands/runtime.rs` |
 | Third-party models | ✅ | `models_save_third_party`, third-party UI |
@@ -62,7 +62,7 @@ The UI is a React SPA inside a Tauri webview. All backend operations go through 
 | Agent scan LLM | Planner always deterministic; generator passes `None` LLM | `agent_service.rs:96-99,112-114` |
 | AI config unification | Two JSON config files | `judge_config.json` vs `ai_inference_settings.json` |
 | Attack categories (UI) | Only `prompt_injection` enabled on Attacks page | `AttacksPage.tsx:18-23` |
-| Plugin report hooks | `PluginType::Report` exists, not invoked | `aisec-plugin-host/types.rs` |
+| Plugin report hooks | `PluginType::Report` exists, not invoked | `promptlab-plugin-host/types.rs` |
 | Findings deep-link | `?scanId=` linked but not read | `FindingsPage.tsx` (no `useSearchParams` for scanId) |
 | Dashboard runtime card | No health metric; load once on mount | `DashboardPage.tsx:52-54` |
 
@@ -72,7 +72,7 @@ The UI is a React SPA inside a Tauri webview. All backend operations go through 
 |--------|----------|
 | `AiService` / inference gateway | Grep: no symbol in `.rs`/`.ts` |
 | `PromptGenerator` (named) | No crate/module/IPC |
-| AI-powered reports | `aisec-report` — rule-based only |
+| AI-powered reports | `promptlab-report` — rule-based only |
 | LLM streaming | `"stream": false` in `llama_cpp_runtime.rs:229` |
 | Named pipe / Unix socket runtime IPC | Grep: 0 matches |
 | Global hotkey system | No `useHotkey`; only Escape in `Modal.tsx:23-27` |
@@ -208,7 +208,7 @@ The UI is a React SPA inside a Tauri webview. All backend operations go through 
 | **Query** | `?projectId=` locks project step |
 | **Toolbar** | **Cancel** → `/scans`; footer Back / Next / Start Scan / View Result / Done |
 | **IPC** | `getProject`, `startScan`, `actions.createTarget`, step-specific discovery/planner/generator |
-| **Persistence** | `localStorage` key `aisec:scan-wizard` (`wizardState.ts:15-16`) |
+| **Persistence** | `localStorage` key `promptlab:scan-wizard` (`wizardState.ts:15-16`) |
 | **Parent components** | `WizardStepper`, step components |
 | **Poll** | 3s refresh after submit (`ScanWizardPage.tsx` ~L138-142) |
 
@@ -384,7 +384,7 @@ The UI is a React SPA inside a Tauri webview. All backend operations go through 
 
 **Orchestrator:** `src/features/scans/ScanWizardPage.tsx`  
 **Steps defined:** `src/features/scans/wizardSteps.ts:16-53`  
-**Session persistence:** `localStorage` `aisec:scan-wizard` v2 (`wizardState.ts:15-16`)
+**Session persistence:** `localStorage` `promptlab:scan-wizard` v2 (`wizardState.ts:15-16`)
 
 ## Step 1 — Project
 
@@ -496,8 +496,8 @@ The UI is a React SPA inside a Tauri webview. All backend operations go through 
 | Runtime install manifest | `{data_dir}/runtime/manifest.json` | `manifest.rs:66-67` |
 | Hardware profile | `{data_dir}/runtime/hardware.json` | `hardware.rs:41-42` |
 | Runtime DTO (UI) | `RuntimeConfigurationDto` | `commands/runtime.rs:85-97` |
-| Low-level config | `aisec_runtime::RuntimeConfig` | `config.rs:8-17` |
-| Env overrides | `AISEC_LLAMA_BASE_URL`, `HOST`, `PORT` | `config.rs:44-50` |
+| Low-level config | `promptlab_runtime::RuntimeConfig` | `config.rs:8-17` |
+| Env overrides | `PROMPTLAB_LLAMA_BASE_URL`, `HOST`, `PORT` | `config.rs:44-50` |
 
 ## Lifecycle
 
@@ -521,7 +521,7 @@ The UI is a React SPA inside a Tauri webview. All backend operations go through 
 | **Unix domain socket** | ❌ NOT IMPLEMENTED | Grep: 0 matches |
 | **Tauri IPC** | ✅ | 17 `runtime_*` commands `lib.rs:236-252` |
 | **Tauri events** | ✅ | `runtime-install-progress` `events.rs:9` |
-| **In-memory logs** | ✅ Ring buffer | `aisec-runtime/src/logs.rs` — not persisted to disk as runtime logs |
+| **In-memory logs** | ✅ Ring buffer | `promptlab-runtime/src/logs.rs` — not persisted to disk as runtime logs |
 
 ## Install / Repair / Detection
 
@@ -546,7 +546,7 @@ The UI is a React SPA inside a Tauri webview. All backend operations go through 
 # 7. Models Audit
 
 **UI:** `ModelsPage.tsx`, `ModelRegistrySection.tsx`  
-**Backend:** `commands/models.rs`, `aisec-models` crate
+**Backend:** `commands/models.rs`, `promptlab-models` crate
 
 | Capability | Status | Evidence |
 |------------|--------|----------|
@@ -580,18 +580,18 @@ The UI is a React SPA inside a Tauri webview. All backend operations go through 
 | **Judge — LLM** | ✅ | `evaluators/llm.rs`, `ModelRolePool` |
 | **Judge modes** | ✅ | deterministic, local_llm, remote_llm, consensus `types.rs:48-53` |
 | **Judge config** | ✅ | `judge_config.json`, `JudgeProviderPage` |
-| **Attack Planner** | ✅ deterministic + local LLM | `aisec-planner`, `planner_generate` |
-| **Payload Generator** | ✅ static + mutation + local LLM | `aisec-generator`, `generator_generate` |
+| **Attack Planner** | ✅ deterministic + local LLM | `promptlab-planner`, `planner_generate` |
+| **Payload Generator** | ✅ static + mutation + local LLM | `promptlab-generator`, `generator_generate` |
 | **Prompt Generator (named)** | ❌ | Inline prompts in planner/generator LLM modules |
-| **Fingerprint (AI stack)** | ✅ | `aisec-fingerprint` — provider rules, not LLM |
-| **Reports AI** | ❌ | `aisec-report/recommendations.rs` rule-based |
+| **Fingerprint (AI stack)** | ✅ | `promptlab-fingerprint` — provider rules, not LLM |
+| **Reports AI** | ❌ | `promptlab-report/recommendations.rs` rule-based |
 | **Conversation** | ❌ | No multi-turn scan conversation state |
-| **Prompt templates** | ⚠️ | `aisec-judge/prompts.rs` for evaluation roles only |
+| **Prompt templates** | ⚠️ | `promptlab-judge/prompts.rs` for evaluation roles only |
 | **Model selection** | ⚠️ Split | AI Runtime settings vs judge vault id |
 | **Runtime usage** | ⚠️ | Local: supervisor + `EmbeddedModelProvider`; remote: `RemoteLlmBackend` |
 | **Direct LLM calls** | ✅ | Via `LlmBackend::complete`, `InferenceRuntime` |
 | **Structured output** | ⚠️ | JSON parse from LLM responses in planner/generator/judge evaluators |
-| **Retry** | ✅ Agent retry policy; discovery HTTP retry | `aisec-agent/retry.rs`, `aisec-discovery/retry.rs` |
+| **Retry** | ✅ Agent retry policy; discovery HTTP retry | `promptlab-agent/retry.rs`, `promptlab-discovery/retry.rs` |
 | **Streaming** | ❌ | `"stream": false` `llama_cpp_runtime.rs:229` |
 | **Telemetry** | ❌ | Settings toggle only; no export pipeline |
 | **Cache** | ⚠️ | `runtime_config_cache`, regex cache fingerprint |
@@ -617,13 +617,13 @@ The UI is a React SPA inside a Tauri webview. All backend operations go through 
 
 | Stage | Crate/Module | Persistence |
 |-------|--------------|-------------|
-| Discovery | `aisec-discovery` + `discovery_run` | `endpoints`, `scans` |
-| Fingerprint | `aisec-fingerprint` + `fingerprint_service` | `endpoints.fingerprint_json` |
-| Planner | `aisec-planner` (wizard preview) | `playbook_json` categories from UI |
-| Generator | `aisec-generator` | Pre-generated payloads in memory per job |
-| Harness | `aisec-harness` + `plugin_transport` | — |
-| Judge | `aisec-judge` + plugins | `findings` |
-| Report | `aisec-report` | `reports` + files in `reports/` |
+| Discovery | `promptlab-discovery` + `discovery_run` | `endpoints`, `scans` |
+| Fingerprint | `promptlab-fingerprint` + `fingerprint_service` | `endpoints.fingerprint_json` |
+| Planner | `promptlab-planner` (wizard preview) | `playbook_json` categories from UI |
+| Generator | `promptlab-generator` | Pre-generated payloads in memory per job |
+| Harness | `promptlab-harness` + `plugin_transport` | — |
+| Judge | `promptlab-judge` + plugins | `findings` |
+| Report | `promptlab-report` | `reports` + files in `reports/` |
 
 ## Control
 
@@ -666,8 +666,8 @@ See **Appendix A** for full list.
 
 ## SQLite
 
-- **File:** `<data_dir>/aisec.db` (`db.rs:17,24`)
-- **Migrations:** `crates/aisec-storage/migrations/001-006`
+- **File:** `<data_dir>/promptlab.db` (`db.rs:17,24`)
+- **Migrations:** `crates/promptlab-storage/migrations/001-006`
 - **Tables:** projects, targets, scans, findings, findings_fts, payloads, attack_results, reports, models, plugins, auth_*, endpoints
 
 ## JSON persistence
@@ -688,14 +688,14 @@ See **Appendix E**.
 |-------|----------------|
 | **UI** | React 18 + Vite `src/` |
 | **Application** | Tauri IPC commands, `AppStore`, page-level hooks |
-| **Domain** | `crates/aisec-*` (judge, attack, discovery, etc.) |
-| **Infrastructure** | `aisec-storage`, `aisec-auth`, file JSON configs |
-| **Runtime** | `aisec-runtime` + llama-server subprocess |
-| **Harness** | `aisec-harness` HTTP/Playwright |
-| **Judge** | `aisec-judge` |
+| **Domain** | `crates/promptlab-*` (judge, attack, discovery, etc.) |
+| **Infrastructure** | `promptlab-storage`, `promptlab-auth`, file JSON configs |
+| **Runtime** | `promptlab-runtime` + llama-server subprocess |
+| **Harness** | `promptlab-harness` HTTP/Playwright |
+| **Judge** | `promptlab-judge` |
 | **Storage** | SQLite + JSON files |
-| **Plugin** | `aisec-plugin-host` subprocess sandbox |
-| **Security** | `security_audit`, `aisec-auth` secrets, credential vaults |
+| **Plugin** | `promptlab-plugin-host` subprocess sandbox |
+| **Security** | `security_audit`, `promptlab-auth` secrets, credential vaults |
 
 ## Violations / duplication
 
@@ -707,7 +707,7 @@ See **Appendix E**.
 
 ## Circular dependencies
 
-- **Crates:** None found (DAG toward `aisec-core`)
+- **Crates:** None found (DAG toward `promptlab-core`)
 - **Tauri modules:** `runtime.rs` ↔ `models.rs` mutual imports
 
 ---
@@ -820,7 +820,7 @@ See **Appendix E**.
 |-------|------------|----------|-------------|
 | Workspace data | React Context + `useReducer` | `AppStore.tsx` | Refreshed from SQLite via IPC |
 | Toast | React Context | `ToastProvider.tsx` | Transient |
-| Wizard draft | `useState` + localStorage | `wizardState.ts` | `aisec:scan-wizard` |
+| Wizard draft | `useState` + localStorage | `wizardState.ts` | `promptlab:scan-wizard` |
 | View mode / page size | Custom hooks | `useViewPreference`, `usePageSizePreference` | localStorage |
 | AI Runtime config | Hook + IPC | `useAiInferenceRoute` | Backend JSON |
 | Model loading overlay | Global hook + poller | `useRuntimeModelLoading` | Backend `runtime_model_loading_id` |
@@ -865,11 +865,11 @@ Pages → shared/ipc/*.ts → Tauri invoke → commands/* → AppState → crate
 ## Backend crates (compile-time)
 
 ```
-aisec-desktop → all feature crates
-aisec-generator → aisec-planner → aisec-fingerprint → aisec-core
-aisec-judge → aisec-harness, aisec-runtime, aisec-models
-aisec-discovery → aisec-core (isolated)
-aisec-report → aisec-storage
+promptlab-desktop → all feature crates
+promptlab-generator → promptlab-planner → promptlab-fingerprint → promptlab-core
+promptlab-judge → promptlab-harness, promptlab-runtime, promptlab-models
+promptlab-discovery → promptlab-core (isolated)
+promptlab-report → promptlab-storage
 ```
 
 ## Runtime communication
@@ -933,7 +933,7 @@ Evidence = disabled UI, unused IPC, comments, or struct fields not wired — **n
 | Judge | 78 | Full engine; config split from runtime |
 | AI (unified) | 38 | No AiService; fragmented |
 | Plugin | 65 | Host works; report plugins not hooked |
-| Security Pack | 75 | `aisec-payload` static; security audit IPC |
+| Security Pack | 75 | `promptlab-payload` static; security audit IPC |
 | Performance | 60 | Sequential scan loops; discovery single-worker |
 | Scalability | 55 | Desktop single-process design |
 | Maintainability | 50 | Duplication, dual config |
@@ -962,13 +962,13 @@ Evidence = disabled UI, unused IPC, comments, or struct fields not wired — **n
 
 ## Appendix D — Workspace Crates (17)
 
-`aisec-core`, `aisec-attack`, `aisec-payload`, `aisec-models`, `aisec-judge`, `aisec-report`, `aisec-fingerprint`, `aisec-planner`, `aisec-generator`, `aisec-agent`, `aisec-plugin-host`, `aisec-auth`, `aisec-discovery`, `aisec-harness`, `aisec-runtime`, `aisec-storage`, `aisec-desktop` (+ `aisec-integration-tests`)
+`promptlab-core`, `promptlab-attack`, `promptlab-payload`, `promptlab-models`, `promptlab-judge`, `promptlab-report`, `promptlab-fingerprint`, `promptlab-planner`, `promptlab-generator`, `promptlab-agent`, `promptlab-plugin-host`, `promptlab-auth`, `promptlab-discovery`, `promptlab-harness`, `promptlab-runtime`, `promptlab-storage`, `promptlab-desktop` (+ `promptlab-integration-tests`)
 
 ## Appendix E — JSON / File Persistence
 
 | Path | Purpose |
 |------|---------|
-| `aisec.db` | SQLite |
+| `promptlab.db` | SQLite |
 | `judge_config.json` | Judge provider config |
 | `ai_inference_settings.json` | Runtime route + selected model |
 | `plugins_state.json` | Plugin enablement |
@@ -1010,7 +1010,7 @@ Evidence = disabled UI, unused IPC, comments, or struct fields not wired — **n
 
 ## Appendix J — Attack Categories (engine)
 
-Built-in categories in `aisec-attack` — `attacks/mod.rs:27-38` (includes prompt_injection, jailbreak, etc.)
+Built-in categories in `promptlab-attack` — `attacks/mod.rs:27-38` (includes prompt_injection, jailbreak, etc.)
 
 ## Appendix K — Frontend IPC Functions (`src/shared/ipc/`)
 

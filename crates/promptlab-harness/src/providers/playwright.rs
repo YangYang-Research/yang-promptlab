@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use aisec_auth::SharedPlaywrightDriver;
+use promptlab_auth::SharedPlaywrightDriver;
 
 use crate::error::{HarnessError, HarnessResult};
 use crate::models::{AttackRequest, NormalizedResponse};

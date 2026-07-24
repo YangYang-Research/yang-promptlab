@@ -5,11 +5,11 @@
 //!   2. Response patterns  (status code / JSON body shape)
 //!   3. OpenAPI analysis   (servers + operations from a spec)
 //!
-//! Run: cargo run -p aisec-fingerprint --example detect_ai
+//! Run: cargo run -p promptlab-fingerprint --example detect_ai
 
 use std::collections::HashMap;
 
-use aisec_fingerprint::{AiProvider, FingerprintEngine, FingerprintInput};
+use promptlab_fingerprint::{AiProvider, FingerprintEngine, FingerprintInput};
 
 fn h(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()

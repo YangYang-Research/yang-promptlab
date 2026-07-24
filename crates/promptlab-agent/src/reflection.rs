@@ -2,7 +2,7 @@
 //!
 //! Kind **A**: LLM reflection over judged attempt outcomes.
 
-use aisec_planner::PlannerLlm;
+use promptlab_planner::PlannerLlm;
 use serde::Deserialize;
 use tracing::info;
 

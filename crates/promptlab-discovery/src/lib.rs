@@ -1,4 +1,4 @@
-//! AISec Discovery Engine — attack-surface enumeration for web targets.
+//! PromptLab Discovery Engine — attack-surface enumeration for web targets.
 //!
 //! Crawls websites, extracts links, and detects REST APIs, OpenAPI specs,
 //! GraphQL endpoints, and AI/LLM service routes.

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 
 use crate::auth_models::*;
 use crate::error::StorageResultExt;
@@ -23,7 +23,7 @@ impl SqliteAuthProfileRepository {
 
 #[async_trait]
 impl AuthProfileRepository for SqliteAuthProfileRepository {
-    async fn create(&self, input: CreateAuthProfile) -> AisecResult<AuthProfile> {
+    async fn create(&self, input: CreateAuthProfile) -> PromptLabResult<AuthProfile> {
         let id = new_id();
         let ts = now();
         let config = json_required(&input.config_json)?;
@@ -46,7 +46,7 @@ impl AuthProfileRepository for SqliteAuthProfileRepository {
         self.get(&id).await
     }
 
-    async fn get(&self, id: &str) -> AisecResult<AuthProfile> {
+    async fn get(&self, id: &str) -> PromptLabResult<AuthProfile> {
         sqlx::query_as::<_, AuthProfile>("SELECT * FROM auth_profiles WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
@@ -54,7 +54,7 @@ impl AuthProfileRepository for SqliteAuthProfileRepository {
             .map_storage()
     }
 
-    async fn list_by_project(&self, project_id: &str) -> AisecResult<Vec<AuthProfile>> {
+    async fn list_by_project(&self, project_id: &str) -> PromptLabResult<Vec<AuthProfile>> {
         sqlx::query_as::<_, AuthProfile>(
             "SELECT * FROM auth_profiles WHERE project_id = ? ORDER BY created_at DESC",
         )
@@ -64,14 +64,14 @@ impl AuthProfileRepository for SqliteAuthProfileRepository {
         .map_storage()
     }
 
-    async fn list_all(&self) -> AisecResult<Vec<AuthProfile>> {
+    async fn list_all(&self) -> PromptLabResult<Vec<AuthProfile>> {
         sqlx::query_as::<_, AuthProfile>("SELECT * FROM auth_profiles ORDER BY created_at ASC")
             .fetch_all(&self.pool)
             .await
             .map_storage()
     }
 
-    async fn update(&self, id: &str, input: UpdateAuthProfile) -> AisecResult<AuthProfile> {
+    async fn update(&self, id: &str, input: UpdateAuthProfile) -> PromptLabResult<AuthProfile> {
         let existing = self.get(id).await?;
         let name = input.name.unwrap_or(existing.name);
         let config = match input.config_json {
@@ -100,7 +100,7 @@ impl AuthProfileRepository for SqliteAuthProfileRepository {
         id: &str,
         config_json: &serde_json::Value,
         credential_reference_id: Option<&str>,
-    ) -> AisecResult<AuthProfile> {
+    ) -> PromptLabResult<AuthProfile> {
         let config = json_required(config_json)?;
         let ts = now();
         let result = sqlx::query(
@@ -117,7 +117,7 @@ impl AuthProfileRepository for SqliteAuthProfileRepository {
         self.get(id).await
     }
 
-    async fn delete(&self, id: &str) -> AisecResult<()> {
+    async fn delete(&self, id: &str) -> PromptLabResult<()> {
         let result = sqlx::query("DELETE FROM auth_profiles WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
@@ -140,7 +140,7 @@ impl SqliteAuthSessionRepository {
 
 #[async_trait]
 impl AuthSessionRepository for SqliteAuthSessionRepository {
-    async fn create(&self, input: CreateAuthSessionRecord) -> AisecResult<AuthSessionRecord> {
+    async fn create(&self, input: CreateAuthSessionRecord) -> PromptLabResult<AuthSessionRecord> {
         let id = new_id();
         let ts = now();
         let status = input.status.unwrap_or_else(|| "active".to_string());
@@ -175,7 +175,7 @@ impl AuthSessionRepository for SqliteAuthSessionRepository {
         self.get(&id).await
     }
 
-    async fn get(&self, id: &str) -> AisecResult<AuthSessionRecord> {
+    async fn get(&self, id: &str) -> PromptLabResult<AuthSessionRecord> {
         sqlx::query_as::<_, AuthSessionRecord>("SELECT * FROM auth_sessions WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
@@ -183,7 +183,7 @@ impl AuthSessionRepository for SqliteAuthSessionRepository {
             .map_storage()
     }
 
-    async fn list_by_profile(&self, profile_id: &str) -> AisecResult<Vec<AuthSessionRecord>> {
+    async fn list_by_profile(&self, profile_id: &str) -> PromptLabResult<Vec<AuthSessionRecord>> {
         sqlx::query_as::<_, AuthSessionRecord>(
             "SELECT * FROM auth_sessions WHERE profile_id = ? ORDER BY created_at DESC",
         )
@@ -193,7 +193,7 @@ impl AuthSessionRepository for SqliteAuthSessionRepository {
         .map_storage()
     }
 
-    async fn list_all(&self) -> AisecResult<Vec<AuthSessionRecord>> {
+    async fn list_all(&self) -> PromptLabResult<Vec<AuthSessionRecord>> {
         sqlx::query_as::<_, AuthSessionRecord>(
             "SELECT * FROM auth_sessions ORDER BY created_at ASC",
         )
@@ -202,7 +202,7 @@ impl AuthSessionRepository for SqliteAuthSessionRepository {
         .map_storage()
     }
 
-    async fn list_legacy_with_plaintext_secrets(&self) -> AisecResult<Vec<AuthSessionRecord>> {
+    async fn list_legacy_with_plaintext_secrets(&self) -> PromptLabResult<Vec<AuthSessionRecord>> {
         sqlx::query_as::<_, AuthSessionRecord>(
             "SELECT * FROM auth_sessions
              WHERE cookies_json IS NOT NULL OR tokens_json IS NOT NULL
@@ -217,7 +217,7 @@ impl AuthSessionRepository for SqliteAuthSessionRepository {
         &self,
         id: &str,
         credential_reference_id: &str,
-    ) -> AisecResult<AuthSessionRecord> {
+    ) -> PromptLabResult<AuthSessionRecord> {
         let result = sqlx::query(
             "UPDATE auth_sessions
              SET credential_reference_id = ?, cookies_json = NULL, tokens_json = NULL, updated_at = ?
@@ -233,7 +233,7 @@ impl AuthSessionRepository for SqliteAuthSessionRepository {
         self.get(id).await
     }
 
-    async fn update(&self, id: &str, input: UpdateAuthSessionRecord) -> AisecResult<AuthSessionRecord> {
+    async fn update(&self, id: &str, input: UpdateAuthSessionRecord) -> PromptLabResult<AuthSessionRecord> {
         let existing = self.get(id).await?;
         let status = input.status.unwrap_or(existing.status);
         let cookies = match input.cookies_json {
@@ -282,7 +282,7 @@ impl AuthSessionRepository for SqliteAuthSessionRepository {
         self.get(id).await
     }
 
-    async fn delete(&self, id: &str) -> AisecResult<()> {
+    async fn delete(&self, id: &str) -> PromptLabResult<()> {
         let result = sqlx::query("DELETE FROM auth_sessions WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
@@ -305,7 +305,7 @@ impl SqliteAuthRecordingRepository {
 
 #[async_trait]
 impl AuthRecordingRepository for SqliteAuthRecordingRepository {
-    async fn create(&self, input: CreateAuthRecordingRecord) -> AisecResult<AuthRecordingRecord> {
+    async fn create(&self, input: CreateAuthRecordingRecord) -> PromptLabResult<AuthRecordingRecord> {
         let id = new_id();
         let ts = now();
         let steps = json_required(&input.steps_json)?;
@@ -328,7 +328,7 @@ impl AuthRecordingRepository for SqliteAuthRecordingRepository {
         self.get(&id).await
     }
 
-    async fn get(&self, id: &str) -> AisecResult<AuthRecordingRecord> {
+    async fn get(&self, id: &str) -> PromptLabResult<AuthRecordingRecord> {
         sqlx::query_as::<_, AuthRecordingRecord>("SELECT * FROM auth_recordings WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
@@ -336,7 +336,7 @@ impl AuthRecordingRepository for SqliteAuthRecordingRepository {
             .map_storage()
     }
 
-    async fn list_by_profile(&self, profile_id: &str) -> AisecResult<Vec<AuthRecordingRecord>> {
+    async fn list_by_profile(&self, profile_id: &str) -> PromptLabResult<Vec<AuthRecordingRecord>> {
         sqlx::query_as::<_, AuthRecordingRecord>(
             "SELECT * FROM auth_recordings WHERE profile_id = ? ORDER BY created_at DESC",
         )
@@ -346,7 +346,7 @@ impl AuthRecordingRepository for SqliteAuthRecordingRepository {
         .map_storage()
     }
 
-    async fn delete(&self, id: &str) -> AisecResult<()> {
+    async fn delete(&self, id: &str) -> PromptLabResult<()> {
         let result = sqlx::query("DELETE FROM auth_recordings WHERE id = ?")
             .bind(id)
             .execute(&self.pool)

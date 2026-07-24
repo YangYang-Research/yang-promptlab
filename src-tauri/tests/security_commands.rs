@@ -2,29 +2,29 @@
 
 use std::path::Path;
 
-use aisec_auth::descriptor_has_plaintext_secrets;
-use aisec_core::{init_logging, LogOptions};
-use aisec_desktop_lib::commands::security::{security_audit_op, security_migrate_secrets_op};
-use aisec_desktop_lib::db::open_database;
-use aisec_desktop_lib::state::AppState;
-use aisec_storage::{
+use promptlab_auth::descriptor_has_plaintext_secrets;
+use promptlab_core::{init_logging, LogOptions};
+use promptlab_desktop_lib::commands::security::{security_audit_op, security_migrate_secrets_op};
+use promptlab_desktop_lib::db::open_database;
+use promptlab_desktop_lib::state::AppState;
+use promptlab_storage::{
     AuthProfileRepository, AuthSessionRepository, CreateAuthProfile, CreateAuthSessionRecord,
     CreateProject, CreateTarget, ProjectRepository, TargetRepository,
 };
 
 async fn make_state(dir: &Path) -> AppState {
-    let db = open_database(&dir.join("aisec.db")).await.expect("open db");
+    let db = open_database(&dir.join("promptlab.db")).await.expect("open db");
     let guard = init_logging(LogOptions::bootstrap("security-it")).unwrap();
     let (manager, provider, meta, harness_factory, plugin_manager) =
-        aisec_desktop_lib::model_registry::open_test_model_stack(dir).expect("model stack");
+        promptlab_desktop_lib::model_registry::open_test_model_stack(dir).expect("model stack");
     AppState::new(
         db,
         dir.to_path_buf(),
         guard,
-        aisec_auth::AuthEngineConfig::default(),
+        promptlab_auth::AuthEngineConfig::default(),
         harness_factory,
         plugin_manager,
-        aisec_runtime::RuntimeManager::new(dir, None),
+        promptlab_runtime::RuntimeManager::new(dir, None),
         manager,
         provider,
         meta,

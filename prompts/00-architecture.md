@@ -1,8 +1,8 @@
 You are a Principal Software Architect and Security Architect.
 
-Design a complete commercial desktop application called AISec.
+Design a complete commercial desktop application called PromptLab.
 
-AISec is an offline-first AI Security Testing Platform.
+PromptLab is an offline-first AI Security Testing Platform.
 
 The application must test:
 

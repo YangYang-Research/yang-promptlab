@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Payload category aligned with AISec attack taxonomy.
+/// Payload category aligned with PromptLab attack taxonomy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PayloadCategory {

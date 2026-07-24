@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use aisec_core::{
+use promptlab_core::{
     ensure_environment, list_log_files, load_environment_config, read_log_tail, resolve_paths,
     save_environment_config, EnvironmentConfig, EnvironmentPaths, LogCategory, OcsfEvent,
     OcsfSeverity,
@@ -89,7 +89,7 @@ pub async fn environment_open_root(
     app.opener()
         .open_path(path.display().to_string(), None::<&str>)
         .map_err(|err| {
-            CommandError::from(aisec_core::AisecError::internal(format!(
+            CommandError::from(promptlab_core::PromptLabError::internal(format!(
                 "failed to open root directory: {err}"
             )))
         })?;
@@ -167,7 +167,7 @@ pub async fn logs_tail(
         return Err(CommandError::invalid_input("invalid log file path"));
     }
     let content = read_log_tail(&path, max_bytes.unwrap_or(64 * 1024))
-        .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(promptlab_core::PromptLabError::internal(e.to_string())))?;
     Ok(LogsTailResponse {
         path: path.display().to_string(),
         content,
@@ -240,7 +240,7 @@ pub async fn logs_open_folder(
     app.opener()
         .open_path(path.display().to_string(), None::<&str>)
         .map_err(|err| {
-            CommandError::from(aisec_core::AisecError::internal(format!(
+            CommandError::from(promptlab_core::PromptLabError::internal(format!(
                 "failed to open logs directory: {err}"
             )))
         })?;

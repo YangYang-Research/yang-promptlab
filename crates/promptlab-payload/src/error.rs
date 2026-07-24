@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use aisec_core::AisecError;
+use promptlab_core::PromptLabError;
 
 #[derive(Debug, Error)]
 pub enum PayloadError {
@@ -17,7 +17,7 @@ pub enum PayloadError {
     Pipeline(String),
 
     #[error(transparent)]
-    Core(#[from] AisecError),
+    Core(#[from] PromptLabError),
 }
 
 pub type PayloadResult<T> = Result<T, PayloadError>;

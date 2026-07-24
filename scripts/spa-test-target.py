@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AISec SPA discovery target — serves http://localhost:3100
+"""PromptLab SPA discovery target — serves http://localhost:3100
 
 The landing page contains NO literal API URLs; the endpoints are built
 dynamically in JavaScript at runtime, so only a real browser (Playwright)
@@ -11,7 +11,7 @@ import json
 
 INDEX_HTML = """<!doctype html>
 <html>
-  <head><title>AISec SPA Demo</title></head>
+  <head><title>PromptLab SPA Demo</title></head>
   <body>
     <div id="app">Loading...</div>
     <script>
@@ -72,5 +72,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print("Serving AISec SPA target on http://localhost:3100")
+    print("Serving PromptLab SPA target on http://localhost:3100")
     HTTPServer(("127.0.0.1", 3100), Handler).serve_forever()

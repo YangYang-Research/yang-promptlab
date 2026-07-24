@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use aisec_core::AisecError;
+use promptlab_core::PromptLabError;
 
 /// Attack framework errors.
 #[derive(Debug, Error)]
@@ -27,7 +27,7 @@ pub enum AttackError {
     BudgetExhausted(String),
 
     #[error(transparent)]
-    Core(#[from] AisecError),
+    Core(#[from] PromptLabError),
 }
 
 pub type AttackResult<T> = Result<T, AttackError>;

@@ -17,7 +17,7 @@ Approved Attack Plan → Payload Generator → Harness → Target → Judge → 
 
 ## Single Source of Truth
 
-**`TargetProfile`** (`crates/aisec-target-profile/`) defines:
+**`TargetProfile`** (`crates/promptlab-target-profile/`) defines:
 
 - Provider / framework
 - HTTP method, base URL, path, headers

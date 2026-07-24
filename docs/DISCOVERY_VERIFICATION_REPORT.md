@@ -1,9 +1,9 @@
 # Discovery Engine Verification Report
 
 **Date:** 2026-06-10  
-**Crate:** `aisec-discovery` v0.1.0  
+**Crate:** `promptlab-discovery` v0.1.0  
 **Test target:** `http://localhost:3000`  
-**Harness:** `scripts/discovery-test-target.py` + `cargo run -p aisec-discovery --example verify_target`
+**Harness:** `scripts/discovery-test-target.py` + `cargo run -p promptlab-discovery --example verify_target`
 
 ---
 
@@ -44,7 +44,7 @@ With `worker_count: 1` and `allow_private_network: true`, discovery against the 
 python3 scripts/discovery-test-target.py
 
 # Terminal 2 (requires worker_count=1 in example until crawler fix)
-cargo run -p aisec-discovery --example verify_target
+cargo run -p promptlab-discovery --example verify_target
 ```
 
 ---
@@ -160,7 +160,7 @@ engine.discover("http://localhost:3000/")  // DiscoveryConfig::default()
 
 **Root cause:** In `crawler.rs`, when the frontier is empty, workers that find `in_flight > 0` wait on `notify`. When the last task completes, only **one** `notify_one()` fires. Other workers remain blocked on `notify.notified().await` forever. Main thread exits `wait_for_completion` but `handle.await` waits on stuck workers.
 
-```107:113:crates/aisec-discovery/src/crawler.rs
+```107:113:crates/promptlab-discovery/src/crawler.rs
                 let Some(task) = task else {
                     if crawler.in_flight.load(Ordering::Relaxed) == 0 {
                         break;
@@ -180,7 +180,7 @@ engine.discover("http://localhost:3000/")  // DiscoveryConfig::default()
 
 **Root cause:** `probe_ai_paths` treats any successful GET (including 404) as completion and skips POST:
 
-```79:91:crates/aisec-discovery/src/detectors/ai.rs
+```79:91:crates/promptlab-discovery/src/detectors/ai.rs
     for url in ai_probe_paths(origin) {
         if let Ok(snapshot) = client.get(&url).await {
             found.extend(detect_ai_from_snapshot(&snapshot, Some(origin)));
@@ -203,7 +203,7 @@ engine.discover("http://localhost:3000/")  // DiscoveryConfig::default()
 | `discovers_openapi_graphql_ai_and_crawled_links` | `worker_count: 4` → crawler deadlock |
 | `crawler_respects_max_depth` | `worker_count: 2` → same deadlock (even with dead port) |
 
-**Status:** `cargo test -p aisec-discovery` does not complete reliably in CI/dev.
+**Status:** `cargo test -p promptlab-discovery` does not complete reliably in CI/dev.
 
 ---
 
@@ -253,14 +253,14 @@ From `docs/DISCOVERY.md` and `docs/ARCHITECTURE.md`:
 | `extract`, `retry`, `config`, `paths` tests | ✅ Pass |
 | `crawler_respects_max_depth` | ❌ Hangs (deadlock) |
 | `discovers_openapi_graphql_ai_and_crawled_links` | ❌ Hangs (deadlock) |
-| Full `cargo test -p aisec-discovery` | ❌ Does not complete |
+| Full `cargo test -p promptlab-discovery` | ❌ Does not complete |
 
 ---
 
 ## Compiler Warnings
 
 ```
-crates/aisec-discovery/src/retry.rs:2 — unused import: std::time::Duration
+crates/promptlab-discovery/src/retry.rs:2 — unused import: std::time::Duration
 ```
 
 ---
@@ -297,7 +297,7 @@ It is **not production-ready** due to:
 ## Appendix: Reproduction Log
 
 ```
-=== AISec Discovery Verification ===
+=== PromptLab Discovery Verification ===
 Target: http://localhost:3000/
 allow_private_network: true
 

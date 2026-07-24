@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use aisec_models::detect_hardware;
+use promptlab_models::detect_hardware;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -62,16 +62,16 @@ impl HardwareDetector {
         let cuda = base
             .gpus
             .iter()
-            .any(|gpu| matches!(gpu.backend, aisec_models::GpuBackend::Cuda));
+            .any(|gpu| matches!(gpu.backend, promptlab_models::GpuBackend::Cuda));
         let metal = base
             .gpus
             .iter()
-            .any(|gpu| matches!(gpu.backend, aisec_models::GpuBackend::Metal))
+            .any(|gpu| matches!(gpu.backend, promptlab_models::GpuBackend::Metal))
             || (base.os == "macos" && base.arch == "aarch64");
         let vulkan = base
             .gpus
             .iter()
-            .any(|gpu| matches!(gpu.backend, aisec_models::GpuBackend::Vulkan));
+            .any(|gpu| matches!(gpu.backend, promptlab_models::GpuBackend::Vulkan));
 
         let profile = RuntimeHardwareProfile {
             os: base.os.clone(),

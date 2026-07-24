@@ -1,6 +1,6 @@
 [package]
-name = "aisec-judge"
-description = "AISec AI Judge Engine — rule, regex, LLM evaluation with multi-model consensus"
+name = "promptlab-judge"
+description = "PromptLab AI Judge Engine — rule, regex, LLM evaluation with multi-model consensus"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,18 +10,18 @@ rust-version.workspace = true
 [features]
 default = []
 # Enable the in-process llama.cpp runtime so the LLM evaluator runs real models.
-llama = ["aisec-models/llama"]
+llama = ["promptlab-models/llama"]
 
 [[example]]
 name = "judge_with_local_model"
 required-features = ["llama"]
 
 [dependencies]
-aisec-core = { workspace = true }
-aisec-harness = { workspace = true }
-aisec-models = { workspace = true }
-aisec-runtime = { workspace = true }
-aisec-inference = { workspace = true }
+promptlab-core = { workspace = true }
+promptlab-harness = { workspace = true }
+promptlab-models = { workspace = true }
+promptlab-runtime = { workspace = true }
+promptlab-inference = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 regex = { workspace = true }

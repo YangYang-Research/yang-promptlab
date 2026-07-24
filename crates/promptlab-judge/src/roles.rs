@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use aisec_models::runtime::InferenceRuntime;
+use promptlab_models::runtime::InferenceRuntime;
 use tokio::sync::Mutex;
 
 use crate::error::{JudgeError, JudgeResult};

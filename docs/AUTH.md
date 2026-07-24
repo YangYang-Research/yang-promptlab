@@ -1,6 +1,6 @@
-# AISec Authentication Engine
+# PromptLab Authentication Engine
 
-**Crate:** `aisec-auth`  
+**Crate:** `promptlab-auth`  
 **Status:** MVP  
 **Browser runtime:** Playwright (Node.js subprocess)
 
@@ -12,7 +12,7 @@ The Authentication Engine records, replays, and manages authenticated sessions f
 
 ```mermaid
 flowchart TB
-    subgraph UI["AISec Desktop"]
+    subgraph UI["PromptLab Desktop"]
         IPC[Tauri IPC]
     end
 
@@ -130,7 +130,7 @@ Bundled assets land in `src-tauri/resources/playwright/` (gitignored, ~300MB).
 
 ## Session Storage
 
-### SQLite (`aisec-storage` migration 002)
+### SQLite (`promptlab-storage` migration 002)
 
 | Table | Purpose |
 |-------|---------|
@@ -153,15 +153,15 @@ Referenced by `auth_sessions.storage_state_path`.
 ## Usage
 
 ```rust
-use aisec_auth::{
+use promptlab_auth::{
     AuthConfig, AuthEngine, AuthEngineConfig, AuthMethod, AuthProfile,
     RecordLoginOptions, SessionStore,
 };
-use aisec_storage::Database;
+use promptlab_storage::Database;
 
 #[tokio::main]
-async fn main() -> aisec_core::AisecResult<()> {
-    let db = Database::connect("sqlite://aisec.db").await?;
+async fn main() -> promptlab_core::PromptLabResult<()> {
+    let db = Database::connect("sqlite://promptlab.db").await?;
     let store = SessionStore::new(db, "./data/auth-vault").await?;
     let engine = AuthEngine::new(AuthEngineConfig::default(), store, None).await?;
 
@@ -213,8 +213,8 @@ async fn main() -> aisec_core::AisecResult<()> {
 ## Testing
 
 ```bash
-cargo test -p aisec-auth          # unit tests with MockPlaywrightDriver
-cargo test -p aisec-storage       # auth table CRUD
+cargo test -p promptlab-auth          # unit tests with MockPlaywrightDriver
+cargo test -p promptlab-storage       # auth table CRUD
 ```
 
 Integration tests with real Playwright require Node.js + `npm install` in `playwright/`.

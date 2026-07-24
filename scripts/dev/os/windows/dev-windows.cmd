@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-REM PromptLab / AISec — Windows Tauri dev launcher
+REM PromptLab / PromptLab — Windows Tauri dev launcher
 REM Handles: MSVC env, libclang, short cargo target dir, npm.cmd (avoids PS execution policy)
 
 cd /d "%~dp0..\..\..\.."

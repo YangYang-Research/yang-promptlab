@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use aisec_core::{AisecError, AisecResult};
+use promptlab_core::{PromptLabError, PromptLabResult};
 use time::{Duration, OffsetDateTime};
 use tracing::{debug, instrument};
 use url::Url;
@@ -41,7 +41,7 @@ impl AuthSessionManager {
         store: SessionStore,
         config: AuthEngineConfig,
         driver: Option<SharedPlaywrightDriver>,
-    ) -> AisecResult<Self> {
+    ) -> PromptLabResult<Self> {
         let driver = match driver {
             Some(d) => d,
             None => Arc::new(PlaywrightClient::new(config.clone()).await?),
@@ -66,7 +66,7 @@ impl AuthSessionManager {
     }
 
     /// Load session cookies, tokens, and storageState path from the database.
-    pub async fn load_context(&self, session_id: &str) -> AisecResult<SessionAuthContext> {
+    pub async fn load_context(&self, session_id: &str) -> PromptLabResult<SessionAuthContext> {
         let session = self.store.get_session(session_id).await?;
         Ok(session_to_context(session))
     }
@@ -75,7 +75,7 @@ impl AuthSessionManager {
     pub async fn load_storage_state(
         &self,
         session_id: &str,
-    ) -> AisecResult<Option<PlaywrightStorageState>> {
+    ) -> PromptLabResult<Option<PlaywrightStorageState>> {
         let session = self.store.get_session(session_id).await?;
         let Some(path) = session.storage_state_path else {
             return Ok(None);
@@ -91,7 +91,7 @@ impl AuthSessionManager {
     pub async fn browser_context_options(
         &self,
         session_id: &str,
-    ) -> AisecResult<Option<PathBuf>> {
+    ) -> PromptLabResult<Option<PathBuf>> {
         let session = self.store.get_session(session_id).await?;
         Ok(session
             .storage_state_path
@@ -104,7 +104,7 @@ impl AuthSessionManager {
         &self,
         session_id: &str,
         probe_url: Option<&str>,
-    ) -> AisecResult<SessionAuthContext> {
+    ) -> PromptLabResult<SessionAuthContext> {
         let mut ctx = self.load_context(session_id).await?;
         let computed = compute_validation_status(&ctx.cookies, ctx.expires_at);
 
@@ -138,7 +138,7 @@ impl AuthSessionManager {
     }
 
     /// Recompute expiry metadata from cookies/tokens and persist it.
-    pub async fn refresh_metadata(&self, session_id: &str) -> AisecResult<SessionAuthContext> {
+    pub async fn refresh_metadata(&self, session_id: &str) -> PromptLabResult<SessionAuthContext> {
         let session = self.store.get_session(session_id).await?;
         let expires_at = earliest_cookie_expiry(&session.cookies).or(session.expires_at);
         let user_identity = session

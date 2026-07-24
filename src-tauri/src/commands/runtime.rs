@@ -1,7 +1,7 @@
 //! Embedded AI runtime IPC — lifecycle, health, benchmark, logs, hardware.
 
-use aisec_models::{ModelEntry, ModelProvider};
-use aisec_runtime::{
+use promptlab_models::{ModelEntry, ModelProvider};
+use promptlab_runtime::{
     hardware::HardwareDetector, RuntimeBenchmarkResult, RuntimeHardwareProfile,
     RuntimeHealthReport, RuntimeLogEntry, RuntimeLifecycleState, RuntimeStatusSnapshot,
 };
@@ -10,7 +10,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 use time::OffsetDateTime;
 
-use aisec_inference::config::{AiRuntimeConfiguration, InferenceMode};
+use promptlab_inference::config::{AiRuntimeConfiguration, InferenceMode};
 use crate::inference_settings::{
     apply_third_party_health_check, config_to_dto, config_to_dto_with_connectivity_test,
     format_health_check_timestamp, is_local_model, is_third_party_model, parse_route,
@@ -127,7 +127,7 @@ fn snapshot_to_dto(snap: RuntimeStatusSnapshot, recommended_runtime: Option<Stri
     }
 }
 
-async fn status_dto_for_manager(manager: &aisec_runtime::RuntimeManager) -> RuntimeStatusDto {
+async fn status_dto_for_manager(manager: &promptlab_runtime::RuntimeManager) -> RuntimeStatusDto {
     let recommended = manager.recommended_runtime_label();
     let snap = manager.status_snapshot_async().await;
     snapshot_to_dto(snap, recommended)
@@ -167,7 +167,7 @@ async fn runtime_repair_inner(app: AppHandle, state: &AppState) -> CommandResult
             emit_runtime_install_progress(&app_handle, step, message, phase);
         })
         .await
-        .map_err(|err| CommandError::from(aisec_core::AisecError::internal(err.to_string())))?;
+        .map_err(|err| CommandError::from(promptlab_core::PromptLabError::internal(err.to_string())))?;
     Ok(status_dto_for_manager(&manager).await)
 }
 
@@ -248,13 +248,13 @@ pub async fn runtime_load_model(
         inference
             .update_from_model(entry, None)
             .await
-            .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
+            .map_err(|e| CommandError::from(promptlab_core::PromptLabError::internal(e.to_string())))?;
     }
 
     {
         let mut manager = state.runtime_manager().lock().await;
         if !manager.supervisor().binary_available() {
-            return Err(map_runtime_err(aisec_runtime::RuntimeError::Unavailable));
+            return Err(map_runtime_err(promptlab_runtime::RuntimeError::Unavailable));
         }
         let lifecycle = manager.lifecycle_state();
         if !matches!(
@@ -321,7 +321,7 @@ pub async fn runtime_traffic_stats(
     state: State<'_, AppState>,
     window_ms: Option<u64>,
     bucket_ms: Option<u64>,
-) -> CommandResult<aisec_inference::TrafficSnapshot> {
+) -> CommandResult<promptlab_inference::TrafficSnapshot> {
     crate::traffic_persist::traffic_snapshot_from_db(
         &state.repositories(),
         window_ms.unwrap_or(60_000),
@@ -505,7 +505,7 @@ async fn reconcile_inference_config(
         inference
             .save()
             .await
-            .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
+            .map_err(|e| CommandError::from(promptlab_core::PromptLabError::internal(e.to_string())))?;
     }
     Ok((config, connectivity_test))
 }
@@ -528,7 +528,7 @@ async fn inference_settings_for_state(state: &AppState) -> CommandResult<AiInfer
 fn local_inference_connectivity_label(
     lifecycle: &str,
     model_loaded: bool,
-    last_health: Option<&aisec_runtime::RuntimeHealthReport>,
+    last_health: Option<&promptlab_runtime::RuntimeHealthReport>,
 ) -> String {
     if matches!(lifecycle, "starting") {
         return "Loading model".into();
@@ -589,7 +589,7 @@ async fn assemble_runtime_configuration(
     models: &[ModelEntry],
     config: &AiRuntimeConfiguration,
     inference: &AiInferenceSettingsDto,
-    runtime_manager: &aisec_runtime::RuntimeManager,
+    runtime_manager: &promptlab_runtime::RuntimeManager,
 ) -> RuntimeConfigurationDto {
     let runtime_status = status_dto_for_manager(runtime_manager).await;
     let last_health = runtime_manager.last_health().cloned();
@@ -834,7 +834,7 @@ pub(crate) async fn prime_loading_configuration_cache(_state: &AppState, _model_
 /// Refresh the configuration cache while the runtime manager lock is already held.
 pub(crate) async fn prime_runtime_configuration_cache(
     state: &AppState,
-    runtime_manager: &aisec_runtime::RuntimeManager,
+    runtime_manager: &promptlab_runtime::RuntimeManager,
 ) {
     let models: Vec<ModelEntry> = {
         let manager = state.model_manager().lock().await;
@@ -854,7 +854,7 @@ pub(crate) async fn wait_for_runtime_model_load(
     state: &AppState,
     model_id: &str,
     file_path: &std::path::Path,
-) -> Result<(), aisec_runtime::RuntimeError> {
+) -> Result<(), promptlab_runtime::RuntimeError> {
     const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
     let started = std::time::Instant::now();
 
@@ -866,16 +866,16 @@ pub(crate) async fn wait_for_runtime_model_load(
                 return Ok(());
             }
             if loading.is_some() {
-                return Err(aisec_runtime::RuntimeError::NativeRuntimeError(
+                return Err(promptlab_runtime::RuntimeError::NativeRuntimeError(
                     "another model is loading into the runtime".into(),
                 ));
             }
-            return Err(aisec_runtime::RuntimeError::NativeRuntimeError(
+            return Err(promptlab_runtime::RuntimeError::NativeRuntimeError(
                 "model load did not complete".into(),
             ));
         }
         if started.elapsed() >= MAX_WAIT {
-            return Err(aisec_runtime::RuntimeError::NativeRuntimeError(
+            return Err(promptlab_runtime::RuntimeError::NativeRuntimeError(
                 "timed out waiting for model load".into(),
             ));
         }
@@ -886,10 +886,10 @@ pub(crate) async fn wait_for_runtime_model_load(
 /// Shared model-load path for manual IPC and startup auto-resume.
 pub(crate) async fn load_model_with_loading_cache(
     state: &AppState,
-    manager: &mut aisec_runtime::RuntimeManager,
+    manager: &mut promptlab_runtime::RuntimeManager,
     file_path: &std::path::Path,
     model_id: &str,
-) -> Result<(), aisec_runtime::RuntimeError> {
+) -> Result<(), promptlab_runtime::RuntimeError> {
     if manager.is_same_model_loaded_at(file_path).await {
         prime_runtime_configuration_cache(state, manager).await;
         return Ok(());
@@ -1055,7 +1055,7 @@ pub async fn runtime_set_inference_route(
             inference
                 .save()
                 .await
-                .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
+                .map_err(|e| CommandError::from(promptlab_core::PromptLabError::internal(e.to_string())))?;
             return Ok(config_to_dto_with_connectivity_test(
                 &config,
                 &models,
@@ -1068,14 +1068,14 @@ pub async fn runtime_set_inference_route(
     inference
         .save()
         .await
-        .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(promptlab_core::PromptLabError::internal(e.to_string())))?;
     Ok(config_to_dto(&config, &models))
 }
 
 #[tauri::command]
 pub async fn runtime_test_connectivity(
     state: State<'_, AppState>,
-) -> CommandResult<aisec_judge::JudgeConnectivityResult> {
+) -> CommandResult<promptlab_judge::JudgeConnectivityResult> {
     let inference = state.inference_manager().lock().await;
     let manager = state.model_manager().lock().await;
     let mut runtime_mgr = state.runtime_manager().lock().await;
@@ -1090,14 +1090,14 @@ pub async fn runtime_test_connectivity(
     let result = session
         .test_connectivity()
         .await
-        .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(promptlab_core::PromptLabError::internal(e.to_string())))?;
     Ok(connectivity_to_judge(result))
 }
 
 #[tauri::command]
 pub async fn runtime_test_inference(
     state: State<'_, AppState>,
-) -> CommandResult<aisec_judge::JudgeConnectivityResult> {
+) -> CommandResult<promptlab_judge::JudgeConnectivityResult> {
     let inference = state.inference_manager().lock().await;
     let manager = state.model_manager().lock().await;
     let mut runtime_mgr = state.runtime_manager().lock().await;
@@ -1112,18 +1112,18 @@ pub async fn runtime_test_inference(
     let result = session
         .test_inference()
         .await
-        .map_err(|e| CommandError::from(aisec_core::AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(promptlab_core::PromptLabError::internal(e.to_string())))?;
     Ok(connectivity_to_judge(result))
 }
 
-fn map_runtime_err(err: aisec_runtime::RuntimeError) -> CommandError {
+fn map_runtime_err(err: promptlab_runtime::RuntimeError) -> CommandError {
     match err {
-        aisec_runtime::RuntimeError::Unavailable => {
+        promptlab_runtime::RuntimeError::Unavailable => {
             CommandError::invalid_input(
                 "Embedded libllama engine is unavailable — reinitialize the engine from AI Runtime",
             )
         }
-        other => CommandError::from(aisec_core::AisecError::internal(other.to_string())),
+        other => CommandError::from(promptlab_core::PromptLabError::internal(other.to_string())),
     }
 }
 
@@ -1146,7 +1146,7 @@ pub struct UpdateJudgeRoleWeightsRequest {
     pub default_llm: f64,
 }
 
-fn judge_weights_dto(row: aisec_storage::JudgeRoleWeights) -> JudgeRoleWeightsDto {
+fn judge_weights_dto(row: promptlab_storage::JudgeRoleWeights) -> JudgeRoleWeightsDto {
     JudgeRoleWeightsDto {
         judge: row.judge,
         classifier: row.classifier,
@@ -1160,7 +1160,7 @@ fn judge_weights_dto(row: aisec_storage::JudgeRoleWeights) -> JudgeRoleWeightsDt
 pub async fn runtime_judge_role_weights(
     state: State<'_, AppState>,
 ) -> CommandResult<JudgeRoleWeightsDto> {
-    use aisec_storage::JudgeRoleWeightsRepository;
+    use promptlab_storage::JudgeRoleWeightsRepository;
 
     let row = state
         .repositories()
@@ -1176,7 +1176,7 @@ pub async fn runtime_set_judge_role_weights(
     state: State<'_, AppState>,
     request: UpdateJudgeRoleWeightsRequest,
 ) -> CommandResult<JudgeRoleWeightsDto> {
-    use aisec_storage::{JudgeRoleWeightsRepository, UpdateJudgeRoleWeights};
+    use promptlab_storage::{JudgeRoleWeightsRepository, UpdateJudgeRoleWeights};
 
     let row = state
         .repositories()

@@ -1,7 +1,7 @@
-# AISec — Project Current State
+# PromptLab — Project Current State
 
 > Architecture audit snapshot. Generated: 2026-06-13.  
-> Repository: `yang-aisec-private` · Version: **0.1.0**
+> Repository: `yang-promptlab-private` · Version: **0.1.0**
 
 ---
 
@@ -9,7 +9,7 @@
 
 ### Product purpose
 
-**AISec** is a desktop application for **AI security testing** — penetration testing and red-team style assessment of LLM-backed applications, chatbots, agents, and API surfaces. Operators define projects and targets, discover attack surfaces (REST, GraphQL, OpenAPI, AI routes), run categorized attack payloads (prompt injection, jailbreak, RAG leakage, tool abuse, etc.), evaluate responses, and export findings as structured reports.
+**PromptLab** is a desktop application for **AI security testing** — penetration testing and red-team style assessment of LLM-backed applications, chatbots, agents, and API surfaces. Operators define projects and targets, discover attack surfaces (REST, GraphQL, OpenAPI, AI routes), run categorized attack payloads (prompt injection, jailbreak, RAG leakage, tool abuse, etc.), evaluate responses, and export findings as structured reports.
 
 The product is built as a **Tauri 2** native shell: React + TypeScript UI (`src/`) backed by a Rust workspace (`crates/`) with SQLite persistence and real HTTP/Playwright execution — not a mock-only demo.
 
@@ -47,7 +47,7 @@ The product is built as a **Tauri 2** native shell: React + TypeScript UI (`src/
 - Dashboard activity feed, job progress, stat-card hints (UI placeholders)
 - Models page (empty store; no IPC)
 - Plugin host (crate + samples; not integrated in desktop app)
-- LLM judge roles (requires local GGUF via `aisec-models`; not configured in app)
+- LLM judge roles (requires local GGUF via `promptlab-models`; not configured in app)
 - Playwright session tokens in attack HTTP layer (descriptor auth for API key/JWT/Basic works; browser session replay incomplete)
 - `disabled_tests` accepted by `scan_start` but not enforced in attack executor
 
@@ -97,9 +97,9 @@ flowchart LR
 
 | Area | Technology |
 |------|------------|
-| **Application shell** | Tauri 2 (`aisec-desktop` / `src-tauri`) |
+| **Application shell** | Tauri 2 (`promptlab-desktop` / `src-tauri`) |
 | **Async runtime** | Tokio |
-| **Database** | SQLite via `sqlx` 0.8 + `aisec-storage` migrations |
+| **Database** | SQLite via `sqlx` 0.8 + `promptlab-storage` migrations |
 | **Logging** | `tracing` + `tracing-subscriber` |
 | **HTTP client** | `reqwest` (discovery, attack transport) |
 
@@ -107,28 +107,28 @@ flowchart LR
 
 | Crate | Role |
 |-------|------|
-| `aisec-core` | Shared errors, logging |
-| `aisec-storage` | SQLite pool, migrations, repositories |
-| `aisec-discovery` | Crawler, static probes, AI/GraphQL/OpenAPI detectors |
-| `aisec-attack` | Attack registry, executor, HTTP transport, 9 category plugins |
-| `aisec-payload` | Embedded payload library + mutation pipeline |
-| `aisec-judge` | Rule, regex, LLM evaluators + consensus |
-| `aisec-report` | HTML, PDF, JSON, SARIF formatters |
-| `aisec-auth` | Playwright session recording, auth profiles |
-| `aisec-models` | GGUF manager, llama.cpp runtime |
-| `aisec-fingerprint` | AI provider fingerprinting |
-| `aisec-plugin-host` | Plugin lifecycle, sandbox, permissions |
-| `aisec-desktop` | Tauri IPC command layer |
-| `aisec-integration-tests` | Cross-crate smoke / MVP flow tests |
+| `promptlab-core` | Shared errors, logging |
+| `promptlab-storage` | SQLite pool, migrations, repositories |
+| `promptlab-discovery` | Crawler, static probes, AI/GraphQL/OpenAPI detectors |
+| `promptlab-attack` | Attack registry, executor, HTTP transport, 9 category plugins |
+| `promptlab-payload` | Embedded payload library + mutation pipeline |
+| `promptlab-judge` | Rule, regex, LLM evaluators + consensus |
+| `promptlab-report` | HTML, PDF, JSON, SARIF formatters |
+| `promptlab-auth` | Playwright session recording, auth profiles |
+| `promptlab-models` | GGUF manager, llama.cpp runtime |
+| `promptlab-fingerprint` | AI provider fingerprinting |
+| `promptlab-plugin-host` | Plugin lifecycle, sandbox, permissions |
+| `promptlab-desktop` | Tauri IPC command layer |
+| `promptlab-integration-tests` | Cross-crate smoke / MVP flow tests |
 
 ### AI Components
 
 | Engine | Crate | Desktop integration |
 |--------|-------|---------------------|
-| **Discovery Engine** | `aisec-discovery` | `discovery_run`, `endpoint_list`, `endpoint_create` |
-| **Attack Engine** | `aisec-attack` + `aisec-payload` | `attack_run_prompt_injection`, `scan_start` background jobs |
-| **Judge Engine** | `aisec-judge` | Used inside `run_category_on_endpoint` (deterministic mode only in production path) |
-| **Report Engine** | `aisec-report` | `report_generate`, `report_read`, `report_export` |
+| **Discovery Engine** | `promptlab-discovery` | `discovery_run`, `endpoint_list`, `endpoint_create` |
+| **Attack Engine** | `promptlab-attack` + `promptlab-payload` | `attack_run_prompt_injection`, `scan_start` background jobs |
+| **Judge Engine** | `promptlab-judge` | Used inside `run_category_on_endpoint` (deterministic mode only in production path) |
+| **Report Engine** | `promptlab-report` | `report_generate`, `report_read`, `report_export` |
 
 ---
 
@@ -137,7 +137,7 @@ flowchart LR
 ### Complete folder tree
 
 ```
-aisec/
+promptlab/
 ├── AGENTS.md
 ├── Cargo.toml                      # Rust workspace root
 ├── package.json                    # npm scripts (dev, tauri, test, playwright bundle)
@@ -188,7 +188,7 @@ aisec/
 │   └── styles/
 │       └── global.css
 │
-├── src-tauri/                      # Tauri shell (aisec-desktop)
+├── src-tauri/                      # Tauri shell (promptlab-desktop)
 │   ├── Cargo.toml
 │   ├── tauri.conf.json
 │   ├── build.rs
@@ -215,22 +215,22 @@ aisec/
 │           └── auth.rs
 │
 ├── crates/                         # Rust business logic
-│   ├── aisec-core/
-│   ├── aisec-storage/
+│   ├── promptlab-core/
+│   ├── promptlab-storage/
 │   │   └── migrations/             # 001–003 SQL migrations
-│   ├── aisec-discovery/
+│   ├── promptlab-discovery/
 │   │   └── playwright/             # Discovery-specific Playwright (separate from auth)
-│   ├── aisec-attack/
+│   ├── promptlab-attack/
 │   │   └── src/attacks/            # One module per attack category
-│   ├── aisec-payload/
+│   ├── promptlab-payload/
 │   │   └── data/payloads.json      # Built-in prompt library
-│   ├── aisec-judge/
-│   ├── aisec-report/
-│   ├── aisec-auth/
+│   ├── promptlab-judge/
+│   ├── promptlab-report/
+│   ├── promptlab-auth/
 │   │   └── playwright/             # Auth recording runner.mjs
-│   ├── aisec-models/
-│   ├── aisec-fingerprint/
-│   └── aisec-plugin-host/
+│   ├── promptlab-models/
+│   ├── promptlab-fingerprint/
+│   └── promptlab-plugin-host/
 │
 ├── packages/
 │   ├── plugin-sdk-python/
@@ -253,15 +253,15 @@ aisec/
 |--------|---------|------------------|
 | **`src/`** | Frontend application | Routing, pages, scan wizard, IPC client, global state, UI components |
 | **`src-tauri/`** | Desktop backend shell | Tauri lifecycle, SQLite init, IPC commands, scan job manager, Playwright bundle resolution |
-| **`crates/aisec-storage`** | Persistence | Migrations, repository traits, SQLite implementations, row models |
-| **`crates/aisec-discovery`** | Attack surface enumeration | HTTP crawl, link extraction, static path probes, AI/GraphQL/OpenAPI detection |
-| **`crates/aisec-attack`** | Offensive testing | Category registry, payload execution, HTTP transport, target auth headers |
-| **`crates/aisec-payload`** | Payload library | JSON payload catalog, mutations, pipeline |
-| **`crates/aisec-judge`** | Response evaluation | Rule/regex/LLM evaluators, consensus, severity scoring |
-| **`crates/aisec-report`** | Deliverables | Report data builder, HTML/PDF/JSON/SARIF formatters, recommendations |
-| **`crates/aisec-auth`** | Session auth | Playwright interactive recording, profile/session storage |
-| **`crates/aisec-models`** | Local LLM | GGUF download, llama.cpp runtime (for judge/attacker roles) |
-| **`crates/aisec-plugin-host`** | Extensibility | Plugin manifest, sandbox runner, permissions (not wired to UI) |
+| **`crates/promptlab-storage`** | Persistence | Migrations, repository traits, SQLite implementations, row models |
+| **`crates/promptlab-discovery`** | Attack surface enumeration | HTTP crawl, link extraction, static path probes, AI/GraphQL/OpenAPI detection |
+| **`crates/promptlab-attack`** | Offensive testing | Category registry, payload execution, HTTP transport, target auth headers |
+| **`crates/promptlab-payload`** | Payload library | JSON payload catalog, mutations, pipeline |
+| **`crates/promptlab-judge`** | Response evaluation | Rule/regex/LLM evaluators, consensus, severity scoring |
+| **`crates/promptlab-report`** | Deliverables | Report data builder, HTML/PDF/JSON/SARIF formatters, recommendations |
+| **`crates/promptlab-auth`** | Session auth | Playwright interactive recording, profile/session storage |
+| **`crates/promptlab-models`** | Local LLM | GGUF download, llama.cpp runtime (for judge/attacker roles) |
+| **`crates/promptlab-plugin-host`** | Extensibility | Plugin manifest, sandbox runner, permissions (not wired to UI) |
 | **`plugins/`** | Reference plugins | Sample attack/discovery/judge/report plugins for SDK demonstration |
 | **`docs/`** | Documentation | Architecture, auth setup, database schema reference |
 | **`tests/`** | Quality gates | Frontend unit tests; Rust integration / MVP flow tests |
@@ -271,8 +271,8 @@ aisec/
 ## DATABASE
 
 **Engine:** SQLite 3  
-**Location:** `{app_data_dir}/aisec.db` (Tauri `app_data_dir`)  
-**Migrations:** `crates/aisec-storage/migrations/` — applied automatically on startup via `sqlx::migrate!`
+**Location:** `{app_data_dir}/promptlab.db` (Tauri `app_data_dir`)  
+**Migrations:** `crates/promptlab-storage/migrations/` — applied automatically on startup via `sqlx::migrate!`
 
 ### Tables overview
 
@@ -444,7 +444,7 @@ aisec/
 | `metadata_json` | TEXT | Tags, description |
 | `created_at`, `updated_at` | TEXT | |
 
-**Usage:** Schema supports custom payloads; runtime attacks primarily use embedded `aisec-payload/data/payloads.json`.
+**Usage:** Schema supports custom payloads; runtime attacks primarily use embedded `promptlab-payload/data/payloads.json`.
 
 ---
 
@@ -492,7 +492,7 @@ aisec/
 | `config_json` | TEXT | Login URL, selectors, credentials |
 | `created_at`, `updated_at` | TEXT | |
 
-**Usage:** Created during Playwright recording; stored via `aisec-auth` SessionStore.
+**Usage:** Created during Playwright recording; stored via `promptlab-auth` SessionStore.
 
 ---
 
@@ -553,7 +553,7 @@ Tauri 2 maps Rust `snake_case` parameters to JavaScript `camelCase` automaticall
 | | |
 |---|---|
 | **Request** | _(none)_ |
-| **Response** | `{ name, version, identifier: "com.aisec.desktop" }` |
+| **Response** | `{ name, version, identifier: "com.promptlab.desktop" }` |
 | **Status** | ✅ Implemented, registered |
 
 #### `db_health`
@@ -860,7 +860,7 @@ Tauri 2 maps Rust `snake_case` parameters to JavaScript `camelCase` automaticall
 
 ## SCAN WIZARD
 
-Persistence: `sessionStorage` key `aisec:scan-wizard`, schema version **2** (`wizardState.ts`). Survives page refresh within the same tab; cleared on explicit reset or successful completion flow.
+Persistence: `sessionStorage` key `promptlab:scan-wizard`, schema version **2** (`wizardState.ts`). Survives page refresh within the same tab; cleared on explicit reset or successful completion flow.
 
 | Step | Label | Component |
 |------|-------|-----------|
@@ -939,7 +939,7 @@ Persistence: `sessionStorage` key `aisec:scan-wizard`, schema version **2** (`wi
 
 ### Current implementation
 
-Located in `crates/aisec-discovery`. Entry point: `DiscoveryEngine::discover(seed_url)`.
+Located in `crates/promptlab-discovery`. Entry point: `DiscoveryEngine::discover(seed_url)`.
 
 **Pipeline:**
 
@@ -984,7 +984,7 @@ Results persisted to `endpoints` table under a new `scans` row named `Discovery:
 - **No authenticated crawl in discovery IPC** — auth descriptor not applied to discovery HTTP client today.
 - **Playwright browser crawl** not wired to `discovery_run` (HTTP-only path).
 - **Network-dependent tests** — `crawler_respects_max_depth` integration test can hang.
-- Discovery Playwright runtime is **separate** from auth Playwright bundle (`crates/aisec-discovery/playwright/`).
+- Discovery Playwright runtime is **separate** from auth Playwright bundle (`crates/promptlab-discovery/playwright/`).
 
 ---
 
@@ -992,12 +992,12 @@ Results persisted to `endpoints` table under a new `scans` row named `Discovery:
 
 ### Current implementation
 
-Located in `crates/aisec-attack`. Desktop uses:
+Located in `crates/promptlab-attack`. Desktop uses:
 
 - `AttackExecutor` + `default_registry()` (9 built-in category attacks)
 - `HttpTransport` for real HTTP requests
 - `apply_descriptor_auth()` — injects Basic, Bearer/API key, JWT headers from target descriptor
-- `aisec-payload` embedded library for prompt content
+- `promptlab-payload` embedded library for prompt content
 - Per-attempt persistence to `attack_results` + conditional `findings`
 
 **Orchestration paths:**
@@ -1023,7 +1023,7 @@ Each attempt runs **attack evaluation** (category-specific heuristics) then **`J
 
 ### Prompt libraries
 
-**Primary source:** `crates/aisec-payload/data/payloads.json` (~20+ payloads across categories).
+**Primary source:** `crates/promptlab-payload/data/payloads.json` (~20+ payloads across categories).
 
 Categories include multiple prompt templates with tags (direct override, DAN, RAG dump, MCP JSON-RPC, etc.). `PayloadMutator` applies encodings/variations at runtime.
 
@@ -1056,11 +1056,11 @@ scan_start / attack_run
 |------|--------|---------------|
 | **Rule-based** | `evaluators/rule.rs` | ✅ Always on in `judge_deterministic` |
 | **Regex** | `evaluators/regex.rs` | ✅ Default patterns (secrets, injection markers) |
-| **LLM (local GGUF)** | `evaluators/llm.rs` + `aisec-models` | ❌ Not configured in app; requires `ModelRolePool` with llama.cpp runtime |
+| **LLM (local GGUF)** | `evaluators/llm.rs` + `promptlab-models` | ❌ Not configured in app; requires `ModelRolePool` with llama.cpp runtime |
 
 **Model roles** (when LLM enabled): `Judge`, `Classifier`, `Attacker` — see `ModelRolePool`.
 
-Example local model usage exists in `crates/aisec-judge/examples/judge_with_local_model.rs` only.
+Example local model usage exists in `crates/promptlab-judge/examples/judge_with_local_model.rs` only.
 
 ### Evaluation logic
 
@@ -1130,10 +1130,10 @@ The legacy `src/shared/mock/data.ts` fixture layer has been **removed**. Remaini
 | `AppStore.settings` | Default object | Theme/paths/toggles — **not persisted** to SQLite or disk |
 | `ModelsPage.tsx` | UI shell | Renders empty grid; action buttons have no handlers |
 | `TopBar.tsx` label | Misleading copy | Says "mock data" when offline — actually **empty state**, not fake records |
-| `aisec-attack/transport/mock.rs` | Test transport | Rust unit tests only |
-| `aisec-judge/mock_runtime.rs` | Test double | Rust tests / examples |
-| `aisec-auth/mock.rs` | Test double | Auth engine tests |
-| `aisec-models/runtime/mock.rs` | Test double | Model runtime tests |
+| `promptlab-attack/transport/mock.rs` | Test transport | Rust unit tests only |
+| `promptlab-judge/mock_runtime.rs` | Test double | Rust tests / examples |
+| `promptlab-auth/mock.rs` | Test double | Auth engine tests |
+| `promptlab-models/runtime/mock.rs` | Test double | Model runtime tests |
 
 **No frontend page injects fabricated projects, findings, or scans when IPC fails.**
 
@@ -1177,11 +1177,11 @@ The legacy `src/shared/mock/data.ts` fixture layer has been **removed**. Remaini
 
 Per `AGENTS.md`, `cargo test --workspace` does not fully pass:
 
-- `aisec-storage` lib test: missing `create` method
-- `aisec-auth`: tokio `process` feature gap
-- `aisec-integration-tests`: missing `tracing` dependency
-- `aisec-discovery`: hanging network test
-- Individual failures in `aisec-judge`, `aisec-plugin-host`
+- `promptlab-storage` lib test: missing `create` method
+- `promptlab-auth`: tokio `process` feature gap
+- `promptlab-integration-tests`: missing `tracing` dependency
+- `promptlab-discovery`: hanging network test
+- Individual failures in `promptlab-judge`, `promptlab-plugin-host`
 
 Frontend: `npm test` passes (28 tests).
 
@@ -1250,8 +1250,8 @@ npm run tauri build
 
 # Tests
 npm test
-cargo test -p aisec-core
-cargo test -p aisec-attack
+cargo test -p promptlab-core
+cargo test -p promptlab-attack
 ```
 
 ---

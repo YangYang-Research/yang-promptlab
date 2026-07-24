@@ -1,6 +1,6 @@
-# AISec Attack Framework
+# PromptLab Attack Framework
 
-**Crate:** `aisec-attack`  
+**Crate:** `promptlab-attack`  
 **Purpose:** Trait-based AI security attack execution with payload mutation, orchestration, and result collection.
 
 ---
@@ -52,14 +52,14 @@ ResultCollector
 ## Usage
 
 ```rust
-use aisec_attack::{
+use promptlab_attack::{
     AttackCategory, AttackContext, AttackExecutor, AttackOrchestrator,
     AttackRegistry, HttpTransport, OrchestratorConfig, ResultCollector,
 };
-use aisec_attack::types::AttackTarget;
+use promptlab_attack::types::AttackTarget;
 
 #[tokio::main]
-async fn main() -> aisec_attack::AttackResult<()> {
+async fn main() -> promptlab_attack::AttackResult<()> {
     let transport = HttpTransport::new();
     let executor = AttackExecutor::new(AttackRegistry::with_builtins(), transport);
 
@@ -116,7 +116,7 @@ Each payload attempt produces an `AttackEvaluation`:
 ## Tests
 
 ```bash
-cargo test -p aisec-attack
+cargo test -p promptlab-attack
 ```
 
 Coverage: lifecycle transitions, all 9 registry entries, mutators, executor, orchestrator, result collector, mock transport.
@@ -125,4 +125,4 @@ Coverage: lifecycle transitions, all 9 registry entries, mutators, executor, orc
 
 ## Storage Integration
 
-Attack results map to `attack_results` and `findings` tables in `aisec-storage`. Enable the optional `storage` feature for persistence sinks (future).
+Attack results map to `attack_results` and `findings` tables in `promptlab-storage`. Enable the optional `storage` feature for persistence sinks (future).

@@ -2,18 +2,18 @@
 
 use std::path::Path;
 
-use aisec_core::AisecResult;
-use aisec_storage::Database;
+use promptlab_core::PromptLabResult;
+use promptlab_storage::Database;
 use tracing::info;
 
-pub use aisec_core::{resolve_db_path, DB_FILENAME, DB_PATH_ENV};
+pub use promptlab_core::{resolve_db_path, DB_FILENAME, DB_PATH_ENV};
 
 /// Open the SQLite database at `path`, creating parent directories as needed and
 /// applying migrations.
-pub async fn open_database(path: &Path) -> AisecResult<Database> {
+pub async fn open_database(path: &Path) -> PromptLabResult<Database> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(aisec_core::AisecError::from)?;
+            std::fs::create_dir_all(parent).map_err(promptlab_core::PromptLabError::from)?;
         }
     }
 

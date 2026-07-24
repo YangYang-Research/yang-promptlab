@@ -1,6 +1,6 @@
 //! Payload engine integration tests.
 
-use aisec_payload::{
+use promptlab_payload::{
     base64_encode, hex_encode, html_encode, unicode_obfuscate, GenerateRequest,
     MutationKind, PayloadCategory, PayloadDatabase, PayloadPipeline, MutationEngine,
 };

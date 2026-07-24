@@ -1,9 +1,9 @@
 //! AI-backed remediation recommendations for scan results (wizard step 6).
 
-use aisec_agent::{MemoryContext, YazgDelegation, YazgSupervisor};
-use aisec_report::{generate_recommendations, data::StorageFindingRow};
-use aisec_storage::{Finding, FindingRepository, ScanRepository, TargetRepository, UpdateScan};
-use aisec_target_profile::{
+use promptlab_agent::{MemoryContext, YazgDelegation, YazgSupervisor};
+use promptlab_report::{generate_recommendations, data::StorageFindingRow};
+use promptlab_storage::{Finding, FindingRepository, ScanRepository, TargetRepository, UpdateScan};
+use promptlab_target_profile::{
     build_attack_results_summary, ensure_failed_scan_action_recommendation,
     AttackRecommendation, AttackRecommendationsBundle, FindingSummaryInput,
 };
@@ -199,7 +199,7 @@ pub async fn scan_recommendations_generate_op(
 }
 
 async fn persist_recommendations(
-    repos: &aisec_storage::Repositories,
+    repos: &promptlab_storage::Repositories,
     scan_id: &str,
     response: &ScanRecommendationsResponse,
 ) -> Result<(), String> {

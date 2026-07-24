@@ -1,6 +1,6 @@
 # AI Runtime Architecture Audit
 
-**Project:** AISec  
+**Project:** PromptLab  
 **Audit type:** Read-only, source-code evidence only  
 **Date:** 2026-06-13  
 **Auditor role:** Lead Software Architect (evidence-based)
@@ -12,7 +12,7 @@
 
 ## Executive Summary
 
-AISec has a **single embedded `RuntimeManager` per desktop process** (owned by Tauri `AppState`), a **production-grade AI Runtime UI**, and a **production-grade Models vault**. However, I found **no unified global AI inference gateway**. Judge, Attack Planner, and Payload Generator each wire into runtime through **separate, duplicated paths** and predominantly through **`judge_config.json`**, not through `RuntimeConfigurationDto` / `ai_inference_settings.json`.
+PromptLab has a **single embedded `RuntimeManager` per desktop process** (owned by Tauri `AppState`), a **production-grade AI Runtime UI**, and a **production-grade Models vault**. However, I found **no unified global AI inference gateway**. Judge, Attack Planner, and Payload Generator each wire into runtime through **separate, duplicated paths** and predominantly through **`judge_config.json`**, not through `RuntimeConfigurationDto` / `ai_inference_settings.json`.
 
 | Dimension | Score |
 |-----------|------:|
@@ -68,10 +68,10 @@ AISec has a **single embedded `RuntimeManager` per desktop process** (owned by T
 **Status:** ⚠️ PARTIALLY IMPLEMENTED
 
 **Evidence:**
-- **Local embedded runtime:** one `RuntimeSupervisor` inside the single `RuntimeManager` (`crates/aisec-runtime/src/manager.rs:46`)
-- **Remote/third-party inference:** `aisec-judge` `RemoteLlmBackend` (`crates/aisec-judge/src/providers/remote.rs`) — separate HTTP stack, not managed by `RuntimeManager`
-- **Ollama client runtime:** `aisec-models::OllamaRuntime` (`crates/aisec-models/src/runtime/ollama.rs`) — can be selected via judge local provider `Ollama` (`crates/aisec-judge/src/config.rs:10-13`)
-- **In-process llama:** `LlamaInProcessRuntime` exists in `aisec-models` (feature-gated) — not the primary desktop path
+- **Local embedded runtime:** one `RuntimeSupervisor` inside the single `RuntimeManager` (`crates/promptlab-runtime/src/manager.rs:46`)
+- **Remote/third-party inference:** `promptlab-judge` `RemoteLlmBackend` (`crates/promptlab-judge/src/providers/remote.rs`) — separate HTTP stack, not managed by `RuntimeManager`
+- **Ollama client runtime:** `promptlab-models::OllamaRuntime` (`crates/promptlab-models/src/runtime/ollama.rs`) — can be selected via judge local provider `Ollama` (`crates/promptlab-judge/src/config.rs:10-13`)
+- **In-process llama:** `LlamaInProcessRuntime` exists in `promptlab-models` (feature-gated) — not the primary desktop path
 
 **Explanation:** There is one **process supervisor** for llama-server, but multiple **inference backends** can be active depending on judge config and route. This is not a single global inference runtime in the architectural sense.
 
@@ -82,8 +82,8 @@ AISec has a **single embedded `RuntimeManager` per desktop process** (owned by T
 **Status:** ✅ IMPLEMENTED (local mode only)
 
 **Evidence:**
-- Lifecycle enum: `crates/aisec-runtime/src/state.rs:8-20`
-- Central orchestration: `crates/aisec-runtime/src/manager.rs:121-336` (`bootstrap`, `repair`, `start_runtime`, `stop_runtime`, `restart_runtime`, `delete_runtime`, `load_model_at_path`, `unload_loaded_model`)
+- Lifecycle enum: `crates/promptlab-runtime/src/state.rs:8-20`
+- Central orchestration: `crates/promptlab-runtime/src/manager.rs:121-336` (`bootstrap`, `repair`, `start_runtime`, `stop_runtime`, `restart_runtime`, `delete_runtime`, `load_model_at_path`, `unload_loaded_model`)
 - IPC surface: `src-tauri/src/commands/runtime.rs:136-327`
 - Graceful shutdown: `src-tauri/src/lib.rs:44-54`
 - Health watch: `src-tauri/src/runtime_watch.rs:14-18` (single watch loop guard)
@@ -110,7 +110,7 @@ AISec has a **single embedded `RuntimeManager` per desktop process** (owned by T
 **Evidence:**
 - I could not find a Rust type named `RuntimeConfiguration`
 - Closest aggregate: `RuntimeConfigurationDto` at `src-tauri/src/commands/runtime.rs:85-97` (IPC/UI DTO)
-- Low-level install config: `aisec_runtime::RuntimeConfig` at `crates/aisec-runtime/src/config.rs:8-17`
+- Low-level install config: `promptlab_runtime::RuntimeConfig` at `crates/promptlab-runtime/src/config.rs:8-17`
 - In-memory cache: `src-tauri/src/state.rs:28` — `runtime_config_cache: Arc<AsyncMutex<Option<RuntimeConfigurationDto>>>`
 
 ---
@@ -136,8 +136,8 @@ AISec has a **single embedded `RuntimeManager` per desktop process** (owned by T
 **Status:** ✅ IMPLEMENTED
 
 **Evidence:**
-- Engine config: `crates/aisec-judge/src/types.rs:298-307` — `JudgeConfig`
-- Persisted provider config: `crates/aisec-judge/src/config.rs:138-152` — `JudgeProviderConfig`
+- Engine config: `crates/promptlab-judge/src/types.rs:298-307` — `JudgeConfig`
+- Persisted provider config: `crates/promptlab-judge/src/config.rs:138-152` — `JudgeProviderConfig`
 - IPC DTO: `src-tauri/src/commands/judge.rs:18-49` — `JudgeConfigDto`
 - Frontend mirror: `src/shared/ipc/judge.ts:15-40`
 - Persistence path: `src-tauri/src/judge_config.rs:12-13` — `{data_dir}/judge_config.json`
@@ -190,14 +190,14 @@ AISec has a **single embedded `RuntimeManager` per desktop process** (owned by T
 
 | Object | Location | Persistence |
 |--------|----------|-------------|
-| `JudgeProviderConfig` | `crates/aisec-judge/src/config.rs` | `judge_config.json` |
-| `JudgeConfig` | `crates/aisec-judge/src/types.rs` | In-memory (derived) |
+| `JudgeProviderConfig` | `crates/promptlab-judge/src/config.rs` | `judge_config.json` |
+| `JudgeConfig` | `crates/promptlab-judge/src/types.rs` | In-memory (derived) |
 | `AiInferenceSettings` | `src-tauri/src/ai_inference_settings.rs` | `ai_inference_settings.json` |
-| `RuntimeConfig` | `crates/aisec-runtime/src/config.rs` | Derived from data dir + manifest |
+| `RuntimeConfig` | `crates/promptlab-runtime/src/config.rs` | Derived from data dir + manifest |
 | `RuntimeConfigurationDto` | `src-tauri/src/commands/runtime.rs` | Ephemeral / cache only |
-| `ModelEntry` / registry | `crates/aisec-models` | `models/registry.json` |
-| `RuntimeManifest` | `crates/aisec-runtime/src/manifest.rs` | `runtime/manifest.json` |
-| `AgentConfig` | `crates/aisec-agent` | In-memory per scan job |
+| `ModelEntry` / registry | `crates/promptlab-models` | `models/registry.json` |
+| `RuntimeManifest` | `crates/promptlab-runtime/src/manifest.rs` | `runtime/manifest.json` |
+| `AgentConfig` | `crates/promptlab-agent` | In-memory per scan job |
 
 ---
 
@@ -211,7 +211,7 @@ AISec has a **single embedded `RuntimeManager` per desktop process** (owned by T
 
 **Status:** ✅ IMPLEMENTED (as process supervisor + status; **not** as inference gateway)
 
-**Evidence:** `crates/aisec-runtime/src/manager.rs`
+**Evidence:** `crates/promptlab-runtime/src/manager.rs`
 
 | Method | Line | Purpose |
 |--------|------|---------|
@@ -291,15 +291,15 @@ Scan / Attack execution
       → load_judge_config (judge_config.json)
       → prepare_judge_runtime_context (judge_config.rs:173-217)
         → RuntimeSupervisor.ensure_running / ensure_model_loaded
-      → aisec_judge::build_judge_engine (crates/aisec-judge/src/factory.rs:21-27)
-        → ModelRolePool + JudgeEngine (crates/aisec-judge/src/engine.rs:167-185)
-          → LlmEvaluator (crates/aisec-judge/src/evaluators/llm.rs)
+      → promptlab_judge::build_judge_engine (crates/promptlab-judge/src/factory.rs:21-27)
+        → ModelRolePool + JudgeEngine (crates/promptlab-judge/src/engine.rs:167-185)
+          → LlmEvaluator (crates/promptlab-judge/src/evaluators/llm.rs)
             → InferenceRuntime trait
               → Local: ModelProviderRuntime → EmbeddedModelProvider → LocalInferenceEngine
               → Remote: RemoteLlmBackend → HTTP (OpenAI-compatible etc.)
 ```
 
-**Evidence:** `aisec-judge` crate has **zero** imports of `RuntimeManager` (verified by subagent grep). Bridge is at Tauri shell only.
+**Evidence:** `promptlab-judge` crate has **zero** imports of `RuntimeManager` (verified by subagent grep). Bridge is at Tauri shell only.
 
 ---
 
@@ -310,10 +310,10 @@ AIRuntimePage / Scan Wizard (AttackPlanStep)
   → planner_generate IPC (src-tauri/src/commands/planner.rs:84-153)
     → load_judge_config + prepare_judge_runtime_context
     → build_planner_llm_backend (planner.rs:155-182)
-      → LocalLlmBackend (crates/aisec-judge/src/providers/local.rs)
-        → ModelProviderRuntime (crates/aisec-runtime/src/inference_adapter.rs)
-    → aisec_planner::generate_attack_plan (crates/aisec-planner/src/engine.rs:7-23)
-      → deterministic OR local_llm (crates/aisec-planner/src/local_llm.rs)
+      → LocalLlmBackend (crates/promptlab-judge/src/providers/local.rs)
+        → ModelProviderRuntime (crates/promptlab-runtime/src/inference_adapter.rs)
+    → promptlab_planner::generate_attack_plan (crates/promptlab-planner/src/engine.rs:7-23)
+      → deterministic OR local_llm (crates/promptlab-planner/src/local_llm.rs)
 ```
 
 **Agent scan path (different):**
@@ -333,7 +333,7 @@ generator_generate / scan_start
     → load_judge_config + prepare_judge_runtime_context
     → build_generator_llm_backend (generator.rs:224-251)
     → JudgeGeneratorLlm (src-tauri/src/generator_service.rs:9-27)
-    → aisec_generator::generate_from_plan (crates/aisec-generator/src/engine.rs)
+    → promptlab_generator::generate_from_plan (crates/promptlab-generator/src/engine.rs)
 ```
 
 **Agent path bug:**
@@ -341,7 +341,7 @@ generator_generate / scan_start
 src-tauri/src/agent_service.rs:112
   → generate_from_plan(&category_plan, mode, None)  // None LLM backend
 ```
-If `mode == LocalLlm`, generator errors at `crates/aisec-generator/src/engine.rs:25-28`.
+If `mode == LocalLlm`, generator errors at `crates/promptlab-generator/src/engine.rs:25-28`.
 
 ---
 
@@ -350,9 +350,9 @@ If `mode == LocalLlm`, generator errors at `crates/aisec-generator/src/engine.rs
 **Status:** ❌ NOT IMPLEMENTED (as named module)
 
 **Evidence:** I could not find `PromptGenerator` type, crate, or IPC command. Prompts are inline in:
-- `crates/aisec-planner/src/local_llm.rs:58-94`
-- `crates/aisec-generator/src/local_llm.rs:97-131`
-- `crates/aisec-judge/src/prompts.rs:1-60` (evaluation prompts, not generation service)
+- `crates/promptlab-planner/src/local_llm.rs:58-94`
+- `crates/promptlab-generator/src/local_llm.rs:97-131`
+- `crates/promptlab-judge/src/prompts.rs:1-60` (evaluation prompts, not generation service)
 
 ---
 
@@ -362,7 +362,7 @@ If `mode == LocalLlm`, generator errors at `crates/aisec-generator/src/engine.rs
 report_generate IPC
   → src-tauri/src/commands/domain.rs:191-241
     → SQLite findings
-    → aisec_report::ReportingEngine (crates/aisec-report/src/engine.rs:27-41)
+    → promptlab_report::ReportingEngine (crates/promptlab-report/src/engine.rs:27-41)
       → HTML/JSON/SARIF/PDF formatters (rule-based)
 ```
 
@@ -382,7 +382,7 @@ report_generate IPC
 | Does Judge select model? | ✅ | `vault_model_id` in local settings (`judge_config.rs`) |
 | Does Judge select provider? | ✅ | `LocalProvider` / `RemoteProvider` (`config.rs:10-31`) |
 | Does Judge directly invoke runtime? | ❌ | `JudgeEngine` uses `InferenceRuntime` trait only (`engine.rs:167-185`) |
-| Does Judge call `RuntimeManager`? | ❌ | No import in `aisec-judge`; Tauri shell calls supervisor |
+| Does Judge call `RuntimeManager`? | ❌ | No import in `promptlab-judge`; Tauri shell calls supervisor |
 | Duplicated runtime logic in Judge? | ⚠️ | `build_local_backend` in `factory.rs:99-130` duplicates Tauri planner/generator wiring |
 
 ---
@@ -395,7 +395,7 @@ report_generate IPC
 
 | Item | Status | Evidence |
 |------|--------|----------|
-| Crate implementation | ✅ | `crates/aisec-planner/` — deterministic + local LLM |
+| Crate implementation | ✅ | `crates/promptlab-planner/` — deterministic + local LLM |
 | IPC command | ✅ | `src-tauri/src/commands/planner.rs` |
 | UI integration | ✅ | `src/features/scans/steps/AttackPlanStep.tsx:137-153` |
 | Uses `RuntimeManager` | ⚠️ | Via `runtime_mgr.supervisor_mut()` only (`planner.rs:125-131`) |
@@ -414,7 +414,7 @@ report_generate IPC
 
 | Item | Status | Evidence |
 |------|--------|----------|
-| Crate | ✅ | `crates/aisec-generator/` |
+| Crate | ✅ | `crates/promptlab-generator/` |
 | Static / mutation modes | ✅ | `static_pack.rs`, `template_mutation.rs` |
 | Local LLM mode | ✅ | `local_llm.rs` + IPC `generator.rs` |
 | Runtime path | ⚠️ | Same judge vault bridge as planner |
@@ -422,7 +422,7 @@ report_generate IPC
 | Agent local LLM | ❌ | `None` backend passed (`agent_service.rs:112`) |
 | Remote LLM generator | ❌ | Not found |
 
-**Note:** `aisec-payload` is a static mutation library, not the IPC payload generator.
+**Note:** `promptlab-payload` is a static mutation library, not the IPC payload generator.
 
 ---
 
@@ -435,10 +435,10 @@ report_generate IPC
 **Status:** ✅ IMPLEMENTED (deterministic, non-AI)
 
 **Evidence:**
-- `crates/aisec-report/src/engine.rs:27-41` — template rendering only
-- `crates/aisec-report/src/recommendations.rs:6-78` — rule-based recommendations
+- `crates/promptlab-report/src/engine.rs:27-41` — template rendering only
+- `crates/promptlab-report/src/recommendations.rs:6-78` — rule-based recommendations
 - `src-tauri/src/commands/domain.rs:226-240` — no LLM calls
-- Grep over `aisec-report/**` found no `InferenceRuntime`, `ollama`, or `openai` usage
+- Grep over `promptlab-report/**` found no `InferenceRuntime`, `ollama`, or `openai` usage
 
 **AI-powered report generation:** ❌ NOT IMPLEMENTED
 
@@ -462,11 +462,11 @@ report_generate IPC
 
 | Abstraction | File |
 |-------------|------|
-| `InferenceRuntime` trait | `crates/aisec-models/src/runtime/mod.rs:24` |
-| `LocalInferenceEngine` | `crates/aisec-models/src/runtime/inference_engine.rs` |
-| `EmbeddedModelProvider` | `crates/aisec-runtime/src/embedded.rs` |
-| `ModelProviderRuntime` | `crates/aisec-runtime/src/inference_adapter.rs` |
-| `LlmBackend` trait | `crates/aisec-judge/src/providers/mod.rs` |
+| `InferenceRuntime` trait | `crates/promptlab-models/src/runtime/mod.rs:24` |
+| `LocalInferenceEngine` | `crates/promptlab-models/src/runtime/inference_engine.rs` |
+| `EmbeddedModelProvider` | `crates/promptlab-runtime/src/embedded.rs` |
+| `ModelProviderRuntime` | `crates/promptlab-runtime/src/inference_adapter.rs` |
+| `LlmBackend` trait | `crates/promptlab-judge/src/providers/mod.rs` |
 | `JudgeGeneratorLlm` / `JudgePlannerLlm` | `src-tauri/src/generator_service.rs`, `planner_service.rs` |
 
 **Status:** ❌ NOT IMPLEMENTED — no business-level AI service layer
@@ -597,12 +597,12 @@ Frontend boot → health IPC → Connected
 
 | Duplication | Locations | Evidence |
 |-------------|-----------|----------|
-| Vault LLM backend wiring | `aisec-judge/src/factory.rs:99-130`, `commands/planner.rs:155-182`, `commands/generator.rs:224-251` | Near-identical `ModelProviderRuntime` + `LocalLlmBackend` setup |
+| Vault LLM backend wiring | `promptlab-judge/src/factory.rs:99-130`, `commands/planner.rs:155-182`, `commands/generator.rs:224-251` | Near-identical `ModelProviderRuntime` + `LocalLlmBackend` setup |
 | LLM adapter traits | `PlannerLlm`, `GeneratorLlm`, `JudgePlannerLlm`, `JudgeGeneratorLlm` | Separate thin wrappers with different token limits |
 | Dual settings systems | `judge_config.json` vs `ai_inference_settings.json` | Planner/generator ignore AI Runtime route file |
 | Ollama vs llama.cpp routing | `judge_config.rs`, `inference_engine.rs`, `ollama.rs`, `llama_cpp_runtime.rs` | Multiple layers |
-| OpenAI-compatible HTTP | `aisec-judge/providers/remote.rs`, `aisec-harness/providers/openai.rs` | Judge remote vs attack transport — not shared |
-| JSON extraction from LLM output | `aisec-planner/local_llm.rs:142-154`, `aisec-generator/local_llm.rs:133-152`, `aisec-judge/evaluators/llm.rs:16-24` | Partial duplication |
+| OpenAI-compatible HTTP | `promptlab-judge/providers/remote.rs`, `promptlab-harness/providers/openai.rs` | Judge remote vs attack transport — not shared |
+| JSON extraction from LLM output | `promptlab-planner/local_llm.rs:142-154`, `promptlab-generator/local_llm.rs:133-152`, `promptlab-judge/evaluators/llm.rs:16-24` | Partial duplication |
 | Legacy Ollama naming | `AppState::ollama_base_url()` (`state.rs:114-121`), `DEFAULT_JUDGE_CONFIG.localProvider: "ollama"` (`judge.ts:225-226`) | Misleading names post-migration |
 
 ---
@@ -615,10 +615,10 @@ Frontend boot → health IPC → Connected
 
 | Item | Status | Evidence |
 |------|--------|----------|
-| `curated_catalog()` deprecated | ⚠️ | `crates/aisec-models/src/catalog.rs:15-17` — returns empty, no callers |
-| `bundled_ollama_binary()` deprecated | ⚠️ | `crates/aisec-runtime/src/paths.rs:20-27` |
-| `OllamaRuntime` legacy client | ⚠️ | `crates/aisec-models/src/runtime/ollama.rs` — still in tree |
-| `LocalProvider::Ollama` in judge schema | ⚠️ | `crates/aisec-judge/src/config.rs:10-13` |
+| `curated_catalog()` deprecated | ⚠️ | `crates/promptlab-models/src/catalog.rs:15-17` — returns empty, no callers |
+| `bundled_ollama_binary()` deprecated | ⚠️ | `crates/promptlab-runtime/src/paths.rs:20-27` |
+| `OllamaRuntime` legacy client | ⚠️ | `crates/promptlab-models/src/runtime/ollama.rs` — still in tree |
+| `LocalProvider::Ollama` in judge schema | ⚠️ | `crates/promptlab-judge/src/config.rs:10-13` |
 | Unused IPC: `getRuntimeStatus` | ⚠️ | `src/shared/ipc/runtime.ts:144` — no feature usage |
 | Unused IPC: `getRuntimeInferenceSettings` | ⚠️ | `runtime.ts:134` |
 | Unused IPC: `installModel`, `verifyModel`, `testModelEmbeddings` | ⚠️ | `src/shared/ipc/models.ts` |
@@ -663,7 +663,7 @@ Frontend boot → health IPC → Connected
 |-----|-----|--------|-------|--------|
 | Triplicated `build_*_llm_backend` | Copy-paste in 3 places | Drift, bugs on provider changes | `factory.rs`, `planner.rs`, `generator.rs` | M (3-5 days) |
 | Judge Provider page separate from AI Runtime | Two operator surfaces | Confusion, misconfiguration | `JudgeProviderPage.tsx`, `AIRuntimePage.tsx` | M (1 week) |
-| Remote inference not in planner/generator | Only judge has `RemoteLlm` | Third-party route unused for planning/generation | `aisec-planner`, `aisec-generator` | L (2 weeks) |
+| Remote inference not in planner/generator | Only judge has `RemoteLlm` | Third-party route unused for planning/generation | `promptlab-planner`, `promptlab-generator` | L (2 weeks) |
 
 ### Medium
 
@@ -712,7 +712,7 @@ Frontend boot → health IPC → Connected
 | Approach | Derive judge local `vault_model_id` from `ai_inference_settings.selected_model_id` when route is local; deprecate independent vault pick in judge UI |
 | Risk | Medium — existing users with mismatched configs |
 | Dependencies | None |
-| Rollback | Feature flag `AISec_USE_LEGACY_JUDGE_CONFIG=1` reading old file only |
+| Rollback | Feature flag `PromptLab_USE_LEGACY_JUDGE_CONFIG=1` reading old file only |
 
 ### Phase 2 — Extract shared vault LLM backend builder
 
@@ -742,7 +742,7 @@ Frontend boot → health IPC → Connected
 
 | Item | Detail |
 |------|--------|
-| Files affected | `JudgeProviderPage.tsx`, `AIRuntimePage.tsx`, `agent_service.rs`, `aisec-planner`, `aisec-generator` |
+| Files affected | `JudgeProviderPage.tsx`, `AIRuntimePage.tsx`, `agent_service.rs`, `promptlab-planner`, `promptlab-generator` |
 | Risk | Medium — UX change |
 | Dependencies | Phase 3 |
 | Rollback | Keep hidden route to legacy judge page |
@@ -788,9 +788,9 @@ flowchart TB
 
   subgraph Crates[Rust Crates]
     JudgeEngine[JudgeEngine]
-    Planner[aisec-planner]
-    Generator[aisec-generator]
-    Report[aisec-report - no AI]
+    Planner[promptlab-planner]
+    Generator[promptlab-generator]
+    Report[promptlab-report - no AI]
     RemoteBE[RemoteLlmBackend]
     LocalBE[LocalLlmBackend]
     LIE[LocalInferenceEngine]
@@ -953,16 +953,16 @@ flowchart TB
   end
 
   subgraph DomainCrates[Domain crates — no AppState]
-    DiscoveryC[aisec-discovery]
-    FingerprintC[aisec-fingerprint]
-    HarnessC[aisec-harness]
-    AttackC[aisec-attack]
-    PlannerC[aisec-planner]
-    GeneratorC[aisec-generator]
-    JudgeC[aisec-judge]
-    ReportC[aisec-report]
-    ModelsC[aisec-models]
-    RuntimeC[aisec-runtime]
+    DiscoveryC[promptlab-discovery]
+    FingerprintC[promptlab-fingerprint]
+    HarnessC[promptlab-harness]
+    AttackC[promptlab-attack]
+    PlannerC[promptlab-planner]
+    GeneratorC[promptlab-generator]
+    JudgeC[promptlab-judge]
+    ReportC[promptlab-report]
+    ModelsC[promptlab-models]
+    RuntimeC[promptlab-runtime]
   end
 
   Dashboard -->|getRuntimeConfiguration| RuntimeIPC
@@ -1047,27 +1047,27 @@ flowchart TB
 
 ```mermaid
 flowchart BT
-  Core[aisec-core]
+  Core[promptlab-core]
 
-  Storage[aisec-storage]
-  Payload[aisec-payload]
-  Fingerprint[aisec-fingerprint]
-  Discovery[aisec-discovery]
-  Report[aisec-report]
-  PluginHost[aisec-plugin-host]
-  Auth[aisec-auth]
+  Storage[promptlab-storage]
+  Payload[promptlab-payload]
+  Fingerprint[promptlab-fingerprint]
+  Discovery[promptlab-discovery]
+  Report[promptlab-report]
+  PluginHost[promptlab-plugin-host]
+  Auth[promptlab-auth]
 
-  Harness[aisec-harness]
-  Models[aisec-models]
-  Runtime[aisec-runtime]
+  Harness[promptlab-harness]
+  Models[promptlab-models]
+  Runtime[promptlab-runtime]
 
-  Attack[aisec-attack]
-  Planner[aisec-planner]
-  Generator[aisec-generator]
-  Judge[aisec-judge]
-  Agent[aisec-agent]
+  Attack[promptlab-attack]
+  Planner[promptlab-planner]
+  Generator[promptlab-generator]
+  Judge[promptlab-judge]
+  Agent[promptlab-agent]
 
-  Desktop[aisec-desktop / src-tauri]
+  Desktop[promptlab-desktop / src-tauri]
 
   Storage --> Core
   Payload --> Core
@@ -1131,13 +1131,13 @@ flowchart BT
 
 **Evidence (manifest dependencies):**
 - `src-tauri/Cargo.toml:22-36` — desktop depends on all feature crates
-- `crates/aisec-runtime/Cargo.toml:11-12` — `aisec-core`, `aisec-models`
-- `crates/aisec-judge/Cargo.toml:20-23` — `aisec-harness`, `aisec-models`, `aisec-runtime`
-- `crates/aisec-generator/Cargo.toml:11-14` — `aisec-planner`, `aisec-attack`, `aisec-payload`
-- `crates/aisec-planner/Cargo.toml:11-13` — `aisec-attack`, `aisec-fingerprint`
-- `crates/aisec-attack/Cargo.toml:15-17` — `aisec-harness`, `aisec-payload`
-- `crates/aisec-discovery/Cargo.toml:11` — `aisec-core` only (isolated)
-- `crates/aisec-report/Cargo.toml:11,22` — `aisec-core`, `aisec-storage` (no AI crates)
+- `crates/promptlab-runtime/Cargo.toml:11-12` — `promptlab-core`, `promptlab-models`
+- `crates/promptlab-judge/Cargo.toml:20-23` — `promptlab-harness`, `promptlab-models`, `promptlab-runtime`
+- `crates/promptlab-generator/Cargo.toml:11-14` — `promptlab-planner`, `promptlab-attack`, `promptlab-payload`
+- `crates/promptlab-planner/Cargo.toml:11-13` — `promptlab-attack`, `promptlab-fingerprint`
+- `crates/promptlab-attack/Cargo.toml:15-17` — `promptlab-harness`, `promptlab-payload`
+- `crates/promptlab-discovery/Cargo.toml:11` — `promptlab-core` only (isolated)
+- `crates/promptlab-report/Cargo.toml:11,22` — `promptlab-core`, `promptlab-storage` (no AI crates)
 
 #### Tauri shell internal module edges (selected)
 
@@ -1169,12 +1169,12 @@ flowchart BT
 **Status:** ✅ **No compile-time crate cycles found**
 
 **Evidence:**
-- `aisec-planner` does **not** import `aisec-generator` (grep — no matches in `crates/aisec-planner`)
-- `aisec-harness` does **not** import `aisec-judge` or `aisec-runtime`
-- `aisec-runtime` does **not** import `aisec-judge`
+- `promptlab-planner` does **not** import `promptlab-generator` (grep — no matches in `crates/promptlab-planner`)
+- `promptlab-harness` does **not** import `promptlab-judge` or `promptlab-runtime`
+- `promptlab-runtime` does **not** import `promptlab-judge`
 
 Longest AI-related chain:  
-`aisec-desktop` → `aisec-agent` → `aisec-generator` → `aisec-planner` → `aisec-fingerprint` → `aisec-core`
+`promptlab-desktop` → `promptlab-agent` → `promptlab-generator` → `promptlab-planner` → `promptlab-fingerprint` → `promptlab-core`
 
 #### Tauri command modules (same crate — mutual imports)
 
@@ -1205,10 +1205,10 @@ I found **no infinite call loop**, but **two config files can diverge** without 
 |-------------|--------|----------|
 | **AI model selection** | ⚠️ DUPLICATED | `ai_inference_settings.selected_model_id` (`ai_inference_settings.rs:42`) vs `judge_config.local.vault_model_id` |
 | **Runtime supervisor access** | ⚠️ DUPLICATED | Inside `RuntimeManager` (`state.rs:27`) but also passed as `&mut RuntimeSupervisor` (`judge_config.rs:189-210`, `planner.rs:125-131`, `generator.rs:169-176`) |
-| **LLM backend construction** | ⚠️ TRIPLICATED | `aisec-judge/src/factory.rs:99-130`, `commands/planner.rs:155-182`, `commands/generator.rs:224-251` |
+| **LLM backend construction** | ⚠️ TRIPLICATED | `promptlab-judge/src/factory.rs:99-130`, `commands/planner.rs:155-182`, `commands/generator.rs:224-251` |
 | **Harness factory** | ⚠️ DUPLICATED | `AppState.harness_factory` (`state.rs:22`) and per-attack rebuild (`harness_runtime.rs:78-100`) |
 | **Runtime configuration assembly** | ⚠️ DUPLICATED | `assemble_runtime_configuration` (`runtime.rs:465`), `runtime_config_cache` (`state.rs:28`), `assemble_runtime_configuration_busy_fallback` (`runtime.rs:588`) |
-| **OpenAI-compatible HTTP** | ⚠️ DUPLICATED | Judge: `aisec-judge/providers/remote.rs`; Attack transport: `aisec-harness/providers/openai.rs` |
+| **OpenAI-compatible HTTP** | ⚠️ DUPLICATED | Judge: `promptlab-judge/providers/remote.rs`; Attack transport: `promptlab-harness/providers/openai.rs` |
 | **Fingerprint ownership** | ✅ SINGLE | Written in `discovery_run` (`discovery.rs:23-25`); read by planner from SQLite (`planner.rs:103-108`) |
 
 ---
@@ -1228,7 +1228,7 @@ I found **no infinite call loop**, but **two config files can diverge** without 
 
 | Separation candidate | Rationale | Evidence |
 |---------------------|-----------|----------|
-| **`aisec-judge` ↔ `aisec-harness`** | Judge depends on harness only for `NormalizedResponse` | `aisec-judge/Cargo.toml:21`, `engine.rs:61` |
+| **`promptlab-judge` ↔ `promptlab-harness`** | Judge depends on harness only for `NormalizedResponse` | `promptlab-judge/Cargo.toml:21`, `engine.rs:61` |
 | **Tauri `commands/*` vs inference gateway** | Shell directly wires judge/planner/generator/runtime | `attack.rs:151-157`, `planner.rs:122-145`, `generator.rs:167-190` |
 | **`RuntimeManager` lifecycle vs inference routing** | Supervisor vs `EmbeddedModelProvider` routing | `manager.rs:227-336` vs `judge_config.rs:173-217`, `embedded.rs:59-69` |
 | **Dashboard vs AI Runtime page** | Dashboard should stay read-only aggregate | `DashboardPage.tsx:37-50` |
@@ -1240,11 +1240,11 @@ I found **no infinite call loop**, but **two config files can diverge** without 
 | Module | Depends on (direct) | Depended on by | AI Runtime link |
 |--------|---------------------|----------------|-----------------|
 | **AI Runtime (UI)** | `runtime_*` IPC | Dashboard (read-only) | Primary surface |
-| **RuntimeManager** | `aisec-models`, llama-server | AppState, lifecycle IPC | Local supervisor |
-| **Harness** | `aisec-core`, optional `aisec-auth` | `aisec-attack`, judge (types), desktop | Target transport only |
+| **RuntimeManager** | `promptlab-models`, llama-server | AppState, lifecycle IPC | Local supervisor |
+| **Harness** | `promptlab-core`, optional `promptlab-auth` | `promptlab-attack`, judge (types), desktop | Target transport only |
 | **Judge Engine** | harness, models, runtime crates | Attack scan, judge IPC | Via `judge_config`, not AI Runtime settings |
-| **Discovery** | `aisec-core` | `discovery_run` | None |
-| **Fingerprint** | `aisec-core` | discovery, planner | None |
+| **Discovery** | `promptlab-core` | `discovery_run` | None |
+| **Fingerprint** | `promptlab-core` | discovery, planner | None |
 | **Attack Planner** | fingerprint, attack | generator, agent, planner IPC | Local LLM via Tauri → judge config |
 | **Payload Generator** | planner, payload | scan, generator IPC, agent | Same as planner |
 | **Reports** | storage | `report_generate` | None — no AI |

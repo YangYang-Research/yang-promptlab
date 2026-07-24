@@ -3,7 +3,7 @@
 //! Used for Sequential execution strategy. No reflection/adapt loop, but still
 //! recovers from endpoint/transport failures via pacing adjustments.
 
-use aisec_planner::PlannerLlm;
+use promptlab_planner::PlannerLlm;
 use serde::Deserialize;
 use tracing::{info, warn};
 

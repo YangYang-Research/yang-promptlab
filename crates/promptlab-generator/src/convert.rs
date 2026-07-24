@@ -1,5 +1,5 @@
-use aisec_attack::{AttackCategory, AttackPayload, PayloadFormat};
-use aisec_payload::{GeneratedPayload, PayloadCategory, PayloadRecord};
+use promptlab_attack::{AttackCategory, AttackPayload, PayloadFormat};
+use promptlab_payload::{GeneratedPayload, PayloadCategory, PayloadRecord};
 
 pub fn attack_to_payload_category(category: AttackCategory) -> PayloadCategory {
     match category {

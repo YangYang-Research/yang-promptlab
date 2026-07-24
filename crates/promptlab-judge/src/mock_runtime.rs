@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use aisec_models::runtime::InferenceRuntime;
-use aisec_models::types::{InferenceRequest, InferenceResponse, RuntimeState};
+use promptlab_models::runtime::InferenceRuntime;
+use promptlab_models::types::{InferenceRequest, InferenceResponse, RuntimeState};
 
 /// Mock llama.cpp runtime returning fixed JSON for judge tests.
 pub struct JsonMockRuntime {
@@ -39,12 +39,12 @@ impl InferenceRuntime for JsonMockRuntime {
         }
     }
 
-    async fn load_model(&mut self, _model_path: &std::path::Path) -> aisec_models::ModelResult<()> {
+    async fn load_model(&mut self, _model_path: &std::path::Path) -> promptlab_models::ModelResult<()> {
         self.ready = true;
         Ok(())
     }
 
-    async fn unload(&mut self) -> aisec_models::ModelResult<()> {
+    async fn unload(&mut self) -> promptlab_models::ModelResult<()> {
         self.ready = false;
         Ok(())
     }
@@ -52,7 +52,7 @@ impl InferenceRuntime for JsonMockRuntime {
     async fn complete(
         &self,
         _request: InferenceRequest,
-    ) -> aisec_models::ModelResult<InferenceResponse> {
+    ) -> promptlab_models::ModelResult<InferenceResponse> {
         if !self.ready {
             // Auto-ready for tests without explicit load
         }
@@ -63,7 +63,7 @@ impl InferenceRuntime for JsonMockRuntime {
         })
     }
 
-    async fn health(&self) -> aisec_models::ModelResult<bool> {
+    async fn health(&self) -> promptlab_models::ModelResult<bool> {
         Ok(true)
     }
 }

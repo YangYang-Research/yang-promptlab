@@ -1,23 +1,23 @@
-//! AISec MVP end-to-end validation.
+//! PromptLab MVP end-to-end validation.
 //!
 //! Exercises the full flow against a live local HTTP target (wiremock):
-//!   1. Create project          (aisec-storage)
-//!   2. Add target URL          (aisec-storage)
-//!   3. Run Discovery           (aisec-discovery — real HTTP crawl + probes)
-//!   4. Detect AI endpoints     (aisec-discovery + aisec-fingerprint)
-//!   5. Prompt injection attack (aisec-attack — real HTTP, persisted findings)
-//!   6. Evaluate response       (aisec-judge — LLM verdict via mock runtime)
-//!   7. Generate report         (aisec-report — HTML)
+//!   1. Create project          (promptlab-storage)
+//!   2. Add target URL          (promptlab-storage)
+//!   3. Run Discovery           (promptlab-discovery — real HTTP crawl + probes)
+//!   4. Detect AI endpoints     (promptlab-discovery + promptlab-fingerprint)
+//!   5. Prompt injection attack (promptlab-attack — real HTTP, persisted findings)
+//!   6. Evaluate response       (promptlab-judge — LLM verdict via mock runtime)
+//!   7. Generate report         (promptlab-report — HTML)
 //!
 //! Everything is real: real HTTP, real SQLite, real evaluation, real HTML.
 
-use aisec_attack::{scanner::PromptInjectionScanner, scanner::ScanContext, AttackBudget, AttackTarget};
-use aisec_discovery::{DiscoveryConfig, DiscoveryEngine, EndpointKind};
-use aisec_fingerprint::{FingerprintEngine, FingerprintInput};
-use aisec_judge::{JsonMockRuntime, JudgeEngine, JudgeRequest, ModelRolePool};
-use aisec_models::runtime::InferenceRuntime;
-use aisec_report::{ReportDataBuilder, ReportFormat, ReportKind, ReportingEngine, StorageFindingRow};
-use aisec_storage::{
+use promptlab_attack::{scanner::PromptInjectionScanner, scanner::ScanContext, AttackBudget, AttackTarget};
+use promptlab_discovery::{DiscoveryConfig, DiscoveryEngine, EndpointKind};
+use promptlab_fingerprint::{FingerprintEngine, FingerprintInput};
+use promptlab_judge::{JsonMockRuntime, JudgeEngine, JudgeRequest, ModelRolePool};
+use promptlab_models::runtime::InferenceRuntime;
+use promptlab_report::{ReportDataBuilder, ReportFormat, ReportKind, ReportingEngine, StorageFindingRow};
+use promptlab_storage::{
     CreateProject, CreateScan, CreateTarget, Database, FindingRepository, ProjectRepository,
     ScanRepository, TargetRepository,
 };

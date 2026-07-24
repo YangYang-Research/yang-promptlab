@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 
 use crate::error::StorageResultExt;
 use crate::models::{
@@ -23,7 +23,7 @@ impl SqliteAttackCatalogRepository {
 
 #[async_trait]
 impl AttackCatalogRepository for SqliteAttackCatalogRepository {
-    async fn get(&self, id: &str) -> AisecResult<AttackCatalogTechnique> {
+    async fn get(&self, id: &str) -> PromptLabResult<AttackCatalogTechnique> {
         sqlx::query_as::<_, AttackCatalogTechnique>(
             "SELECT * FROM attack_catalog_techniques WHERE id = ?",
         )
@@ -33,7 +33,7 @@ impl AttackCatalogRepository for SqliteAttackCatalogRepository {
         .map_storage()
     }
 
-    async fn list(&self) -> AisecResult<Vec<AttackCatalogTechnique>> {
+    async fn list(&self) -> PromptLabResult<Vec<AttackCatalogTechnique>> {
         sqlx::query_as::<_, AttackCatalogTechnique>(
             r#"
             SELECT * FROM attack_catalog_techniques
@@ -45,7 +45,7 @@ impl AttackCatalogRepository for SqliteAttackCatalogRepository {
         .map_storage()
     }
 
-    async fn list_enabled(&self) -> AisecResult<Vec<AttackCatalogTechnique>> {
+    async fn list_enabled(&self) -> PromptLabResult<Vec<AttackCatalogTechnique>> {
         sqlx::query_as::<_, AttackCatalogTechnique>(
             r#"
             SELECT * FROM attack_catalog_techniques
@@ -58,7 +58,7 @@ impl AttackCatalogRepository for SqliteAttackCatalogRepository {
         .map_storage()
     }
 
-    async fn list_by_category(&self, category_id: &str) -> AisecResult<Vec<AttackCatalogTechnique>> {
+    async fn list_by_category(&self, category_id: &str) -> PromptLabResult<Vec<AttackCatalogTechnique>> {
         sqlx::query_as::<_, AttackCatalogTechnique>(
             r#"
             SELECT * FROM attack_catalog_techniques
@@ -72,7 +72,7 @@ impl AttackCatalogRepository for SqliteAttackCatalogRepository {
         .map_storage()
     }
 
-    async fn seed_from(&self, entries: Vec<UpsertAttackCatalogTechnique>) -> AisecResult<u64> {
+    async fn seed_from(&self, entries: Vec<UpsertAttackCatalogTechnique>) -> PromptLabResult<u64> {
         let mut touched = 0u64;
         let timestamp = now();
 
@@ -178,7 +178,7 @@ impl AttackCatalogRepository for SqliteAttackCatalogRepository {
         &self,
         id: &str,
         input: UpdateAttackCatalogTechnique,
-    ) -> AisecResult<AttackCatalogTechnique> {
+    ) -> PromptLabResult<AttackCatalogTechnique> {
         let existing = self.get(id).await?;
         let name = input.name.unwrap_or(existing.name);
         let description = input.description.or(existing.description);
@@ -218,7 +218,7 @@ impl AttackCatalogRepository for SqliteAttackCatalogRepository {
         self.get(id).await
     }
 
-    async fn reset_content(&self, id: &str) -> AisecResult<AttackCatalogTechnique> {
+    async fn reset_content(&self, id: &str) -> PromptLabResult<AttackCatalogTechnique> {
         let existing = self.get(id).await?;
         let updated_at = now();
         let result = sqlx::query(

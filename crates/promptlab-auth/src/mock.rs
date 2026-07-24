@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 use serde_json::json;
 
 use crate::playwright::{ExecuteHttpResult, PlaywrightDriver, RecordLoginResult, ReplaySessionResult};
@@ -53,11 +53,11 @@ impl MockPlaywrightDriver {
 
 #[async_trait]
 impl PlaywrightDriver for MockPlaywrightDriver {
-    async fn launch(&self, _options: crate::playwright::PlaywrightOptions) -> AisecResult<()> {
+    async fn launch(&self, _options: crate::playwright::PlaywrightOptions) -> PromptLabResult<()> {
         Ok(())
     }
 
-    async fn close(&self) -> AisecResult<()> {
+    async fn close(&self) -> PromptLabResult<()> {
         Ok(())
     }
 
@@ -67,7 +67,7 @@ impl PlaywrightDriver for MockPlaywrightDriver {
         _method: &str,
         _config: serde_json::Value,
         _options: RecordLoginOptions,
-    ) -> AisecResult<RecordLoginResult> {
+    ) -> PromptLabResult<RecordLoginResult> {
         Ok(self.record_result.clone())
     }
 
@@ -75,11 +75,11 @@ impl PlaywrightDriver for MockPlaywrightDriver {
         &self,
         _url: &str,
         _options: RecordLoginOptions,
-    ) -> AisecResult<()> {
+    ) -> PromptLabResult<()> {
         Ok(())
     }
 
-    async fn finish_interactive_login(&self) -> AisecResult<RecordLoginResult> {
+    async fn finish_interactive_login(&self) -> PromptLabResult<RecordLoginResult> {
         Ok(self.record_result.clone())
     }
 
@@ -89,19 +89,19 @@ impl PlaywrightDriver for MockPlaywrightDriver {
         _storage_state: Option<serde_json::Value>,
         _storage_state_path: Option<&std::path::Path>,
         _options: ReplayOptions,
-    ) -> AisecResult<ReplaySessionResult> {
+    ) -> PromptLabResult<ReplaySessionResult> {
         Ok(self.replay_result.clone())
     }
 
-    async fn extract_tokens(&self, _url: Option<&str>) -> AisecResult<Vec<ExtractedToken>> {
+    async fn extract_tokens(&self, _url: Option<&str>) -> PromptLabResult<Vec<ExtractedToken>> {
         Ok(self.tokens.clone())
     }
 
-    async fn get_cookies(&self, _url: Option<&str>) -> AisecResult<Vec<CookieRecord>> {
+    async fn get_cookies(&self, _url: Option<&str>) -> PromptLabResult<Vec<CookieRecord>> {
         Ok(self.cookies.clone())
     }
 
-    async fn set_cookies(&self, cookies: Vec<CookieRecord>) -> AisecResult<Vec<CookieRecord>> {
+    async fn set_cookies(&self, cookies: Vec<CookieRecord>) -> PromptLabResult<Vec<CookieRecord>> {
         Ok(cookies)
     }
 
@@ -112,7 +112,7 @@ impl PlaywrightDriver for MockPlaywrightDriver {
         _headers: std::collections::HashMap<String, String>,
         _body: Option<String>,
         _storage_state_path: Option<&std::path::Path>,
-    ) -> AisecResult<ExecuteHttpResult> {
+    ) -> PromptLabResult<ExecuteHttpResult> {
         Ok(ExecuteHttpResult {
             status: 200,
             headers: std::collections::HashMap::new(),
@@ -129,7 +129,7 @@ impl PlaywrightDriver for MockPlaywrightDriver {
         _submit_selector: &str,
         _response_selector: &str,
         _storage_state_path: Option<&std::path::Path>,
-    ) -> AisecResult<String> {
+    ) -> PromptLabResult<String> {
         Ok(format!("mock-response:{prompt}"))
     }
 }

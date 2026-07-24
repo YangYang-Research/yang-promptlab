@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 
 use crate::error::StorageResultExt;
 use crate::models::{CreateModel, ModelRecord, UpdateModel};
@@ -21,7 +21,7 @@ impl SqliteModelRepository {
 
 #[async_trait]
 impl ModelRepository for SqliteModelRepository {
-    async fn create(&self, input: CreateModel) -> AisecResult<ModelRecord> {
+    async fn create(&self, input: CreateModel) -> PromptLabResult<ModelRecord> {
         let id = new_id();
         let timestamp = now();
         let format = input.format.unwrap_or_else(|| "gguf".to_string());
@@ -52,7 +52,7 @@ impl ModelRepository for SqliteModelRepository {
         self.get(&id).await
     }
 
-    async fn get(&self, id: &str) -> AisecResult<ModelRecord> {
+    async fn get(&self, id: &str) -> PromptLabResult<ModelRecord> {
         sqlx::query_as::<_, ModelRecord>("SELECT * FROM models WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
@@ -60,14 +60,14 @@ impl ModelRepository for SqliteModelRepository {
             .map_storage()
     }
 
-    async fn list(&self) -> AisecResult<Vec<ModelRecord>> {
+    async fn list(&self) -> PromptLabResult<Vec<ModelRecord>> {
         sqlx::query_as::<_, ModelRecord>("SELECT * FROM models ORDER BY created_at DESC")
             .fetch_all(&self.pool)
             .await
             .map_storage()
     }
 
-    async fn update(&self, id: &str, input: UpdateModel) -> AisecResult<ModelRecord> {
+    async fn update(&self, id: &str, input: UpdateModel) -> PromptLabResult<ModelRecord> {
         let existing = self.get(id).await?;
         let name = input.name.unwrap_or(existing.name);
         let file_path = input.file_path.unwrap_or(existing.file_path);
@@ -104,7 +104,7 @@ impl ModelRepository for SqliteModelRepository {
         self.get(id).await
     }
 
-    async fn delete(&self, id: &str) -> AisecResult<()> {
+    async fn delete(&self, id: &str) -> PromptLabResult<()> {
         let result = sqlx::query("DELETE FROM models WHERE id = ?")
             .bind(id)
             .execute(&self.pool)

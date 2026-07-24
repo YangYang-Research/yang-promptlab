@@ -1,4 +1,4 @@
-use aisec_attack::AttackCategory;
+use promptlab_attack::AttackCategory;
 
 pub fn parse_attack_category(raw: &str) -> Option<AttackCategory> {
     AttackCategory::all()

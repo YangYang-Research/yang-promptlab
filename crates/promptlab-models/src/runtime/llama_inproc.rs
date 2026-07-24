@@ -140,7 +140,7 @@ impl InferenceRuntime for LlamaInProcessRuntime {
         let path = model_path.to_path_buf();
 
         let handle = std::thread::Builder::new()
-            .name("aisec-llama".into())
+            .name("promptlab-llama".into())
             .spawn(move || worker_loop(path, cfg, rx, ready_tx))
             .map_err(|e| ModelError::runtime(format!("failed to spawn llama worker: {e}")))?;
 

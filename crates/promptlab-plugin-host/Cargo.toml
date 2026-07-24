@@ -1,6 +1,6 @@
 [package]
-name = "aisec-plugin-host"
-description = "AISec plugin manager — lifecycle, sandbox, permissions"
+name = "promptlab-plugin-host"
+description = "PromptLab plugin manager — lifecycle, sandbox, permissions"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-aisec-core = { workspace = true }
+promptlab-core = { workspace = true }
 async-trait = { workspace = true }
 semver = "1"
 serde = { workspace = true }

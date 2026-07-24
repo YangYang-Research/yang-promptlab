@@ -1,19 +1,19 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
-use aisec_core::{AisecError, AisecResult};
+use promptlab_core::{PromptLabError, PromptLabResult};
 use url::Url;
 
 use crate::config::DiscoveryConfig;
 
 /// Validate a URL is safe to fetch under the given policy.
-pub fn validate_target_url(raw: &str, config: &DiscoveryConfig) -> AisecResult<Url> {
-    let url = Url::parse(raw).map_err(|err| AisecError::invalid_input(format!("invalid URL: {err}")))?;
+pub fn validate_target_url(raw: &str, config: &DiscoveryConfig) -> PromptLabResult<Url> {
+    let url = Url::parse(raw).map_err(|err| PromptLabError::invalid_input(format!("invalid URL: {err}")))?;
 
     match url.scheme() {
         "http" | "https" => {}
         other => {
-            return Err(AisecError::invalid_input(format!(
+            return Err(PromptLabError::invalid_input(format!(
                 "unsupported scheme '{other}'; only http/https allowed"
             )));
         }
@@ -21,10 +21,10 @@ pub fn validate_target_url(raw: &str, config: &DiscoveryConfig) -> AisecResult<U
 
     let host = url
         .host_str()
-        .ok_or_else(|| AisecError::invalid_input("URL must have a host"))?;
+        .ok_or_else(|| PromptLabError::invalid_input("URL must have a host"))?;
 
     if !config.allow_private_network && is_blocked_host(host) {
-        return Err(AisecError::invalid_input(format!(
+        return Err(PromptLabError::invalid_input(format!(
             "host '{host}' resolves to a blocked network range; set allow_private_network=true to override"
         )));
     }

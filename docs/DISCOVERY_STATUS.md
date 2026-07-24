@@ -1,6 +1,6 @@
 # Discovery Engine Status
 
-**Crate:** `aisec-discovery` v0.1.0  
+**Crate:** `promptlab-discovery` v0.1.0  
 **Date:** 2026-06-10  
 **Classification:** **Partial implementation**
 
@@ -14,7 +14,7 @@
 | **2. Partial implementation** | **Yes** | Works end-to-end as a library with known bugs and scope gaps |
 | **3. Skeleton** | No | 16 source modules, BFS crawler, 4 detector families, integration tests |
 
-`aisec-discovery` is a **working library MVP**, not a skeleton. It is **not production-complete** due to a critical crawler concurrency bug, limited JS analysis, no OpenAPI path expansion, and zero desktop-app integration.
+`promptlab-discovery` is a **working library MVP**, not a skeleton. It is **not production-complete** due to a critical crawler concurrency bug, limited JS analysis, no OpenAPI path expansion, and zero desktop-app integration.
 
 ---
 
@@ -326,7 +326,7 @@ Missing for "complete" production discovery:
 ## Final Classification
 
 ```
-aisec-discovery
+promptlab-discovery
 ├── Overall ..................... PARTIAL IMPLEMENTATION
 ├── HTTP crawling ............... PARTIAL (real logic, concurrency bug)
 ├── JS parsing .................. PARTIAL (regex hints only)

@@ -10,7 +10,7 @@ pub use environment::{
     resolve_paths, save_environment_config, user_home, EnvironmentConfig, EnvironmentPaths,
     DB_FILENAME, DB_PATH_ENV, ENV_CONFIG_FILE, ROOT_DIR_NAME, ROOT_PATH_ENV,
 };
-pub use error::{AisecError, AisecResult, ErrorCode};
+pub use error::{PromptLabError, PromptLabResult, ErrorCode};
 pub use event_log::{
     global_event_bus, global_event_ring, list_log_files, mask_secrets, publish_crash,
     read_log_tail, spawn_event_logger, EventBus, EventLogGuard, EventRing, LogCategory,

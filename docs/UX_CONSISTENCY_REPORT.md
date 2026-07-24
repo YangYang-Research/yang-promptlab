@@ -1,4 +1,4 @@
-# AISec UX Consistency Report
+# PromptLab UX Consistency Report
 
 **Date:** 2026-06-13  
 **Scope:** Frontend UI (`src/`) after Iteration 5 UX refinements  

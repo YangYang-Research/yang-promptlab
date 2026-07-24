@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use aisec_harness::NormalizedResponse;
+use promptlab_harness::NormalizedResponse;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AttackResult;

@@ -8,7 +8,7 @@ use serde::Serialize;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use aisec_storage::{Endpoint, Finding, Project, Report, Scan, Target};
+use promptlab_storage::{Endpoint, Finding, Project, Report, Scan, Target};
 
 pub(crate) fn ts(dt: OffsetDateTime) -> String {
     dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string())
@@ -123,8 +123,8 @@ pub struct TargetProfileDto {
     pub verification: VerificationResultDto,
 }
 
-impl From<aisec_target_profile::TargetCapabilities> for TargetCapabilitiesDto {
-    fn from(c: aisec_target_profile::TargetCapabilities) -> Self {
+impl From<promptlab_target_profile::TargetCapabilities> for TargetCapabilitiesDto {
+    fn from(c: promptlab_target_profile::TargetCapabilities) -> Self {
         Self {
             supports_streaming: c.supports_streaming,
             supports_tools: c.supports_tools,
@@ -136,8 +136,8 @@ impl From<aisec_target_profile::TargetCapabilities> for TargetCapabilitiesDto {
     }
 }
 
-impl From<aisec_target_profile::VerificationResult> for VerificationResultDto {
-    fn from(v: aisec_target_profile::VerificationResult) -> Self {
+impl From<promptlab_target_profile::VerificationResult> for VerificationResultDto {
+    fn from(v: promptlab_target_profile::VerificationResult) -> Self {
         Self {
             verified: v.verified,
             verified_at: v.verified_at.map(|dt| ts(dt)),
@@ -153,8 +153,8 @@ impl From<aisec_target_profile::VerificationResult> for VerificationResultDto {
     }
 }
 
-impl From<aisec_target_profile::TargetProfile> for TargetProfileDto {
-    fn from(p: aisec_target_profile::TargetProfile) -> Self {
+impl From<promptlab_target_profile::TargetProfile> for TargetProfileDto {
+    fn from(p: promptlab_target_profile::TargetProfile) -> Self {
         Self {
             provider: p.provider.as_str().into(),
             framework: p.framework,
@@ -190,8 +190,8 @@ pub struct VerificationConsoleEntryDto {
     pub message: String,
 }
 
-impl From<aisec_target_profile::VerificationConsoleEntry> for VerificationConsoleEntryDto {
-    fn from(c: aisec_target_profile::VerificationConsoleEntry) -> Self {
+impl From<promptlab_target_profile::VerificationConsoleEntry> for VerificationConsoleEntryDto {
+    fn from(c: promptlab_target_profile::VerificationConsoleEntry) -> Self {
         Self {
             method: c.method,
             url: c.url,
@@ -309,8 +309,8 @@ pub struct FindingImportDto {
 }
 
 
-pub fn metadata_from_endpoint(endpoint: &Endpoint) -> Option<aisec_endpoint_metadata::AiEndpointMetadata> {
-    aisec_endpoint_metadata::AiEndpointMetadata::from_json(endpoint.metadata_json.as_deref()?).ok()
+pub fn metadata_from_endpoint(endpoint: &Endpoint) -> Option<promptlab_endpoint_metadata::AiEndpointMetadata> {
+    promptlab_endpoint_metadata::AiEndpointMetadata::from_json(endpoint.metadata_json.as_deref()?).ok()
 }
 
 #[derive(Debug, Clone, Serialize)]

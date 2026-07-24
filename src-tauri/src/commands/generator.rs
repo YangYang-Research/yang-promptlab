@@ -1,13 +1,13 @@
 //! Payload generation helpers for scan execution.
 
-use aisec_attack::{AttackCategory, AttackPayload};
-use aisec_core::AisecError;
-use aisec_generator::{
+use promptlab_attack::{AttackCategory, AttackPayload};
+use promptlab_core::PromptLabError;
+use promptlab_generator::{
     generate_prompt_payloads_with_llm, GeneratePayloadsInput, GeneratorAdvancedOptions,
     GeneratorMode, GeneratorTargetContext, PromptPayloads,
 };
-use aisec_planner::{AttackPlan, PlannerMode};
-use aisec_target_profile::{
+use promptlab_planner::{AttackPlan, PlannerMode};
+use promptlab_target_profile::{
     capability_influences_strategy, effective_capabilities, PayloadGenerationStrategy,
     PayloadStrategy, TargetProfile,
 };
@@ -75,7 +75,7 @@ pub fn target_context_from_profile(profile: &TargetProfile) -> GeneratorTargetCo
     }
 }
 
-fn payload_source_key(payload: &aisec_attack::AttackPayload) -> String {
+fn payload_source_key(payload: &promptlab_attack::AttackPayload) -> String {
     payload
         .metadata
         .get("source_id")
@@ -101,7 +101,7 @@ pub fn cap_payloads_per_testcase(mut pack: PromptPayloads, max_per_test: u32) ->
     let mut kept = 0usize;
     let mut capped_map = HashMap::new();
     for (category, items) in pack.by_category {
-        let mut per_source: HashMap<String, Vec<aisec_attack::AttackPayload>> = HashMap::new();
+        let mut per_source: HashMap<String, Vec<promptlab_attack::AttackPayload>> = HashMap::new();
         for item in items {
             let key = payload_source_key(&item);
             let bucket = per_source.entry(key).or_default();
@@ -157,7 +157,7 @@ pub fn validate_payload_map_per_testcase(
 
     for category in categories {
         let expected_tests =
-            aisec_target_profile::wizard_plan::enabled_tests_for_category(*category, disabled_tests);
+            promptlab_target_profile::wizard_plan::enabled_tests_for_category(*category, disabled_tests);
         if expected_tests == 0 {
             continue;
         }
@@ -229,7 +229,7 @@ pub struct GenerateJobOptions {
     pub target_context: Option<GeneratorTargetContext>,
     pub adaptation_feedback: Option<String>,
     /// DB-backed catalog; when `None`, uses embedded factory seed.
-    pub catalog: Option<aisec_payload::PayloadDatabase>,
+    pub catalog: Option<promptlab_payload::PayloadDatabase>,
 }
 
 impl GenerateJobOptions {
@@ -267,7 +267,7 @@ impl GenerateJobOptions {
         }
     }
 
-    pub fn with_catalog(mut self, catalog: aisec_payload::PayloadDatabase) -> Self {
+    pub fn with_catalog(mut self, catalog: promptlab_payload::PayloadDatabase) -> Self {
         self.catalog = Some(catalog);
         self
     }
@@ -275,10 +275,10 @@ impl GenerateJobOptions {
 
 pub async fn generate_payloads_for_scan_job(
     data_dir: &std::path::Path,
-    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
-    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
-    model_provider: aisec_runtime::SharedModelProvider,
-    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
+    inference_manager: Arc<AsyncMutex<promptlab_inference::InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<promptlab_models::LocalModelManager>>,
+    model_provider: promptlab_runtime::SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<promptlab_runtime::RuntimeManager>>,
     plan: &AttackPlan,
     mode: GeneratorMode,
 ) -> CommandResult<PromptPayloads> {
@@ -297,10 +297,10 @@ pub async fn generate_payloads_for_scan_job(
 
 pub async fn generate_payloads_for_scan_job_with_options(
     data_dir: &std::path::Path,
-    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
-    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
-    model_provider: aisec_runtime::SharedModelProvider,
-    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
+    inference_manager: Arc<AsyncMutex<promptlab_inference::InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<promptlab_models::LocalModelManager>>,
+    model_provider: promptlab_runtime::SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<promptlab_runtime::RuntimeManager>>,
     plan: &AttackPlan,
     mode: GeneratorMode,
     max_payloads_per_test: Option<u32>,
@@ -319,14 +319,14 @@ pub async fn generate_payloads_for_scan_job_with_options(
 
 pub async fn generate_payloads_for_scan_job_with_options_and_catalog(
     data_dir: &std::path::Path,
-    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
-    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
-    model_provider: aisec_runtime::SharedModelProvider,
-    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
+    inference_manager: Arc<AsyncMutex<promptlab_inference::InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<promptlab_models::LocalModelManager>>,
+    model_provider: promptlab_runtime::SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<promptlab_runtime::RuntimeManager>>,
     plan: &AttackPlan,
     mode: GeneratorMode,
     max_payloads_per_test: Option<u32>,
-    catalog: aisec_payload::PayloadDatabase,
+    catalog: promptlab_payload::PayloadDatabase,
 ) -> CommandResult<PromptPayloads> {
     generate_payloads_for_scan_job_with_job_options(
         data_dir,
@@ -342,10 +342,10 @@ pub async fn generate_payloads_for_scan_job_with_options_and_catalog(
 
 pub async fn generate_payloads_for_scan_job_with_job_options(
     data_dir: &std::path::Path,
-    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
-    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
-    model_provider: aisec_runtime::SharedModelProvider,
-    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
+    inference_manager: Arc<AsyncMutex<promptlab_inference::InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<promptlab_models::LocalModelManager>>,
+    model_provider: promptlab_runtime::SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<promptlab_runtime::RuntimeManager>>,
     plan: &AttackPlan,
     mut options: GenerateJobOptions,
 ) -> CommandResult<PromptPayloads> {
@@ -365,7 +365,7 @@ pub async fn generate_payloads_for_scan_job_with_job_options(
     let catalog_owned = options
         .catalog
         .take()
-        .or_else(|| aisec_payload::PayloadDatabase::builtin().ok());
+        .or_else(|| promptlab_payload::PayloadDatabase::builtin().ok());
     let catalog_ref = catalog_owned.as_ref();
 
     let input = GeneratePayloadsInput {
@@ -388,11 +388,11 @@ pub async fn generate_payloads_for_scan_job_with_job_options(
         ));
         generate_prompt_payloads_with_llm(&input, Some(llm.as_ref()))
             .await
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?
     } else {
-        aisec_generator::generate_prompt_payloads(&input)
+        promptlab_generator::generate_prompt_payloads(&input)
             .await
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?
     };
 
     Ok(if let Some(max_per_test) = options.max_payloads_per_test {
@@ -404,10 +404,10 @@ pub async fn generate_payloads_for_scan_job_with_job_options(
 
 pub async fn generate_payloads_for_scan_job_with_strategy(
     data_dir: &std::path::Path,
-    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
-    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
-    model_provider: aisec_runtime::SharedModelProvider,
-    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
+    inference_manager: Arc<AsyncMutex<promptlab_inference::InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<promptlab_models::LocalModelManager>>,
+    model_provider: promptlab_runtime::SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<promptlab_runtime::RuntimeManager>>,
     plan: &AttackPlan,
     strategy: &PayloadStrategy,
 ) -> CommandResult<PromptPayloads> {
@@ -427,10 +427,10 @@ pub async fn generate_payloads_for_scan_job_with_strategy(
 
 pub async fn generate_payloads_for_scan_job_with_strategy_context(
     data_dir: &std::path::Path,
-    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
-    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
-    model_provider: aisec_runtime::SharedModelProvider,
-    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
+    inference_manager: Arc<AsyncMutex<promptlab_inference::InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<promptlab_models::LocalModelManager>>,
+    model_provider: promptlab_runtime::SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<promptlab_runtime::RuntimeManager>>,
     plan: &AttackPlan,
     strategy: &PayloadStrategy,
     profile: Option<&TargetProfile>,
@@ -453,15 +453,15 @@ pub async fn generate_payloads_for_scan_job_with_strategy_context(
 
 pub async fn generate_payloads_for_scan_job_with_strategy_context_and_catalog(
     data_dir: &std::path::Path,
-    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
-    model_manager: Arc<AsyncMutex<aisec_models::LocalModelManager>>,
-    model_provider: aisec_runtime::SharedModelProvider,
-    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
+    inference_manager: Arc<AsyncMutex<promptlab_inference::InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<promptlab_models::LocalModelManager>>,
+    model_provider: promptlab_runtime::SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<promptlab_runtime::RuntimeManager>>,
     plan: &AttackPlan,
     strategy: &PayloadStrategy,
     profile: Option<&TargetProfile>,
     adaptation_feedback: Option<String>,
-    catalog: Option<aisec_payload::PayloadDatabase>,
+    catalog: Option<promptlab_payload::PayloadDatabase>,
 ) -> CommandResult<PromptPayloads> {
     let mut options = GenerateJobOptions::from_strategy(strategy, profile, adaptation_feedback);
     if let Some(catalog) = catalog {

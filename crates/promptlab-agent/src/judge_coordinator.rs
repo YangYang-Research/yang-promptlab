@@ -3,7 +3,7 @@
 //! Receives a judge command (from Yazg or scan host), fans out to the three
 //! role workers, then synthesizes a consensus [`JudgeVerdict`].
 
-use aisec_judge::{EvaluatorResult, JudgeEngine, JudgeRequest, JudgeVerdict, ModelRole};
+use promptlab_judge::{EvaluatorResult, JudgeEngine, JudgeRequest, JudgeVerdict, ModelRole};
 use tracing::{info, warn};
 
 use crate::error::{AgentError, AgentResult};
@@ -132,10 +132,10 @@ impl JudgeCoordinatorAgent {
 mod tests {
     use std::sync::Arc;
 
-    use aisec_judge::{
+    use promptlab_judge::{
         JudgeConfig, JudgeMode, JudgeRequest, JsonMockRuntime, ModelRolePool,
     };
-    use aisec_models::runtime::InferenceRuntime;
+    use promptlab_models::runtime::InferenceRuntime;
     use tokio::sync::Mutex;
 
     use super::*;

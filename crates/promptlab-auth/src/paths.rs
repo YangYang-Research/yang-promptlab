@@ -1,18 +1,18 @@
 use std::path::{Path, PathBuf};
 
-/// Platform-specific AISec data root (without bundle id suffix).
+/// Platform-specific PromptLab data root (without bundle id suffix).
 pub fn default_data_root() -> PathBuf {
     if let Some(base) = dirs_for_platform() {
-        return base.join("AISec");
+        return base.join("PromptLab");
     }
-    PathBuf::from(".aisec")
+    PathBuf::from(".promptlab")
 }
 
 /// Auth session vault directory for encrypted Playwright artifacts.
 ///
-/// - Windows: `%LOCALAPPDATA%/AISec/AuthSessions`
-/// - macOS: `~/Library/Application Support/AISec/AuthSessions`
-/// - Linux: `~/.local/share/aisec/AuthSessions`
+/// - Windows: `%LOCALAPPDATA%/PromptLab/AuthSessions`
+/// - macOS: `~/Library/Application Support/PromptLab/AuthSessions`
+/// - Linux: `~/.local/share/promptlab/AuthSessions`
 pub fn auth_sessions_dir(data_root: impl AsRef<Path>) -> PathBuf {
     data_root.as_ref().join("AuthSessions")
 }
@@ -47,7 +47,7 @@ mod tests {
 
     #[test]
     fn auth_sessions_dir_suffix() {
-        let dir = auth_sessions_dir("/tmp/aisec-data");
+        let dir = auth_sessions_dir("/tmp/promptlab-data");
         assert!(dir.ends_with("AuthSessions"));
     }
 }

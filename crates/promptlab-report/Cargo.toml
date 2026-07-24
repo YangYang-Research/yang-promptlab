@@ -1,6 +1,6 @@
 [package]
-name = "aisec-report"
-description = "AISec reporting engine — HTML, PDF, JSON, SARIF, CSV export"
+name = "promptlab-report"
+description = "PromptLab reporting engine — HTML, PDF, JSON, SARIF, CSV export"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-aisec-core = { workspace = true }
+promptlab-core = { workspace = true }
 async-trait = { workspace = true }
 printpdf = "0.7"
 serde = { workspace = true }
@@ -19,6 +19,6 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-aisec-storage = { workspace = true }
+promptlab-storage = { workspace = true }
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

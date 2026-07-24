@@ -1,5 +1,5 @@
-use aisec_attack::AttackCategory;
-use aisec_planner::AttackPlan;
+use promptlab_attack::AttackCategory;
+use promptlab_planner::AttackPlan;
 use async_trait::async_trait;
 use serde::Deserialize;
 use tracing::warn;
@@ -123,7 +123,7 @@ fn build_category_prompt(
         .map(|p| serde_json::json!({ "id": p.id, "name": p.name, "content": p.content }))
         .collect();
 
-    let mut prompt = aisec_inference::PromptRegistry::generator_user(
+    let mut prompt = promptlab_inference::PromptRegistry::generator_user(
         &category.display_name(),
         category.as_str(),
         &plan.profile_id,

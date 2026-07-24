@@ -1,6 +1,6 @@
 [package]
-name = "aisec-inference"
-description = "Unified AI inference gateway, runtime orchestration, and provider adapters for AISec"
+name = "promptlab-inference"
+description = "Unified AI inference gateway, runtime orchestration, and provider adapters for PromptLab"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,9 +8,9 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-aisec-core = { workspace = true }
-aisec-models = { workspace = true }
-aisec-runtime = { workspace = true }
+promptlab-core = { workspace = true }
+promptlab-models = { workspace = true }
+promptlab-runtime = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

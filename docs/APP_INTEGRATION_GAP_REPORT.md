@@ -21,7 +21,7 @@ Phần "xương sống tích hợp" UI ↔ Tauri IPC ↔ database (các mục B1
 | C3 | Lớp **IPC chỉ có 2 lệnh** bootstrap | `src/shared/ipc/client.ts:43-49` chỉ có `health`, `app_info` |
 | C4 | **Backend Tauri chỉ có 2 command**, không mở DB | `src-tauri/src/commands/mod.rs` chỉ có `health`, `app_info` |
 | C5 | `AppState` **không chứa database** | `src-tauri/src/state.rs` chỉ giữ `_log_guard` |
-| C6 | Tauri **không phụ thuộc các crate domain** | `src-tauri/Cargo.toml:21-26` chỉ có `aisec-core` (không có `aisec-storage`) |
+| C6 | Tauri **không phụ thuộc các crate domain** | `src-tauri/Cargo.toml:21-26` chỉ có `promptlab-core` (không có `promptlab-storage`) |
 | C7 | Store **không có action tạo/persist** dữ liệu | `src/app/store/AppStore.tsx:50-90` reducer chỉ có các action UI |
 
 Hệ quả: dù backend (storage, discovery, attack, judge, report) đã chạy được ở tầng thư viện, **không
@@ -42,7 +42,7 @@ có đường dẫn nào** để giao diện gọi xuống. App chỉ thao tác 
    export `getAppInfo`, `healthCheck`).
 3. Kể cả nếu gọi IPC, **backend chưa có command** `project_create` (`src-tauri/src/commands/mod.rs`).
 4. Kể cả nếu có command, **backend chưa mở SQLite** (`AppState` không có `Database`;
-   `src-tauri/Cargo.toml` không phụ thuộc `aisec-storage`).
+   `src-tauri/Cargo.toml` không phụ thuộc `promptlab-storage`).
 5. Danh sách project hiển thị đến từ `mockProjects`, và reducer **không có** action thêm project
    (`AppStore.tsx`), nên cũng không có chỗ để hiển thị project mới.
 
@@ -95,8 +95,8 @@ Hai kết quả không mâu thuẫn: chúng kiểm thử **hai tầng khác nhau
 - `src/shared/ipc/index.ts` — chỉ export `getAppInfo`, `healthCheck`.
 - `src-tauri/src/commands/mod.rs` — chỉ `health` và `app_info`.
 - `src-tauri/src/state.rs:4-6` — `AppState` chỉ chứa `_log_guard` (không có `Database`).
-- `src-tauri/Cargo.toml:21-26` — chỉ phụ thuộc `aisec-core` (thiếu `aisec-storage`, `aisec-discovery`,
-  `aisec-attack`, `aisec-judge`, `aisec-report`).
+- `src-tauri/Cargo.toml:21-26` — chỉ phụ thuộc `promptlab-core` (thiếu `promptlab-storage`, `promptlab-discovery`,
+  `promptlab-attack`, `promptlab-judge`, `promptlab-report`).
 - Quét toàn bộ `src/`: chỉ có `onClick` ở bộ lọc severity (`FindingsPage.tsx:98,107`) và nút thu gọn
   sidebar (`Sidebar.tsx:77`). **Không có** `onClick` cho bất kỳ nút hành động nào.
 
@@ -126,7 +126,7 @@ Ngoài ra, các thay đổi đang có (đổi status finding, đổi settings) c
 Đây là phần tích hợp UI ↔ Tauri ↔ DB (tương ứng B1/B2/B3 trong `docs/MVP_EXECUTION_PLAN.md`):
 
 1. **Backend Tauri (B1):**
-   - Thêm `aisec-storage` (và các crate engine khi cần) vào `src-tauri/Cargo.toml`.
+   - Thêm `promptlab-storage` (và các crate engine khi cần) vào `src-tauri/Cargo.toml`.
    - Mở SQLite và lưu `Database` trong `AppState` lúc khởi động.
 2. **Lệnh IPC domain (B2):** thêm `#[tauri::command]` cho `project_create`, `project_list`,
    `target_create`, `scan_run`, `findings_list`, `report_generate`.

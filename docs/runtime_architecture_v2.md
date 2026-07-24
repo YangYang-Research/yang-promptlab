@@ -1,4 +1,4 @@
-# AISec Runtime Architecture v2 — Embedded llama.cpp
+# PromptLab Runtime Architecture v2 — Embedded llama.cpp
 
 **Version:** 2.0  
 **Date:** 2026-06-13  
@@ -8,7 +8,7 @@
 
 ## Overview
 
-AISec Desktop runs local LLM inference through an embedded **llama.cpp** server (`llama-server`) supervised by `aisec-runtime::RuntimeSupervisor`. Models are **GGUF files** in the app vault (`{app_data}/models/`). The Judge Engine consumes inference exclusively through the **ModelProvider** abstraction — no direct runtime coupling in `aisec-judge`.
+PromptLab Desktop runs local LLM inference through an embedded **llama.cpp** server (`llama-server`) supervised by `promptlab-runtime::RuntimeSupervisor`. Models are **GGUF files** in the app vault (`{app_data}/models/`). The Judge Engine consumes inference exclusively through the **ModelProvider** abstraction — no direct runtime coupling in `promptlab-judge`.
 
 ---
 
@@ -27,18 +27,18 @@ flowchart TB
         JC[judge_config + attack/scan]
     end
 
-    subgraph Judge["aisec-judge"]
+    subgraph Judge["promptlab-judge"]
         JE[JudgeEngine]
         MPR[ModelProviderRuntime]
     end
 
-    subgraph Runtime["aisec-runtime"]
+    subgraph Runtime["promptlab-runtime"]
         EMP[EmbeddedModelProvider]
         RS[RuntimeSupervisor]
         LCR[LlamaCppRuntime]
     end
 
-    subgraph Models["aisec-models"]
+    subgraph Models["promptlab-models"]
         LMM[LocalModelManager]
         LIE[LocalInferenceEngine]
         VAULT[(GGUF Vault)]
@@ -140,7 +140,7 @@ sequenceDiagram
 | Q6 | `q6_k`, `.q6` |
 | Q8 | `q8_0`, `.q8`, `Q8_K` |
 
-Detection: `aisec-runtime::runtime::gguf::detect_quantization()`.
+Detection: `promptlab-runtime::runtime::gguf::detect_quantization()`.
 
 ---
 
@@ -220,7 +220,7 @@ DTO field names (`ollamaTag`, `ollamaBaseUrl`, `installedModels`) preserved for 
 | Binary | `runtime/llama-server` |
 | Default URL | `http://127.0.0.1:8081` |
 | Vault | `{app_data}/models/` |
-| Env | `AISEC_LLAMA_BASE_URL`, `AISEC_LLAMA_HOST`, `AISEC_LLAMA_PORT` |
+| Env | `PROMPTLAB_LLAMA_BASE_URL`, `PROMPTLAB_LLAMA_HOST`, `PROMPTLAB_LLAMA_PORT` |
 
 ---
 
@@ -228,9 +228,9 @@ DTO field names (`ollamaTag`, `ollamaBaseUrl`, `installedModels`) preserved for 
 
 | Crate | Responsibility |
 |-------|----------------|
-| `aisec-runtime` | Supervisor, embedded `LlamaCppRuntime`, `EmbeddedModelProvider`, GGUF discovery |
-| `aisec-models` | Vault registry, downloads, per-model `LocalInferenceEngine` |
-| `aisec-judge` | Verdict logic; `ModelProviderRuntime` bridge only |
+| `promptlab-runtime` | Supervisor, embedded `LlamaCppRuntime`, `EmbeddedModelProvider`, GGUF discovery |
+| `promptlab-models` | Vault registry, downloads, per-model `LocalInferenceEngine` |
+| `promptlab-judge` | Verdict logic; `ModelProviderRuntime` bridge only |
 | `src-tauri` | IPC, startup wiring, judge_config orchestration |
 
 ---

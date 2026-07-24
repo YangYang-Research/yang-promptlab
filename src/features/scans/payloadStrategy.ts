@@ -27,7 +27,7 @@ export type PayloadStrategyDto = {
   enableCrossCategoryMutation: boolean;
 };
 
-/** Matches `PayloadStrategy::clamp` in `aisec-target-profile`. */
+/** Matches `PayloadStrategy::clamp` in `promptlab-target-profile`. */
 export const VARIANTS_PER_TEST_MIN = 1;
 export const VARIANTS_PER_TEST_MAX = 20;
 export const PAYLOAD_BUDGET_MIN = 1;
@@ -214,7 +214,7 @@ export function profileAppliesPayloadPreset(profileId: AttackProfileId): boolean
   return profileId !== "custom";
 }
 
-/** Mirrors `payload_strategy_for_attack_profile` in `aisec-target-profile`. */
+/** Mirrors `payload_strategy_for_attack_profile` in `promptlab-target-profile`. */
 export function payloadStrategyForAttackProfile(
   profileId: AttackProfileId,
   recommended: PayloadStrategyConfig,

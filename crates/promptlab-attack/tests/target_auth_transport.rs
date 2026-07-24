@@ -1,4 +1,4 @@
-use aisec_attack::{
+use promptlab_attack::{
     apply_descriptor_auth, AttackCategory, AttackContext, AttackPayload, AttackTarget, HarnessTransport,
     PayloadRunner,
 };

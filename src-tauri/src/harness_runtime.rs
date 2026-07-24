@@ -2,12 +2,12 @@
 
 use std::path::Path;
 
-use aisec_attack::HarnessTransport;
-use aisec_auth::{resolve_descriptor_for_runtime, resolve_descriptor_for_wizard, AuthSessionManager, SecretStore, SessionAuthContext, SessionValidationStatus};
-use aisec_harness::{AuthMaterial, HarnessFactory, PlaywrightHarness, TargetDescriptor};
+use promptlab_attack::HarnessTransport;
+use promptlab_auth::{resolve_descriptor_for_runtime, resolve_descriptor_for_wizard, AuthSessionManager, SecretStore, SessionAuthContext, SessionValidationStatus};
+use promptlab_harness::{AuthMaterial, HarnessFactory, PlaywrightHarness, TargetDescriptor};
 use tracing::warn;
 
-use aisec_storage::Database;
+use promptlab_storage::Database;
 
 use crate::error::CommandResult;
 use crate::session_auth::{auth_session_manager_from_parts, browser_session_id};
@@ -39,7 +39,7 @@ pub async fn build_harness_attack_runtime(
 pub async fn build_harness_attack_runtime_parts(
     db: Database,
     data_dir: &Path,
-    auth_config: aisec_auth::AuthEngineConfig,
+    auth_config: promptlab_auth::AuthEngineConfig,
     base_factory: &HarnessFactory,
     descriptor_json: &str,
     probe_url: &str,
@@ -84,10 +84,10 @@ pub async fn build_harness_attack_runtime_parts(
         session = Some(ctx);
     }
 
-    let descriptor = aisec_harness::adapter::descriptor_from_parts(&descriptor_json, probe_url, auth.clone());
+    let descriptor = promptlab_harness::adapter::descriptor_from_parts(&descriptor_json, probe_url, auth.clone());
     let mut factory = base_factory.clone();
 
-    if descriptor.preferred_harness() == aisec_harness::HarnessKind::Playwright {
+    if descriptor.preferred_harness() == promptlab_harness::HarnessKind::Playwright {
         if let Some(ctx) = &session {
             if let Some(path) = ctx.storage_state_path.clone() {
                 let manager = auth_session_manager_from_parts(

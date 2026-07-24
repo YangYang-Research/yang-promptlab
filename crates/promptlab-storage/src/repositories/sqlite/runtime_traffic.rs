@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 
 use crate::error::StorageResultExt;
 use crate::models::{
@@ -23,7 +23,7 @@ impl SqliteRuntimeTrafficRepository {
 
 #[async_trait]
 impl RuntimeTrafficRepository for SqliteRuntimeTrafficRepository {
-    async fn insert_many(&self, events: Vec<CreateRuntimeTrafficEvent>) -> AisecResult<u64> {
+    async fn insert_many(&self, events: Vec<CreateRuntimeTrafficEvent>) -> PromptLabResult<u64> {
         if events.is_empty() {
             return Ok(0);
         }
@@ -79,7 +79,7 @@ impl RuntimeTrafficRepository for SqliteRuntimeTrafficRepository {
         &self,
         start_ms: i64,
         end_ms: i64,
-    ) -> AisecResult<Vec<RuntimeTrafficEvent>> {
+    ) -> PromptLabResult<Vec<RuntimeTrafficEvent>> {
         sqlx::query_as::<_, RuntimeTrafficEvent>(
             r#"
             SELECT id, at_ms, direction, created_at
@@ -95,7 +95,7 @@ impl RuntimeTrafficRepository for SqliteRuntimeTrafficRepository {
         .map_storage()
     }
 
-    async fn counters(&self) -> AisecResult<RuntimeTrafficCounters> {
+    async fn counters(&self) -> PromptLabResult<RuntimeTrafficCounters> {
         sqlx::query_as::<_, RuntimeTrafficCounters>(
             "SELECT id, lifetime_sent, lifetime_received FROM runtime_traffic_counters WHERE id = 1",
         )
@@ -104,7 +104,7 @@ impl RuntimeTrafficRepository for SqliteRuntimeTrafficRepository {
         .map_storage()
     }
 
-    async fn prune_before(&self, cutoff_ms: i64) -> AisecResult<u64> {
+    async fn prune_before(&self, cutoff_ms: i64) -> PromptLabResult<u64> {
         let result = sqlx::query("DELETE FROM runtime_traffic_events WHERE at_ms < ?")
             .bind(cutoff_ms)
             .execute(&self.pool)

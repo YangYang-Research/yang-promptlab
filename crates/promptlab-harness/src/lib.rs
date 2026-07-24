@@ -1,4 +1,4 @@
-//! Execution harness layer for AISec.
+//! Execution harness layer for PromptLab.
 //!
 //! Routes attack payloads to heterogeneous targets (HTTP APIs, OpenAI-compatible
 //! endpoints, browser chat UIs) and returns a [`NormalizedResponse`] that the

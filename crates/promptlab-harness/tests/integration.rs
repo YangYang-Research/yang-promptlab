@@ -1,6 +1,6 @@
 //! Integration tests for harness execution.
 
-use aisec_harness::{AttackRequest, HarnessFactory, NormalizedResponse};
+use promptlab_harness::{AttackRequest, HarnessFactory, NormalizedResponse};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -14,7 +14,7 @@ async fn factory_executes_http_target() {
         .await;
 
     let factory = HarnessFactory::new().unwrap();
-    let descriptor = aisec_harness::TargetDescriptor {
+    let descriptor = promptlab_harness::TargetDescriptor {
         url: format!("{}/api/chat", server.uri()),
         ..Default::default()
     };

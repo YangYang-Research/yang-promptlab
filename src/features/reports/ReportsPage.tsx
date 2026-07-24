@@ -215,7 +215,7 @@ export function ReportsPage() {
     <div className="page">
       <PageHeader
         title="Reports"
-        description="Read-only report exports generated from SQLite findings via aisec-report"
+        description="Read-only report exports generated from SQLite findings via promptlab-report"
         actions={
           <RefreshButton loading={loading} onClick={() => void actions.refresh()} />
         }

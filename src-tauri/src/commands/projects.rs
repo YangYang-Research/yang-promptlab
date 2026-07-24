@@ -3,7 +3,7 @@
 //! Each command delegates to a testable `*_op` function so integration tests
 //! can exercise the same logic without a Tauri runtime.
 
-use aisec_storage::{CreateProject, ProjectRepository};
+use promptlab_storage::{CreateProject, ProjectRepository};
 use tauri::State;
 use tracing::{debug, info, instrument};
 
@@ -89,7 +89,7 @@ pub async fn project_update_op(
         .projects()
         .update(
             id,
-            aisec_storage::UpdateProject {
+            promptlab_storage::UpdateProject {
                 name,
                 description,
                 ..Default::default()

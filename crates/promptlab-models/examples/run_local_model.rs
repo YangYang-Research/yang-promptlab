@@ -2,9 +2,9 @@
 //!
 //! Run:
 //!   MODEL=/path/to/model.gguf \
-//!     cargo run -p aisec-models --features llama --example run_local_model
+//!     cargo run -p promptlab-models --features llama --example run_local_model
 
-use aisec_models::{InferenceRequest, InferenceRuntime, LlamaInProcessRuntime, LlamaModelConfig};
+use promptlab_models::{InferenceRequest, InferenceRuntime, LlamaInProcessRuntime, LlamaModelConfig};
 
 #[tokio::main]
 async fn main() {
@@ -15,7 +15,7 @@ async fn main() {
 
     let mut runtime = LlamaInProcessRuntime::new(LlamaModelConfig::default());
 
-    println!("=== AISec Local Model Runtime (in-process llama.cpp) ===");
+    println!("=== PromptLab Local Model Runtime (in-process llama.cpp) ===");
     println!("GGUF: {model}");
     runtime
         .load_model(std::path::Path::new(&model))

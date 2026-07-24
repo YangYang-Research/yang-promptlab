@@ -76,13 +76,13 @@ impl SandboxRunner {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .env("AISEC_PLUGIN_ID", &manifest.plugin.id)
-            .env("AISEC_PLUGIN_DIR", plugin_dir)
-            .env("AISEC_HOST_API", crate::manifest::HOST_API_VERSION)
-            .env("AISEC_SANDBOX", "1");
+            .env("PROMPTLAB_PLUGIN_ID", &manifest.plugin.id)
+            .env("PROMPTLAB_PLUGIN_DIR", plugin_dir)
+            .env("PROMPTLAB_HOST_API", crate::manifest::HOST_API_VERSION)
+            .env("PROMPTLAB_SANDBOX", "1");
 
         if !self.config.allow_network_env {
-            cmd.env("AISEC_NO_NETWORK", "1");
+            cmd.env("PROMPTLAB_NO_NETWORK", "1");
         }
 
         // Strip inherited secrets from environment

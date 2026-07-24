@@ -1,4 +1,4 @@
-# AISec Plugin SDK (Python)
+# PromptLab Plugin SDK (Python)
 
 Install in development:
 

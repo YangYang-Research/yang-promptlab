@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AISec discovery verification target — serves http://localhost:3000"""
+"""PromptLab discovery verification target — serves http://localhost:3000"""
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
@@ -34,7 +34,7 @@ class Handler(BaseHTTPRequestHandler):
                 json.dumps(
                     {
                         "openapi": "3.1.0",
-                        "info": {"title": "AISec Test", "version": "1.0.0"},
+                        "info": {"title": "PromptLab Test", "version": "1.0.0"},
                         "paths": {},
                     }
                 ),

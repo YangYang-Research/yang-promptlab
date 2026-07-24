@@ -1,12 +1,12 @@
 //! Persist AI Runtime traffic events to SQLite and serve historical charts.
 
-use aisec_inference::{
+use promptlab_inference::{
     TrafficDirection, TrafficEvent, TrafficSnapshot, traffic_drain_pending,
     traffic_ensure_started, traffic_lifetime_totals, traffic_set_lifetime_totals,
     traffic_snapshot_from_events,
 };
-use aisec_storage::repositories::RuntimeTrafficRepository;
-use aisec_storage::{CreateRuntimeTrafficEvent, Repositories};
+use promptlab_storage::repositories::RuntimeTrafficRepository;
+use promptlab_storage::{CreateRuntimeTrafficEvent, Repositories};
 use tauri::{AppHandle, Manager};
 use tracing::{info, warn};
 
@@ -60,7 +60,7 @@ pub async fn bootstrap_traffic_persistence(app: &AppHandle) {
     });
 }
 
-pub async fn flush_pending_traffic(repos: &Repositories) -> aisec_core::AisecResult<u64> {
+pub async fn flush_pending_traffic(repos: &Repositories) -> promptlab_core::PromptLabResult<u64> {
     let pending = traffic_drain_pending();
     if pending.is_empty() {
         return Ok(0);
@@ -79,7 +79,7 @@ pub async fn traffic_snapshot_from_db(
     repos: &Repositories,
     window_ms: u64,
     bucket_ms: u64,
-) -> aisec_core::AisecResult<TrafficSnapshot> {
+) -> promptlab_core::PromptLabResult<TrafficSnapshot> {
     let _ = flush_pending_traffic(repos).await?;
 
     let now_ms = std::time::SystemTime::now()

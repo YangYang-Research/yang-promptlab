@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn embedded_runtime_always_available() {
-        let supervisor = RuntimeSupervisor::new("/tmp/aisec", "/tmp/data");
+        let supervisor = RuntimeSupervisor::new("/tmp/promptlab", "/tmp/data");
         assert!(supervisor.runtime_available());
     }
 }

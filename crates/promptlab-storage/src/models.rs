@@ -498,15 +498,15 @@ pub struct UpdateAgentLongTermMemory {
 }
 
 /// Helper for serializing optional JSON columns.
-pub(crate) fn json_string(value: &Option<serde_json::Value>) -> aisec_core::AisecResult<Option<String>> {
+pub(crate) fn json_string(value: &Option<serde_json::Value>) -> promptlab_core::PromptLabResult<Option<String>> {
     match value {
         Some(v) => Ok(Some(serde_json::to_string(v).map_err(|err| {
-            aisec_core::AisecError::invalid_input(err.to_string())
+            promptlab_core::PromptLabError::invalid_input(err.to_string())
         })?)),
         None => Ok(None),
     }
 }
 
-pub(crate) fn json_string_required(value: &serde_json::Value) -> aisec_core::AisecResult<String> {
-    serde_json::to_string(value).map_err(|err| aisec_core::AisecError::invalid_input(err.to_string()))
+pub(crate) fn json_string_required(value: &serde_json::Value) -> promptlab_core::PromptLabResult<String> {
+    serde_json::to_string(value).map_err(|err| promptlab_core::PromptLabError::invalid_input(err.to_string()))
 }

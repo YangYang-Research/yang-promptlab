@@ -183,7 +183,7 @@ impl JudgeRequest {
         probe_id: impl Into<String>,
         attack_category: impl Into<String>,
         payload: impl Into<String>,
-        normalized: &aisec_harness::NormalizedResponse,
+        normalized: &promptlab_harness::NormalizedResponse,
     ) -> Self {
         Self {
             probe_id: probe_id.into(),

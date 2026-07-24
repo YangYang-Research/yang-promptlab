@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use aisec_models::runtime::{InferenceRuntime, LlamaInProcessRuntime, LlamaModelConfig};
-use aisec_models::types::{InferenceRequest, RuntimeState};
+use promptlab_models::runtime::{InferenceRuntime, LlamaInProcessRuntime, LlamaModelConfig};
+use promptlab_models::types::{InferenceRequest, RuntimeState};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::info;

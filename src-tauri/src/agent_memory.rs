@@ -1,9 +1,9 @@
-//! SQLite-backed [`aisec_agent::AgentMemoryStore`] for Yazg + sub-agents.
+//! SQLite-backed [`promptlab_agent::AgentMemoryStore`] for Yazg + sub-agents.
 
-use aisec_agent::{
+use promptlab_agent::{
     AgentMemoryStore, LtmEntry, LtmWrite, MemoryContext, MemoryScopeType, StmEntry, StmWrite,
 };
-use aisec_storage::{
+use promptlab_storage::{
     AgentLongTermMemoryRepository, AgentShortTermMemoryRepository, CreateAgentShortTermMemory,
     Repositories, UpsertAgentLongTermMemory,
 };

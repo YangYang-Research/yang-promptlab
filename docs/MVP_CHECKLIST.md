@@ -1,4 +1,4 @@
-# AISec MVP Checklist
+# PromptLab MVP Checklist
 
 **Goal:** A user can open the desktop app and complete a full pentest loop on a target URL — from project creation through HTML report export.
 
@@ -38,16 +38,16 @@ Open app → Create project → Add target URL → Crawl → Discover endpoints
 | ✅ | Tauri shell builds and launches | **Done** |
 | ✅ | React UI renders (9 pages, layout, routing) | **Done** |
 | ✅ | `health` / `app_info` IPC | **Done** |
-| ⬜ | App opens SQLite on startup (`~/.aisec/aisec.db`) | **Missing** |
+| ⬜ | App opens SQLite on startup (`~/.promptlab/promptlab.db`) | **Missing** |
 | ⬜ | `AppState` holds `Database` handle | **Missing** — `state.rs` only stores log guard |
 | ⬜ | Frontend hydrates from backend (not mock-only mode) | **Missing** |
 | ⬜ | Global error surfacing for IPC failures | **Partial** — falls back to mock silently |
 
 **Missing work**
-- [ ] Add `aisec-storage` to `src-tauri/Cargo.toml`
+- [ ] Add `promptlab-storage` to `src-tauri/Cargo.toml`
 - [ ] Initialize `Database::connect` in Tauri `setup`
 - [ ] Store `Database` in `AppState` (behind `Mutex` or `Arc`)
-- [ ] Resolve app data directory (Tauri `path` API → `~/.aisec/`)
+- [ ] Resolve app data directory (Tauri `path` API → `~/.promptlab/`)
 - [ ] Replace mock bootstrap with real project list fetch (Step 2 dependency)
 
 ---
@@ -56,7 +56,7 @@ Open app → Create project → Add target URL → Crawl → Discover endpoints
 
 | | Item | Status |
 |---|------|--------|
-| ✅ | `ProjectRepository` + `CreateProject` model | **Done** (`aisec-storage`) |
+| ✅ | `ProjectRepository` + `CreateProject` model | **Done** (`promptlab-storage`) |
 | ✅ | Projects UI table (read mock data) | **Done** |
 | ⬜ | IPC command `project_create` | **Missing** |
 | ⬜ | IPC command `project_list` | **Missing** |
@@ -101,7 +101,7 @@ Open app → Create project → Add target URL → Crawl → Discover endpoints
 
 | | Item | Status |
 |---|------|--------|
-| ✅ | `DiscoveryEngine::discover(seed_url)` | **Done** (`aisec-discovery`) |
+| ✅ | `DiscoveryEngine::discover(seed_url)` | **Done** (`promptlab-discovery`) |
 | ✅ | `Crawler` — BFS, depth/page limits, same-origin | **Done** |
 | ✅ | `HttpClient` with timeout/retry | **Done** |
 | ✅ | Discovery UI page (display mock jobs) | **Done** (UI only) |
@@ -177,7 +177,7 @@ Open app → Create project → Add target URL → Crawl → Discover endpoints
 | | Item | Status |
 |---|------|--------|
 | ✅ | Inline `PromptInjectionAttack::evaluate` | **Done** (basic indicators) |
-| ✅ | `JudgeEngine` — rule + regex + LLM consensus | **Done** (`aisec-judge`) |
+| ✅ | `JudgeEngine` — rule + regex + LLM consensus | **Done** (`promptlab-judge`) |
 | ✅ | `CreateFinding` + `FindingRepository` | **Done** |
 | ✅ | Findings UI (mock list, status toggle) | **Done** (local state only) |
 | ⬜ | Invoke `JudgeEngine` on each attack response | **Missing** |
@@ -195,7 +195,7 @@ Open app → Create project → Add target URL → Crawl → Discover endpoints
 - [ ] `finding_list` IPC; hydrate Findings page from DB
 - [ ] Deduplicate findings per scan (same category + similar evidence)
 
-**MVP decision:** Use `aisec-judge` deterministic path (not attack inline evaluate) for Step 7 to satisfy "Evaluate results" as a distinct stage.
+**MVP decision:** Use `promptlab-judge` deterministic path (not attack inline evaluate) for Step 7 to satisfy "Evaluate results" as a distinct stage.
 
 ---
 
@@ -234,10 +234,10 @@ Infrastructure required across all steps:
 
 | Task | Priority |
 |------|----------|
-| Add workspace deps: `aisec-storage`, `aisec-discovery`, `aisec-attack`, `aisec-judge`, `aisec-report`, `tokio` | P0 |
+| Add workspace deps: `promptlab-storage`, `promptlab-discovery`, `promptlab-attack`, `promptlab-judge`, `promptlab-report`, `tokio` | P0 |
 | Extend `AppState` with `Database` + config paths | P0 |
 | Command module layout: `commands/{project,target,scan,finding,report}.rs` | P0 |
-| Unified error mapping: `AisecError` → `CommandError` | P0 |
+| Unified error mapping: `PromptLabError` → `CommandError` | P0 |
 | Async command support (`async fn` + `tauri::State`) | P0 |
 
 ### B. MVP run pipeline (orchestration)
@@ -284,9 +284,9 @@ scan_run(target_id)
 
 | Issue | Crate | Blocks |
 |-------|-------|--------|
-| `ScanRepository` trait not in scope in storage tests | `aisec-storage` | CI confidence (not runtime) |
-| Judge `regex_and_rules_agree_on_secret` fails | `aisec-judge` | Step 7 accuracy |
-| Plugin manifest drift | `aisec-plugin-host` | Not MVP-critical |
+| `ScanRepository` trait not in scope in storage tests | `promptlab-storage` | CI confidence (not runtime) |
+| Judge `regex_and_rules_agree_on_secret` fails | `promptlab-judge` | Step 7 accuracy |
+| Plugin manifest drift | `promptlab-plugin-host` | Not MVP-critical |
 
 ### F. Explicitly out of MVP scope
 
@@ -350,7 +350,7 @@ scan_run(target_id)
 - [ ] ≥0 findings persisted (pass or fail — pipeline must complete)
 - [ ] Generate HTML report → file exists on disk, opens in browser
 - [ ] Restart app → project, target, findings, report metadata still present
-- [ ] `cargo test -p aisec-judge --test integration` passes (Step 7 gate)
+- [ ] `cargo test -p promptlab-judge --test integration` passes (Step 7 gate)
 
 ---
 

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use aisec_models::runtime::InferenceRuntime;
-use aisec_runtime::ModelProviderRuntime;
+use promptlab_models::runtime::InferenceRuntime;
+use promptlab_runtime::ModelProviderRuntime;
 use tokio::sync::Mutex;
 
 use crate::config::{
@@ -10,7 +10,7 @@ use crate::config::{
 };
 use crate::engine::JudgeEngine;
 use crate::error::{JudgeError, JudgeResult};
-use aisec_inference::ProviderAdapter;
+use promptlab_inference::ProviderAdapter;
 use crate::providers::local::LocalLlmBackend;
 use crate::providers::remote::RemoteLlmBackend;
 use crate::providers::LlmBackend;
@@ -71,25 +71,25 @@ struct AdapterRuntime {
 
 #[async_trait::async_trait]
 impl InferenceRuntime for AdapterRuntime {
-    fn state(&self) -> aisec_models::types::RuntimeState {
-        aisec_models::types::RuntimeState::Ready
+    fn state(&self) -> promptlab_models::types::RuntimeState {
+        promptlab_models::types::RuntimeState::Ready
     }
 
     async fn load_model(
         &mut self,
         _model_path: &std::path::Path,
-    ) -> aisec_models::error::ModelResult<()> {
+    ) -> promptlab_models::error::ModelResult<()> {
         Ok(())
     }
 
-    async fn unload(&mut self) -> aisec_models::error::ModelResult<()> {
+    async fn unload(&mut self) -> promptlab_models::error::ModelResult<()> {
         Ok(())
     }
 
     async fn complete(
         &self,
-        request: aisec_models::types::InferenceRequest,
-    ) -> aisec_models::error::ModelResult<aisec_models::types::InferenceResponse> {
+        request: promptlab_models::types::InferenceRequest,
+    ) -> promptlab_models::error::ModelResult<promptlab_models::types::InferenceResponse> {
         self.adapter
             .complete(
                 request.system.as_deref(),
@@ -98,19 +98,19 @@ impl InferenceRuntime for AdapterRuntime {
                 request.temperature,
             )
             .await
-            .map(|text| aisec_models::types::InferenceResponse {
+            .map(|text| promptlab_models::types::InferenceResponse {
                 text,
                 tokens_predicted: 0,
                 duration_ms: 0,
             })
-            .map_err(|e| aisec_models::error::ModelError::runtime(e.to_string()))
+            .map_err(|e| promptlab_models::error::ModelError::runtime(e.to_string()))
     }
 
-    async fn health(&self) -> aisec_models::error::ModelResult<bool> {
+    async fn health(&self) -> promptlab_models::error::ModelResult<bool> {
         self.adapter
             .health()
             .await
-            .map_err(|e| aisec_models::error::ModelError::runtime(e.to_string()))
+            .map_err(|e| promptlab_models::error::ModelError::runtime(e.to_string()))
     }
 }
 
@@ -120,25 +120,25 @@ struct BackendRuntime {
 
 #[async_trait::async_trait]
 impl InferenceRuntime for BackendRuntime {
-    fn state(&self) -> aisec_models::types::RuntimeState {
-        aisec_models::types::RuntimeState::Ready
+    fn state(&self) -> promptlab_models::types::RuntimeState {
+        promptlab_models::types::RuntimeState::Ready
     }
 
     async fn load_model(
         &mut self,
         _model_path: &std::path::Path,
-    ) -> aisec_models::error::ModelResult<()> {
+    ) -> promptlab_models::error::ModelResult<()> {
         Ok(())
     }
 
-    async fn unload(&mut self) -> aisec_models::error::ModelResult<()> {
+    async fn unload(&mut self) -> promptlab_models::error::ModelResult<()> {
         Ok(())
     }
 
     async fn complete(
         &self,
-        request: aisec_models::types::InferenceRequest,
-    ) -> aisec_models::error::ModelResult<aisec_models::types::InferenceResponse> {
+        request: promptlab_models::types::InferenceRequest,
+    ) -> promptlab_models::error::ModelResult<promptlab_models::types::InferenceResponse> {
         self.backend
             .complete(
                 request.system.as_deref(),
@@ -147,19 +147,19 @@ impl InferenceRuntime for BackendRuntime {
                 request.temperature,
             )
             .await
-            .map(|text| aisec_models::types::InferenceResponse {
+            .map(|text| promptlab_models::types::InferenceResponse {
                 text,
                 tokens_predicted: 0,
                 duration_ms: 0,
             })
-            .map_err(|e| aisec_models::error::ModelError::runtime(e.to_string()))
+            .map_err(|e| promptlab_models::error::ModelError::runtime(e.to_string()))
     }
 
-    async fn health(&self) -> aisec_models::error::ModelResult<bool> {
+    async fn health(&self) -> promptlab_models::error::ModelResult<bool> {
         self.backend
             .health_check()
             .await
-            .map_err(|e| aisec_models::error::ModelError::runtime(e.to_string()))
+            .map_err(|e| promptlab_models::error::ModelError::runtime(e.to_string()))
     }
 }
 

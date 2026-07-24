@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use aisec_harness::{
+use promptlab_harness::{
     adapter::descriptor_from_parts, AuthMaterial, HarnessAttackTransport, HarnessFactory,
     HarnessKind, HttpMethod, TargetDescriptor, TargetSurface,
 };

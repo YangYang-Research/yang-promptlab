@@ -26,7 +26,7 @@ pub mod scan_playbook;
 pub mod state;
 pub mod traffic_persist;
 
-use aisec_models::ModelEntry;
+use promptlab_models::ModelEntry;
 use state::AppState;
 use tauri::{async_runtime::Mutex as AsyncMutex, Manager, RunEvent};
 
@@ -70,17 +70,17 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            let environment = aisec_core::bootstrap_environment()
+            let environment = promptlab_core::bootstrap_environment()
                 .map_err(crate::error::CommandError::from)?;
 
             let (event_bus, event_ring, event_log_guard) =
-                aisec_core::spawn_event_logger(environment.logs.clone());
+                promptlab_core::spawn_event_logger(environment.logs.clone());
             let event_bus = std::sync::Arc::new(event_bus);
 
             let log_guard = logging::init_app_logging(&environment)?;
 
             event_bus.info(
-                aisec_core::LogCategory::Application,
+                promptlab_core::LogCategory::Application,
                 "Application Started",
                 "promptlab-desktop",
                 "startup",
@@ -102,16 +102,16 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                     .with_vault_dir(vault_dir.clone());
 
             tauri::async_runtime::block_on(async {
-                let store = aisec_auth::SessionStore::new(database.clone(), vault_dir.clone())
+                let store = promptlab_auth::SessionStore::new(database.clone(), vault_dir.clone())
                     .await
                     .map_err(crate::error::CommandError::from)?;
-                aisec_auth::migrate_legacy_auth_data(&database, store.secrets())
+                promptlab_auth::migrate_legacy_auth_data(&database, store.secrets())
                     .await
                     .map_err(crate::error::CommandError::from)?;
-                aisec_auth::migrate_legacy_target_descriptors(&database, store.secrets())
+                promptlab_auth::migrate_legacy_target_descriptors(&database, store.secrets())
                     .await
                     .map_err(crate::error::CommandError::from)?;
-                aisec_auth::migrate_legacy_storage_artifacts(
+                promptlab_auth::migrate_legacy_storage_artifacts(
                     &database,
                     &root,
                     &store.encrypted_vault(),
@@ -141,11 +141,11 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             );
 
             let model_manager_arc = std::sync::Arc::new(AsyncMutex::new(model_manager));
-            let model_provider: aisec_runtime::SharedModelProvider = std::sync::Arc::new(
-                aisec_runtime::EmbeddedModelProvider::new(model_manager_arc.clone()),
+            let model_provider: promptlab_runtime::SharedModelProvider = std::sync::Arc::new(
+                promptlab_runtime::EmbeddedModelProvider::new(model_manager_arc.clone()),
             );
 
-            let harness_factory = aisec_harness::HarnessFactory::new()
+            let harness_factory = promptlab_harness::HarnessFactory::new()
                 .map_err(crate::error::CommandError::from)?;
             let plugin_manager = std::sync::Arc::new(AsyncMutex::new(
                 crate::plugin_service::bootstrap_plugin_manager(&root)
@@ -177,7 +177,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             }
 
             let app_handle = app.handle().clone();
-            aisec_inference::traffic_ensure_started();
+            promptlab_inference::traffic_ensure_started();
             tauri::async_runtime::spawn(async move {
                 let state = app_handle.state::<AppState>();
                 {
@@ -194,7 +194,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             });
 
             event_bus.info(
-                aisec_core::LogCategory::Application,
+                promptlab_core::LogCategory::Application,
                 "Application Ready",
                 "promptlab-desktop",
                 "startup",

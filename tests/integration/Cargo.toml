@@ -1,18 +1,18 @@
 [package]
-name = "aisec-integration-tests"
+name = "promptlab-integration-tests"
 version.workspace = true
 edition.workspace = true
 publish = false
 
 [dependencies]
-aisec-core = { workspace = true }
-aisec-auth = { workspace = true }
-aisec-storage = { workspace = true }
-aisec-discovery = { workspace = true }
-aisec-fingerprint = { workspace = true }
-aisec-attack = { workspace = true, features = ["storage"] }
-aisec-judge = { workspace = true }
-aisec-report = { workspace = true }
+promptlab-core = { workspace = true }
+promptlab-auth = { workspace = true }
+promptlab-storage = { workspace = true }
+promptlab-discovery = { workspace = true }
+promptlab-fingerprint = { workspace = true }
+promptlab-attack = { workspace = true, features = ["storage"] }
+promptlab-judge = { workspace = true }
+promptlab-report = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

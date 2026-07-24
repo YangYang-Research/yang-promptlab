@@ -1,4 +1,4 @@
-//! AISec Local Model Manager.
+//! PromptLab Local Model Manager.
 //!
 //! GGUF model registry, HuggingFace downloads with resume, SHA256 verification,
 //! hardware/GPU detection, and llama.cpp runtime integration.
@@ -31,7 +31,7 @@ pub use types::*;
 pub use registry_validate::{validate_registry, RegistryValidationIssue, RegistryValidationReport};
 pub use verify::VerificationEngine;
 
-/// Create a model manager with default vault at `~/.aisec/models` or `./data/models`.
+/// Create a model manager with default vault at `~/.promptlab/models` or `./data/models`.
 pub fn default_manager() -> ModelResult<LocalModelManager> {
     let vault = std::env::var("PROMPTLAB_MODEL_VAULT")
         .map(std::path::PathBuf::from)

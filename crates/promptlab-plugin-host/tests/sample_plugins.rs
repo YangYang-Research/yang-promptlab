@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use aisec_plugin_host::{PluginManager, PluginType};
+use promptlab_plugin_host::{PluginManager, PluginType};
 
 fn samples_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -38,7 +38,7 @@ async fn invokes_discovery_sample() {
 
     let mut mgr = PluginManager::new(samples_dir()).unwrap();
     mgr.discover().unwrap();
-    let id = "com.aisec.sample.discovery-openapi";
+    let id = "com.promptlab.sample.discovery-openapi";
     mgr.enable(id).unwrap();
 
     let result = mgr
@@ -63,7 +63,7 @@ async fn invokes_attack_sample() {
 
     let mut mgr = PluginManager::new(samples_dir()).unwrap();
     mgr.discover().unwrap();
-    let id = "com.aisec.sample.attack-delimiter";
+    let id = "com.promptlab.sample.attack-delimiter";
     mgr.enable(id).unwrap();
 
     let result = mgr
@@ -87,7 +87,7 @@ async fn invokes_judge_sample() {
 
     let mut mgr = PluginManager::new(samples_dir()).unwrap();
     mgr.discover().unwrap();
-    let id = "com.aisec.sample.judge-keyword";
+    let id = "com.promptlab.sample.judge-keyword";
     mgr.enable(id).unwrap();
 
     let result = mgr
@@ -110,7 +110,7 @@ async fn invokes_report_sample() {
 
     let mut mgr = PluginManager::new(samples_dir()).unwrap();
     mgr.discover().unwrap();
-    let id = "com.aisec.sample.report-markdown";
+    let id = "com.promptlab.sample.report-markdown";
     mgr.enable(id).unwrap();
 
     let result = mgr

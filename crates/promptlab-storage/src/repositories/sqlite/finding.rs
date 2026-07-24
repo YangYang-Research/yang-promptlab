@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 
 use crate::error::StorageResultExt;
 use crate::models::{CreateFinding, Finding, UpdateFinding};
@@ -21,7 +21,7 @@ impl SqliteFindingRepository {
 
 #[async_trait]
 impl FindingRepository for SqliteFindingRepository {
-    async fn create(&self, input: CreateFinding) -> AisecResult<Finding> {
+    async fn create(&self, input: CreateFinding) -> PromptLabResult<Finding> {
         let id = new_id();
         let timestamp = now();
         let status = input.status.unwrap_or_else(|| "open".to_string());
@@ -55,7 +55,7 @@ impl FindingRepository for SqliteFindingRepository {
         self.get(&id).await
     }
 
-    async fn get(&self, id: &str) -> AisecResult<Finding> {
+    async fn get(&self, id: &str) -> PromptLabResult<Finding> {
         sqlx::query_as::<_, Finding>("SELECT * FROM findings WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
@@ -63,7 +63,7 @@ impl FindingRepository for SqliteFindingRepository {
             .map_storage()
     }
 
-    async fn list_by_scan(&self, scan_id: &str) -> AisecResult<Vec<Finding>> {
+    async fn list_by_scan(&self, scan_id: &str) -> PromptLabResult<Vec<Finding>> {
         sqlx::query_as::<_, Finding>(
             "SELECT * FROM findings WHERE scan_id = ? ORDER BY created_at DESC",
         )
@@ -73,7 +73,7 @@ impl FindingRepository for SqliteFindingRepository {
         .map_storage()
     }
 
-    async fn list_by_project(&self, project_id: &str) -> AisecResult<Vec<Finding>> {
+    async fn list_by_project(&self, project_id: &str) -> PromptLabResult<Vec<Finding>> {
         sqlx::query_as::<_, Finding>(
             "SELECT * FROM findings WHERE project_id = ? ORDER BY created_at DESC",
         )
@@ -83,7 +83,7 @@ impl FindingRepository for SqliteFindingRepository {
         .map_storage()
     }
 
-    async fn search(&self, query: &str, limit: i64) -> AisecResult<Vec<Finding>> {
+    async fn search(&self, query: &str, limit: i64) -> PromptLabResult<Vec<Finding>> {
         let fts_query = query
             .split_whitespace()
             .map(|term| format!("\"{term}\""))
@@ -107,7 +107,7 @@ impl FindingRepository for SqliteFindingRepository {
         .map_storage()
     }
 
-    async fn update(&self, id: &str, input: UpdateFinding) -> AisecResult<Finding> {
+    async fn update(&self, id: &str, input: UpdateFinding) -> PromptLabResult<Finding> {
         let existing = self.get(id).await?;
         let title = input.title.unwrap_or(existing.title);
         let severity = input.severity.unwrap_or(existing.severity);
@@ -144,7 +144,7 @@ impl FindingRepository for SqliteFindingRepository {
         self.get(id).await
     }
 
-    async fn delete(&self, id: &str) -> AisecResult<()> {
+    async fn delete(&self, id: &str) -> PromptLabResult<()> {
         let result = sqlx::query("DELETE FROM findings WHERE id = ?")
             .bind(id)
             .execute(&self.pool)

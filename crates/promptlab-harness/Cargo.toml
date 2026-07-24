@@ -1,5 +1,5 @@
 [package]
-name = "aisec-harness"
+name = "promptlab-harness"
 description = "Execution harness layer — normalized attack delivery to heterogeneous AI targets"
 version.workspace = true
 edition.workspace = true
@@ -11,11 +11,11 @@ rust-version.workspace = true
 default = ["http", "openai"]
 http = []
 openai = []
-playwright = ["dep:aisec-auth"]
+playwright = ["dep:promptlab-auth"]
 
 [dependencies]
-aisec-core = { workspace = true }
-aisec-auth = { workspace = true, optional = true }
+promptlab-core = { workspace = true }
+promptlab-auth = { workspace = true, optional = true }
 async-trait = { workspace = true }
 base64 = "0.22"
 reqwest = { workspace = true }

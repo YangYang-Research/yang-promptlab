@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
-use aisec_judge::{
+use promptlab_judge::{
     build_judge_engine, JudgeMode, JudgeProviderConfig, JudgeRequest, JudgeRuntimeContext,
     LocalProviderSettings,
 };
-use aisec_models::types::{InferenceRequest, InferenceResponse};
-use aisec_runtime::provider::{ModelProvider, ModelProviderHealth};
+use promptlab_models::types::{InferenceRequest, InferenceResponse};
+use promptlab_runtime::provider::{ModelProvider, ModelProviderHealth};
 use async_trait::async_trait;
 
 struct JsonJudgeProvider {
@@ -16,19 +16,19 @@ struct JsonJudgeProvider {
 
 #[async_trait]
 impl ModelProvider for JsonJudgeProvider {
-    async fn list_models(&self) -> aisec_runtime::RuntimeResult<Vec<String>> {
+    async fn list_models(&self) -> promptlab_runtime::RuntimeResult<Vec<String>> {
         Ok(vec!["vault-judge".into()])
     }
 
-    async fn install_model(&self, _model_id: &str) -> aisec_runtime::RuntimeResult<()> {
+    async fn install_model(&self, _model_id: &str) -> promptlab_runtime::RuntimeResult<()> {
         Ok(())
     }
 
-    async fn remove_model(&self, _model_id: &str) -> aisec_runtime::RuntimeResult<()> {
+    async fn remove_model(&self, _model_id: &str) -> promptlab_runtime::RuntimeResult<()> {
         Ok(())
     }
 
-    async fn run_inference(&self, _model_id: &str, _prompt: &str) -> aisec_runtime::RuntimeResult<String> {
+    async fn run_inference(&self, _model_id: &str, _prompt: &str) -> promptlab_runtime::RuntimeResult<String> {
         Ok(self.json.clone())
     }
 
@@ -36,7 +36,7 @@ impl ModelProvider for JsonJudgeProvider {
         &self,
         _model_id: &str,
         _request: &InferenceRequest,
-    ) -> aisec_runtime::RuntimeResult<InferenceResponse> {
+    ) -> promptlab_runtime::RuntimeResult<InferenceResponse> {
         Ok(InferenceResponse {
             text: self.json.clone(),
             tokens_predicted: 32,
@@ -44,7 +44,7 @@ impl ModelProvider for JsonJudgeProvider {
         })
     }
 
-    async fn health(&self) -> aisec_runtime::RuntimeResult<ModelProviderHealth> {
+    async fn health(&self) -> promptlab_runtime::RuntimeResult<ModelProviderHealth> {
         Ok(ModelProviderHealth {
             healthy: true,
             message: "mock runtime provider".into(),

@@ -1,4 +1,4 @@
-# AISec — Architecture Diagrams
+# PromptLab — Architecture Diagrams
 
 > Visual reference for system structure, data flow, and job lifecycle.  
 > Version: 0.1.0 · Stack: Tauri 2 + React 19 + Rust workspace + SQLite
@@ -9,7 +9,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              AISec Desktop Application                          │
+│                              PromptLab Desktop Application                          │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                 │
 │  ┌──────────────────────────────────────┐    ┌──────────────────────────────┐  │
@@ -37,7 +37,7 @@
 │  │                    BACKEND (Rust — src-tauri + crates)                   │  │
 │  │                                                                          │  │
 │  │  ┌─────────────┐   ┌─────────────────┐   ┌─────────────────────────┐  │  │
-│  │  │  commands/  │──►│  AppState       │──►│  aisec-storage          │  │  │
+│  │  │  commands/  │──►│  AppState       │──►│  promptlab-storage          │  │  │
 │  │  │  projects   │   │  · Database     │   │  SQLite + repositories  │  │  │
 │  │  │  domain     │   │  · ScanJobMgr   │   └───────────┬─────────────┘  │  │
 │  │  │  discovery  │   │  · auth config  │               │                │  │
@@ -47,18 +47,18 @@
 │  │  └─────────────┘   ┌────────────────────────────────────────────┐     │  │
 │  │                    │           ENGINE CRATES (workspace)           │     │  │
 │  │                    │                                           │     │  │
-│  │                    │  aisec-discovery   aisec-attack           │     │  │
-│  │                    │  aisec-payload     aisec-judge            │     │  │
-│  │                    │  aisec-report      aisec-auth             │     │  │
-│  │                    │  aisec-models*     aisec-fingerprint*     │     │  │
-│  │                    │  aisec-plugin-host* aisec-core            │     │  │
+│  │                    │  promptlab-discovery   promptlab-attack           │     │  │
+│  │                    │  promptlab-payload     promptlab-judge            │     │  │
+│  │                    │  promptlab-report      promptlab-auth             │     │  │
+│  │                    │  promptlab-models*     promptlab-fingerprint*     │     │  │
+│  │                    │  promptlab-plugin-host* promptlab-core            │     │  │
 │  │                    │  (* = library only, not fully wired)    │     │  │
 │  │                    └────────────────────────────────────────────┘     │  │
 │  └──────────────────────────────────────────────────────────────────────────┘  │
 │                                                                                 │
 │  ┌──────────────────────────────┐   ┌──────────────────────────────────────┐  │
 │  │  PERSISTENCE                 │   │  EXTERNAL RUNTIMES                   │  │
-│  │  · {app_data}/aisec.db       │   │  · HTTP targets (reqwest)            │  │
+│  │  · {app_data}/promptlab.db       │   │  · HTTP targets (reqwest)            │  │
 │  │  · {app_data}/reports/       │   │  · Playwright (Node + Chromium)      │  │
 │  │  · {app_data}/auth-vault/    │   │  · Local GGUF (llama.cpp)*           │  │
 │  └──────────────────────────────┘   └──────────────────────────────────────┘  │
@@ -73,8 +73,8 @@
 | State | AppStore + wizard sessionStorage | Client-side cache and draft persistence |
 | IPC | `@tauri-apps/api` invoke | Typed command boundary |
 | Commands | `src-tauri/src/commands/` | Validation, orchestration, DTO mapping |
-| Engines | `crates/aisec-*` | Discovery, attack, judge, report, auth |
-| Storage | `aisec-storage` + SQLite | Single source of truth |
+| Engines | `crates/promptlab-*` | Discovery, attack, judge, report, auth |
+| Storage | `promptlab-storage` + SQLite | Single source of truth |
 
 ---
 
@@ -95,7 +95,7 @@
 │  ┌─────────────────────────────┐    ┌─────────────────────────────────┐  │
 │  │  AppStore (global)          │    │  Wizard session (local)         │  │
 │  │  · useReducer + Context     │    │  · sessionStorage key:          │  │
-│  │  · projects, targets, scans │    │    aisec:scan-wizard (v2)       │  │
+│  │  · projects, targets, scans │    │    promptlab:scan-wizard (v2)       │  │
 │  │  · findings, reports,       │    │  · currentStep, targetForm,     │  │
 │  │    endpoints                │    │    discovery, attackPlan        │  │
 │  │  · backendConnected         │    │  · survives tab refresh         │  │
@@ -202,7 +202,7 @@ End-to-end path from operator intent to deliverable report.
 │DISCOVERY │  Wizard Step 3 · DiscoveryStep
 │          │  IPC: discovery_run(target_id)
 │          │       endpoint_list(scan_id) · endpoint_create (manual)
-│          │  Engine: aisec-discovery
+│          │  Engine: promptlab-discovery
 │          │    · static probes (AI, GraphQL, OpenAPI paths)
 │          │    · HTTP crawler (depth 2, max 25 pages)
 │          │  DB:  scans (status: running → completed)
@@ -215,8 +215,8 @@ End-to-end path from operator intent to deliverable report.
 │  ATTACK  │  Wizard Step 4–5 · AttackPlanStep → scan_start
 │  PLAN    │  IPC: scan_start { projectId, targetId, endpointIds,
 │          │              profile, categories[], disabledTests[] }
-│          │  Engine: aisec-attack (per endpoint × category)
-│          │    · PayloadRunner → aisec-payload/payloads.json
+│          │  Engine: promptlab-attack (per endpoint × category)
+│          │    · PayloadRunner → promptlab-payload/payloads.json
 │          │    · HttpTransport → real HTTP to endpoint.url
 │          │    · apply_descriptor_auth → headers from target
 │          │  BG:   ScanJobManager (async tokio task)
@@ -227,7 +227,7 @@ End-to-end path from operator intent to deliverable report.
      ▼
 ┌──────────┐
 │  JUDGE   │  Inside run_category_on_endpoint (attack.rs)
-│          │  Engine: aisec-judge
+│          │  Engine: promptlab-judge
 │          │    · judge_deterministic() [production path]
 │          │      RuleBasedEvaluator + RegexEvaluator
 │          │    · judge() with LLM [available, not configured in app]
@@ -248,7 +248,7 @@ End-to-end path from operator intent to deliverable report.
 ┌──────────┐
 │  REPORT  │  ResultsStep · ReportsPage · GenerateReportModal
 │          │  IPC: report_generate → report_read / report_export
-│          │  Engine: aisec-report
+│          │  Engine: promptlab-report
 │          │    · ReportDataBuilder ← findings from SQLite
 │          │    · HTML | PDF | JSON | SARIF formatters
 │          │  FS:  {app_data}/reports/{filename}
@@ -383,7 +383,7 @@ DELETE target   ──SET NULL──► scans.target_id, findings.target_id, end
 
 ## BACKGROUND JOB FLOW
 
-AISec uses **two execution models**: synchronous IPC handlers and async background tasks.
+PromptLab uses **two execution models**: synchronous IPC handlers and async background tasks.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -603,7 +603,7 @@ Report         scan_id, format     →   reports + FS file       →   export pa
 
 ```
 {app_data_dir}/
-├── aisec.db                    ← all relational data
+├── promptlab.db                    ← all relational data
 ├── reports/
 │   └── {scan}-{kind}-{format}.{ext}   ← report_generate output
 ├── auth-vault/

@@ -12,7 +12,7 @@ use crate::types::{
     PluginInvokeResult, PluginLanguage, PluginRecord, PluginState, PluginType, SandboxConfig,
 };
 
-/// Discovers, installs, and executes AISec plugins.
+/// Discovers, installs, and executes PromptLab plugins.
 pub struct PluginManager {
     plugins_dir: PathBuf,
     records: HashMap<String, PluginRecord>,
@@ -254,7 +254,7 @@ mod tests {
             sample.join(MANIFEST_FILE),
             r#"
 [plugin]
-id = "com.aisec.sample.discovery"
+id = "com.promptlab.sample.discovery"
 name = "Sample Discovery"
 version = "1.0.0"
 api_version = "1"

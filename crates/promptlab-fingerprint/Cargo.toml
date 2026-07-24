@@ -1,6 +1,6 @@
 [package]
-name = "aisec-fingerprint"
-description = "AI endpoint fingerprinting engine for AISec"
+name = "promptlab-fingerprint"
+description = "AI endpoint fingerprinting engine for PromptLab"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-aisec-core = { workspace = true }
+promptlab-core = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

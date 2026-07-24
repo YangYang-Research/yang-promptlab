@@ -1,6 +1,6 @@
 # Reporting Engine
 
-**Crate:** `aisec-report`  
+**Crate:** `promptlab-report`  
 **Purpose:** Generate executive, technical, and compliance reports in HTML, PDF, JSON, and SARIF.
 
 ---
@@ -29,7 +29,7 @@
 ## Usage
 
 ```rust
-use aisec_report::{
+use promptlab_report::{
     ReportDataBuilder, ReportFormat, ReportKind, ReportingEngine, Severity,
     ReportFinding,
 };
@@ -63,7 +63,7 @@ engine.generate_all_formats(ReportKind::Technical, &input).await?;
 ### From storage findings
 
 ```rust
-use aisec_report::StorageFindingRow;
+use promptlab_report::StorageFindingRow;
 
 let findings = ReportDataBuilder::from_storage_findings(&storage_rows);
 let input = ReportDataBuilder::build("scan-id", "Project", None, findings);
@@ -108,7 +108,7 @@ SARIF 2.1.0 output maps severities:
 ## Tests
 
 ```bash
-cargo test -p aisec-report
+cargo test -p promptlab-report
 ```
 
 ---
@@ -117,4 +117,4 @@ cargo test -p aisec-report
 
 Reports are written to the configured output directory with filenames:
 
-`aisec-{kind}-{scan_id}.{ext}`
+`promptlab-{kind}-{scan_id}.{ext}`

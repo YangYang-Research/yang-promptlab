@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 
 use crate::error::StorageResultExt;
 use crate::models::{
@@ -23,7 +23,7 @@ impl SqliteAgentLongTermMemoryRepository {
 
 #[async_trait]
 impl AgentLongTermMemoryRepository for SqliteAgentLongTermMemoryRepository {
-    async fn upsert(&self, input: UpsertAgentLongTermMemory) -> AisecResult<AgentLongTermMemory> {
+    async fn upsert(&self, input: UpsertAgentLongTermMemory) -> PromptLabResult<AgentLongTermMemory> {
         let id = new_id();
         let timestamp = now();
         let importance = input.importance.unwrap_or(0.5).clamp(0.0, 1.0);
@@ -72,7 +72,7 @@ impl AgentLongTermMemoryRepository for SqliteAgentLongTermMemoryRepository {
         .await
     }
 
-    async fn get(&self, id: &str) -> AisecResult<AgentLongTermMemory> {
+    async fn get(&self, id: &str) -> PromptLabResult<AgentLongTermMemory> {
         sqlx::query_as::<_, AgentLongTermMemory>(
             "SELECT * FROM agent_long_term_memory WHERE id = ?",
         )
@@ -88,7 +88,7 @@ impl AgentLongTermMemoryRepository for SqliteAgentLongTermMemoryRepository {
         scope_type: &str,
         scope_id: &str,
         memory_key: &str,
-    ) -> AisecResult<AgentLongTermMemory> {
+    ) -> PromptLabResult<AgentLongTermMemory> {
         let resolved_scope = if scope_type == "global" { "" } else { scope_id };
         sqlx::query_as::<_, AgentLongTermMemory>(
             r#"
@@ -109,7 +109,7 @@ impl AgentLongTermMemoryRepository for SqliteAgentLongTermMemoryRepository {
         &self,
         scope_type: &str,
         scope_id: &str,
-    ) -> AisecResult<Vec<AgentLongTermMemory>> {
+    ) -> PromptLabResult<Vec<AgentLongTermMemory>> {
         let resolved_scope = if scope_type == "global" { "" } else { scope_id };
         sqlx::query_as::<_, AgentLongTermMemory>(
             r#"
@@ -130,7 +130,7 @@ impl AgentLongTermMemoryRepository for SqliteAgentLongTermMemoryRepository {
         agent_id: &str,
         scope_type: &str,
         scope_id: &str,
-    ) -> AisecResult<Vec<AgentLongTermMemory>> {
+    ) -> PromptLabResult<Vec<AgentLongTermMemory>> {
         let resolved_scope = if scope_type == "global" { "" } else { scope_id };
         sqlx::query_as::<_, AgentLongTermMemory>(
             r#"
@@ -151,7 +151,7 @@ impl AgentLongTermMemoryRepository for SqliteAgentLongTermMemoryRepository {
         &self,
         id: &str,
         input: UpdateAgentLongTermMemory,
-    ) -> AisecResult<AgentLongTermMemory> {
+    ) -> PromptLabResult<AgentLongTermMemory> {
         let existing = self.get(id).await?;
         let content = input.content.unwrap_or(existing.content);
         let content_json = match input.content_json {
@@ -184,7 +184,7 @@ impl AgentLongTermMemoryRepository for SqliteAgentLongTermMemoryRepository {
         self.get(id).await
     }
 
-    async fn touch(&self, id: &str) -> AisecResult<AgentLongTermMemory> {
+    async fn touch(&self, id: &str) -> PromptLabResult<AgentLongTermMemory> {
         let updated_at = now();
         let result = sqlx::query(
             r#"
@@ -206,7 +206,7 @@ impl AgentLongTermMemoryRepository for SqliteAgentLongTermMemoryRepository {
         self.get(id).await
     }
 
-    async fn delete(&self, id: &str) -> AisecResult<()> {
+    async fn delete(&self, id: &str) -> PromptLabResult<()> {
         let result = sqlx::query("DELETE FROM agent_long_term_memory WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
@@ -216,7 +216,7 @@ impl AgentLongTermMemoryRepository for SqliteAgentLongTermMemoryRepository {
         ensure_rows_affected(result, "agent long-term memory")
     }
 
-    async fn delete_by_scope(&self, scope_type: &str, scope_id: &str) -> AisecResult<u64> {
+    async fn delete_by_scope(&self, scope_type: &str, scope_id: &str) -> PromptLabResult<u64> {
         let resolved_scope = if scope_type == "global" { "" } else { scope_id };
         let result = sqlx::query(
             "DELETE FROM agent_long_term_memory WHERE scope_type = ? AND scope_id = ?",

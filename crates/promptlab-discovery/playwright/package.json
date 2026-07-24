@@ -1,9 +1,9 @@
 {
-  "name": "aisec-discovery-playwright-runner",
+  "name": "promptlab-discovery-playwright-runner",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Playwright Chromium runner for AISec Discovery SPA crawling and network capture",
+  "description": "Playwright Chromium runner for PromptLab Discovery SPA crawling and network capture",
   "dependencies": {
     "playwright": "^1.52.0"
   }

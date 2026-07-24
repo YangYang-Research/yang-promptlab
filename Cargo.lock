@@ -53,415 +53,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aisec-agent"
-version = "0.1.0"
-dependencies = [
- "aisec-judge",
- "aisec-models",
- "aisec-planner",
- "aisec-target-profile",
- "async-trait",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "aisec-attack"
-version = "0.1.0"
-dependencies = [
- "aisec-core",
- "aisec-harness",
- "aisec-payload",
- "aisec-storage",
- "async-trait",
- "base64 0.22.1",
- "regex",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
- "uuid",
- "wiremock",
-]
-
-[[package]]
-name = "aisec-auth"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "aisec-core",
- "aisec-storage",
- "async-trait",
- "base64 0.22.1",
- "jsonwebtoken",
- "keyring",
- "rand 0.8.6",
- "regex",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "aisec-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "time",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "aisec-desktop"
-version = "0.1.0"
-dependencies = [
- "aisec-agent",
- "aisec-attack",
- "aisec-auth",
- "aisec-core",
- "aisec-endpoint-metadata",
- "aisec-generator",
- "aisec-harness",
- "aisec-inference",
- "aisec-judge",
- "aisec-models",
- "aisec-payload",
- "aisec-planner",
- "aisec-plugin-host",
- "aisec-report",
- "aisec-runtime",
- "aisec-storage",
- "aisec-target-profile",
- "async-trait",
- "base64 0.22.1",
- "flate2",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sqlx",
- "tar",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-process",
- "tempfile",
- "time",
- "tokio",
- "tracing",
- "url",
- "which",
- "zip",
-]
-
-[[package]]
-name = "aisec-discovery"
-version = "0.1.0"
-dependencies = [
- "aisec-core",
- "async-trait",
- "dashmap",
- "regex",
- "reqwest 0.12.28",
- "scraper",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
- "url",
- "uuid",
- "wiremock",
-]
-
-[[package]]
-name = "aisec-endpoint-metadata"
-version = "0.1.0"
-dependencies = [
- "aisec-core",
- "aisec-fingerprint",
- "regex",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "time",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "aisec-fingerprint"
-version = "0.1.0"
-dependencies = [
- "aisec-core",
- "regex",
- "serde",
- "serde_json",
- "time",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "aisec-generator"
-version = "0.1.0"
-dependencies = [
- "aisec-attack",
- "aisec-core",
- "aisec-inference",
- "aisec-payload",
- "aisec-planner",
- "async-trait",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "aisec-harness"
-version = "0.1.0"
-dependencies = [
- "aisec-auth",
- "aisec-core",
- "async-trait",
- "base64 0.22.1",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "url",
- "wiremock",
-]
-
-[[package]]
-name = "aisec-inference"
-version = "0.1.0"
-dependencies = [
- "aisec-core",
- "aisec-models",
- "aisec-runtime",
- "async-trait",
- "hex",
- "hmac",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "aisec-integration-tests"
-version = "0.1.0"
-dependencies = [
- "aisec-attack",
- "aisec-auth",
- "aisec-core",
- "aisec-discovery",
- "aisec-fingerprint",
- "aisec-judge",
- "aisec-report",
- "aisec-storage",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "uuid",
- "wiremock",
-]
-
-[[package]]
-name = "aisec-judge"
-version = "0.1.0"
-dependencies = [
- "aisec-core",
- "aisec-harness",
- "aisec-inference",
- "aisec-models",
- "aisec-runtime",
- "async-trait",
- "hex",
- "hmac",
- "regex",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "aisec-models"
-version = "0.1.0"
-dependencies = [
- "aisec-core",
- "aisec-storage",
- "async-trait",
- "futures-util",
- "llama-cpp-2",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "sysctl",
- "tempfile",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
- "wiremock",
- "zip",
-]
-
-[[package]]
-name = "aisec-payload"
-version = "0.1.0"
-dependencies = [
- "aisec-core",
- "aisec-storage",
- "base64 0.22.1",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "aisec-planner"
-version = "0.1.0"
-dependencies = [
- "aisec-attack",
- "async-trait",
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "aisec-plugin-host"
-version = "0.1.0"
-dependencies = [
- "aisec-core",
- "async-trait",
- "semver",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "toml 0.8.23",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "aisec-report"
-version = "0.1.0"
-dependencies = [
- "aisec-core",
- "aisec-storage",
- "async-trait",
- "printpdf",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "aisec-runtime"
-version = "0.1.0"
-dependencies = [
- "aisec-core",
- "aisec-models",
- "async-trait",
- "libc",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "aisec-storage"
-version = "0.1.0"
-dependencies = [
- "aisec-core",
- "async-trait",
- "serde",
- "serde_json",
- "sqlx",
- "tempfile",
- "time",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "aisec-target-profile"
-version = "0.1.0"
-dependencies = [
- "aisec-attack",
- "aisec-harness",
- "aisec-inference",
- "aisec-payload",
- "aisec-planner",
- "async-trait",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4020,6 +3611,415 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "promptlab-agent"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "promptlab-judge",
+ "promptlab-models",
+ "promptlab-planner",
+ "promptlab-target-profile",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "promptlab-attack"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "promptlab-core",
+ "promptlab-harness",
+ "promptlab-payload",
+ "promptlab-storage",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
+name = "promptlab-auth"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "async-trait",
+ "base64 0.22.1",
+ "jsonwebtoken",
+ "keyring",
+ "promptlab-core",
+ "promptlab-storage",
+ "rand 0.8.6",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "promptlab-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "promptlab-desktop"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "flate2",
+ "promptlab-agent",
+ "promptlab-attack",
+ "promptlab-auth",
+ "promptlab-core",
+ "promptlab-endpoint-metadata",
+ "promptlab-generator",
+ "promptlab-harness",
+ "promptlab-inference",
+ "promptlab-judge",
+ "promptlab-models",
+ "promptlab-payload",
+ "promptlab-planner",
+ "promptlab-plugin-host",
+ "promptlab-report",
+ "promptlab-runtime",
+ "promptlab-storage",
+ "promptlab-target-profile",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tar",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-process",
+ "tempfile",
+ "time",
+ "tokio",
+ "tracing",
+ "url",
+ "which",
+ "zip",
+]
+
+[[package]]
+name = "promptlab-discovery"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dashmap",
+ "promptlab-core",
+ "regex",
+ "reqwest 0.12.28",
+ "scraper",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
+name = "promptlab-endpoint-metadata"
+version = "0.1.0"
+dependencies = [
+ "promptlab-core",
+ "promptlab-fingerprint",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "promptlab-fingerprint"
+version = "0.1.0"
+dependencies = [
+ "promptlab-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "time",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "promptlab-generator"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "promptlab-attack",
+ "promptlab-core",
+ "promptlab-inference",
+ "promptlab-payload",
+ "promptlab-planner",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "promptlab-harness"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "promptlab-auth",
+ "promptlab-core",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+ "wiremock",
+]
+
+[[package]]
+name = "promptlab-inference"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "hex",
+ "hmac",
+ "promptlab-core",
+ "promptlab-models",
+ "promptlab-runtime",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "promptlab-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "promptlab-attack",
+ "promptlab-auth",
+ "promptlab-core",
+ "promptlab-discovery",
+ "promptlab-fingerprint",
+ "promptlab-judge",
+ "promptlab-report",
+ "promptlab-storage",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
+name = "promptlab-judge"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "hex",
+ "hmac",
+ "promptlab-core",
+ "promptlab-harness",
+ "promptlab-inference",
+ "promptlab-models",
+ "promptlab-runtime",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "promptlab-models"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "llama-cpp-2",
+ "promptlab-core",
+ "promptlab-storage",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sysctl",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "wiremock",
+ "zip",
+]
+
+[[package]]
+name = "promptlab-payload"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "promptlab-core",
+ "promptlab-storage",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "promptlab-planner"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "promptlab-attack",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "promptlab-plugin-host"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "promptlab-core",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "promptlab-report"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "printpdf",
+ "promptlab-core",
+ "promptlab-storage",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "promptlab-runtime"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "libc",
+ "promptlab-core",
+ "promptlab-models",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "promptlab-storage"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "promptlab-core",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "promptlab-target-profile"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "promptlab-attack",
+ "promptlab-harness",
+ "promptlab-inference",
+ "promptlab-payload",
+ "promptlab-planner",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]

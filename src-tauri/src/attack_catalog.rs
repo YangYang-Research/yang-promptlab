@@ -1,8 +1,8 @@
 //! Seed and load the global attack technique catalog from SQLite.
 
-use aisec_core::AisecError;
-use aisec_payload::{parse_category, PayloadDatabase, PayloadRecord};
-use aisec_storage::{
+use promptlab_core::PromptLabError;
+use promptlab_payload::{parse_category, PayloadDatabase, PayloadRecord};
+use promptlab_storage::{
     AttackCatalogRepository, AttackCatalogTechnique, Database, Repositories,
     UpsertAttackCatalogTechnique,
 };
@@ -11,7 +11,7 @@ use crate::error::CommandResult;
 
 pub async fn seed_attack_catalog(database: &Database) -> CommandResult<u64> {
     let entries = PayloadDatabase::seed_entries()
-        .map_err(|e| AisecError::internal(format!("catalog seed load failed: {e}")))?;
+        .map_err(|e| PromptLabError::internal(format!("catalog seed load failed: {e}")))?;
     let upserts: Vec<UpsertAttackCatalogTechnique> = entries
         .into_iter()
         .map(|entry| {
@@ -37,7 +37,7 @@ pub async fn seed_attack_catalog(database: &Database) -> CommandResult<u64> {
         .attack_catalog()
         .seed_from(upserts)
         .await
-        .map_err(AisecError::from)?;
+        .map_err(PromptLabError::from)?;
     tracing::info!(touched, "attack catalog seeded");
     Ok(touched)
 }
@@ -53,7 +53,7 @@ pub async fn load_payload_database_from_repos(
         .attack_catalog()
         .list_enabled()
         .await
-        .map_err(AisecError::from)?;
+        .map_err(PromptLabError::from)?;
     payload_database_from_rows(rows)
 }
 
@@ -63,7 +63,7 @@ pub fn payload_database_from_rows(
     let mut records = Vec::with_capacity(rows.len());
     for row in rows {
         let category = parse_category(&row.category_id)
-            .map_err(|e| AisecError::invalid_input(format!("catalog category: {e}")))?;
+            .map_err(|e| PromptLabError::invalid_input(format!("catalog category: {e}")))?;
         let tags: Vec<String> = serde_json::from_str(&row.tags_json).unwrap_or_default();
         records.push(PayloadRecord {
             id: row.id,
@@ -75,5 +75,5 @@ pub fn payload_database_from_rows(
         });
     }
     PayloadDatabase::from_records(2, records)
-        .map_err(|e| AisecError::internal(format!("catalog build failed: {e}")).into())
+        .map_err(|e| PromptLabError::internal(format!("catalog build failed: {e}")).into())
 }

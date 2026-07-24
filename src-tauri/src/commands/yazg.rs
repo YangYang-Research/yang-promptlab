@@ -2,12 +2,12 @@
 
 use std::collections::HashMap;
 
-use aisec_agent::{
+use promptlab_agent::{
     AgentEvent, CreateProjectTools, CreatedProject, MemoryContext, SupervisorIntent,
     YazgDelegation, YazgSupervisor, YazgTurn,
 };
-use aisec_storage::TargetRepository;
-use aisec_target_profile::TargetProfile;
+use promptlab_storage::TargetRepository;
+use promptlab_target_profile::TargetProfile;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -100,10 +100,10 @@ fn event_dto(event: AgentEvent) -> AgentEventDto {
     AgentEventDto {
         agent: event.agent.as_str().into(),
         kind: match event.kind {
-            aisec_agent::AgentEventKind::Started => "started".into(),
-            aisec_agent::AgentEventKind::Completed => "completed".into(),
-            aisec_agent::AgentEventKind::Failed => "failed".into(),
-            aisec_agent::AgentEventKind::Info => "info".into(),
+            promptlab_agent::AgentEventKind::Started => "started".into(),
+            promptlab_agent::AgentEventKind::Completed => "completed".into(),
+            promptlab_agent::AgentEventKind::Failed => "failed".into(),
+            promptlab_agent::AgentEventKind::Info => "info".into(),
         },
         message: event.message,
     }
@@ -138,7 +138,7 @@ fn turn_to_response(
     }
 }
 
-fn map_agent_err(err: aisec_agent::AgentError) -> CommandError {
+fn map_agent_err(err: promptlab_agent::AgentError) -> CommandError {
     CommandError::invalid_input(err.to_string())
 }
 

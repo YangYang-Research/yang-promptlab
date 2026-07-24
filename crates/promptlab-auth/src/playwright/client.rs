@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use aisec_core::{AisecError, AisecResult};
+use promptlab_core::{PromptLabError, PromptLabResult};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -21,31 +21,31 @@ use crate::types::{CookieRecord, ExtractedToken, RecordLoginOptions, ReplayOptio
 /// Playwright automation driver (subprocess JSON-lines protocol).
 #[async_trait]
 pub trait PlaywrightDriver: Send + Sync {
-    async fn launch(&self, options: PlaywrightOptions) -> AisecResult<()>;
-    async fn close(&self) -> AisecResult<()>;
+    async fn launch(&self, options: PlaywrightOptions) -> PromptLabResult<()>;
+    async fn close(&self) -> PromptLabResult<()>;
     async fn record_login(
         &self,
         url: &str,
         method: &str,
         config: Value,
         options: RecordLoginOptions,
-    ) -> AisecResult<RecordLoginResult>;
+    ) -> PromptLabResult<RecordLoginResult>;
     async fn begin_interactive_login(
         &self,
         url: &str,
         options: RecordLoginOptions,
-    ) -> AisecResult<()>;
-    async fn finish_interactive_login(&self) -> AisecResult<RecordLoginResult>;
+    ) -> PromptLabResult<()>;
+    async fn finish_interactive_login(&self) -> PromptLabResult<RecordLoginResult>;
     async fn replay_session(
         &self,
         url: &str,
         storage_state: Option<Value>,
         storage_state_path: Option<&Path>,
         options: ReplayOptions,
-    ) -> AisecResult<ReplaySessionResult>;
-    async fn extract_tokens(&self, url: Option<&str>) -> AisecResult<Vec<ExtractedToken>>;
-    async fn get_cookies(&self, url: Option<&str>) -> AisecResult<Vec<CookieRecord>>;
-    async fn set_cookies(&self, cookies: Vec<CookieRecord>) -> AisecResult<Vec<CookieRecord>>;
+    ) -> PromptLabResult<ReplaySessionResult>;
+    async fn extract_tokens(&self, url: Option<&str>) -> PromptLabResult<Vec<ExtractedToken>>;
+    async fn get_cookies(&self, url: Option<&str>) -> PromptLabResult<Vec<CookieRecord>>;
+    async fn set_cookies(&self, cookies: Vec<CookieRecord>) -> PromptLabResult<Vec<CookieRecord>>;
     async fn execute_http_request(
         &self,
         url: &str,
@@ -53,7 +53,7 @@ pub trait PlaywrightDriver: Send + Sync {
         headers: std::collections::HashMap<String, String>,
         body: Option<String>,
         storage_state_path: Option<&Path>,
-    ) -> AisecResult<ExecuteHttpResult>;
+    ) -> PromptLabResult<ExecuteHttpResult>;
     async fn send_chat_prompt(
         &self,
         url: &str,
@@ -62,7 +62,7 @@ pub trait PlaywrightDriver: Send + Sync {
         submit_selector: &str,
         response_selector: &str,
         storage_state_path: Option<&Path>,
-    ) -> AisecResult<String>;
+    ) -> PromptLabResult<String>;
 }
 
 pub struct PlaywrightClient {
@@ -78,7 +78,7 @@ struct PlaywrightProcess {
 }
 
 impl PlaywrightClient {
-    pub async fn new(config: AuthEngineConfig) -> AisecResult<Self> {
+    pub async fn new(config: AuthEngineConfig) -> PromptLabResult<Self> {
         Ok(Self {
             inner: Arc::new(Mutex::new(PlaywrightProcess {
                 child: None,
@@ -90,7 +90,7 @@ impl PlaywrightClient {
         })
     }
 
-    fn runner_path(&self) -> AisecResult<PathBuf> {
+    fn runner_path(&self) -> PromptLabResult<PathBuf> {
         if let Some(path) = &self.config.playwright_runner {
             return Ok(path.clone());
         }
@@ -98,14 +98,14 @@ impl PlaywrightClient {
         if manifest.exists() {
             Ok(manifest)
         } else {
-            Err(AisecError::config(format!(
+            Err(PromptLabError::config(format!(
                 "playwright runner not found at {}",
                 manifest.display()
             )))
         }
     }
 
-    async fn ensure_process(&self) -> AisecResult<()> {
+    async fn ensure_process(&self) -> PromptLabResult<()> {
         let mut guard = self.inner.lock().await;
         if guard.child.is_some() {
             return Ok(());
@@ -129,10 +129,10 @@ impl PlaywrightClient {
 
         let mut child = command
             .spawn()
-            .map_err(|err| AisecError::internal(format!("failed to spawn playwright runner: {err}")))?;
+            .map_err(|err| PromptLabError::internal(format!("failed to spawn playwright runner: {err}")))?;
 
-        let stdin = child.stdin.take().ok_or_else(|| AisecError::internal("no stdin"))?;
-        let stdout = child.stdout.take().ok_or_else(|| AisecError::internal("no stdout"))?;
+        let stdin = child.stdin.take().ok_or_else(|| PromptLabError::internal("no stdin"))?;
+        let stdout = child.stdout.take().ok_or_else(|| PromptLabError::internal("no stdout"))?;
 
         guard.child = Some(child);
         guard.stdin = Some(stdin);
@@ -140,7 +140,7 @@ impl PlaywrightClient {
         Ok(())
     }
 
-    async fn call<T: DeserializeOwned>(&self, cmd: &str, payload: Value) -> AisecResult<T> {
+    async fn call<T: DeserializeOwned>(&self, cmd: &str, payload: Value) -> PromptLabResult<T> {
         self.ensure_process().await?;
 
         let id = {
@@ -158,26 +158,26 @@ impl PlaywrightClient {
         }
 
         let line =
-            serde_json::to_string(&body).map_err(|e| AisecError::internal(e.to_string()))?;
+            serde_json::to_string(&body).map_err(|e| PromptLabError::internal(e.to_string()))?;
 
         {
             let mut guard = self.inner.lock().await;
             let stdin = guard
                 .stdin
                 .as_mut()
-                .ok_or_else(|| AisecError::internal("stdin closed"))?;
+                .ok_or_else(|| PromptLabError::internal("stdin closed"))?;
             stdin
                 .write_all(line.as_bytes())
                 .await
-                .map_err(|e| AisecError::internal(e.to_string()))?;
+                .map_err(|e| PromptLabError::internal(e.to_string()))?;
             stdin
                 .write_all(b"\n")
                 .await
-                .map_err(|e| AisecError::internal(e.to_string()))?;
+                .map_err(|e| PromptLabError::internal(e.to_string()))?;
             stdin
                 .flush()
                 .await
-                .map_err(|e| AisecError::internal(e.to_string()))?;
+                .map_err(|e| PromptLabError::internal(e.to_string()))?;
         }
 
         let response_line = {
@@ -185,23 +185,23 @@ impl PlaywrightClient {
             let stdout = guard
                 .stdout
                 .as_mut()
-                .ok_or_else(|| AisecError::internal("stdout closed"))?;
+                .ok_or_else(|| PromptLabError::internal("stdout closed"))?;
             let mut buf = String::new();
             stdout
                 .read_line(&mut buf)
                 .await
-                .map_err(|e| AisecError::internal(e.to_string()))?;
+                .map_err(|e| PromptLabError::internal(e.to_string()))?;
             buf
         };
 
         let response: PlaywrightResponse = serde_json::from_str(&response_line)
-            .map_err(|e| AisecError::internal(format!("invalid playwright response: {e}")))?;
+            .map_err(|e| PromptLabError::internal(format!("invalid playwright response: {e}")))?;
 
         if response.id != id {
-            return Err(AisecError::internal("playwright response id mismatch"));
+            return Err(PromptLabError::internal("playwright response id mismatch"));
         }
         if !response.ok {
-            return Err(AisecError::internal(
+            return Err(PromptLabError::internal(
                 response
                     .error
                     .unwrap_or_else(|| "playwright command failed".into()),
@@ -209,21 +209,21 @@ impl PlaywrightClient {
         }
 
         serde_json::from_value(response.result)
-            .map_err(|e| AisecError::internal(format!("failed to decode playwright result: {e}")))
+            .map_err(|e| PromptLabError::internal(format!("failed to decode playwright result: {e}")))
     }
 }
 
 #[async_trait]
 impl PlaywrightDriver for PlaywrightClient {
     #[instrument(skip(self))]
-    async fn launch(&self, options: PlaywrightOptions) -> AisecResult<()> {
+    async fn launch(&self, options: PlaywrightOptions) -> PromptLabResult<()> {
         let _: serde_json::Value = self
             .call("launch", serde_json::json!({ "options": options }))
             .await?;
         Ok(())
     }
 
-    async fn close(&self) -> AisecResult<()> {
+    async fn close(&self) -> PromptLabResult<()> {
         let _: serde_json::Value = self.call("close", serde_json::json!({})).await?;
         let mut guard = self.inner.lock().await;
         if let Some(mut child) = guard.child.take() {
@@ -240,7 +240,7 @@ impl PlaywrightDriver for PlaywrightClient {
         method: &str,
         config: Value,
         options: RecordLoginOptions,
-    ) -> AisecResult<RecordLoginResult> {
+    ) -> PromptLabResult<RecordLoginResult> {
         self.launch(PlaywrightOptions {
             headless: !options.headed,
             headed: options.headed,
@@ -271,7 +271,7 @@ impl PlaywrightDriver for PlaywrightClient {
         &self,
         url: &str,
         options: RecordLoginOptions,
-    ) -> AisecResult<()> {
+    ) -> PromptLabResult<()> {
         self.launch(PlaywrightOptions {
             headless: false,
             headed: true,
@@ -299,7 +299,7 @@ impl PlaywrightDriver for PlaywrightClient {
         Ok(())
     }
 
-    async fn finish_interactive_login(&self) -> AisecResult<RecordLoginResult> {
+    async fn finish_interactive_login(&self) -> PromptLabResult<RecordLoginResult> {
         self.call("finish_interactive_login", serde_json::json!({}))
             .await
     }
@@ -310,7 +310,7 @@ impl PlaywrightDriver for PlaywrightClient {
         storage_state: Option<Value>,
         storage_state_path: Option<&Path>,
         options: ReplayOptions,
-    ) -> AisecResult<ReplaySessionResult> {
+    ) -> PromptLabResult<ReplaySessionResult> {
         let req = ReplaySessionRequest {
             url: url.to_string(),
             storage_state,
@@ -327,7 +327,7 @@ impl PlaywrightDriver for PlaywrightClient {
             .await
     }
 
-    async fn extract_tokens(&self, url: Option<&str>) -> AisecResult<Vec<ExtractedToken>> {
+    async fn extract_tokens(&self, url: Option<&str>) -> PromptLabResult<Vec<ExtractedToken>> {
         let result: serde_json::Value = self
             .call(
                 "extract_tokens",
@@ -337,14 +337,14 @@ impl PlaywrightDriver for PlaywrightClient {
         parse_tokens(&result["tokens"])
     }
 
-    async fn get_cookies(&self, url: Option<&str>) -> AisecResult<Vec<CookieRecord>> {
+    async fn get_cookies(&self, url: Option<&str>) -> PromptLabResult<Vec<CookieRecord>> {
         let result: serde_json::Value = self
             .call("get_cookies", serde_json::json!({ "url": url }))
             .await?;
         parse_cookies(&result["cookies"])
     }
 
-    async fn set_cookies(&self, cookies: Vec<CookieRecord>) -> AisecResult<Vec<CookieRecord>> {
+    async fn set_cookies(&self, cookies: Vec<CookieRecord>) -> PromptLabResult<Vec<CookieRecord>> {
         let result: serde_json::Value = self
             .call("set_cookies", serde_json::json!({ "cookies": cookies }))
             .await?;
@@ -358,7 +358,7 @@ impl PlaywrightDriver for PlaywrightClient {
         headers: std::collections::HashMap<String, String>,
         body: Option<String>,
         storage_state_path: Option<&Path>,
-    ) -> AisecResult<ExecuteHttpResult> {
+    ) -> PromptLabResult<ExecuteHttpResult> {
         self.call(
             "execute_http_request",
             serde_json::json!({
@@ -385,7 +385,7 @@ impl PlaywrightDriver for PlaywrightClient {
         submit_selector: &str,
         response_selector: &str,
         storage_state_path: Option<&Path>,
-    ) -> AisecResult<String> {
+    ) -> PromptLabResult<String> {
         let result: serde_json::Value = self
             .call(
                 "send_chat_prompt",
@@ -409,16 +409,16 @@ impl PlaywrightDriver for PlaywrightClient {
             .get("response_text")
             .and_then(|v| v.as_str())
             .map(str::to_string)
-            .ok_or_else(|| aisec_core::AisecError::internal("missing response_text from chat prompt"))
+            .ok_or_else(|| promptlab_core::PromptLabError::internal("missing response_text from chat prompt"))
     }
 }
 
-pub fn parse_tokens(value: &Value) -> AisecResult<Vec<ExtractedToken>> {
+pub fn parse_tokens(value: &Value) -> PromptLabResult<Vec<ExtractedToken>> {
     serde_json::from_value(value.clone())
-        .map_err(|e| AisecError::internal(format!("token parse error: {e}")))
+        .map_err(|e| PromptLabError::internal(format!("token parse error: {e}")))
 }
 
-pub fn parse_cookies(value: &Value) -> AisecResult<Vec<CookieRecord>> {
+pub fn parse_cookies(value: &Value) -> PromptLabResult<Vec<CookieRecord>> {
     serde_json::from_value(value.clone())
-        .map_err(|e| AisecError::internal(format!("cookie parse error: {e}")))
+        .map_err(|e| PromptLabError::internal(format!("cookie parse error: {e}")))
 }

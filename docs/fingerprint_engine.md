@@ -1,4 +1,4 @@
-# AISec Fingerprint Engine
+# PromptLab Fingerprint Engine
 
 The fingerprint engine identifies AI platforms and deployment components **before attack execution**, enabling targeted scan planning in the Scan Wizard.
 
@@ -10,8 +10,8 @@ Discovery  →  Fingerprint  →  Attack Planning
 
 | Stage | Crate / module | What happens |
 |-------|----------------|--------------|
-| **Discovery** | `aisec-discovery` | Crawl target, probe routes, enumerate endpoints |
-| **Fingerprint** | `aisec-fingerprint` | HTTP probe + rule evaluation per endpoint |
+| **Discovery** | `promptlab-discovery` | Crawl target, probe routes, enumerate endpoints |
+| **Fingerprint** | `promptlab-fingerprint` | HTTP probe + rule evaluation per endpoint |
 | **Attack planning** | Scan Wizard step 4 | Suggest categories from fingerprint recommendations |
 
 Discovery runs in `discovery_run` (`src-tauri/src/commands/discovery.rs`). Each eligible endpoint is probed via `fingerprint_service::fingerprint_endpoint_url`, which calls `FingerprintEngine::fingerprint_stack`.
@@ -21,7 +21,7 @@ Eligible endpoint kinds: `ai_endpoint`, `openapi`, `graphql`, `javascript`, `res
 ## Crate layout
 
 ```
-crates/aisec-fingerprint/
+crates/promptlab-fingerprint/
 ├── src/
 │   ├── engine.rs          # FingerprintEngine orchestration
 │   ├── profile.rs         # PlatformProfile builder (attack-planning output)
@@ -137,7 +137,7 @@ discovery_run
 ## Usage (Rust)
 
 ```rust
-use aisec_fingerprint::{FingerprintEngine, FingerprintInput};
+use promptlab_fingerprint::{FingerprintEngine, FingerprintInput};
 
 let engine = FingerprintEngine::new();
 let input = FingerprintInput::from_snapshot(
@@ -159,8 +159,8 @@ println!("recommendations: {:?}", report.attack_recommendations);
 
 | Area | Path |
 |------|------|
-| Engine | `crates/aisec-fingerprint/src/engine.rs` |
-| Platform profile | `crates/aisec-fingerprint/src/profile.rs` |
+| Engine | `crates/promptlab-fingerprint/src/engine.rs` |
+| Platform profile | `crates/promptlab-fingerprint/src/profile.rs` |
 | Tauri service | `src-tauri/src/fingerprint_service.rs` |
 | Discovery IPC | `src-tauri/src/commands/discovery.rs` |
 | Wizard UI | `src/features/scans/steps/DiscoveryStep.tsx`, `AttackPlanStep.tsx` |

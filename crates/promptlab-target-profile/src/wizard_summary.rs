@@ -1,7 +1,7 @@
 //! LLM-backed posture summaries (project + scan).
 
-use aisec_inference::PromptRegistry;
-use aisec_planner::{PlannerError, PlannerLlm, PlannerResult};
+use promptlab_inference::PromptRegistry;
+use promptlab_planner::{PlannerError, PlannerLlm, PlannerResult};
 use serde::{Deserialize, Serialize};
 
 use crate::wizard_recommendations::AttackResultsSummary;

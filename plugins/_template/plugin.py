@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""AISec plugin template — install SDK: pip install -e packages/plugin-sdk-python"""
+"""PromptLab plugin template — install SDK: pip install -e packages/plugin-sdk-python"""
 
-from aisec_plugin.discovery import DiscoveryPlugin
+from promptlab_plugin.discovery import DiscoveryPlugin
 
 
 @DiscoveryPlugin.register("discover")

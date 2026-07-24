@@ -1,4 +1,4 @@
-# AISec Payload Generator
+# PromptLab Payload Generator
 
 Dynamic prompt payload generation from attack plans, feeding the attack engine during scans.
 
@@ -8,14 +8,14 @@ Dynamic prompt payload generation from attack plans, feeding the attack engine d
 AttackPlan  →  Payload Generator  →  PromptPayloads  →  AttackExecutor
 ```
 
-Upstream planner output (`aisec-planner::AttackPlan`) selects categories and disabled tests. The generator materializes `AttackPayload` probes per category and injects them into `AttackContext.generated_payloads` for execution.
+Upstream planner output (`promptlab-planner::AttackPlan`) selects categories and disabled tests. The generator materializes `AttackPayload` probes per category and injects them into `AttackContext.generated_payloads` for execution.
 
-## Crate: `aisec-generator`
+## Crate: `promptlab-generator`
 
 | Module | Role |
 |--------|------|
 | `types` | `PromptPayloads`, `GeneratorMode`, `GeneratorStats` |
-| `static_pack` | Built-in catalog from `aisec-payload` (no mutations) |
+| `static_pack` | Built-in catalog from `promptlab-payload` (no mutations) |
 | `template_mutation` | Catalog + encoding/template mutations via `PayloadPipeline` |
 | `local_llm` | Vault LLM synthesizes novel probes per category |
 | `convert` | `PayloadRecord` / `GeneratedPayload` → `AttackPayload` |
@@ -49,7 +49,7 @@ pub struct PromptPayloads {
 
 ## Supported categories
 
-User-facing labels map to `AttackCategory` / `aisec-payload` catalog entries:
+User-facing labels map to `AttackCategory` / `promptlab-payload` catalog entries:
 
 | Label | Engine category | Catalog |
 |-------|-----------------|---------|

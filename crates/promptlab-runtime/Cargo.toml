@@ -1,6 +1,6 @@
 [package]
-name = "aisec-runtime"
-description = "Embedded local AI runtime (libllama) and model provider for AISec"
+name = "promptlab-runtime"
+description = "Embedded local AI runtime (libllama) and model provider for PromptLab"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,8 +8,8 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-aisec-core = { workspace = true }
-aisec-models = { workspace = true, features = ["llama"] }
+promptlab-core = { workspace = true }
+promptlab-models = { workspace = true, features = ["llama"] }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

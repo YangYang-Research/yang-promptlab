@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 
 use crate::error::StorageResultExt;
 use crate::models::{CreateScan, Scan, UpdateScan};
@@ -21,7 +21,7 @@ impl SqliteScanRepository {
 
 #[async_trait]
 impl ScanRepository for SqliteScanRepository {
-    async fn create(&self, input: CreateScan) -> AisecResult<Scan> {
+    async fn create(&self, input: CreateScan) -> PromptLabResult<Scan> {
         let id = new_id();
         let timestamp = now();
         let status = input.status.unwrap_or_else(|| "pending".to_string());
@@ -51,7 +51,7 @@ impl ScanRepository for SqliteScanRepository {
         self.get(&id).await
     }
 
-    async fn get(&self, id: &str) -> AisecResult<Scan> {
+    async fn get(&self, id: &str) -> PromptLabResult<Scan> {
         sqlx::query_as::<_, Scan>("SELECT * FROM scans WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
@@ -59,7 +59,7 @@ impl ScanRepository for SqliteScanRepository {
             .map_storage()
     }
 
-    async fn list_by_project(&self, project_id: &str) -> AisecResult<Vec<Scan>> {
+    async fn list_by_project(&self, project_id: &str) -> PromptLabResult<Vec<Scan>> {
         sqlx::query_as::<_, Scan>(
             "SELECT * FROM scans WHERE project_id = ? ORDER BY created_at DESC",
         )
@@ -69,7 +69,7 @@ impl ScanRepository for SqliteScanRepository {
         .map_storage()
     }
 
-    async fn list_interrupted(&self) -> AisecResult<Vec<Scan>> {
+    async fn list_interrupted(&self) -> PromptLabResult<Vec<Scan>> {
         sqlx::query_as::<_, Scan>(
             "SELECT * FROM scans WHERE status IN ('running', 'paused', 'pending') ORDER BY created_at DESC",
         )
@@ -78,7 +78,7 @@ impl ScanRepository for SqliteScanRepository {
         .map_storage()
     }
 
-    async fn update(&self, id: &str, input: UpdateScan) -> AisecResult<Scan> {
+    async fn update(&self, id: &str, input: UpdateScan) -> PromptLabResult<Scan> {
         let existing = self.get(id).await?;
         let target_id = match input.target_id {
             Some(value) => value,
@@ -124,7 +124,7 @@ impl ScanRepository for SqliteScanRepository {
         self.get(id).await
     }
 
-    async fn delete(&self, id: &str) -> AisecResult<()> {
+    async fn delete(&self, id: &str) -> PromptLabResult<()> {
         let result = sqlx::query("DELETE FROM scans WHERE id = ?")
             .bind(id)
             .execute(&self.pool)

@@ -1,6 +1,6 @@
 [package]
-name = "aisec-payload"
-description = "AISec payload engine — static library, mutations, generation pipeline"
+name = "promptlab-payload"
+description = "PromptLab payload engine — static library, mutations, generation pipeline"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,11 +9,11 @@ rust-version.workspace = true
 
 [features]
 default = []
-storage = ["dep:aisec-storage"]
+storage = ["dep:promptlab-storage"]
 
 [dependencies]
-aisec-core = { workspace = true }
-aisec-storage = { workspace = true, optional = true }
+promptlab-core = { workspace = true }
+promptlab-storage = { workspace = true, optional = true }
 base64 = "0.22"
 serde = { workspace = true }
 serde_json = { workspace = true }

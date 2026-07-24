@@ -1,6 +1,6 @@
-# AISec Payload Engine
+# PromptLab Payload Engine
 
-**Crate:** `aisec-payload`  
+**Crate:** `promptlab-payload`  
 **Purpose:** Static payload library, encoding mutations, and variant generation pipeline.
 
 ---
@@ -53,7 +53,7 @@ db.by_tag("mcp");
 | `HtmlWrap` | HTML entities + decode instruction wrapper |
 
 ```rust
-use aisec_payload::{MutationEngine, MutationKind};
+use promptlab_payload::{MutationEngine, MutationKind};
 
 let engine = MutationEngine::with_defaults();
 let encoded = engine.apply(MutationKind::HexEncode, "secret")?;
@@ -69,7 +69,7 @@ let variants = engine.expand("secret", MutationKind::encoding_kinds())?;
 ## Generation Pipeline
 
 ```rust
-use aisec_payload::{
+use promptlab_payload::{
     GenerateRequest, MutationKind, PayloadCategory, PayloadPipeline,
 };
 
@@ -98,12 +98,12 @@ Filter options: `categories`, `payload_ids`, `tags`, `mutations`.
 ## Tests
 
 ```bash
-cargo test -p aisec-payload
+cargo test -p promptlab-payload
 ```
 
 ---
 
 ## Integration
 
-- **`aisec-attack`** — consume `GeneratedPayload` variants in attack executor
-- **`aisec-storage`** — optional `storage` feature for persisting custom payloads to SQLite `payloads` table
+- **`promptlab-attack`** — consume `GeneratedPayload` variants in attack executor
+- **`promptlab-storage`** — optional `storage` feature for persisting custom payloads to SQLite `payloads` table

@@ -89,15 +89,15 @@ pub struct CreateAuthRecordingRecord {
     pub metadata_json: Option<serde_json::Value>,
 }
 
-pub(crate) fn json_opt(value: &Option<serde_json::Value>) -> aisec_core::AisecResult<Option<String>> {
+pub(crate) fn json_opt(value: &Option<serde_json::Value>) -> promptlab_core::PromptLabResult<Option<String>> {
     match value {
         Some(v) => Ok(Some(serde_json::to_string(v).map_err(|e| {
-            aisec_core::AisecError::invalid_input(e.to_string())
+            promptlab_core::PromptLabError::invalid_input(e.to_string())
         })?)),
         None => Ok(None),
     }
 }
 
-pub(crate) fn json_required(value: &serde_json::Value) -> aisec_core::AisecResult<String> {
-    serde_json::to_string(value).map_err(|e| aisec_core::AisecError::invalid_input(e.to_string()))
+pub(crate) fn json_required(value: &serde_json::Value) -> promptlab_core::PromptLabResult<String> {
+    serde_json::to_string(value).map_err(|e| promptlab_core::PromptLabError::invalid_input(e.to_string()))
 }

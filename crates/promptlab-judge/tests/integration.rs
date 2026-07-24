@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use aisec_judge::{
+use promptlab_judge::{
     JsonMockRuntime, JudgeConfig, JudgeEngine, JudgeMode, JudgeRequest, ModelRole, ModelRolePool,
 };
-use aisec_models::runtime::InferenceRuntime;
+use promptlab_models::runtime::InferenceRuntime;
 use tokio::sync::Mutex;
 
 #[tokio::test]

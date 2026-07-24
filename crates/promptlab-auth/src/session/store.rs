@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use aisec_core::{AisecError, AisecResult};
-use aisec_storage::{
+use promptlab_core::{PromptLabError, PromptLabResult};
+use promptlab_storage::{
     AuthProfileRepository, AuthRecordingRepository, AuthSessionRepository, CreateAuthProfile,
     CreateAuthRecordingRecord, CreateAuthSessionRecord, Database, UpdateAuthSessionRecord,
 };
@@ -25,11 +25,11 @@ pub struct SessionStore {
 }
 
 impl SessionStore {
-    pub async fn new(db: Database, vault_dir: impl Into<PathBuf>) -> AisecResult<Self> {
+    pub async fn new(db: Database, vault_dir: impl Into<PathBuf>) -> PromptLabResult<Self> {
         let vault_dir = vault_dir.into();
         tokio::fs::create_dir_all(&vault_dir)
             .await
-            .map_err(AisecError::from)?;
+            .map_err(PromptLabError::from)?;
         let secrets = SecretStore::new()?;
         let encrypted_vault = EncryptedVault::new(&secrets, vault_dir.clone())?;
         Ok(Self {
@@ -56,9 +56,9 @@ impl SessionStore {
         &self,
         session_id: &str,
         state: &PlaywrightStorageState,
-    ) -> AisecResult<PathBuf> {
+    ) -> PromptLabResult<PathBuf> {
         let json = serde_json::to_string_pretty(state)
-            .map_err(|e| AisecError::internal(e.to_string()))?;
+            .map_err(|e| PromptLabError::internal(e.to_string()))?;
         let path = self
             .encrypted_vault
             .write_json(session_id, &json)
@@ -67,15 +67,15 @@ impl SessionStore {
         Ok(path)
     }
 
-    pub async fn load_storage_state(&self, path: &Path) -> AisecResult<PlaywrightStorageState> {
+    pub async fn load_storage_state(&self, path: &Path) -> PromptLabResult<PlaywrightStorageState> {
         let data = if path.extension().and_then(|e| e.to_str()) == Some("enc") {
             self.encrypted_vault.read_json(path).await?
         } else {
             tokio::fs::read_to_string(path)
                 .await
-                .map_err(AisecError::from)?
+                .map_err(PromptLabError::from)?
         };
-        serde_json::from_str(&data).map_err(|e| AisecError::internal(e.to_string()))
+        serde_json::from_str(&data).map_err(|e| PromptLabError::internal(e.to_string()))
     }
 
     pub async fn persist_session(
@@ -84,7 +84,7 @@ impl SessionStore {
         cookies: &[CookieRecord],
         tokens: &[ExtractedToken],
         storage_state_path: Option<PathBuf>,
-    ) -> AisecResult<AuthSession> {
+    ) -> PromptLabResult<AuthSession> {
         let secrets_json = session_secrets_to_json(cookies, tokens)?;
         let credential_reference_id = self
             .secrets
@@ -129,7 +129,7 @@ impl SessionStore {
         credential_reference_id: Option<&str>,
         cookies: &[CookieRecord],
         tokens: &[ExtractedToken],
-    ) -> AisecResult<String> {
+    ) -> PromptLabResult<String> {
         let secrets_json = session_secrets_to_json(cookies, tokens)?;
         if let Some(existing) = credential_reference_id {
             let id = CredentialReferenceId::parse(existing);
@@ -145,7 +145,7 @@ impl SessionStore {
         &self,
         session_id: &str,
         cookies: &[CookieRecord],
-    ) -> AisecResult<()> {
+    ) -> PromptLabResult<()> {
         let session = self.get_session(session_id).await?;
         let record = self.db.repositories().auth_sessions().get(session_id).await?;
         let cred_id = self
@@ -176,7 +176,7 @@ impl SessionStore {
         &self,
         session_id: &str,
         tokens: &[ExtractedToken],
-    ) -> AisecResult<()> {
+    ) -> PromptLabResult<()> {
         let session = self.get_session(session_id).await?;
         let record = self.db.repositories().auth_sessions().get(session_id).await?;
         let cred_id = self
@@ -203,7 +203,7 @@ impl SessionStore {
         Ok(())
     }
 
-    pub async fn get_session(&self, session_id: &str) -> AisecResult<AuthSession> {
+    pub async fn get_session(&self, session_id: &str) -> PromptLabResult<AuthSession> {
         let record = self
             .db
             .repositories()
@@ -223,14 +223,14 @@ impl SessionStore {
                 .as_deref()
                 .map(|j| serde_json::from_str(j))
                 .transpose()
-                .map_err(|e| AisecError::internal(e.to_string()))?
+                .map_err(|e| PromptLabError::internal(e.to_string()))?
                 .unwrap_or_default();
             let tokens: Vec<ExtractedToken> = record
                 .tokens_json
                 .as_deref()
                 .map(|j| serde_json::from_str(j))
                 .transpose()
-                .map_err(|e| AisecError::internal(e.to_string()))?
+                .map_err(|e| PromptLabError::internal(e.to_string()))?
                 .unwrap_or_default();
             (cookies, tokens)
         };
@@ -263,7 +263,7 @@ impl SessionStore {
         last_validated_at: Option<time::OffsetDateTime>,
         user_identity: Option<&str>,
         expires_at: Option<time::OffsetDateTime>,
-    ) -> AisecResult<()> {
+    ) -> PromptLabResult<()> {
         self.db
             .repositories()
             .auth_sessions()
@@ -287,7 +287,7 @@ impl SessionStore {
         steps: &[RecordedStep],
         storage_state_path: Option<PathBuf>,
         metadata: serde_json::Value,
-    ) -> AisecResult<LoginRecording> {
+    ) -> PromptLabResult<LoginRecording> {
         let record = self
             .db
             .repositories()
@@ -316,7 +316,7 @@ impl SessionStore {
         &self,
         session_id: &str,
         path: impl AsRef<Path>,
-    ) -> AisecResult<()> {
+    ) -> PromptLabResult<()> {
         self.db
             .repositories()
             .auth_sessions()
@@ -331,7 +331,7 @@ impl SessionStore {
         Ok(())
     }
 
-    pub async fn create_profile(&self, profile: &AuthProfile) -> AisecResult<AuthProfile> {
+    pub async fn create_profile(&self, profile: &AuthProfile) -> PromptLabResult<AuthProfile> {
         let mut config = profile.config.clone();
         store_auth_config_secrets(&mut config, &self.secrets)?;
 
@@ -356,7 +356,7 @@ impl SessionStore {
         })
     }
 
-    pub async fn delete_session(&self, session_id: &str) -> AisecResult<()> {
+    pub async fn delete_session(&self, session_id: &str) -> PromptLabResult<()> {
         if let Ok(session) = self.get_session(session_id).await {
             if let Some(path) = session.storage_state_path.as_deref().map(Path::new) {
                 let _ = self.encrypted_vault.delete_artifact(path).await;

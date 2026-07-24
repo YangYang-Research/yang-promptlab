@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 
 use crate::error::StorageResultExt;
 use crate::models::{CreateEndpoint, Endpoint, UpdateEndpoint};
@@ -21,7 +21,7 @@ impl SqliteEndpointRepository {
 
 #[async_trait]
 impl EndpointRepository for SqliteEndpointRepository {
-    async fn create(&self, input: CreateEndpoint) -> AisecResult<Endpoint> {
+    async fn create(&self, input: CreateEndpoint) -> PromptLabResult<Endpoint> {
         let id = new_id();
         let created_at = now();
         let endpoint_type = input
@@ -70,7 +70,7 @@ impl EndpointRepository for SqliteEndpointRepository {
         self.get(&id).await
     }
 
-    async fn create_many(&self, inputs: Vec<CreateEndpoint>) -> AisecResult<Vec<Endpoint>> {
+    async fn create_many(&self, inputs: Vec<CreateEndpoint>) -> PromptLabResult<Vec<Endpoint>> {
         let mut created = Vec::with_capacity(inputs.len());
         for input in inputs {
             created.push(self.create(input).await?);
@@ -78,7 +78,7 @@ impl EndpointRepository for SqliteEndpointRepository {
         Ok(created)
     }
 
-    async fn get(&self, id: &str) -> AisecResult<Endpoint> {
+    async fn get(&self, id: &str) -> PromptLabResult<Endpoint> {
         sqlx::query_as::<_, Endpoint>("SELECT * FROM endpoints WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
@@ -86,7 +86,7 @@ impl EndpointRepository for SqliteEndpointRepository {
             .map_storage()
     }
 
-    async fn list_by_scan(&self, scan_id: &str) -> AisecResult<Vec<Endpoint>> {
+    async fn list_by_scan(&self, scan_id: &str) -> PromptLabResult<Vec<Endpoint>> {
         sqlx::query_as::<_, Endpoint>(
             "SELECT * FROM endpoints WHERE scan_id = ? ORDER BY risk_score DESC, confidence DESC, url ASC",
         )
@@ -96,7 +96,7 @@ impl EndpointRepository for SqliteEndpointRepository {
         .map_storage()
     }
 
-    async fn update(&self, id: &str, input: UpdateEndpoint) -> AisecResult<Endpoint> {
+    async fn update(&self, id: &str, input: UpdateEndpoint) -> PromptLabResult<Endpoint> {
         if let Some(method) = &input.method {
             sqlx::query("UPDATE endpoints SET method = ? WHERE id = ?")
                 .bind(method)
@@ -108,7 +108,7 @@ impl EndpointRepository for SqliteEndpointRepository {
         self.get(id).await
     }
 
-    async fn delete_by_scan(&self, scan_id: &str) -> AisecResult<u64> {
+    async fn delete_by_scan(&self, scan_id: &str) -> PromptLabResult<u64> {
         let result = sqlx::query("DELETE FROM endpoints WHERE scan_id = ?")
             .bind(scan_id)
             .execute(&self.pool)

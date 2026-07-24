@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use aisec_target_profile::{verify_target_profile, TargetProfile};
+use promptlab_target_profile::{verify_target_profile, TargetProfile};
 
 const PROFILE_JSON: &str = r#"{
   "provider": "generic_http",

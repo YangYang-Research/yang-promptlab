@@ -1,13 +1,13 @@
 //! Target Profile IPC — templates, verification, persistence.
 
-use aisec_auth::{resolve_descriptor_for_wizard, SecretStore};
-use aisec_core::{AisecError, LogCategory};
-use aisec_storage::TargetRepository;
-use aisec_target_profile::{
+use promptlab_auth::{resolve_descriptor_for_wizard, SecretStore};
+use promptlab_core::{PromptLabError, LogCategory};
+use promptlab_storage::TargetRepository;
+use promptlab_target_profile::{
     execute_capability_probe, execute_verify_http, has_ai_response, list_provider_templates,
     TargetProfile, VerificationError, VerifyHttpSuccess,
 };
-use aisec_agent::{MemoryContext, YazgDelegation, YazgSupervisor};
+use promptlab_agent::{MemoryContext, YazgDelegation, YazgSupervisor};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tracing::{info, warn};
@@ -29,7 +29,7 @@ fn profile_from_json(raw: &str) -> CommandResult<TargetProfile> {
 
 fn profile_to_json(profile: &TargetProfile) -> CommandResult<String> {
     serde_json::to_string(profile).map_err(|err| {
-        CommandError::from(AisecError::internal(err.to_string()))
+        CommandError::from(PromptLabError::internal(err.to_string()))
     })
 }
 
@@ -369,10 +369,10 @@ async fn persist_failed_verification(
     state: &AppState,
     target_id: &str,
     profile: &mut TargetProfile,
-    console: &aisec_target_profile::VerificationConsoleEntry,
+    console: &promptlab_target_profile::VerificationConsoleEntry,
     message: &str,
 ) -> CommandResult<()> {
-    profile.verification = aisec_target_profile::VerificationResult {
+    profile.verification = promptlab_target_profile::VerificationResult {
         verified: false,
         verified_at: None,
         provider: profile.provider.as_str().into(),

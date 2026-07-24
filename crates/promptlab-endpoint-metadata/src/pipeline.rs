@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use aisec_fingerprint::{FingerprintEngine, FingerprintInput, StackFingerprintReport};
+use promptlab_fingerprint::{FingerprintEngine, FingerprintInput, StackFingerprintReport};
 use time::OffsetDateTime;
 use url::Url;
 
@@ -75,7 +75,7 @@ pub async fn analyze_endpoint(
         stack_report
             .ai_components
             .iter()
-            .any(|c| c.component == aisec_fingerprint::AiComponent::McpServer),
+            .any(|c| c.component == promptlab_fingerprint::AiComponent::McpServer),
     );
 
     let mut classification = EndpointClassifier::classify(
@@ -233,14 +233,14 @@ fn fingerprint_from_report(report: &StackFingerprintReport) -> FingerprintMetada
     }
 }
 
-fn api_style_str(style: aisec_fingerprint::ApiStyle) -> String {
+fn api_style_str(style: promptlab_fingerprint::ApiStyle) -> String {
     match style {
-        aisec_fingerprint::ApiStyle::OpenAiCompatible => "openai_compatible",
-        aisec_fingerprint::ApiStyle::AnthropicMessages => "anthropic_messages",
-        aisec_fingerprint::ApiStyle::GeminiGenerateContent => "gemini_generate_content",
-        aisec_fingerprint::ApiStyle::BedrockInvoke => "bedrock_invoke",
-        aisec_fingerprint::ApiStyle::OllamaNative => "ollama_native",
-        aisec_fingerprint::ApiStyle::Unknown => "unknown",
+        promptlab_fingerprint::ApiStyle::OpenAiCompatible => "openai_compatible",
+        promptlab_fingerprint::ApiStyle::AnthropicMessages => "anthropic_messages",
+        promptlab_fingerprint::ApiStyle::GeminiGenerateContent => "gemini_generate_content",
+        promptlab_fingerprint::ApiStyle::BedrockInvoke => "bedrock_invoke",
+        promptlab_fingerprint::ApiStyle::OllamaNative => "ollama_native",
+        promptlab_fingerprint::ApiStyle::Unknown => "unknown",
     }
     .into()
 }

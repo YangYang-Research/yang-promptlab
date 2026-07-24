@@ -1,11 +1,11 @@
 //! Local model manager integration tests.
 
-use aisec_models::{
+use promptlab_models::{
     detect_hardware, huggingface_url, DownloadManager, DownloadStatus, LocalModelManager,
     MockInferenceRuntime, VerificationEngine,
 };
-use aisec_models::runtime::InferenceRuntime;
-use aisec_models::types::InferenceRequest;
+use promptlab_models::runtime::InferenceRuntime;
+use promptlab_models::types::InferenceRequest;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -74,7 +74,7 @@ async fn mock_inference_runtime() {
 #[tokio::test]
 #[ignore = "network: mistral catalog background download smoke test"]
 async fn mistral_catalog_download_smoke() {
-    use aisec_models::builtin_catalog::BuiltinCatalog;
+    use promptlab_models::builtin_catalog::BuiltinCatalog;
     use std::path::Path;
 
     let catalog_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/models.json");

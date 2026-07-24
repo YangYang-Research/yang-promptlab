@@ -1,6 +1,6 @@
 # Local Model Manager
 
-**Crate:** `aisec-models`  
+**Crate:** `promptlab-models`  
 **Purpose:** GGUF model registry, HuggingFace downloads, SHA256 verification, hardware detection, llama.cpp runtime.
 
 ---
@@ -21,7 +21,7 @@ LocalModelManager
 ## Model Registry
 
 ```rust
-use aisec_models::LocalModelManager;
+use promptlab_models::LocalModelManager;
 
 let mut mgr = LocalModelManager::new("./data/models")?;
 let entry = mgr.import_local("llama-3-8b", "/path/to/model.gguf")?;
@@ -41,7 +41,7 @@ Vault layout:
 ## HuggingFace Downloads
 
 ```rust
-use aisec_models::HuggingFaceDownloadRequest;
+use promptlab_models::HuggingFaceDownloadRequest;
 
 let entry = mgr.download_huggingface(HuggingFaceDownloadRequest {
     name: "Llama 3 8B Q4".into(),
@@ -62,7 +62,7 @@ Resume: partial file + `.download.json` sidecar → `Range: bytes=N-` on retry.
 ## Verification
 
 ```rust
-use aisec_models::VerificationEngine;
+use promptlab_models::VerificationEngine;
 
 let (hash, size) = VerificationEngine::hash_file("model.gguf").await?;
 let result = VerificationEngine::verify_or_fail("model.gguf", &expected).await?;
@@ -75,7 +75,7 @@ Streaming 1 MiB chunks — suitable for multi-GB GGUF files.
 ## Hardware / GPU Detection
 
 ```rust
-use aisec_models::detect_hardware;
+use promptlab_models::detect_hardware;
 
 let hw = detect_hardware()?;
 println!("{} cores, {} GB RAM, {} GPU(s)",
@@ -99,8 +99,8 @@ println!("{} cores, {} GB RAM, {} GPU(s)",
 Requires `llama-server` on PATH or configured binary:
 
 ```rust
-use aisec_models::{InferenceRequest, LlamaCppConfig, LlamaCppRuntime};
-use aisec_models::runtime::InferenceRuntime;
+use promptlab_models::{InferenceRequest, LlamaCppConfig, LlamaCppRuntime};
+use promptlab_models::runtime::InferenceRuntime;
 
 let mut runtime = LlamaCppRuntime::new(LlamaCppConfig::default());
 runtime.load_model(path_to_gguf).await?;
@@ -118,7 +118,7 @@ API: `POST /completion` (llama.cpp server), health via `GET /health`.
 ## Tests
 
 ```bash
-cargo test -p aisec-models
+cargo test -p promptlab-models
 ```
 
 Uses `wiremock` for download/resume tests and `MockInferenceRuntime` for inference without llama.cpp.
@@ -129,4 +129,4 @@ Uses `wiremock` for download/resume tests and `MockInferenceRuntime` for inferen
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `AISEC_MODEL_VAULT` | `./data/models` | Model storage directory |
+| `PROMPTLAB_MODEL_VAULT` | `./data/models` | Model storage directory |

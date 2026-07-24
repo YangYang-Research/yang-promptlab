@@ -3,7 +3,7 @@ use std::time::Instant;
 use crate::factory::HarnessFactory;
 use crate::models::{AttackRequest, AuthMaterial, HttpMethod, TargetDescriptor};
 
-/// Bridges `aisec-attack` transport requests to the harness execution layer.
+/// Bridges `promptlab-attack` transport requests to the harness execution layer.
 pub struct HarnessAttackTransport {
     factory: HarnessFactory,
     descriptor: TargetDescriptor,

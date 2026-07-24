@@ -2,8 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use aisec_core::AisecResult;
-use aisec_storage::{
+use promptlab_core::PromptLabResult;
+use promptlab_storage::{
     AuthProfileRepository, AuthSessionRepository, Database, TargetRepository,
 };
 use serde_json::Value;
@@ -42,7 +42,7 @@ impl SecretMigrationAudit {
 }
 
 /// Scan SQLite-backed records for inline secrets.
-pub async fn audit_database_secrets(db: &Database, data_dir: &Path) -> AisecResult<SecretMigrationAudit> {
+pub async fn audit_database_secrets(db: &Database, data_dir: &Path) -> PromptLabResult<SecretMigrationAudit> {
     let repos = db.repositories();
     let mut audit = SecretMigrationAudit::default();
 
@@ -149,7 +149,7 @@ pub fn merge_judge_config_audit(audit: &mut SecretMigrationAudit, judge_legacy: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aisec_storage::{CreateTarget, TargetRepository};
+    use promptlab_storage::{CreateTarget, TargetRepository};
 
     #[tokio::test]
     async fn audit_finds_plaintext_target_descriptor() {

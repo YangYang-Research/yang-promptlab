@@ -1,8 +1,8 @@
 //! Integration tests for payload generation from attack plans.
 
-use aisec_attack::AttackCategory;
-use aisec_generator::{generate_from_plan, GeneratorMode};
-use aisec_planner::{AttackPlan, PlannerMode};
+use promptlab_attack::AttackCategory;
+use promptlab_generator::{generate_from_plan, GeneratorMode};
+use promptlab_planner::{AttackPlan, PlannerMode};
 
 #[tokio::test]
 async fn openwebui_plan_generates_core_categories() {

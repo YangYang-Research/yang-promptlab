@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 
 use crate::error::StorageResultExt;
 use crate::models::{CreateAttackResult, AttackResult, UpdateAttackResult};
@@ -21,7 +21,7 @@ impl SqliteAttackResultRepository {
 
 #[async_trait]
 impl AttackResultRepository for SqliteAttackResultRepository {
-    async fn create(&self, input: CreateAttackResult) -> AisecResult<AttackResult> {
+    async fn create(&self, input: CreateAttackResult) -> PromptLabResult<AttackResult> {
         let id = new_id();
         let timestamp = now();
         let response_json = crate::models::json_string(&input.response_json)?;
@@ -53,7 +53,7 @@ impl AttackResultRepository for SqliteAttackResultRepository {
         self.get(&id).await
     }
 
-    async fn get(&self, id: &str) -> AisecResult<AttackResult> {
+    async fn get(&self, id: &str) -> PromptLabResult<AttackResult> {
         sqlx::query_as::<_, AttackResult>("SELECT * FROM attack_results WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
@@ -61,7 +61,7 @@ impl AttackResultRepository for SqliteAttackResultRepository {
             .map_storage()
     }
 
-    async fn list_by_scan(&self, scan_id: &str) -> AisecResult<Vec<AttackResult>> {
+    async fn list_by_scan(&self, scan_id: &str) -> PromptLabResult<Vec<AttackResult>> {
         sqlx::query_as::<_, AttackResult>(
             "SELECT * FROM attack_results WHERE scan_id = ? ORDER BY created_at DESC",
         )
@@ -71,7 +71,7 @@ impl AttackResultRepository for SqliteAttackResultRepository {
         .map_storage()
     }
 
-    async fn update(&self, id: &str, input: UpdateAttackResult) -> AisecResult<AttackResult> {
+    async fn update(&self, id: &str, input: UpdateAttackResult) -> PromptLabResult<AttackResult> {
         let existing = self.get(id).await?;
         let success = input.success.unwrap_or(existing.success);
         let response_json = match input.response_json {
@@ -104,7 +104,7 @@ impl AttackResultRepository for SqliteAttackResultRepository {
         self.get(id).await
     }
 
-    async fn delete(&self, id: &str) -> AisecResult<()> {
+    async fn delete(&self, id: &str) -> PromptLabResult<()> {
         let result = sqlx::query("DELETE FROM attack_results WHERE id = ?")
             .bind(id)
             .execute(&self.pool)

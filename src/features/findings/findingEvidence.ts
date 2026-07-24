@@ -154,7 +154,7 @@ function evaluatorWeight(role: JudgeRoleKey, weights: JudgeRoleWeights): number 
   return weights.defaultLlm;
 }
 
-/** Recompute aggregate confidence the same way as `aisec_judge::scoring::aggregate_confidence`. */
+/** Recompute aggregate confidence the same way as `promptlab_judge::scoring::aggregate_confidence`. */
 export function buildJudgeScoreBreakdown(
   roles: JudgeRoleResult[],
   weights: JudgeRoleWeights = DEFAULT_JUDGE_ROLE_WEIGHTS,

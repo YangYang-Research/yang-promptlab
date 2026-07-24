@@ -109,7 +109,7 @@ impl ReportFormatter for SarifFormatter {
                     driver: SarifDriver {
                         name: "PromptLab",
                         version: env!("CARGO_PKG_VERSION"),
-                        information_uri: "https://github.com/yangyang/aisec",
+                        information_uri: "https://github.com/yangyang/promptlab",
                     },
                 },
                 results,
@@ -131,7 +131,7 @@ impl ReportFormatter for SarifFormatter {
         Ok(GeneratedReport {
             kind,
             format: ReportFormat::Sarif,
-            filename: format!("aisec-{}-{}.sarif.json", kind.as_str(), input.scan_id),
+            filename: format!("promptlab-{}-{}.sarif.json", kind.as_str(), input.scan_id),
             bytes,
             content_type: ReportFormat::Sarif.content_type().into(),
         })

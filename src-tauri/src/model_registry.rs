@@ -2,9 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use aisec_core::AisecResult;
-use aisec_models::{BuiltinCatalog, BuiltinCatalogMeta, LocalModelManager};
-use aisec_runtime::{EmbeddedModelProvider, SharedModelProvider};
+use promptlab_core::PromptLabResult;
+use promptlab_models::{BuiltinCatalog, BuiltinCatalogMeta, LocalModelManager};
+use promptlab_runtime::{EmbeddedModelProvider, SharedModelProvider};
 use tauri::{AppHandle, Manager};
 use tracing::info;
 
@@ -32,12 +32,12 @@ pub fn remote_registry_url() -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
-pub async fn load_builtin_catalog(app: &AppHandle) -> AisecResult<(BuiltinCatalog, BuiltinCatalogMeta)> {
+pub async fn load_builtin_catalog(app: &AppHandle) -> PromptLabResult<(BuiltinCatalog, BuiltinCatalogMeta)> {
     let path = resolve_models_json_path(app);
     let remote = remote_registry_url();
     let catalog = BuiltinCatalog::load_with_optional_remote(&path, remote.as_deref())
         .await
-        .map_err(|err| aisec_core::AisecError::internal(err.to_string()))?;
+        .map_err(|err| promptlab_core::PromptLabError::internal(err.to_string()))?;
     let meta = catalog.meta().clone();
     info!(
         path = %path.display(),
@@ -51,33 +51,33 @@ pub async fn load_builtin_catalog(app: &AppHandle) -> AisecResult<(BuiltinCatalo
 }
 
 /// Load the repo registry for integration tests (offline, no remote merge).
-pub fn load_repo_catalog_for_tests() -> AisecResult<(BuiltinCatalog, BuiltinCatalogMeta)> {
+pub fn load_repo_catalog_for_tests() -> PromptLabResult<(BuiltinCatalog, BuiltinCatalogMeta)> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../resources/models.json");
     let catalog = BuiltinCatalog::load_from_path(&path)
-        .map_err(|err| aisec_core::AisecError::internal(err.to_string()))?;
+        .map_err(|err| promptlab_core::PromptLabError::internal(err.to_string()))?;
     let meta = catalog.meta().clone();
     Ok((catalog, meta))
 }
 
 pub fn open_test_model_stack(
     data_dir: &Path,
-) -> AisecResult<(
+) -> PromptLabResult<(
     std::sync::Arc<tokio::sync::Mutex<LocalModelManager>>,
     SharedModelProvider,
     BuiltinCatalogMeta,
-    aisec_harness::HarnessFactory,
-    std::sync::Arc<tauri::async_runtime::Mutex<aisec_plugin_host::PluginManager>>,
+    promptlab_harness::HarnessFactory,
+    std::sync::Arc<tauri::async_runtime::Mutex<promptlab_plugin_host::PluginManager>>,
 )> {
     let (catalog, meta) = load_repo_catalog_for_tests()?;
     let manager = crate::inference_host::open_model_manager(data_dir, catalog)
-        .map_err(|err| aisec_core::AisecError::internal(err.to_string()))?;
+        .map_err(|err| promptlab_core::PromptLabError::internal(err.to_string()))?;
     let manager = std::sync::Arc::new(tokio::sync::Mutex::new(manager));
     let provider = std::sync::Arc::new(EmbeddedModelProvider::new(manager.clone()));
-    let harness_factory = aisec_harness::HarnessFactory::new()
-        .map_err(|err| aisec_core::AisecError::internal(err.to_string()))?;
+    let harness_factory = promptlab_harness::HarnessFactory::new()
+        .map_err(|err| promptlab_core::PromptLabError::internal(err.to_string()))?;
     let plugin_manager = std::sync::Arc::new(tauri::async_runtime::Mutex::new(
         crate::plugin_service::bootstrap_plugin_manager(data_dir).unwrap_or_else(|_| {
-            aisec_plugin_host::PluginManager::new(data_dir.join("plugins"))
+            promptlab_plugin_host::PluginManager::new(data_dir.join("plugins"))
                 .expect("plugin manager")
         }),
     ));
@@ -87,10 +87,10 @@ pub fn open_test_model_stack(
 pub async fn open_model_manager_with_registry(
     app: &AppHandle,
     data_dir: &Path,
-) -> AisecResult<(LocalModelManager, BuiltinCatalogMeta)> {
+) -> PromptLabResult<(LocalModelManager, BuiltinCatalogMeta)> {
     let (catalog, meta) = load_builtin_catalog(app).await?;
     let mut manager = crate::inference_host::open_model_manager(data_dir, catalog)
-        .map_err(|err| aisec_core::AisecError::internal(err.to_string()))?;
+        .map_err(|err| promptlab_core::PromptLabError::internal(err.to_string()))?;
     let recovered = manager
         .recover_orphan_downloads()
         .await
@@ -104,7 +104,7 @@ pub async fn open_model_manager_with_registry(
     if let Err(err) = manager.restore_persisted_pipelines().await {
         tracing::warn!(error = %err, "pipeline restore skipped");
     }
-    if let Ok(secrets) = aisec_auth::SecretStore::new() {
+    if let Ok(secrets) = promptlab_auth::SecretStore::new() {
         match crate::third_party_credentials::migrate_third_party_model_credentials(
             data_dir,
             &mut manager,

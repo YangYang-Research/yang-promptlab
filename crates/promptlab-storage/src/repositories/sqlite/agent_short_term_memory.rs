@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use sqlx::SqlitePool;
 use time::OffsetDateTime;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 
 use crate::error::StorageResultExt;
 use crate::models::{
@@ -24,7 +24,7 @@ impl SqliteAgentShortTermMemoryRepository {
 
 #[async_trait]
 impl AgentShortTermMemoryRepository for SqliteAgentShortTermMemoryRepository {
-    async fn create(&self, input: CreateAgentShortTermMemory) -> AisecResult<AgentShortTermMemory> {
+    async fn create(&self, input: CreateAgentShortTermMemory) -> PromptLabResult<AgentShortTermMemory> {
         let id = new_id();
         let timestamp = now();
         let importance = input.importance.unwrap_or(0.5).clamp(0.0, 1.0);
@@ -61,7 +61,7 @@ impl AgentShortTermMemoryRepository for SqliteAgentShortTermMemoryRepository {
         self.get(&id).await
     }
 
-    async fn get(&self, id: &str) -> AisecResult<AgentShortTermMemory> {
+    async fn get(&self, id: &str) -> PromptLabResult<AgentShortTermMemory> {
         sqlx::query_as::<_, AgentShortTermMemory>(
             "SELECT * FROM agent_short_term_memory WHERE id = ?",
         )
@@ -71,7 +71,7 @@ impl AgentShortTermMemoryRepository for SqliteAgentShortTermMemoryRepository {
         .map_storage()
     }
 
-    async fn list_by_session(&self, session_id: &str) -> AisecResult<Vec<AgentShortTermMemory>> {
+    async fn list_by_session(&self, session_id: &str) -> PromptLabResult<Vec<AgentShortTermMemory>> {
         sqlx::query_as::<_, AgentShortTermMemory>(
             r#"
             SELECT * FROM agent_short_term_memory
@@ -89,7 +89,7 @@ impl AgentShortTermMemoryRepository for SqliteAgentShortTermMemoryRepository {
         &self,
         session_id: &str,
         agent_id: &str,
-    ) -> AisecResult<Vec<AgentShortTermMemory>> {
+    ) -> PromptLabResult<Vec<AgentShortTermMemory>> {
         sqlx::query_as::<_, AgentShortTermMemory>(
             r#"
             SELECT * FROM agent_short_term_memory
@@ -104,7 +104,7 @@ impl AgentShortTermMemoryRepository for SqliteAgentShortTermMemoryRepository {
         .map_storage()
     }
 
-    async fn delete(&self, id: &str) -> AisecResult<()> {
+    async fn delete(&self, id: &str) -> PromptLabResult<()> {
         let result = sqlx::query("DELETE FROM agent_short_term_memory WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
@@ -114,7 +114,7 @@ impl AgentShortTermMemoryRepository for SqliteAgentShortTermMemoryRepository {
         ensure_rows_affected(result, "agent short-term memory")
     }
 
-    async fn delete_by_session(&self, session_id: &str) -> AisecResult<u64> {
+    async fn delete_by_session(&self, session_id: &str) -> PromptLabResult<u64> {
         let result = sqlx::query("DELETE FROM agent_short_term_memory WHERE session_id = ?")
             .bind(session_id)
             .execute(&self.pool)
@@ -124,7 +124,7 @@ impl AgentShortTermMemoryRepository for SqliteAgentShortTermMemoryRepository {
         Ok(result.rows_affected())
     }
 
-    async fn prune_expired(&self, cutoff: OffsetDateTime) -> AisecResult<u64> {
+    async fn prune_expired(&self, cutoff: OffsetDateTime) -> PromptLabResult<u64> {
         let result = sqlx::query(
             r#"
             DELETE FROM agent_short_term_memory

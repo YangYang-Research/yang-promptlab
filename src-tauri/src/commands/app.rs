@@ -29,7 +29,7 @@ pub async fn app_clear_all_data_op(state: &AppState, app: &AppHandle) -> Command
 
     if root.exists() {
         std::fs::remove_dir_all(&root).map_err(|err| {
-            CommandError::from(aisec_core::AisecError::internal(format!(
+            CommandError::from(promptlab_core::PromptLabError::internal(format!(
                 "failed to remove PromptLab root directory: {err}"
             )))
         })?;
@@ -46,7 +46,7 @@ pub async fn app_clear_all_data_op(state: &AppState, app: &AppHandle) -> Command
     }
 
     state.event_bus().info(
-        aisec_core::LogCategory::Application,
+        promptlab_core::LogCategory::Application,
         "Application Data Cleared",
         "app",
         "clear_all_data",

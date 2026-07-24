@@ -1,10 +1,10 @@
 //! Interactive Playwright session recording for target authentication.
 
-use aisec_auth::{
+use promptlab_auth::{
     auth_sessions_dir, AuthConfig, AuthEngine, AuthMethod, AuthProfile, RecordLoginOptions,
     SessionStore,
 };
-use aisec_core::AisecError;
+use promptlab_core::PromptLabError;
 use serde::Serialize;
 use tauri::{async_runtime::Mutex, State};
 
@@ -91,7 +91,7 @@ fn build_auth_config(
             success_url_pattern: None,
             provider: None,
         }),
-        _ => Err(CommandError::from(AisecError::invalid_input(format!(
+        _ => Err(CommandError::from(PromptLabError::invalid_input(format!(
             "unsupported auth recording method: {method}"
         )))),
     }
@@ -99,7 +99,7 @@ fn build_auth_config(
 
 fn parse_auth_method(method: &str) -> Result<AuthMethod, CommandError> {
     AuthMethod::parse(method).ok_or_else(|| {
-        CommandError::from(AisecError::invalid_input(format!(
+        CommandError::from(PromptLabError::invalid_input(format!(
             "unsupported auth recording method: {method}"
         )))
     })
@@ -115,14 +115,14 @@ pub async fn auth_record_session_start(
 ) -> CommandResult<AuthRecordStartDto> {
     let login_url = login_url.trim();
     if login_url.is_empty() {
-        return Err(CommandError::from(AisecError::invalid_input(
+        return Err(CommandError::from(PromptLabError::invalid_input(
             "login URL is required",
         )));
     }
 
     let mut auth = auth_state.lock().await;
     if auth.profile_id.is_some() {
-        return Err(CommandError::from(AisecError::invalid_input(
+        return Err(CommandError::from(PromptLabError::invalid_input(
             "a browser recording is already in progress",
         )));
     }
@@ -185,7 +185,7 @@ pub async fn auth_record_session_finish(
 ) -> CommandResult<AuthRecordFinishDto> {
     let mut auth = auth_state.lock().await;
     let profile_id = auth.profile_id.take().ok_or_else(|| {
-        CommandError::from(AisecError::invalid_input(
+        CommandError::from(PromptLabError::invalid_input(
             "no browser recording is in progress",
         ))
     })?;
@@ -214,13 +214,13 @@ pub async fn auth_session_validate(
 ) -> CommandResult<AuthSessionStatusDto> {
     let session_id = session_id.trim();
     if session_id.is_empty() {
-        return Err(CommandError::from(AisecError::invalid_input(
+        return Err(CommandError::from(PromptLabError::invalid_input(
             "session id is required",
         )));
     }
     let probe_url = probe_url.trim();
     if probe_url.is_empty() {
-        return Err(CommandError::from(AisecError::invalid_input(
+        return Err(CommandError::from(PromptLabError::invalid_input(
             "probe URL is required",
         )));
     }
@@ -237,7 +237,7 @@ pub async fn auth_session_status(
 ) -> CommandResult<AuthSessionStatusDto> {
     let session_id = session_id.trim();
     if session_id.is_empty() {
-        return Err(CommandError::from(AisecError::invalid_input(
+        return Err(CommandError::from(PromptLabError::invalid_input(
             "session id is required",
         )));
     }

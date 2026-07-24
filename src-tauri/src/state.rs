@@ -1,14 +1,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use aisec_auth::AuthEngineConfig;
-use aisec_core::{EnvironmentPaths, EventBus, EventLogGuard, EventRing, LogGuard};
-use aisec_harness::HarnessFactory;
-use aisec_models::{BuiltinCatalogMeta, LocalModelManager};
-use aisec_plugin_host::PluginManager;
-use aisec_inference::InferenceRuntimeManager;
-use aisec_runtime::RuntimeManager;
-use aisec_storage::{Database, Repositories};
+use promptlab_auth::AuthEngineConfig;
+use promptlab_core::{EnvironmentPaths, EventBus, EventLogGuard, EventRing, LogGuard};
+use promptlab_harness::HarnessFactory;
+use promptlab_models::{BuiltinCatalogMeta, LocalModelManager};
+use promptlab_plugin_host::PluginManager;
+use promptlab_inference::InferenceRuntimeManager;
+use promptlab_runtime::RuntimeManager;
+use promptlab_storage::{Database, Repositories};
 use tauri::async_runtime::Mutex as AsyncMutex;
 
 use crate::jobs::ScanJobManager;
@@ -24,7 +24,7 @@ pub struct AppState {
     harness_factory: HarnessFactory,
     plugin_manager: Arc<AsyncMutex<PluginManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
-    model_provider: aisec_runtime::SharedModelProvider,
+    model_provider: promptlab_runtime::SharedModelProvider,
     model_catalog_meta: BuiltinCatalogMeta,
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
     inference_manager: Arc<AsyncMutex<InferenceRuntimeManager>>,
@@ -49,7 +49,7 @@ impl AppState {
         plugin_manager: Arc<AsyncMutex<PluginManager>>,
         runtime_manager: RuntimeManager,
         model_manager: Arc<AsyncMutex<LocalModelManager>>,
-        model_provider: aisec_runtime::SharedModelProvider,
+        model_provider: promptlab_runtime::SharedModelProvider,
         model_catalog_meta: BuiltinCatalogMeta,
     ) -> Self {
         let config_dir = environment.config.clone();
@@ -133,7 +133,7 @@ impl AppState {
         &self.model_manager
     }
 
-    pub fn model_provider(&self) -> &aisec_runtime::SharedModelProvider {
+    pub fn model_provider(&self) -> &promptlab_runtime::SharedModelProvider {
         &self.model_provider
     }
 

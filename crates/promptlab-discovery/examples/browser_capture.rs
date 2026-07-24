@@ -2,12 +2,12 @@
 //!
 //! Run:
 //!   python3 scripts/spa-test-target.py
-//!   cargo run -p aisec-discovery --example browser_capture
+//!   cargo run -p promptlab-discovery --example browser_capture
 //!
 //! Requires the bundled Playwright runner dependencies:
-//!   (cd crates/aisec-discovery/playwright && npm install && npx playwright install chromium)
+//!   (cd crates/promptlab-discovery/playwright && npm install && npx playwright install chromium)
 
-use aisec_discovery::{BrowserConfig, DiscoveryConfig, DiscoveryEngine, EndpointKind};
+use promptlab_discovery::{BrowserConfig, DiscoveryConfig, DiscoveryEngine, EndpointKind};
 
 #[tokio::main]
 async fn main() {
@@ -31,7 +31,7 @@ async fn main() {
         ..Default::default()
     };
 
-    println!("=== AISec Browser (Playwright/Chromium) Capture ===");
+    println!("=== PromptLab Browser (Playwright/Chromium) Capture ===");
     println!("Target: {target}\n");
 
     let report = engine

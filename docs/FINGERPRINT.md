@@ -1,6 +1,6 @@
 # AI Endpoint Fingerprinting
 
-**Crate:** `aisec-fingerprint`  
+**Crate:** `promptlab-fingerprint`  
 **Purpose:** Identify AI inference providers from HTTP observations with weighted confidence scoring.
 
 ---
@@ -22,7 +22,7 @@
 
 ## Detection Rules
 
-Rules live in `crates/aisec-fingerprint/src/rules/providers/`. Each rule has:
+Rules live in `crates/promptlab-fingerprint/src/rules/providers/`. Each rule has:
 
 - **id** — stable identifier (e.g. `openai.host`)
 - **weight** — contribution to raw score (0.15–0.50)
@@ -55,7 +55,7 @@ Default threshold: **0.45** (below = excluded from results)
 ## Usage
 
 ```rust
-use aisec_fingerprint::{FingerprintEngine, FingerprintInput};
+use promptlab_fingerprint::{FingerprintEngine, FingerprintInput};
 use std::collections::HashMap;
 
 let engine = FingerprintEngine::new();
@@ -80,7 +80,7 @@ if let Some(fp) = report.best_match() {
 ## Tests
 
 ```bash
-cargo test -p aisec-fingerprint
+cargo test -p promptlab-fingerprint
 ```
 
 Per-provider integration tests in `engine.rs` cover all 8 targets.
@@ -89,4 +89,4 @@ Per-provider integration tests in `engine.rs` cover all 8 targets.
 
 ## Integration
 
-Use with `aisec-discovery` HTTP snapshots by building `FingerprintInput` from URL, status, headers, and body after probe/crawl.
+Use with `promptlab-discovery` HTTP snapshots by building `FingerprintInput` from URL, status, headers, and body after probe/crawl.

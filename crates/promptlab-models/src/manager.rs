@@ -1158,7 +1158,7 @@ impl LocalModelManager {
         let response = engine
             .complete(InferenceRequest {
                 system: None,
-                prompt: "Reply with exactly: AISec OK".into(),
+                prompt: "Reply with exactly: PromptLab OK".into(),
                 max_tokens: 16,
                 temperature: 0.0,
             })
@@ -1173,7 +1173,7 @@ impl LocalModelManager {
             .chat(ChatRequest {
                 messages: vec![ChatMessage {
                     role: "user".into(),
-                    content: "Reply with exactly: AISec OK".into(),
+                    content: "Reply with exactly: PromptLab OK".into(),
                 }],
                 max_tokens: 16,
                 temperature: 0.0,

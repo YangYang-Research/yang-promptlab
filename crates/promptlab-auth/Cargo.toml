@@ -1,6 +1,6 @@
 [package]
-name = "aisec-auth"
-description = "Authentication engine for AISec (Playwright login recording, session replay, token extraction)"
+name = "promptlab-auth"
+description = "Authentication engine for PromptLab (Playwright login recording, session replay, token extraction)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,8 +8,8 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-aisec-core = { workspace = true }
-aisec-storage = { workspace = true }
+promptlab-core = { workspace = true }
+promptlab-storage = { workspace = true }
 async-trait = { workspace = true }
 base64 = "0.22"
 jsonwebtoken = "9"

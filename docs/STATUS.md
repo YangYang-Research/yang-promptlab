@@ -1,4 +1,4 @@
-# AISec Module Status
+# PromptLab Module Status
 
 **Last updated:** 2026-06-10  
 **Build baseline:** `cargo build --workspace` pass · `npm run build` pass  
@@ -24,14 +24,14 @@ Classifications reflect **product readiness** (desktop app + backend integration
 | Module | Status | Primary location |
 |--------|--------|------------------|
 | UI | **PARTIAL** | `src/` |
-| Database | **PARTIAL** | `crates/aisec-storage` |
-| Discovery | **PARTIAL** | `crates/aisec-discovery` |
-| Authentication | **PARTIAL** | `crates/aisec-auth` |
-| Attack Framework | **PARTIAL** | `crates/aisec-attack`, `crates/aisec-payload` |
-| Judge Engine | **PARTIAL** | `crates/aisec-judge` |
-| Reporting | **PARTIAL** | `crates/aisec-report` |
-| Plugin SDK | **BROKEN** | `crates/aisec-plugin-host`, `packages/plugin-sdk-*`, `plugins/` |
-| Model Manager | **PARTIAL** | `crates/aisec-models` |
+| Database | **PARTIAL** | `crates/promptlab-storage` |
+| Discovery | **PARTIAL** | `crates/promptlab-discovery` |
+| Authentication | **PARTIAL** | `crates/promptlab-auth` |
+| Attack Framework | **PARTIAL** | `crates/promptlab-attack`, `crates/promptlab-payload` |
+| Judge Engine | **PARTIAL** | `crates/promptlab-judge` |
+| Reporting | **PARTIAL** | `crates/promptlab-report` |
+| Plugin SDK | **BROKEN** | `crates/promptlab-plugin-host`, `packages/plugin-sdk-*`, `plugins/` |
+| Model Manager | **PARTIAL** | `crates/promptlab-models` |
 
 **Overall:** 0 COMPLETE · 8 PARTIAL · 0 SKELETON · 1 BROKEN
 
@@ -75,16 +75,16 @@ No module is product-complete. Domain libraries are largely built; application i
 
 ### Database — PARTIAL
 
-**Location:** `crates/aisec-storage`
+**Location:** `crates/promptlab-storage`
 
 | Aspect | State |
 |--------|-------|
 | Engine | SQLite via sqlx |
 | Migrations | `001_initial_schema.sql`, `002_auth_schema.sql` |
 | Repositories | Projects, targets, scans, findings (FTS5), attack results, reports, models, plugins, payloads, auth profiles/sessions/recordings |
-| Build | `cargo build -p aisec-storage` pass |
+| Build | `cargo build -p promptlab-storage` pass |
 | Tests | Lib tests **do not compile** — `ScanRepository` trait not in scope in `finding.rs` and `attack_result.rs` test modules |
-| Integration | **Not opened by Tauri** — `src-tauri` depends on `aisec-core` only |
+| Integration | **Not opened by Tauri** — `src-tauri` depends on `promptlab-core` only |
 
 **Done**
 - Full relational schema with indexes and FTS for findings
@@ -92,7 +92,7 @@ No module is product-complete. Domain libraries are largely built; application i
 - In-memory test database helper
 
 **Gaps**
-- No encryption at rest (`aisec-vault` absent; secrets stored as JSON)
+- No encryption at rest (`promptlab-vault` absent; secrets stored as JSON)
 - No connection from desktop app to `Database` pool
 - Test suite broken (compile errors)
 
@@ -105,7 +105,7 @@ No module is product-complete. Domain libraries are largely built; application i
 
 ### Discovery — PARTIAL
 
-**Location:** `crates/aisec-discovery`
+**Location:** `crates/promptlab-discovery`
 
 | Aspect | State |
 |--------|-------|
@@ -123,7 +123,7 @@ No module is product-complete. Domain libraries are largely built; application i
 **Gaps**
 - Not invoked from UI or Tauri
 - SSRF policy does not resolve DNS or re-validate redirects
-- No persistence of discovery results to `aisec-storage` from app flow
+- No persistence of discovery results to `promptlab-storage` from app flow
 
 **Blockers to COMPLETE**
 - IPC `discovery.start` / progress events
@@ -134,7 +134,7 @@ No module is product-complete. Domain libraries are largely built; application i
 
 ### Authentication — PARTIAL
 
-**Location:** `crates/aisec-auth`, auth tables in `crates/aisec-storage`
+**Location:** `crates/promptlab-auth`, auth tables in `crates/promptlab-storage`
 
 | Aspect | State |
 |--------|-------|
@@ -165,7 +165,7 @@ No module is product-complete. Domain libraries are largely built; application i
 
 ### Attack Framework — PARTIAL
 
-**Location:** `crates/aisec-attack`, `crates/aisec-payload`
+**Location:** `crates/promptlab-attack`, `crates/promptlab-payload`
 
 | Aspect | State |
 |--------|-------|
@@ -177,7 +177,7 @@ No module is product-complete. Domain libraries are largely built; application i
 
 **Done**
 - Trait-based attack plugins with structured results
-- Payload library, mutation pipeline (`aisec-payload` — integration 5/5 pass)
+- Payload library, mutation pipeline (`promptlab-payload` — integration 5/5 pass)
 - Result collector and orchestration report types
 
 **Gaps**
@@ -195,11 +195,11 @@ No module is product-complete. Domain libraries are largely built; application i
 
 ### Judge Engine — PARTIAL
 
-**Location:** `crates/aisec-judge`
+**Location:** `crates/promptlab-judge`
 
 | Aspect | State |
 |--------|-------|
-| Evaluators | Rule-based, regex, LLM (via `aisec-models` runtime) |
+| Evaluators | Rule-based, regex, LLM (via `promptlab-models` runtime) |
 | Consensus | Multi-model weighted voting, confidence scoring |
 | Build | Pass |
 | Tests | Integration **2/3 pass** — `regex_and_rules_agree_on_secret` fails (regex pattern vs `"API key:"` mismatch; consensus threshold 0.55) |
@@ -224,7 +224,7 @@ No module is product-complete. Domain libraries are largely built; application i
 
 ### Reporting — PARTIAL
 
-**Location:** `crates/aisec-report`
+**Location:** `crates/promptlab-report`
 
 | Aspect | State |
 |--------|-------|
@@ -245,14 +245,14 @@ No module is product-complete. Domain libraries are largely built; application i
 
 **Blockers to COMPLETE**
 - IPC `report.export(format, scan_id)`
-- Load findings/run logs from `aisec-storage`
+- Load findings/run logs from `promptlab-storage`
 - UI download/save integration
 
 ---
 
 ### Plugin SDK — BROKEN
 
-**Location:** `crates/aisec-plugin-host`, `packages/plugin-sdk-python`, `packages/plugin-sdk-js`, `plugins/samples/`
+**Location:** `crates/promptlab-plugin-host`, `packages/plugin-sdk-python`, `packages/plugin-sdk-js`, `plugins/samples/`
 
 | Aspect | State |
 |--------|-------|
@@ -286,7 +286,7 @@ No module is product-complete. Domain libraries are largely built; application i
 
 ### Model Manager — PARTIAL
 
-**Location:** `crates/aisec-models`
+**Location:** `crates/promptlab-models`
 
 | Aspect | State |
 |--------|-------|
@@ -320,7 +320,7 @@ No module is product-complete. Domain libraries are largely built; application i
 All **PARTIAL** modules share the same root cause: the Tauri shell is a bootstrap stub.
 
 ```
-React UI  ──IPC──►  src-tauri  ──X──►  aisec-storage / engines
+React UI  ──IPC──►  src-tauri  ──X──►  promptlab-storage / engines
               health, app_info only
 ```
 
@@ -352,14 +352,14 @@ cargo build --workspace
 npm run build
 
 # Per-module tests
-cargo test -p aisec-storage --lib          # compile fail
-cargo test -p aisec-discovery --test integration
-cargo test -p aisec-auth --lib              # compile fail
-cargo test -p aisec-attack --test integration
-cargo test -p aisec-judge --test integration  # 1 fail
-cargo test -p aisec-report --test integration
-cargo test -p aisec-models --lib            # 3 fail (macOS)
-cargo test -p aisec-plugin-host --test sample_plugins  # 5 fail
+cargo test -p promptlab-storage --lib          # compile fail
+cargo test -p promptlab-discovery --test integration
+cargo test -p promptlab-auth --lib              # compile fail
+cargo test -p promptlab-attack --test integration
+cargo test -p promptlab-judge --test integration  # 1 fail
+cargo test -p promptlab-report --test integration
+cargo test -p promptlab-models --lib            # 3 fail (macOS)
+cargo test -p promptlab-plugin-host --test sample_plugins  # 5 fail
 npm test
 ```
 

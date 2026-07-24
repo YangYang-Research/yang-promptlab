@@ -2,8 +2,8 @@
 //!
 //! Kind **A**: LLM planning over a verified target profile (shared runtime).
 
-use aisec_planner::PlannerLlm;
-use aisec_target_profile::{build_wizard_attack_plan_with_llm, TargetProfile, WizardAttackPlan};
+use promptlab_planner::PlannerLlm;
+use promptlab_target_profile::{build_wizard_attack_plan_with_llm, TargetProfile, WizardAttackPlan};
 use serde::Deserialize;
 use tracing::info;
 

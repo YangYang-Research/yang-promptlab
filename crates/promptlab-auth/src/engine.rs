@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use aisec_core::{AisecError, AisecResult};
+use promptlab_core::{PromptLabError, PromptLabResult};
 use tracing::instrument;
 
 use crate::config::AuthEngineConfig;
@@ -27,7 +27,7 @@ impl AuthEngine {
         config: AuthEngineConfig,
         store: SessionStore,
         driver: Option<SharedPlaywrightDriver>,
-    ) -> AisecResult<Self> {
+    ) -> PromptLabResult<Self> {
         let driver = match driver {
             Some(d) => d,
             None => Arc::new(PlaywrightClient::new(config.clone()).await?),
@@ -53,12 +53,12 @@ impl AuthEngine {
         &self,
         profile: &AuthProfile,
         options: RecordLoginOptions,
-    ) -> AisecResult<(AuthSession, LoginRecording)> {
+    ) -> PromptLabResult<(AuthSession, LoginRecording)> {
         let mut profile = profile.clone();
         resolve_auth_config_secrets(&mut profile.config, self.store.secrets())?;
 
         if !profile.method.uses_browser() {
-            return Err(AisecError::invalid_input(format!(
+            return Err(PromptLabError::invalid_input(format!(
                 "method {} does not support browser recording",
                 profile.method.as_str()
             )));
@@ -67,7 +67,7 @@ impl AuthEngine {
         let login_url = profile
             .config
             .login_url()
-            .ok_or_else(|| AisecError::invalid_input("profile missing login_url"))?;
+            .ok_or_else(|| PromptLabError::invalid_input("profile missing login_url"))?;
 
         let pw_config = config_to_playwright(&profile.config)?;
         let result = self
@@ -88,7 +88,7 @@ impl AuthEngine {
         &self,
         login_url: &str,
         options: RecordLoginOptions,
-    ) -> AisecResult<()> {
+    ) -> PromptLabResult<()> {
         self.driver.begin_interactive_login(login_url, options).await
     }
 
@@ -96,7 +96,7 @@ impl AuthEngine {
     pub async fn finish_interactive_recording(
         &self,
         profile_id: &str,
-    ) -> AisecResult<(AuthSession, LoginRecording)> {
+    ) -> PromptLabResult<(AuthSession, LoginRecording)> {
         let result = self.driver.finish_interactive_login().await?;
         self.persist_record_result(profile_id, result).await
     }
@@ -105,7 +105,7 @@ impl AuthEngine {
         &self,
         profile_id: &str,
         result: crate::playwright::RecordLoginResult,
-    ) -> AisecResult<(AuthSession, LoginRecording)> {
+    ) -> PromptLabResult<(AuthSession, LoginRecording)> {
         let cookies = parse_cookies(&serde_json::Value::Array(result.cookies))?;
         let tokens = parse_tokens(&serde_json::Value::Array(result.tokens))?;
         let steps: Vec<RecordedStep> = result
@@ -157,7 +157,7 @@ impl AuthEngine {
         session_id: &str,
         url: &str,
         options: ReplayOptions,
-    ) -> AisecResult<ReplayResult> {
+    ) -> PromptLabResult<ReplayResult> {
         let session = self.store.get_session(session_id).await?;
         let storage_state = if let Some(path) = &session.storage_state_path {
             Some(
@@ -202,7 +202,7 @@ impl AuthEngine {
         &self,
         profile: &AuthProfile,
         record_options: RecordLoginOptions,
-    ) -> AisecResult<AuthenticateResult> {
+    ) -> PromptLabResult<AuthenticateResult> {
         match profile.method {
             AuthMethod::Jwt => authenticate_jwt(profile, &self.store).await,
             AuthMethod::ApiKey => authenticate_api_key(profile, &self.store).await,
@@ -218,7 +218,7 @@ impl AuthEngine {
     }
 
     /// Extract tokens from an active session (refreshes from browser if needed).
-    pub async fn extract_tokens(&self, session_id: &str, url: Option<&str>) -> AisecResult<Vec<ExtractedToken>> {
+    pub async fn extract_tokens(&self, session_id: &str, url: Option<&str>) -> PromptLabResult<Vec<ExtractedToken>> {
         let session = self.store.get_session(session_id).await?;
         let browser_tokens = self.driver.extract_tokens(url).await?;
         let merged = TokenExtractor::merge_tokens(&session.tokens, &browser_tokens);
@@ -229,7 +229,7 @@ impl AuthEngine {
     }
 
     /// Export cookies from session storage.
-    pub async fn export_cookies(&self, session_id: &str) -> AisecResult<Vec<crate::types::CookieRecord>> {
+    pub async fn export_cookies(&self, session_id: &str) -> PromptLabResult<Vec<crate::types::CookieRecord>> {
         CookieManager::new(&self.store, self.driver.as_ref())
             .export_cookies(session_id)
             .await
@@ -240,25 +240,25 @@ impl AuthEngine {
         &self,
         session_id: &str,
         cookies: Vec<crate::types::CookieRecord>,
-    ) -> AisecResult<Vec<crate::types::CookieRecord>> {
+    ) -> PromptLabResult<Vec<crate::types::CookieRecord>> {
         CookieManager::new(&self.store, self.driver.as_ref())
             .import_cookies(session_id, cookies)
             .await
     }
 
-    pub async fn close(&self) -> AisecResult<()> {
+    pub async fn close(&self) -> PromptLabResult<()> {
         self.driver.close().await
     }
 }
 
-async fn authenticate_jwt(profile: &AuthProfile, store: &SessionStore) -> AisecResult<AuthenticateResult> {
+async fn authenticate_jwt(profile: &AuthProfile, store: &SessionStore) -> PromptLabResult<AuthenticateResult> {
     let mut profile = profile.clone();
     resolve_auth_config_secrets(&mut profile.config, store.secrets())?;
     let AuthConfig::Jwt { token, header_name, prefix, .. } = &profile.config else {
-        return Err(AisecError::invalid_input("expected jwt config"));
+        return Err(PromptLabError::invalid_input("expected jwt config"));
     };
     if token.is_empty() {
-        return Err(AisecError::invalid_input("jwt token is missing"));
+        return Err(PromptLabError::invalid_input("jwt token is missing"));
     }
     TokenExtractor::validate_jwt_structure(token)?;
     let extracted =
@@ -272,14 +272,14 @@ async fn authenticate_jwt(profile: &AuthProfile, store: &SessionStore) -> AisecR
     })
 }
 
-async fn authenticate_api_key(profile: &AuthProfile, store: &SessionStore) -> AisecResult<AuthenticateResult> {
+async fn authenticate_api_key(profile: &AuthProfile, store: &SessionStore) -> PromptLabResult<AuthenticateResult> {
     let mut profile = profile.clone();
     resolve_auth_config_secrets(&mut profile.config, store.secrets())?;
     let AuthConfig::ApiKey { key, header_name, prefix, .. } = &profile.config else {
-        return Err(AisecError::invalid_input("expected api_key config"));
+        return Err(PromptLabError::invalid_input("expected api_key config"));
     };
     if key.is_empty() {
-        return Err(AisecError::invalid_input("api key must not be empty"));
+        return Err(PromptLabError::invalid_input("api key must not be empty"));
     }
     let token = ExtractedToken {
         kind: "api_key".into(),
@@ -303,7 +303,7 @@ async fn authenticate_api_key(profile: &AuthProfile, store: &SessionStore) -> Ai
     })
 }
 
-fn config_to_playwright(config: &AuthConfig) -> AisecResult<serde_json::Value> {
+fn config_to_playwright(config: &AuthConfig) -> PromptLabResult<serde_json::Value> {
     match config {
         AuthConfig::UsernamePassword {
             username,
@@ -342,7 +342,7 @@ fn config_to_playwright(config: &AuthConfig) -> AisecResult<serde_json::Value> {
             "success_url_pattern": success_url_pattern,
             "idp_entity_id": idp_entity_id,
         })),
-        AuthConfig::Jwt { .. } | AuthConfig::ApiKey { .. } => Err(AisecError::invalid_input(
+        AuthConfig::Jwt { .. } | AuthConfig::ApiKey { .. } => Err(PromptLabError::invalid_input(
             "credential auth does not use playwright config",
         )),
     }
@@ -352,7 +352,7 @@ fn config_to_playwright(config: &AuthConfig) -> AisecResult<serde_json::Value> {
 mod tests {
     use super::*;
     use crate::mock::MockPlaywrightDriver;
-    use aisec_storage::Database;
+    use promptlab_storage::Database;
     use std::sync::Arc;
 
     // Returns the engine together with the vault TempDir, which must be kept

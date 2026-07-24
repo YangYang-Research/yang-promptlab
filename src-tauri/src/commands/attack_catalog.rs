@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use aisec_agent::{MemoryContext, TechniquePromptContext, YazgDelegation, YazgSupervisor};
-use aisec_storage::{AttackCatalogRepository, AttackCatalogTechnique, UpdateAttackCatalogTechnique};
+use promptlab_agent::{MemoryContext, TechniquePromptContext, YazgDelegation, YazgSupervisor};
+use promptlab_storage::{AttackCatalogRepository, AttackCatalogTechnique, UpdateAttackCatalogTechnique};
 
 use crate::agent_memory::SqliteAgentMemoryStore;
 use crate::error::{CommandError, CommandResult};

@@ -1,7 +1,7 @@
-//! AISec AI Judge Engine.
+//! PromptLab AI Judge Engine.
 //!
 //! LLM-based evaluation with multi-role consensus and confidence scoring.
-//! Integrates with `aisec-models` / AI Inference Gateway.
+//! Integrates with `promptlab-models` / AI Inference Gateway.
 
 pub mod config;
 pub mod consensus;

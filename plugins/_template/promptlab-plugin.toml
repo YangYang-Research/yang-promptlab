@@ -1,6 +1,6 @@
 [plugin]
 id = "com.example.my-plugin"
-name = "My AISec Plugin"
+name = "My PromptLab Plugin"
 version = "0.1.0"
 api_version = "1"
 plugin_type = "discovery"   # discovery | attack | judge | report
@@ -12,7 +12,7 @@ author = "Your Name"
 type = "subprocess"
 entry = "plugin.py"         # or plugin.js for JavaScript
 interpreter = "python3"     # or "node"
-min_aisec = "0.1.0"
+min_promptlab = "0.1.0"
 
 [capabilities]
 log = true

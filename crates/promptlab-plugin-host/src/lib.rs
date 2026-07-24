@@ -1,4 +1,4 @@
-//! AISec Plugin Host — plugin manager, sandbox, permissions, lifecycle.
+//! PromptLab Plugin Host — plugin manager, sandbox, permissions, lifecycle.
 
 pub mod error;
 pub mod lifecycle;

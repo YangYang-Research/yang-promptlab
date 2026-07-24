@@ -1,6 +1,6 @@
 # Model Registry
 
-AISec loads its built-in model catalog from `resources/models.json` at startup. That file is the **source of truth** for browse/install flows in the Models page and for judge model resolution.
+PromptLab loads its built-in model catalog from `resources/models.json` at startup. That file is the **source of truth** for browse/install flows in the Models page and for judge model resolution.
 
 ## Registry file
 
@@ -27,7 +27,7 @@ On backend init (`src-tauri/src/lib.rs`):
 
 1. Resolve registry path (bundled resource → repo fallback in dev).
 2. Load `resources/models.json`.
-3. Optionally merge a remote registry when `AISEC_MODEL_REGISTRY_URL` is set and reachable.
+3. Optionally merge a remote registry when `PROMPTLAB_MODEL_REGISTRY_URL` is set and reachable.
 4. Attach the catalog to `LocalModelManager` in `AppState`.
 
 If the remote URL is unavailable, startup continues offline with the bundled registry only.
@@ -53,26 +53,26 @@ Vault models remain in `{app_data}/models/` with the existing list/remove/verify
 
 ```bash
 # Optional online registry merge (same JSON shape as models.json)
-export AISEC_MODEL_REGISTRY_URL=https://example.com/aisec/models.json
+export PROMPTLAB_MODEL_REGISTRY_URL=https://example.com/promptlab/models.json
 ```
 
 ## Implementation map
 
 | Layer | Location |
 |-------|----------|
-| Registry loader | `crates/aisec-models/src/builtin_catalog.rs` |
-| Download control | `crates/aisec-models/src/download/coordinator.rs` |
-| ZIP import | `crates/aisec-models/src/import_pack.rs` |
+| Registry loader | `crates/promptlab-models/src/builtin_catalog.rs` |
+| Download control | `crates/promptlab-models/src/download/coordinator.rs` |
+| ZIP import | `crates/promptlab-models/src/import_pack.rs` |
 | Tauri wiring | `src-tauri/src/model_registry.rs`, `commands/models.rs` |
 | UI | `src/features/models/ModelsPage.tsx` |
 
 ## Tests
 
 ```bash
-cargo test -p aisec-models
-cargo test -p aisec-desktop --test models_commands
+cargo test -p promptlab-models
+cargo test -p promptlab-desktop --test models_commands
 ```
 
 ## Migration note
 
-The deprecated `curated_catalog()` hardcoded list in `aisec-models` now returns empty. All catalog data must live in `resources/models.json` (plus optional remote merge).
+The deprecated `curated_catalog()` hardcoded list in `promptlab-models` now returns empty. All catalog data must live in `resources/models.json` (plus optional remote merge).

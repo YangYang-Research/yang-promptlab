@@ -25,8 +25,8 @@ export class Plugin {
 
   static async run() {
     const base = new PluginContext({
-      pluginId: process.env.AISEC_PLUGIN_ID ?? 'unknown',
-      pluginDir: process.env.AISEC_PLUGIN_DIR ?? '.',
+      pluginId: process.env.PROMPTLAB_PLUGIN_ID ?? 'unknown',
+      pluginDir: process.env.PROMPTLAB_PLUGIN_DIR ?? '.',
     });
 
     while (true) {

@@ -2,11 +2,11 @@
 //!
 //! Run:
 //!   python3 scripts/vuln-chatbot-target.py
-//!   cargo run -p aisec-attack --features storage --example scan_prompt_injection
+//!   cargo run -p promptlab-attack --features storage --example scan_prompt_injection
 
-use aisec_attack::scanner::{PromptInjectionScanner, ScanContext};
-use aisec_attack::{AttackBudget, AttackTarget};
-use aisec_storage::{CreateProject, CreateScan, Database, FindingRepository, ProjectRepository, ScanRepository};
+use promptlab_attack::scanner::{PromptInjectionScanner, ScanContext};
+use promptlab_attack::{AttackBudget, AttackTarget};
+use promptlab_storage::{CreateProject, CreateScan, Database, FindingRepository, ProjectRepository, ScanRepository};
 
 #[tokio::main]
 async fn main() {
@@ -36,7 +36,7 @@ async fn main() {
         .await
         .expect("scan");
 
-    println!("=== AISec Prompt Injection Scanner ===");
+    println!("=== PromptLab Prompt Injection Scanner ===");
     println!("Target: {url}\n");
 
     let scanner = PromptInjectionScanner::new(db.clone());

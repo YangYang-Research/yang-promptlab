@@ -1,4 +1,4 @@
-//! AISec Reporting Engine.
+//! PromptLab Reporting Engine.
 //!
 //! Generates executive, technical, and compliance reports in HTML, PDF, JSON, SARIF, and CSV.
 

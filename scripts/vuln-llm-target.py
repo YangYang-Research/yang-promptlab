@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deliberately vulnerable LLM API target for AISec attack verification.
+"""Deliberately vulnerable LLM API target for PromptLab attack verification.
 
 Serves http://127.0.0.1:3001. Unlike a hardened model, this endpoint obeys
 prompt-injection payloads: it echoes the injected instruction back and leaks

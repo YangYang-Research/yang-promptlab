@@ -1,10 +1,10 @@
 //! Reporting engine integration tests.
 
-use aisec_report::{
+use promptlab_report::{
     ReportDataBuilder, ReportFormat, ReportKind, ReportingEngine, Severity, StorageFindingRow,
 };
 
-fn sample_input() -> aisec_report::ReportInput {
+fn sample_input() -> promptlab_report::ReportInput {
     ReportDataBuilder::build(
         "integration-scan",
         "Integration Project",

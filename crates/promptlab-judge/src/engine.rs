@@ -53,7 +53,7 @@ impl JudgeEngine {
         probe_id: impl Into<String>,
         attack_category: impl Into<String>,
         payload: impl Into<String>,
-        normalized: &aisec_harness::NormalizedResponse,
+        normalized: &promptlab_harness::NormalizedResponse,
     ) -> JudgeResult<JudgeVerdict> {
         self.judge(JudgeRequest::from_normalized(
             probe_id,
@@ -228,7 +228,7 @@ mod tests {
 
     use super::*;
     use crate::mock_runtime::JsonMockRuntime;
-    use aisec_models::runtime::InferenceRuntime;
+    use promptlab_models::runtime::InferenceRuntime;
     use tokio::sync::Mutex;
 
     fn engine_with_mock(json: &str) -> JudgeEngine {

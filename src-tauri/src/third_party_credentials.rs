@@ -2,11 +2,11 @@
 
 use std::path::Path;
 
-use aisec_auth::{
+use promptlab_auth::{
     CredentialReferenceId, ModelCredentialVault, SecretScope, SecretStore,
 };
-use aisec_core::AisecError;
-use aisec_models::{LocalModelManager, ModelProvider};
+use promptlab_core::PromptLabError;
+use promptlab_models::{LocalModelManager, ModelProvider};
 use tracing::info;
 
 use crate::error::{CommandError, CommandResult};
@@ -81,19 +81,19 @@ pub fn persist_third_party_credentials(
     if !credentials.api_key.trim().is_empty() {
         let id = vault
             .store(credentials.api_key.trim())
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
         metadata[API_KEY_CREDENTIAL_ID] = serde_json::Value::String(id.to_string());
     }
     if !credentials.aws_secret_access_key.trim().is_empty() {
         let id = vault
             .store(credentials.aws_secret_access_key.trim())
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
         metadata[AWS_SECRET_CREDENTIAL_ID] = serde_json::Value::String(id.to_string());
     }
     if !credentials.aws_session_token.trim().is_empty() {
         let id = vault
             .store(credentials.aws_session_token.trim())
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
         metadata[AWS_SESSION_CREDENTIAL_ID] = serde_json::Value::String(id.to_string());
     }
     if let Some(env) = credentials
@@ -229,10 +229,10 @@ fn rekey_credential_metadata(
     if secrets.load(SecretScope::Model, &reference).is_ok() {
         let secret = secrets
             .load(SecretScope::Model, &reference)
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
         let new_id = vault
             .store(secret.trim())
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
         metadata[key] = serde_json::Value::String(new_id.to_string());
         return Ok(true);
     }
@@ -245,7 +245,7 @@ fn rekey_credential_metadata(
         })?;
     let new_id = vault
         .store(secret.trim())
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     metadata[key] = serde_json::Value::String(new_id.to_string());
     Ok(true)
 }
@@ -257,7 +257,7 @@ pub async fn migrate_third_party_model_credentials(
     secrets: &SecretStore,
 ) -> CommandResult<u32> {
     let vault = ModelCredentialVault::new(data_dir)
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     let remote_ids: Vec<String> = manager
         .list_models()
         .into_iter()
@@ -293,7 +293,7 @@ pub async fn migrate_third_party_model_credentials(
         if changed {
             manager
                 .update_model_metadata(&model_id, metadata)
-                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+                .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
             migrated += 1;
             info!(model_id = %model_id, "migrated third-party model credentials to encrypted vault");
         }
@@ -303,5 +303,5 @@ pub async fn migrate_third_party_model_credentials(
 }
 
 pub fn open_model_credential_vault(data_dir: &Path) -> CommandResult<ModelCredentialVault> {
-    ModelCredentialVault::new(data_dir).map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
+    ModelCredentialVault::new(data_dir).map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from aisec_plugin.base import Plugin, PluginContext
+from promptlab_plugin.base import Plugin, PluginContext
 
 
 class JudgePlugin(Plugin):

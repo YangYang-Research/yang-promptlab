@@ -112,7 +112,7 @@ pub struct AttackContext {
     pub target_id: Option<String>,
     pub target: AttackTarget,
     pub budget: AttackBudget,
-    /// Payloads produced by `aisec-generator`; override attack builtins per category.
+    /// Payloads produced by `promptlab-generator`; override attack builtins per category.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generated_payloads: Option<HashMap<AttackCategory, Vec<AttackPayload>>>,
     #[serde(default)]
@@ -197,7 +197,7 @@ pub struct AttackResponse {
     pub headers: HashMap<String, String>,
     pub body: String,
     pub duration_ms: u64,
-    pub normalized: aisec_harness::NormalizedResponse,
+    pub normalized: promptlab_harness::NormalizedResponse,
 }
 
 /// Severity of a successful attack evaluation.

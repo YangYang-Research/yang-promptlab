@@ -4,12 +4,12 @@
 //!
 //! Run:
 //!   MODEL=/path/to/model.gguf \
-//!     cargo run -p aisec-judge --features llama --example judge_with_local_model
+//!     cargo run -p promptlab-judge --features llama --example judge_with_local_model
 
 use std::sync::Arc;
 
-use aisec_judge::{JudgeConfig, JudgeEngine, JudgeRequest, ModelRolePool};
-use aisec_models::{InferenceRuntime, LlamaInProcessRuntime, LlamaModelConfig};
+use promptlab_judge::{JudgeConfig, JudgeEngine, JudgeRequest, ModelRolePool};
+use promptlab_models::{InferenceRuntime, LlamaInProcessRuntime, LlamaModelConfig};
 use tokio::sync::Mutex;
 
 #[tokio::main]

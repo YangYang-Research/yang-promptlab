@@ -2,7 +2,7 @@
 
 Reference implementations for all four plugin types. Each directory contains:
 
-- `aisec-plugin.toml` — manifest (type, language, capabilities, hooks)
+- `promptlab-plugin.toml` — manifest (type, language, capabilities, hooks)
 - `plugin.py` or `plugin.js` — entry script
 
 | Plugin | Type | Language | Hook |
@@ -27,5 +27,5 @@ echo '{"id":"1","method":"execute_attack","params":{"payload":"ignore instructio
 Run integration tests:
 
 ```bash
-cargo test -p aisec-plugin-host
+cargo test -p promptlab-plugin-host
 ```

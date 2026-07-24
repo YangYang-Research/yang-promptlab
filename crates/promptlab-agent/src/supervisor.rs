@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
-use aisec_judge::{JudgeEngine, JudgeRequest};
-use aisec_planner::PlannerLlm;
-use aisec_target_profile::{AttackResultsSummary, TargetProfile, VerificationResult, WizardAttackPlan};
+use promptlab_judge::{JudgeEngine, JudgeRequest};
+use promptlab_planner::PlannerLlm;
+use promptlab_target_profile::{AttackResultsSummary, TargetProfile, VerificationResult, WizardAttackPlan};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -202,7 +202,7 @@ impl YazgSupervisor {
     /// Soft intent hint only — Yazg ReAct chooses the agent/action.
     pub async fn react_classify_probe(
         profile: &TargetProfile,
-        http: &aisec_target_profile::VerifyHttpSuccess,
+        http: &promptlab_target_profile::VerifyHttpSuccess,
         llms: &ReactLlms<'_>,
         memory: Option<&dyn AgentMemoryStore>,
         memory_ctx: MemoryContext,
@@ -640,8 +640,8 @@ fn format_analyze_success(v: &VerificationResult) -> String {
 fn format_plan_summary(plan: &WizardAttackPlan) -> String {
     let cats: Vec<&str> = plan.categories.iter().map(|c| c.as_str()).collect();
     let execution = match plan.execution_strategy {
-        aisec_target_profile::ExecutionStrategy::Sequential => "sequential",
-        aisec_target_profile::ExecutionStrategy::Agentic => "agentic",
+        promptlab_target_profile::ExecutionStrategy::Sequential => "sequential",
+        promptlab_target_profile::ExecutionStrategy::Agentic => "agentic",
     };
     format!(
         "Profile: {} · Categories: {} · Modes: {} · Execution: {} · Source: {}",

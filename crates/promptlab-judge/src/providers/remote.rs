@@ -151,8 +151,8 @@ impl RemoteLlmBackend {
         let mut req = self.client.post(url).json(&body);
         req = req.header("Authorization", format!("Bearer {}", self.api_key));
         if self.settings.provider == RemoteProvider::OpenRouter {
-            req = req.header("HTTP-Referer", "https://aisec.local");
-            req = req.header("X-Title", "AISec Judge");
+            req = req.header("HTTP-Referer", "https://promptlab.local");
+            req = req.header("X-Title", "PromptLab Judge");
         }
 
         let response = req

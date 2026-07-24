@@ -20,7 +20,7 @@ impl ReportFormatter for PdfFormatter {
         Ok(GeneratedReport {
             kind,
             format: ReportFormat::Pdf,
-            filename: format!("aisec-{}-{}.pdf", kind.as_str(), input.scan_id),
+            filename: format!("promptlab-{}-{}.pdf", kind.as_str(), input.scan_id),
             bytes,
             content_type: ReportFormat::Pdf.content_type().into(),
         })

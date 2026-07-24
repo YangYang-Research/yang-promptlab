@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * AISec Discovery — Playwright runner (JSON-lines protocol over stdin/stdout).
+ * PromptLab Discovery — Playwright runner (JSON-lines protocol over stdin/stdout).
  *
  * Launches real Chromium, navigates a target, waits for single-page-app
  * rendering, and captures all network traffic (with emphasis on XHR/fetch API

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use aisec_core::{AisecError, AisecResult};
+use promptlab_core::{PromptLabError, PromptLabResult};
 use uuid::Uuid;
 
 /// Identifier for a secret stored outside SQLite (OS keychain / credential manager).
@@ -71,17 +71,17 @@ fn test_backend() -> &'static std::sync::Mutex<std::collections::HashMap<String,
 pub struct SecretStore;
 
 impl SecretStore {
-    pub fn new() -> AisecResult<Self> {
+    pub fn new() -> PromptLabResult<Self> {
         Ok(Self)
     }
 
     #[cfg(not(test))]
-    fn entry(scope: SecretScope, id: &str) -> AisecResult<keyring::Entry> {
+    fn entry(scope: SecretScope, id: &str) -> PromptLabResult<keyring::Entry> {
         keyring::Entry::new(SERVICE_NAME, &storage_key(scope, id))
-            .map_err(|err| AisecError::internal(format!("keyring entry: {err}")))
+            .map_err(|err| PromptLabError::internal(format!("keyring entry: {err}")))
     }
 
-    pub fn store(&self, scope: SecretScope, secret: &str) -> AisecResult<CredentialReferenceId> {
+    pub fn store(&self, scope: SecretScope, secret: &str) -> PromptLabResult<CredentialReferenceId> {
         let id = CredentialReferenceId::new();
         self.store_with_id(scope, &id, secret)?;
         Ok(id)
@@ -92,7 +92,7 @@ impl SecretStore {
         scope: SecretScope,
         id: &CredentialReferenceId,
         secret: &str,
-    ) -> AisecResult<()> {
+    ) -> PromptLabResult<()> {
         #[cfg(test)]
         {
             test_backend()
@@ -104,12 +104,12 @@ impl SecretStore {
         #[cfg(not(test))]
         Self::entry(scope, id.as_str())?
             .set_password(secret)
-            .map_err(|err| AisecError::internal(format!("store secret: {err}")))
+            .map_err(|err| PromptLabError::internal(format!("store secret: {err}")))
     }
 
-    pub fn load(&self, scope: SecretScope, id: &CredentialReferenceId) -> AisecResult<String> {
+    pub fn load(&self, scope: SecretScope, id: &CredentialReferenceId) -> PromptLabResult<String> {
         self.load_optional(scope, id)?
-            .ok_or_else(|| AisecError::not_found("secret not found in secure storage"))
+            .ok_or_else(|| PromptLabError::not_found("secret not found in secure storage"))
     }
 
     /// Load a secret when present; returns `None` if the keychain entry was removed or never existed.
@@ -117,7 +117,7 @@ impl SecretStore {
         &self,
         scope: SecretScope,
         id: &CredentialReferenceId,
-    ) -> AisecResult<Option<String>> {
+    ) -> PromptLabResult<Option<String>> {
         #[cfg(test)]
         {
             return Ok(test_backend()
@@ -130,11 +130,11 @@ impl SecretStore {
         match Self::entry(scope, id.as_str())?.get_password() {
             Ok(password) => Ok(Some(password)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(err) => Err(AisecError::internal(format!("load secret: {err}"))),
+            Err(err) => Err(PromptLabError::internal(format!("load secret: {err}"))),
         }
     }
 
-    pub fn delete(&self, scope: SecretScope, id: &CredentialReferenceId) -> AisecResult<()> {
+    pub fn delete(&self, scope: SecretScope, id: &CredentialReferenceId) -> PromptLabResult<()> {
         #[cfg(test)]
         {
             test_backend()
@@ -146,7 +146,7 @@ impl SecretStore {
         #[cfg(not(test))]
         match Self::entry(scope, id.as_str())?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(err) => Err(AisecError::internal(format!("delete secret: {err}"))),
+            Err(err) => Err(PromptLabError::internal(format!("delete secret: {err}"))),
         }
     }
 }

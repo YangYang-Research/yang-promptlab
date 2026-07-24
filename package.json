@@ -11,7 +11,7 @@
     "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",
-    "setup:playwright": "npm install --prefix crates/aisec-auth/playwright && npx --prefix crates/aisec-auth/playwright playwright install chromium",
+    "setup:playwright": "npm install --prefix crates/promptlab-auth/playwright && npx --prefix crates/promptlab-auth/playwright playwright install chromium",
     "bundle:playwright": "bash scripts/bundle-playwright-auth.sh"
   },
   "dependencies": {

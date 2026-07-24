@@ -1,8 +1,8 @@
 //! Attack planner IPC — wizard attack plan DTOs and adjust command.
 
-use aisec_attack::AttackCategory;
-use aisec_storage::TargetRepository;
-use aisec_target_profile::{
+use promptlab_attack::AttackCategory;
+use promptlab_storage::TargetRepository;
+use promptlab_target_profile::{
     adjust_wizard_attack_plan, build_wizard_attack_plan, build_wizard_plan_summary,
     AttackProfileMode, ExecutionStrategy, PayloadStrategy, WizardAttackPlan,
 };
@@ -119,17 +119,17 @@ pub struct CategoryRationaleDto {
 fn payload_strategy_to_dto(strategy: PayloadStrategy) -> PayloadStrategyDto {
     PayloadStrategyDto {
         strategy: match strategy.strategy {
-            aisec_target_profile::PayloadGenerationStrategy::Deterministic => {
+            promptlab_target_profile::PayloadGenerationStrategy::Deterministic => {
                 "deterministic".into()
             }
-            aisec_target_profile::PayloadGenerationStrategy::Mutation => "mutation".into(),
-            aisec_target_profile::PayloadGenerationStrategy::Adaptive => "adaptive".into(),
+            promptlab_target_profile::PayloadGenerationStrategy::Mutation => "mutation".into(),
+            promptlab_target_profile::PayloadGenerationStrategy::Adaptive => "adaptive".into(),
         },
         mutation_level: match strategy.mutation_level {
-            aisec_target_profile::MutationLevel::Low => "low".into(),
-            aisec_target_profile::MutationLevel::Medium => "medium".into(),
-            aisec_target_profile::MutationLevel::High => "high".into(),
-            aisec_target_profile::MutationLevel::Extreme => "extreme".into(),
+            promptlab_target_profile::MutationLevel::Low => "low".into(),
+            promptlab_target_profile::MutationLevel::Medium => "medium".into(),
+            promptlab_target_profile::MutationLevel::High => "high".into(),
+            promptlab_target_profile::MutationLevel::Extreme => "extreme".into(),
         },
         variants_per_test: strategy.variants_per_test,
         max_total_payloads: strategy.max_total_payloads,
@@ -142,7 +142,7 @@ fn payload_strategy_to_dto(strategy: PayloadStrategy) -> PayloadStrategyDto {
 }
 
 fn parse_payload_strategy(dto: PayloadStrategyDto) -> CommandResult<PayloadStrategy> {
-    use aisec_target_profile::{MutationLevel, PayloadGenerationStrategy};
+    use promptlab_target_profile::{MutationLevel, PayloadGenerationStrategy};
 
     let strategy = match dto.strategy.trim().to_ascii_lowercase().as_str() {
         "deterministic" => PayloadGenerationStrategy::Deterministic,
@@ -277,14 +277,14 @@ fn parse_profile_modes(modes: &[AttackProfileModeDto]) -> Vec<AttackProfileMode>
 
 fn parse_category_rationales(
     raw: &[CategoryRationaleDto],
-) -> Vec<aisec_planner::types::CategoryRationale> {
+) -> Vec<promptlab_planner::types::CategoryRationale> {
     raw.iter()
         .filter_map(|item| {
             let category = AttackCategory::all()
                 .iter()
                 .copied()
                 .find(|c| c.as_str() == item.category)?;
-            Some(aisec_planner::types::CategoryRationale {
+            Some(promptlab_planner::types::CategoryRationale {
                 category,
                 reason: item.reason.clone(),
                 priority: item.priority,
@@ -294,7 +294,7 @@ fn parse_category_rationales(
         .collect()
 }
 
-fn merge_adjust_base(profile: &aisec_target_profile::TargetProfile, request: &PlannerAdjustRequest) -> WizardAttackPlan {
+fn merge_adjust_base(profile: &promptlab_target_profile::TargetProfile, request: &PlannerAdjustRequest) -> WizardAttackPlan {
     let mut base = build_wizard_attack_plan(profile);
     if request.profile_modes.is_empty() {
         return base;

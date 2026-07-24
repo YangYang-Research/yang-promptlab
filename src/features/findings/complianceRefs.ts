@@ -1,4 +1,4 @@
-/** Mirrors `aisec_report::recommendations::compliance_refs_for`. */
+/** Mirrors `promptlab_report::recommendations::compliance_refs_for`. */
 export function complianceRefsFor(category: string): string[] {
   const cat = category.toLowerCase();
   const refs = ["OWASP LLM Top 10"];

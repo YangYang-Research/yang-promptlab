@@ -1,10 +1,10 @@
-"""AISec Plugin SDK for Python."""
+"""PromptLab Plugin SDK for Python."""
 
-from aisec_plugin.attack import AttackPlugin
-from aisec_plugin.base import Plugin, PluginContext
-from aisec_plugin.discovery import DiscoveryPlugin
-from aisec_plugin.judge import JudgePlugin
-from aisec_plugin.report import ReportPlugin
+from promptlab_plugin.attack import AttackPlugin
+from promptlab_plugin.base import Plugin, PluginContext
+from promptlab_plugin.discovery import DiscoveryPlugin
+from promptlab_plugin.judge import JudgePlugin
+from promptlab_plugin.report import ReportPlugin
 
 __all__ = [
     "Plugin",

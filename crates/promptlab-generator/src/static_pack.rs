@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use aisec_attack::{AttackCategory, AttackPayload};
-use aisec_payload::{GenerateRequest, MutationKind, PayloadPipeline};
-use aisec_planner::AttackPlan;
+use promptlab_attack::{AttackCategory, AttackPayload};
+use promptlab_payload::{GenerateRequest, MutationKind, PayloadPipeline};
+use promptlab_planner::AttackPlan;
 
 use crate::convert::{attack_to_payload_category, generated_to_attack_payload, record_to_attack_payload};
 use crate::error::GeneratorResult;
@@ -123,7 +123,7 @@ fn mode_label(mode: GeneratorMode) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aisec_planner::PlannerMode;
+    use promptlab_planner::PlannerMode;
 
     #[test]
     fn static_pack_respects_disabled_tests() {

@@ -1,4 +1,4 @@
-use aisec_core::{init_logging, AisecError, LogOptions};
+use promptlab_core::{init_logging, PromptLabError, LogOptions};
 
 #[test]
 fn logging_initializes_with_temp_directory() {
@@ -14,7 +14,7 @@ fn logging_initializes_with_temp_directory() {
 
 #[test]
 fn error_codes_map_to_client_messages() {
-    let err = AisecError::invalid_input("bad payload");
+    let err = PromptLabError::invalid_input("bad payload");
     assert_eq!(err.code().as_str(), "INVALID_INPUT");
     assert_eq!(err.client_message(), "bad payload");
 }

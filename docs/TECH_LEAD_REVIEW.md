@@ -1,6 +1,6 @@
-# AISec — Tech Lead Review
+# PromptLab — Tech Lead Review
 
-> Staff Engineer assessment of the AISec desktop codebase (v0.1.0).  
+> Staff Engineer assessment of the PromptLab desktop codebase (v0.1.0).  
 > Review date: 2026-06-13 · Scope: architecture, maintainability, scalability, performance, security, technical debt  
 > **No code was modified** as part of this review.
 
@@ -8,7 +8,7 @@
 
 ## Executive summary
 
-AISec is a **well-structured late-alpha product** with a clear separation between React UI, Tauri IPC, and a Rust workspace of domain engines. The primary scan workflow (project → target → discovery → attack → judge → findings → report) is **real and wired**, not a mock prototype. Library-layer quality is ahead of product-layer integration: several crates (`aisec-models`, `aisec-plugin-host`, `aisec-fingerprint`) are built but not connected to the desktop shell.
+PromptLab is a **well-structured late-alpha product** with a clear separation between React UI, Tauri IPC, and a Rust workspace of domain engines. The primary scan workflow (project → target → discovery → attack → judge → findings → report) is **real and wired**, not a mock prototype. Library-layer quality is ahead of product-layer integration: several crates (`promptlab-models`, `promptlab-plugin-host`, `promptlab-fingerprint`) are built but not connected to the desktop shell.
 
 **Strengths:** Crate boundaries, testable `*_op` command pattern, typed IPC DTOs, SQLite repository layer, embedded payload library, deterministic judge in the attack path, Playwright auth bundling for release.
 
@@ -46,7 +46,7 @@ Severity scale:
 | | |
 |---|---|
 | **Severity** | Info |
-| **Explanation** | Business logic lives in focused crates (`aisec-discovery`, `aisec-attack`, `aisec-judge`, `aisec-report`, `aisec-storage`). Tauri commands are thin wrappers over testable `*_op` functions (`commands/domain.rs`, `commands/scan.rs`). DTO mapping is centralized in `src-tauri/src/dto.rs`. This is the right shape for a security tool that will evolve independently per engine. |
+| **Explanation** | Business logic lives in focused crates (`promptlab-discovery`, `promptlab-attack`, `promptlab-judge`, `promptlab-report`, `promptlab-storage`). Tauri commands are thin wrappers over testable `*_op` functions (`commands/domain.rs`, `commands/scan.rs`). DTO mapping is centralized in `src-tauri/src/dto.rs`. This is the right shape for a security tool that will evolve independently per engine. |
 | **Recommendation** | Preserve this pattern. New features should extend crates first, then add IPC — not embed logic in `src-tauri`. Document the rule in CONTRIBUTING (one page). |
 
 ---
@@ -56,7 +56,7 @@ Severity scale:
 | | |
 |---|---|
 | **Severity** | High |
-| **Explanation** | The workspace exposes 12 crates but the desktop app only exercises a subset. `aisec-models`, `aisec-plugin-host`, and `aisec-fingerprint` are not wired to IPC or UI. The judge LLM path exists in `aisec-judge` but production attack flow calls `judge_deterministic()` only. Playwright auth persists sessions to SQLite/vault but `session_id` is not written into `targets.descriptor_json`, so browser auth does not flow to `apply_descriptor_auth` in attacks. Operators see UI affordances (Models page, plugin samples) that imply capabilities the app does not deliver. |
+| **Explanation** | The workspace exposes 12 crates but the desktop app only exercises a subset. `promptlab-models`, `promptlab-plugin-host`, and `promptlab-fingerprint` are not wired to IPC or UI. The judge LLM path exists in `promptlab-judge` but production attack flow calls `judge_deterministic()` only. Playwright auth persists sessions to SQLite/vault but `session_id` is not written into `targets.descriptor_json`, so browser auth does not flow to `apply_descriptor_auth` in attacks. Operators see UI affordances (Models page, plugin samples) that imply capabilities the app does not deliver. |
 | **Recommendation** | Publish an explicit **integration matrix** (crate × IPC × UI) and treat unintegrated crates as "library-only" in UX until wired. Prioritize auth session → attack transport as the highest integration gap on the critical path. Defer Models/plugins UI or gate behind "Coming soon" to avoid false expectations. |
 
 ---
@@ -76,7 +76,7 @@ Severity scale:
 | | |
 |---|---|
 | **Severity** | Medium |
-| **Explanation** | Wizard draft state lives in `sessionStorage` (`wizardState.ts`, key `aisec:scan-wizard` v2) while committed entities live in SQLite. Steps 2–4 can diverge from DB if the user refreshes mid-flow or if target persist fails silently. `submittedScanId` links wizard step 6 to DB only after successful `scan_start`. |
+| **Explanation** | Wizard draft state lives in `sessionStorage` (`wizardState.ts`, key `promptlab:scan-wizard` v2) while committed entities live in SQLite. Steps 2–4 can diverge from DB if the user refreshes mid-flow or if target persist fails silently. `submittedScanId` links wizard step 6 to DB only after successful `scan_start`. |
 | **Recommendation** | Treat sessionStorage as a cache, not source of truth. On wizard mount, reconcile against DB (target fingerprint vs `savedTargetFingerprint`). Consider server-side draft scans or explicit "Save draft" that writes partial playbook to SQLite. |
 
 ---
@@ -138,7 +138,7 @@ Severity scale:
 | | |
 |---|---|
 | **Severity** | High |
-| **Explanation** | Per `AGENTS.md`, `cargo test --workspace` fails due to multiple pre-existing issues (storage test API drift, `aisec-auth` tokio feature, integration-tests missing `tracing`, discovery hang, judge/plugin-host failures). Frontend tests pass (`npm test`). A Staff review cannot sign off on release discipline without a green CI bar. |
+| **Explanation** | Per `AGENTS.md`, `cargo test --workspace` fails due to multiple pre-existing issues (storage test API drift, `promptlab-auth` tokio feature, integration-tests missing `tracing`, discovery hang, judge/plugin-host failures). Frontend tests pass (`npm test`). A Staff review cannot sign off on release discipline without a green CI bar. |
 | **Recommendation** | Fix failing tests or quarantine network-dependent tests behind `#[ignore]`. Add CI workflow: `npm test`, `cargo test --workspace`, `cargo build --workspace`. Make PR merge depend on green CI. |
 
 ---
@@ -191,7 +191,7 @@ Severity scale:
 |---|---|
 | **Severity** | Info |
 | **Explanation** | Single-user desktop app with WAL mode (`pool.rs`, `max_connections(5)`) is a sound choice. No need for client-server DB at current scale. |
-| **Recommendation** | Document backup/export path for `aisec.db`. Consider periodic VACUUM guidance in ops docs. |
+| **Recommendation** | Document backup/export path for `promptlab.db`. Consider periodic VACUUM guidance in ops docs. |
 
 ---
 
@@ -244,7 +244,7 @@ Severity scale:
 | | |
 |---|---|
 | **Severity** | Critical |
-| **Explanation** | Target descriptors persist passwords, API keys, and JWT tokens in `targets.descriptor_json` (`targetDescriptor.ts` → `target_create`). SQLite file at `{app_data}/aisec.db` is unencrypted. Evidence and attack results may also contain sensitive response bodies. This is a **local secrets exposure** risk: backup tools, malware, shared machines, or accidental log upload can leak credentials. |
+| **Explanation** | Target descriptors persist passwords, API keys, and JWT tokens in `targets.descriptor_json` (`targetDescriptor.ts` → `target_create`). SQLite file at `{app_data}/promptlab.db` is unencrypted. Evidence and attack results may also contain sensitive response bodies. This is a **local secrets exposure** risk: backup tools, malware, shared machines, or accidental log upload can leak credentials. |
 | **Recommendation** | Use OS keychain (macOS Keychain, Windows DPAPI, Linux secret-service) for secrets; store references in descriptor. Minimum interim: encrypt sensitive fields with a machine-bound key. Never log descriptor contents. Document threat model: "single-operator trusted workstation." |
 
 ---
@@ -264,7 +264,7 @@ Severity scale:
 | | |
 |---|---|
 | **Severity** | Info (by design) |
-| **Explanation** | `aisec-payload/data/payloads.json` contains active probe strings (injection, jailbreak, exfil instructions). `HttpTransport` executes against operator-selected endpoints. This is correct product behavior for authorized testing. |
+| **Explanation** | `promptlab-payload/data/payloads.json` contains active probe strings (injection, jailbreak, exfil instructions). `HttpTransport` executes against operator-selected endpoints. This is correct product behavior for authorized testing. |
 | **Recommendation** | Add scan authorization acknowledgement in UI (scope checkbox, target URL display). Include rate limiting defaults. Document legal/authorization requirements in product README. |
 
 ---
@@ -294,7 +294,7 @@ Severity scale:
 | | |
 |---|---|
 | **Severity** | Medium |
-| **Explanation** | `aisec-plugin-host` runs Python/Node subprocesses with JSON-lines protocol and `PermissionGuard`, but plugins are not loaded in the desktop app. When integrated, subprocess plugins remain a **supply chain risk** if operators install third-party plugins. |
+| **Explanation** | `promptlab-plugin-host` runs Python/Node subprocesses with JSON-lines protocol and `PermissionGuard`, but plugins are not loaded in the desktop app. When integrated, subprocess plugins remain a **supply chain risk** if operators install third-party plugins. |
 | **Recommendation** | Before enabling plugins: signature verification, permission prompts, network/file capability defaults deny, plugin review docs. Treat as post-MVP with security review gate. |
 
 ---
@@ -304,7 +304,7 @@ Severity scale:
 | | |
 |---|---|
 | **Severity** | Info |
-| **Explanation** | `aisec-storage` uses `sqlx` with bound parameters in repository implementations. No string-concatenated SQL observed in command layer. Foreign keys enabled at connect. |
+| **Explanation** | `promptlab-storage` uses `sqlx` with bound parameters in repository implementations. No string-concatenated SQL observed in command layer. Foreign keys enabled at connect. |
 | **Recommendation** | Maintain repository-only DB access rule. Add sqlx compile-time check where feasible. |
 
 ---
@@ -326,7 +326,7 @@ Severity scale:
 | | |
 |---|---|
 | **Severity** | Medium |
-| **Explanation** | Auth bundling (`scripts/bundle-playwright-auth.sh`, `src-tauri/resources/playwright/`) and discovery Playwright (`crates/aisec-discovery/playwright/`) are separate Node trees. Release size and maintenance burden doubled. |
+| **Explanation** | Auth bundling (`scripts/bundle-playwright-auth.sh`, `src-tauri/resources/playwright/`) and discovery Playwright (`crates/promptlab-discovery/playwright/`) are separate Node trees. Release size and maintenance burden doubled. |
 | **Recommendation** | Unify on one bundled runtime path referenced by both crates via env vars (`PLAYWRIGHT_BROWSERS_PATH`, shared runner). |
 
 ---
@@ -366,7 +366,7 @@ Severity scale:
 | | |
 |---|---|
 | **Severity** | Medium |
-| **Explanation** | `aisec-judge` supports multi-model consensus; attack path uses `judge_deterministic()` only. Settings include `autoJudge: true` but it has no effect. False negatives/positives likely on nuanced LLM responses with regex-only judging. |
+| **Explanation** | `promptlab-judge` supports multi-model consensus; attack path uses `judge_deterministic()` only. Settings include `autoJudge: true` but it has no effect. False negatives/positives likely on nuanced LLM responses with regex-only judging. |
 | **Recommendation** | Wire `ModelRolePool` when GGUF registered, or disable `autoJudge` in settings UI until implemented. Document deterministic judge limitations in report footers. |
 
 ---

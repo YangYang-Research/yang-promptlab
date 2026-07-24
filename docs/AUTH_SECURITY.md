@@ -1,6 +1,6 @@
 # Auth Security Model
 
-AISec uses a **single auth framework** (`aisec-auth`) for browser login recording, session replay, JWT/API-key auth, and target descriptor credentials. The unused `aisec-browser` crate was removed; vault paths live in `aisec-auth::paths`.
+PromptLab uses a **single auth framework** (`promptlab-auth`) for browser login recording, session replay, JWT/API-key auth, and target descriptor credentials. The unused `promptlab-browser` crate was removed; vault paths live in `promptlab-auth::paths`.
 
 ## Secret storage
 
@@ -18,7 +18,7 @@ Platform backends (via `keyring`):
 - **macOS**: Keychain
 - **Linux**: Secret Service (libsecret)
 
-Service name: `com.aisec.app`. Entry keys: `{scope}:{uuid}` where scope is `session`, `profile`, `target`, or `vault-key`.
+Service name: `com.promptlab.app`. Entry keys: `{scope}:{uuid}` where scope is `session`, `profile`, `target`, or `vault-key`.
 
 ## Forbidden
 
@@ -37,7 +37,7 @@ Runtime-only resolution: attack/discovery paths call `resolve_descriptor_for_run
   auth-vault/                   # legacy plaintext dir (read + migrate on startup)
 ```
 
-Canonical path: `aisec_auth::auth_sessions_dir(data_dir)`.
+Canonical path: `promptlab_auth::auth_sessions_dir(data_dir)`.
 
 ## Database migration
 
@@ -55,7 +55,7 @@ Legacy rows with `cookies_json` / `tokens_json` or inline config secrets are mig
 ## API usage
 
 ```rust
-use aisec_auth::{
+use promptlab_auth::{
     auth_sessions_dir, migrate_legacy_auth_data, SessionStore, SecretStore,
     sanitize_target_descriptor,
 };
@@ -69,7 +69,7 @@ let (sanitized, _) = sanitize_target_descriptor(&descriptor_json, store.secrets(
 
 ## Tests
 
-- `aisec-auth`: `secrets/store`, `secrets/vault`, `secrets/descriptor`, `engine` (mock keyring)
-- `aisec-storage`: auth repository CRUD with `credential_reference_id`
+- `promptlab-auth`: `secrets/store`, `secrets/vault`, `secrets/descriptor`, `engine` (mock keyring)
+- `promptlab-storage`: auth repository CRUD with `credential_reference_id`
 
 Tests use `keyring::mock::MockCredentialBuilder` — no real OS keychain required in CI.

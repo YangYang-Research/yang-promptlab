@@ -24,7 +24,7 @@ impl PluginLanguage {
     }
 }
 
-/// Plugin category aligned with AISec engines.
+/// Plugin category aligned with PromptLab engines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PluginType {

@@ -1,4 +1,4 @@
-# AISec Agentic Scanner
+# PromptLab Agentic Scanner
 
 Autonomous attack execution with a closed-loop pipeline: fingerprint, plan, attack, judge, and retry until a vulnerability is found or the attempt budget is exhausted.
 
@@ -15,7 +15,7 @@ Stop conditions:
 - **Max attempts reached** — per-category retry budget exhausted (default: 5)
 - **Cancelled** — user stops the scan from the Scans page
 
-## Crate: `aisec-agent`
+## Crate: `promptlab-agent`
 
 | Module | Role |
 |--------|------|
@@ -29,9 +29,9 @@ Stop conditions:
 
 | Capability | Implementation |
 |------------|----------------|
-| **Plan** | `aisec-planner::generate_attack_plan` from stored endpoint fingerprint |
-| **Execute** | `aisec-attack` via `run_category_on_endpoint` |
-| **Evaluate** | `aisec-judge` + plugin judge signals |
+| **Plan** | `promptlab-planner::generate_attack_plan` from stored endpoint fingerprint |
+| **Execute** | `promptlab-attack` via `run_category_on_endpoint` |
+| **Evaluate** | `promptlab-judge` + plugin judge signals |
 | **Retry** | `should_retry()` when judge reports not vulnerable |
 | **Mutate payloads** | Escalate `GeneratorMode`: static → template mutation → local LLM |
 

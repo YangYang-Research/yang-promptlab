@@ -1,25 +1,25 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/aisec-core",
-    "crates/aisec-attack",
-    "crates/aisec-payload",
-    "crates/aisec-models",
-    "crates/aisec-judge",
-    "crates/aisec-report",
-    "crates/aisec-fingerprint",
-    "crates/aisec-planner",
-    "crates/aisec-generator",
-    "crates/aisec-plugin-host",
-    "crates/aisec-auth",
-    "crates/aisec-discovery",
-    "crates/aisec-endpoint-metadata",
-    "crates/aisec-agent",
-    "crates/aisec-target-profile",
-    "crates/aisec-harness",
-    "crates/aisec-runtime",
-    "crates/aisec-inference",
-    "crates/aisec-storage",
+    "crates/promptlab-core",
+    "crates/promptlab-attack",
+    "crates/promptlab-payload",
+    "crates/promptlab-models",
+    "crates/promptlab-judge",
+    "crates/promptlab-report",
+    "crates/promptlab-fingerprint",
+    "crates/promptlab-planner",
+    "crates/promptlab-generator",
+    "crates/promptlab-plugin-host",
+    "crates/promptlab-auth",
+    "crates/promptlab-discovery",
+    "crates/promptlab-endpoint-metadata",
+    "crates/promptlab-agent",
+    "crates/promptlab-target-profile",
+    "crates/promptlab-harness",
+    "crates/promptlab-runtime",
+    "crates/promptlab-inference",
+    "crates/promptlab-storage",
     "src-tauri",
     "tests/integration",
 ]
@@ -32,25 +32,25 @@ authors = ["PromptLab"]
 rust-version = "1.77"
 
 [workspace.dependencies]
-aisec-inference = { path = "crates/aisec-inference" }
-aisec-attack = { path = "crates/aisec-attack" }
-aisec-payload = { path = "crates/aisec-payload" }
-aisec-models = { path = "crates/aisec-models" }
-aisec-judge = { path = "crates/aisec-judge" }
-aisec-report = { path = "crates/aisec-report" }
-aisec-fingerprint = { path = "crates/aisec-fingerprint" }
-aisec-planner = { path = "crates/aisec-planner" }
-aisec-generator = { path = "crates/aisec-generator" }
-aisec-plugin-host = { path = "crates/aisec-plugin-host" }
-aisec-auth = { path = "crates/aisec-auth" }
-aisec-harness = { path = "crates/aisec-harness" }
-aisec-runtime = { path = "crates/aisec-runtime" }
-aisec-core = { path = "crates/aisec-core" }
-aisec-discovery = { path = "crates/aisec-discovery" }
-aisec-endpoint-metadata = { path = "crates/aisec-endpoint-metadata" }
-aisec-agent = { path = "crates/aisec-agent" }
-aisec-target-profile = { path = "crates/aisec-target-profile" }
-aisec-storage = { path = "crates/aisec-storage" }
+promptlab-inference = { path = "crates/promptlab-inference" }
+promptlab-attack = { path = "crates/promptlab-attack" }
+promptlab-payload = { path = "crates/promptlab-payload" }
+promptlab-models = { path = "crates/promptlab-models" }
+promptlab-judge = { path = "crates/promptlab-judge" }
+promptlab-report = { path = "crates/promptlab-report" }
+promptlab-fingerprint = { path = "crates/promptlab-fingerprint" }
+promptlab-planner = { path = "crates/promptlab-planner" }
+promptlab-generator = { path = "crates/promptlab-generator" }
+promptlab-plugin-host = { path = "crates/promptlab-plugin-host" }
+promptlab-auth = { path = "crates/promptlab-auth" }
+promptlab-harness = { path = "crates/promptlab-harness" }
+promptlab-runtime = { path = "crates/promptlab-runtime" }
+promptlab-core = { path = "crates/promptlab-core" }
+promptlab-discovery = { path = "crates/promptlab-discovery" }
+promptlab-endpoint-metadata = { path = "crates/promptlab-endpoint-metadata" }
+promptlab-agent = { path = "crates/promptlab-agent" }
+promptlab-target-profile = { path = "crates/promptlab-target-profile" }
+promptlab-storage = { path = "crates/promptlab-storage" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

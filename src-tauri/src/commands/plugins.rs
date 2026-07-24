@@ -1,6 +1,6 @@
 //! Plugin manager IPC commands.
 
-use aisec_plugin_host::{PluginManager, PluginState, PluginType};
+use promptlab_plugin_host::{PluginManager, PluginState, PluginType};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -35,7 +35,7 @@ fn state_label(state: PluginState) -> &'static str {
     }
 }
 
-fn record_to_dto(record: &aisec_plugin_host::PluginRecord) -> PluginRecordDto {
+fn record_to_dto(record: &promptlab_plugin_host::PluginRecord) -> PluginRecordDto {
     let mut hooks = Vec::new();
     if let Some(h) = record.hooks.discover.as_deref() {
         hooks.push(h.to_string());
@@ -74,7 +74,7 @@ pub async fn plugins_refresh_op(state: &AppState) -> CommandResult<Vec<PluginRec
     manager
         .discover()
         .map_err(CommandError::from)?;
-    aisec_plugin_host::restore_enabled(&mut manager, state.config_dir())
+    promptlab_plugin_host::restore_enabled(&mut manager, state.config_dir())
         .map_err(CommandError::from)?;
     Ok(manager.list().into_iter().map(record_to_dto).collect())
 }

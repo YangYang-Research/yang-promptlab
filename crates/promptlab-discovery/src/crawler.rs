@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 use dashmap::DashSet;
 use tokio::sync::{Mutex, Notify};
 use tracing::{debug, instrument, warn};
@@ -57,7 +57,7 @@ impl Crawler {
     }
 
     #[instrument(skip(self), fields(seed = %self.seed))]
-    pub async fn run(&self) -> AisecResult<CrawlOutput> {
+    pub async fn run(&self) -> PromptLabResult<CrawlOutput> {
         self.enqueue(CrawlTask {
             url: self.seed.to_string(),
             depth: 0,
@@ -137,7 +137,7 @@ impl Crawler {
     }
 
     #[instrument(skip(self, task), fields(url = %task.url, depth = task.depth, worker_id))]
-    async fn process_task(&self, worker_id: usize, task: CrawlTask) -> AisecResult<()> {
+    async fn process_task(&self, worker_id: usize, task: CrawlTask) -> PromptLabResult<()> {
         if task.depth > self.config.max_depth {
             return Ok(());
         }
@@ -147,7 +147,7 @@ impl Crawler {
         }
 
         let parsed = Url::parse(&task.url)
-            .map_err(|err| aisec_core::AisecError::invalid_input(err.to_string()))?;
+            .map_err(|err| promptlab_core::PromptLabError::invalid_input(err.to_string()))?;
         validate_target_url(parsed.as_str(), &self.config)?;
 
         let key = canonical_key(&parsed);
@@ -178,7 +178,7 @@ impl Crawler {
         Ok(())
     }
 
-    async fn process_html(&self, task: &CrawlTask, html: &str) -> AisecResult<()> {
+    async fn process_html(&self, task: &CrawlTask, html: &str) -> PromptLabResult<()> {
         let links = extract_links(&task.url, html);
         self.links_extracted
             .fetch_add(links.len(), Ordering::Relaxed);
@@ -225,7 +225,7 @@ impl Crawler {
         Ok(())
     }
 
-    async fn process_hints(&self, task: &CrawlTask, content: &str) -> AisecResult<()> {
+    async fn process_hints(&self, task: &CrawlTask, content: &str) -> PromptLabResult<()> {
         for hint in extract_url_hints(content) {
             let resolved = if hint.starts_with("http") {
                 hint
@@ -250,9 +250,9 @@ impl Crawler {
         link: String,
         depth: u32,
         referrer: Option<String>,
-    ) -> AisecResult<()> {
+    ) -> PromptLabResult<()> {
         let parsed = Url::parse(&link)
-            .map_err(|err| aisec_core::AisecError::invalid_input(err.to_string()))?;
+            .map_err(|err| promptlab_core::PromptLabError::invalid_input(err.to_string()))?;
 
         if self.config.same_origin_only && !is_same_origin(&parsed, &self.origin) {
             // Still record external links as discovered links

@@ -4,7 +4,7 @@
 //! Judge runs inside the host attack tool (JudgeCoordinatorAgent).
 
 use async_trait::async_trait;
-use aisec_planner::PlannerLlm;
+use promptlab_planner::PlannerLlm;
 use serde::Deserialize;
 use tracing::{info, warn};
 

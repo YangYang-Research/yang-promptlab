@@ -18,7 +18,7 @@ const testNameById = new Map(
   ATTACK_CATALOG.flatMap((category) => category.tests.map((test) => [test.id, test.name] as const)),
 );
 
-/** Mutated payloads use `{source_id}:{generation_uuid}` (see aisec-generator convert). */
+/** Mutated payloads use `{source_id}:{generation_uuid}` (see promptlab-generator convert). */
 function baseTestIdFromPayloadId(payloadId: string): string {
   const colon = payloadId.indexOf(":");
   if (colon <= 0) return payloadId;

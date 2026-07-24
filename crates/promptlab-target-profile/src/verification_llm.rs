@@ -1,7 +1,7 @@
 //! AI Runtime validation of verify HTTP responses.
 
-use aisec_inference::PromptRegistry;
-use aisec_planner::PlannerLlm;
+use promptlab_inference::PromptRegistry;
+use promptlab_planner::PlannerLlm;
 use serde::Deserialize;
 use time::OffsetDateTime;
 use tracing::warn;

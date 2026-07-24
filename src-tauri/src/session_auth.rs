@@ -2,14 +2,14 @@
 
 use std::path::Path;
 
-use aisec_attack::{AttackExecutor, AttackRegistry};
-use aisec_auth::{
+use promptlab_attack::{AttackExecutor, AttackRegistry};
+use promptlab_auth::{
     auth_sessions_dir, AuthEngineConfig, AuthSessionManager, SessionAuthContext, SessionStore,
     SessionValidationStatus,
 };
-use aisec_harness::{HarnessFactory, HarnessKind, TargetDescriptor};
+use promptlab_harness::{HarnessFactory, HarnessKind, TargetDescriptor};
 
-use aisec_storage::Database;
+use promptlab_storage::Database;
 
 use crate::error::{CommandError, CommandResult};
 use crate::harness_runtime::build_harness_attack_runtime_parts;
@@ -124,7 +124,7 @@ pub async fn build_attack_runtime_parts(
     data_dir: &Path,
     auth_config: AuthEngineConfig,
     harness_factory: &HarnessFactory,
-    plugin_manager: std::sync::Arc<tauri::async_runtime::Mutex<aisec_plugin_host::PluginManager>>,
+    plugin_manager: std::sync::Arc<tauri::async_runtime::Mutex<promptlab_plugin_host::PluginManager>>,
     descriptor_json: &str,
     probe_url: &str,
 ) -> CommandResult<AttackRuntime> {
@@ -151,13 +151,13 @@ pub fn fallback_attack_runtime() -> AttackRuntime {
         url: "https://localhost".into(),
         ..TargetDescriptor::default()
     };
-    let harness = aisec_attack::HarnessTransport::from_parts(
+    let harness = promptlab_attack::HarnessTransport::from_parts(
         factory,
         descriptor,
         "https://localhost".to_string(),
     );
     let plugins = std::sync::Arc::new(tauri::async_runtime::Mutex::new(
-        aisec_plugin_host::PluginManager::new(std::env::temp_dir().join("aisec-test-plugins"))
+        promptlab_plugin_host::PluginManager::new(std::env::temp_dir().join("promptlab-test-plugins"))
             .expect("plugin manager"),
     ));
     AttackRuntime {
@@ -175,7 +175,7 @@ pub fn attack_executor_with_variants(
     transport: PluginAwareTransport,
     variants_per_test: usize,
 ) -> AttackExecutor<PluginAwareTransport> {
-    use aisec_attack::{MutatorConfig, MutatorKind, PayloadMutator};
+    use promptlab_attack::{MutatorConfig, MutatorKind, PayloadMutator};
     let max_per_payload = variants_per_test.saturating_sub(1);
     let mutator = PayloadMutator::new(MutatorConfig {
         enabled: MutatorKind::all().to_vec(),

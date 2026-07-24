@@ -3,11 +3,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use aisec_auth::AuthEngineConfig;
-use aisec_attack::AttackCategory;
-use aisec_models::LocalModelManager;
-use aisec_runtime::SharedModelProvider;
-use aisec_storage::{
+use promptlab_auth::AuthEngineConfig;
+use promptlab_attack::AttackCategory;
+use promptlab_models::LocalModelManager;
+use promptlab_runtime::SharedModelProvider;
+use promptlab_storage::{
     CreateScan, FindingRepository, ProjectRepository, Repositories,
     ScanRepository, TargetRepository, UpdateScan,
 };
@@ -20,7 +20,7 @@ use crate::commands::scan_execution::{
     run_target_profile_attack_scan, scan_attack_requests_total, scan_progress_total,
     scan_testcases_total, ScanExecutionConfig, TargetProfileScanContext,
 };
-use aisec_target_profile::PayloadStrategy;
+use promptlab_target_profile::PayloadStrategy;
 use serde::Serialize;
 use crate::events::{emit_app_data_changed, ScanProgressEmitter};
 use crate::session_auth::{build_attack_runtime_parts, fallback_attack_runtime, seed_url_from_descriptor, AttackRuntime};
@@ -52,8 +52,8 @@ fn is_interrupted_scan_status(status: &str) -> bool {
 
 async fn mark_scan_interrupted(
     repos: &Repositories,
-    scan: &aisec_storage::Scan,
-) -> Result<(), aisec_core::AisecError> {
+    scan: &promptlab_storage::Scan,
+) -> Result<(), promptlab_core::PromptLabError> {
     let mut playbook = scan
         .playbook_json
         .as_deref()
@@ -183,7 +183,7 @@ fn progress_to_dto(scan_id: &str, progress: &ScanProgress) -> ScanStatusDto {
 
 async fn run_scan_job(
     app: AppHandle,
-    db: aisec_storage::Database,
+    db: promptlab_storage::Database,
     jobs: ScanJobManager,
     scan_id: String,
     project_id: String,
@@ -197,12 +197,12 @@ async fn run_scan_job(
     progress: Arc<Mutex<ScanProgress>>,
     data_dir: std::path::PathBuf,
     auth_config: AuthEngineConfig,
-    harness_factory: aisec_harness::HarnessFactory,
-    plugin_manager: Arc<AsyncMutex<aisec_plugin_host::PluginManager>>,
-    inference_manager: Arc<AsyncMutex<aisec_inference::InferenceRuntimeManager>>,
+    harness_factory: promptlab_harness::HarnessFactory,
+    plugin_manager: Arc<AsyncMutex<promptlab_plugin_host::PluginManager>>,
+    inference_manager: Arc<AsyncMutex<promptlab_inference::InferenceRuntimeManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
-    runtime_manager: Arc<AsyncMutex<aisec_runtime::RuntimeManager>>,
+    runtime_manager: Arc<AsyncMutex<promptlab_runtime::RuntimeManager>>,
 ) {
     let repos = db.repositories();
     let progress_emitter = ScanProgressEmitter::new(app.clone(), scan_id.clone());
@@ -446,15 +446,15 @@ pub async fn scan_start_op(
             playbook["payload_strategy"] = serde_json::to_value(strategy).unwrap_or_default();
             playbook["scan_metadata"] = serde_json::json!({
                 "generation_strategy": match strategy.strategy {
-                    aisec_target_profile::PayloadGenerationStrategy::Deterministic => "deterministic",
-                    aisec_target_profile::PayloadGenerationStrategy::Mutation => "mutation",
-                    aisec_target_profile::PayloadGenerationStrategy::Adaptive => "adaptive",
+                    promptlab_target_profile::PayloadGenerationStrategy::Deterministic => "deterministic",
+                    promptlab_target_profile::PayloadGenerationStrategy::Mutation => "mutation",
+                    promptlab_target_profile::PayloadGenerationStrategy::Adaptive => "adaptive",
                 },
                 "mutation_level": match strategy.mutation_level {
-                    aisec_target_profile::MutationLevel::Low => "low",
-                    aisec_target_profile::MutationLevel::Medium => "medium",
-                    aisec_target_profile::MutationLevel::High => "high",
-                    aisec_target_profile::MutationLevel::Extreme => "extreme",
+                    promptlab_target_profile::MutationLevel::Low => "low",
+                    promptlab_target_profile::MutationLevel::Medium => "medium",
+                    promptlab_target_profile::MutationLevel::High => "high",
+                    promptlab_target_profile::MutationLevel::Extreme => "extreme",
                 },
                 "variant_count": strategy.variants_per_test,
                 "adaptive_enabled": strategy.enable_response_adaptation,
@@ -703,7 +703,7 @@ fn execution_params_from_playbook(
 async fn spawn_resumed_scan_job(
     app: &AppHandle,
     state: &AppState,
-    scan: &aisec_storage::Scan,
+    scan: &promptlab_storage::Scan,
 ) -> CommandResult<()> {
     if state.jobs().contains(&scan.id) {
         return Ok(());
@@ -871,7 +871,7 @@ pub async fn scan_status_op(state: &AppState, scan_id: String) -> CommandResult<
 async fn scan_status_from_db(
     repos: &Repositories,
     scan_id: &str,
-    scan: &aisec_storage::Scan,
+    scan: &promptlab_storage::Scan,
 ) -> CommandResult<ScanStatusDto> {
     if let Some(progress) = progress_from_playbook(scan.playbook_json.as_deref()) {
         return Ok(progress_to_dto(scan_id, &progress));
@@ -1105,7 +1105,7 @@ pub async fn scan_console_tail(
     let start = offset.unwrap_or(0);
     let (content, next_offset, total_bytes) =
         scan_console_log::read_from_offset(&state.logs_dir(), &scan_id, start).map_err(|e| {
-            CommandError::from(aisec_core::AisecError::internal(e.to_string()))
+            CommandError::from(promptlab_core::PromptLabError::internal(e.to_string()))
         })?;
     Ok(ScanConsoleTailDto {
         content,

@@ -1,6 +1,6 @@
 # AI Judge Engine
 
-**Crate:** `aisec-judge`  
+**Crate:** `promptlab-judge`  
 **Purpose:** Evaluate attack probe responses via rules, regex, offline LLM judges, and multi-model consensus.
 
 ---
@@ -30,7 +30,7 @@ JudgeRequest
 | **Classifier** | Finding type and severity classification |
 | **Attacker** | Did the model comply with adversarial intent? |
 
-All LLM roles use offline `aisec-models` `InferenceRuntime` (llama.cpp).
+All LLM roles use offline `promptlab-models` `InferenceRuntime` (llama.cpp).
 
 ---
 
@@ -39,7 +39,7 @@ All LLM roles use offline `aisec-models` `InferenceRuntime` (llama.cpp).
 ### Deterministic only (no local model required)
 
 ```rust
-use aisec_judge::{deterministic_engine, JudgeRequest};
+use promptlab_judge::{deterministic_engine, JudgeRequest};
 
 let engine = deterministic_engine();
 let verdict = engine.judge_deterministic(JudgeRequest {
@@ -57,8 +57,8 @@ println!("{} — {:.0}%", verdict.summary, verdict.confidence * 100.0);
 
 ```rust
 use std::sync::Arc;
-use aisec_judge::{JudgeEngine, JudgeConfig, ModelRolePool, JudgeRequest};
-use aisec_models::{LlamaCppRuntime, LlamaCppConfig, runtime::InferenceRuntime};
+use promptlab_judge::{JudgeEngine, JudgeConfig, ModelRolePool, JudgeRequest};
+use promptlab_models::{LlamaCppRuntime, LlamaCppConfig, runtime::InferenceRuntime};
 use tokio::sync::Mutex;
 
 let mut pool = ModelRolePool::new();
@@ -110,7 +110,7 @@ Models must return JSON:
 ## Tests
 
 ```bash
-cargo test -p aisec-judge
+cargo test -p promptlab-judge
 ```
 
 Uses `JsonMockRuntime` for LLM tests without llama.cpp installed.
@@ -119,7 +119,7 @@ Uses `JsonMockRuntime` for LLM tests without llama.cpp installed.
 
 ## Integration
 
-Wire into `aisec-attack` executor to replace or augment heuristic `AttackEvaluation`:
+Wire into `promptlab-attack` executor to replace or augment heuristic `AttackEvaluation`:
 
 ```rust
 let verdict = judge_engine.judge(JudgeRequest {

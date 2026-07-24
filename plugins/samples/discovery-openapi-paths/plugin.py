@@ -64,7 +64,7 @@ def discover(params):
 
 
 def main():
-    os.environ.get("AISEC_PLUGIN_ID", "com.aisec.sample.discovery-openapi")
+    os.environ.get("PROMPTLAB_PLUGIN_ID", "com.promptlab.sample.discovery-openapi")
     while True:
         msg = read_message()
         if msg is None or msg.get("type") == "shutdown":

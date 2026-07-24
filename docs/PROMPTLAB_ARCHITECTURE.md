@@ -1,6 +1,6 @@
 # PromptLab Architecture Refactor
 
-> Breaking refactor: AISec → PromptLab. No backward compatibility. Storage unified under `~/.promptlab/`.
+> Breaking refactor: PromptLab → PromptLab. No backward compatibility. Storage unified under `~/.promptlab/`.
 
 ## 1. Application Architecture
 
@@ -38,7 +38,7 @@ Override root: `PROMPTLAB_ROOT` env var. Override DB: `PROMPTLAB_DB_PATH`.
 
 ## 3. Environment Architecture
 
-- **Module:** `crates/aisec-core/src/environment.rs`
+- **Module:** `crates/promptlab-core/src/environment.rs`
 - **Bootstrap:** `bootstrap_environment()` on startup — creates dirs, validates read/write
 - **IPC:** `environment_get`, `environment_update`
 - **UI:** Settings → **Environments** (replaces Paths)
@@ -59,7 +59,7 @@ OCSF JSON formatter
 Category log files + app.log aggregate
 ```
 
-- **Module:** `crates/aisec-core/src/event_log.rs`
+- **Module:** `crates/promptlab-core/src/event_log.rs`
 - **IPC:** `logs_list_files`, `logs_tail`, `logs_recent_events`, `logs_open_folder`
 - **UI:** Settings → Troubleshooting (live viewer, filters, auto-refresh)
 
@@ -101,8 +101,8 @@ Every category event is also written to `app.log`.
 
 | File | Purpose |
 |------|---------|
-| `crates/aisec-core/src/environment.rs` | Root directory layout + validation |
-| `crates/aisec-core/src/event_log.rs` | Event bus + OCSF logger |
+| `crates/promptlab-core/src/environment.rs` | Root directory layout + validation |
+| `crates/promptlab-core/src/event_log.rs` | Event bus + OCSF logger |
 | `src-tauri/src/commands/environment.rs` | Environment + logs IPC |
 | `src/shared/ipc/environment.ts` | Frontend IPC wrappers |
 | `src/features/settings/EnvironmentsPanel.tsx` | Environments settings UI |
@@ -114,29 +114,29 @@ Every category event is also written to `app.log`.
 | Before | After |
 |--------|-------|
 | Tauri `app_data_dir` | `~/.promptlab/` |
-| `aisec.db` at data root | `workspaces/promptlab.db` |
+| `promptlab.db` at data root | `workspaces/promptlab.db` |
 | `ai_runtime_config.json` at data root | `config/ai_runtime_config.json` |
 | `plugins_state.json` at data root | `config/plugins_state.json` |
 | `AuthSessions/` at data root | `workspaces/AuthSessions/` |
 | Settings → Paths | Settings → Environments |
-| Storage keys `aisec:*` | `promptlab:*` |
-| Product name AISec | PromptLab |
-| Bundle ID `yangyang.aisec.app` | `com.promptlab.desktop` |
+| Storage keys `promptlab:*` | `promptlab:*` |
+| Product name PromptLab | PromptLab |
+| Bundle ID `yangyang.promptlab.app` | `com.promptlab.desktop` |
 
 ## 9. Files Removed / Obsolete
 
 - Settings **Paths** tab (replaced by Environments)
 - Tauri `app_data_dir` as storage root (no longer used for app data)
-- Legacy `~/.aisec` path defaults in UI
+- Legacy `~/.promptlab` path defaults in UI
 
 ## 10. Remaining Technical Debt
 
-- Internal Rust crates still named `aisec-*` (workspace package rename deferred)
-- Executable still `aisec-desktop` binary name in Cargo.toml
+- Internal Rust crates still named `promptlab-*` (workspace package rename deferred)
+- Executable still `promptlab-desktop` binary name in Cargo.toml
 - Not all feature modules publish OCSF events yet (only startup/settings wired)
 - `tracing` still writes `promptlab-trace.log` alongside OCSF logs (dev diagnostics)
-- Plugin env vars `AISEC_PLUGIN_*` in plugin-host sandbox (rename to `PROMPTLAB_*`)
-- Keychain service name still `com.aisec.app` in aisec-auth
+- Plugin env vars `PROMPTLAB_PLUGIN_*` in plugin-host sandbox (rename to `PROMPTLAB_*`)
+- Keychain service name still `com.promptlab.app` in promptlab-auth
 - Consolidated single SQL schema file not yet merged (migrations still incremental)
 - Crash panic hook not yet wired to `publish_crash()`
 - Export Logs ZIP not implemented (copy log folder path only)

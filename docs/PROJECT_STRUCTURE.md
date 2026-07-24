@@ -1,11 +1,11 @@
-# AISec Project Structure
+# PromptLab Project Structure
 
-Bootstrap layout for the AISec desktop application. Business logic crates and features are intentionally omitted.
+Bootstrap layout for the PromptLab desktop application. Business logic crates and features are intentionally omitted.
 
 ## Repository Tree
 
 ```
-aisec/
+promptlab/
 ├── Cargo.toml                  # Rust workspace root
 ├── package.json                # Frontend + Tauri CLI scripts
 ├── vite.config.ts              # Vite dev/build configuration
@@ -45,13 +45,13 @@ aisec/
 │       └── state.rs              # AppState
 │
 ├── crates/
-│   ├── aisec-core/             # Shared Rust foundations
+│   ├── promptlab-core/             # Shared Rust foundations
 │   │   └── src/
 │   │       ├── error.rs
 │   │       └── logging.rs
-│   ├── aisec-fingerprint/      # AI endpoint provider fingerprinting
-│   ├── aisec-plugin-host/      # Plugin manager, sandbox, permissions
-│   └── aisec-storage/          # SQLite + sqlx + repositories
+│   ├── promptlab-fingerprint/      # AI endpoint provider fingerprinting
+│   ├── promptlab-plugin-host/      # Plugin manager, sandbox, permissions
+│   └── promptlab-storage/          # SQLite + sqlx + repositories
 │
 ├── packages/
 │   ├── plugin-sdk-python/      # Python plugin SDK
@@ -66,7 +66,7 @@ aisec/
 ├── plugins/
 │   ├── README.md
 │   ├── _template/
-│   │   ├── aisec-plugin.toml
+│   │   ├── promptlab-plugin.toml
 │   │   └── plugin.py
 │   └── samples/                # Reference plugins (4 types × Python/JS)
 │
@@ -84,20 +84,20 @@ aisec/
 
 | Crate | Path | Purpose |
 |-------|------|---------|
-| `aisec-core` | `crates/aisec-core` | Shared error + logging frameworks |
-| `aisec-storage` | `crates/aisec-storage` | SQLite persistence, migrations, repositories |
-| `aisec-discovery` | `crates/aisec-discovery` | Attack-surface discovery engine (crawl, API, GraphQL, OpenAPI, AI) |
-| `aisec-core` | `crates/aisec-core` | Shared errors, logging |
-| `aisec-attack` | `crates/aisec-attack` | AI security attack framework |
-| `aisec-payload` | `crates/aisec-payload` | Payload library, mutations, generation pipeline |
-| `aisec-models` | `crates/aisec-models` | Local GGUF model manager, llama.cpp runtime |
-| `aisec-judge` | `crates/aisec-judge` | AI judge engine — rule, regex, LLM consensus |
-| `aisec-report` | `crates/aisec-report` | Report generation — HTML, PDF, JSON, SARIF |
-| `aisec-fingerprint` | `crates/aisec-fingerprint` | AI endpoint provider fingerprinting |
-| `aisec-plugin-host` | `crates/aisec-plugin-host` | Plugin lifecycle, sandbox, permissions |
-| `aisec-auth` | `crates/aisec-auth` | Authentication engine (Playwright sessions) |
-| `aisec-desktop` | `src-tauri` | Tauri application shell |
-| `aisec-integration-tests` | `tests/integration` | Cross-crate smoke tests |
+| `promptlab-core` | `crates/promptlab-core` | Shared error + logging frameworks |
+| `promptlab-storage` | `crates/promptlab-storage` | SQLite persistence, migrations, repositories |
+| `promptlab-discovery` | `crates/promptlab-discovery` | Attack-surface discovery engine (crawl, API, GraphQL, OpenAPI, AI) |
+| `promptlab-core` | `crates/promptlab-core` | Shared errors, logging |
+| `promptlab-attack` | `crates/promptlab-attack` | AI security attack framework |
+| `promptlab-payload` | `crates/promptlab-payload` | Payload library, mutations, generation pipeline |
+| `promptlab-models` | `crates/promptlab-models` | Local GGUF model manager, llama.cpp runtime |
+| `promptlab-judge` | `crates/promptlab-judge` | AI judge engine — rule, regex, LLM consensus |
+| `promptlab-report` | `crates/promptlab-report` | Report generation — HTML, PDF, JSON, SARIF |
+| `promptlab-fingerprint` | `crates/promptlab-fingerprint` | AI endpoint provider fingerprinting |
+| `promptlab-plugin-host` | `crates/promptlab-plugin-host` | Plugin lifecycle, sandbox, permissions |
+| `promptlab-auth` | `crates/promptlab-auth` | Authentication engine (Playwright sessions) |
+| `promptlab-desktop` | `src-tauri` | Tauri application shell |
+| `promptlab-integration-tests` | `tests/integration` | Cross-crate smoke tests |
 
 ## Bootstrap IPC Commands
 
@@ -130,18 +130,18 @@ npm test
 
 ### Logging
 
-- **Rust:** `tracing` + `tracing-subscriber` + `tracing-appender` via `aisec-core::logging`
+- **Rust:** `tracing` + `tracing-subscriber` + `tracing-appender` via `promptlab-core::logging`
 - **Frontend:** `createLogger()` in `src/shared/logging` with `VITE_LOG_LEVEL` support
 
 ### Error Handling
 
-- **Rust:** `AisecError` / `ErrorCode` in `aisec-core`; `CommandError` IPC envelope in `src-tauri`
+- **Rust:** `PromptLabError` / `ErrorCode` in `promptlab-core`; `CommandError` IPC envelope in `src-tauri`
 - **Frontend:** `AppError` type, `toAppError()`, and `ErrorBoundary` in `src/shared/errors`
 
 ## Next Steps (Not Implemented)
 
 Future crates and modules described in `docs/ARCHITECTURE.md`:
 
-- Security engines (`aisec-engine-*`)
+- Security engines (`promptlab-engine-*`)
 - Orchestrator, storage, vault, plugin host
 - Feature modules under `src/features/`

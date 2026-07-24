@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use aisec_models::runtime::InferenceRuntime;
-use aisec_models::types::{InferenceRequest, InferenceResponse, RuntimeState};
+use promptlab_models::runtime::InferenceRuntime;
+use promptlab_models::types::{InferenceRequest, InferenceResponse, RuntimeState};
 
 use crate::error::RuntimeResult;
 use crate::provider::ModelProvider;
@@ -35,32 +35,32 @@ impl InferenceRuntime for ModelProviderRuntime {
     async fn load_model(
         &mut self,
         _model_path: &std::path::Path,
-    ) -> aisec_models::error::ModelResult<()> {
+    ) -> promptlab_models::error::ModelResult<()> {
         Ok(())
     }
 
-    async fn unload(&mut self) -> aisec_models::error::ModelResult<()> {
+    async fn unload(&mut self) -> promptlab_models::error::ModelResult<()> {
         Ok(())
     }
 
     async fn complete(
         &self,
         request: InferenceRequest,
-    ) -> aisec_models::error::ModelResult<InferenceResponse> {
+    ) -> promptlab_models::error::ModelResult<InferenceResponse> {
         let response = self
             .provider
             .complete_for_model(&self.model_id, &request)
             .await
-            .map_err(|err| aisec_models::error::ModelError::runtime(err.to_string()))?;
+            .map_err(|err| promptlab_models::error::ModelError::runtime(err.to_string()))?;
         Ok(response)
     }
 
-    async fn health(&self) -> aisec_models::error::ModelResult<bool> {
+    async fn health(&self) -> promptlab_models::error::ModelResult<bool> {
         self.provider
             .health()
             .await
             .map(|health| health.healthy)
-            .map_err(|err| aisec_models::error::ModelError::runtime(err.to_string()))
+            .map_err(|err| promptlab_models::error::ModelError::runtime(err.to_string()))
     }
 }
 

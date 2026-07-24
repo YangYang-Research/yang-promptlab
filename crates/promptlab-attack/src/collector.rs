@@ -113,7 +113,7 @@ mod tests {
                         headers: Default::default(),
                         body: "leaked".into(),
                         duration_ms: 1,
-                        normalized: aisec_harness::NormalizedResponse::from_http(
+                        normalized: promptlab_harness::NormalizedResponse::from_http(
                             200,
                             "leaked".into(),
                             "mock",

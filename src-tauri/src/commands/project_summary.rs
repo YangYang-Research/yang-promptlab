@@ -1,10 +1,10 @@
 //! AI-backed project posture summary (Project Details → Summary).
 
-use aisec_agent::{MemoryContext, SummaryRequest, YazgDelegation, YazgSupervisor};
-use aisec_storage::{
+use promptlab_agent::{MemoryContext, SummaryRequest, YazgDelegation, YazgSupervisor};
+use promptlab_storage::{
     FindingRepository, ProjectRepository, ScanRepository, TargetRepository, UpdateProject,
 };
-use aisec_target_profile::{
+use promptlab_target_profile::{
     build_attack_results_summary, ensure_failed_project_summary_action,
     ensure_failed_scan_action_recommendation, is_retryable_scan_status, FindingSummaryInput,
     SummaryAction, SummaryBundle,
@@ -110,10 +110,10 @@ struct LlmProjectSummary {
 }
 
 fn collect_retryable_failed_scans(
-    attack_scans: &[&aisec_storage::Scan],
-    targets: &[aisec_storage::Target],
+    attack_scans: &[&promptlab_storage::Scan],
+    targets: &[promptlab_storage::Target],
 ) -> Vec<ProjectSummaryFailedScanDto> {
-    let target_by_id: std::collections::HashMap<&str, &aisec_storage::Target> = targets
+    let target_by_id: std::collections::HashMap<&str, &promptlab_storage::Target> = targets
         .iter()
         .map(|t| (t.id.as_str(), t))
         .collect();
@@ -268,7 +268,7 @@ pub async fn project_summary_generate_op(
         .map(|scan| (scan.id.as_str(), scan.target_id.as_deref()))
         .collect();
 
-    let mut findings_by_target: std::collections::HashMap<&str, Vec<&aisec_storage::Finding>> =
+    let mut findings_by_target: std::collections::HashMap<&str, Vec<&promptlab_storage::Finding>> =
         std::collections::HashMap::new();
     for finding in &findings {
         let target_id = finding
@@ -285,7 +285,7 @@ pub async fn project_summary_generate_op(
     }
 
     // Attack scans per target, newest first (list_by_project is created_at DESC).
-    let mut scans_by_target: std::collections::HashMap<&str, Vec<&aisec_storage::Scan>> =
+    let mut scans_by_target: std::collections::HashMap<&str, Vec<&promptlab_storage::Scan>> =
         std::collections::HashMap::new();
     for scan in &attack_scans {
         if let Some(tid) = scan.target_id.as_deref() {
@@ -637,7 +637,7 @@ fn fallback_summary(input: &ProjectSummaryInput) -> LlmProjectSummary {
 }
 
 async fn persist_summary(
-    repos: &aisec_storage::Repositories,
+    repos: &promptlab_storage::Repositories,
     project_id: &str,
     response: &ProjectSummaryResponse,
 ) -> Result<(), String> {

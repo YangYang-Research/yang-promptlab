@@ -1,4 +1,4 @@
-use aisec_attack::PayloadAttempt;
+use promptlab_attack::PayloadAttempt;
 use serde::{Deserialize, Serialize};
 
 // Batch checkpoint for deferred pause between attack and judge batches (persisted in playbook_json).

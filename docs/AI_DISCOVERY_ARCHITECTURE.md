@@ -1,6 +1,6 @@
 # AI-Aware Discovery Architecture
 
-AISec is an **AI Security Scanner**. Discovery produces **`AiEndpointMetadata`** as the single source of truth for all downstream phases.
+PromptLab is an **AI Security Scanner**. Discovery produces **`AiEndpointMetadata`** as the single source of truth for all downstream phases.
 
 ## Pipeline
 
@@ -47,11 +47,11 @@ Migration `007_ai_endpoint_metadata.sql`:
 
 | Crate | Role |
 |-------|------|
-| `aisec-discovery` | Crawl + static probes |
-| `aisec-endpoint-metadata` | Schema/Capability/Classify/Risk pipeline |
-| `aisec-fingerprint` | Stack fingerprint (embedded in metadata) |
-| `aisec-planner` | Reads `metadata` + embedded `stack_fingerprint` |
-| `aisec-attack` | Uses `body_template_from_metadata()` |
+| `promptlab-discovery` | Crawl + static probes |
+| `promptlab-endpoint-metadata` | Schema/Capability/Classify/Risk pipeline |
+| `promptlab-fingerprint` | Stack fingerprint (embedded in metadata) |
+| `promptlab-planner` | Reads `metadata` + embedded `stack_fingerprint` |
+| `promptlab-attack` | Uses `body_template_from_metadata()` |
 
 ## IPC events
 
@@ -59,7 +59,7 @@ Migration `007_ai_endpoint_metadata.sql`:
 
 ## Removed
 
-- `fingerprint_service.rs` — logic moved into `aisec-endpoint-metadata` pipeline
+- `fingerprint_service.rs` — logic moved into `promptlab-endpoint-metadata` pipeline
 - `endpoints.fingerprint_json` column (renamed to `metadata_json`)
 - Fake discovery phase animation (replaced by real backend phases)
 
@@ -69,9 +69,9 @@ Migration `007_ai_endpoint_metadata.sql`:
 sequenceDiagram
     participant UI as Discovery Wizard
     participant CMD as discovery command
-    participant DISC as aisec-discovery
+    participant DISC as promptlab-discovery
     participant PIPE as endpoint_pipeline
-    participant META as aisec-endpoint-metadata
+    participant META as promptlab-endpoint-metadata
     participant DB as SQLite
 
     UI->>CMD: run_discovery(scan_id)
@@ -92,4 +92,4 @@ sequenceDiagram
 - Cancellation token for long discovery runs (not yet wired)
 - Resume partial metadata on failure
 - OpenAPI-driven schema inference from spec body
-- `aisec-generator` crate: attack path uses `body_template_from_metadata`; generator internals not yet field-path aware
+- `promptlab-generator` crate: attack path uses `body_template_from_metadata`; generator internals not yet field-path aware

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use aisec_core::{AisecError, AisecResult};
+use promptlab_core::{PromptLabError, PromptLabResult};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, USER_AGENT};
 use reqwest::{Client, Method, Response, StatusCode};
 use tracing::instrument;
@@ -19,14 +19,14 @@ pub struct HttpClient {
 }
 
 impl HttpClient {
-    pub fn new(config: DiscoveryConfig) -> AisecResult<Self> {
+    pub fn new(config: DiscoveryConfig) -> PromptLabResult<Self> {
         let config = Arc::new(config);
         let inner = Client::builder()
             .user_agent(config.user_agent.clone())
             .timeout(config.request_timeout)
             .redirect(reqwest::redirect::Policy::limited(5))
             .build()
-            .map_err(|err| AisecError::config(format!("failed to build HTTP client: {err}")))?;
+            .map_err(|err| PromptLabError::config(format!("failed to build HTTP client: {err}")))?;
 
         Ok(Self {
             inner,
@@ -45,12 +45,12 @@ impl HttpClient {
     }
 
     #[instrument(skip(self), fields(url = %url))]
-    pub async fn get(&self, url: &str) -> AisecResult<HttpSnapshot> {
+    pub async fn get(&self, url: &str) -> PromptLabResult<HttpSnapshot> {
         self.request(Method::GET, url, None).await
     }
 
     #[instrument(skip(self, body), fields(url = %url))]
-    pub async fn post_json(&self, url: &str, body: &str) -> AisecResult<HttpSnapshot> {
+    pub async fn post_json(&self, url: &str, body: &str) -> PromptLabResult<HttpSnapshot> {
         self.request(Method::POST, url, Some(body)).await
     }
 
@@ -59,7 +59,7 @@ impl HttpClient {
         method: Method,
         url: &str,
         json_body: Option<&str>,
-    ) -> AisecResult<HttpSnapshot> {
+    ) -> PromptLabResult<HttpSnapshot> {
         let label = format!("{method} {url}");
         let config = self.config.clone();
         let client = self.inner.clone();
@@ -93,11 +93,11 @@ impl HttpClient {
             }
         })
         .await
-        .map_err(|err| AisecError::internal(format!("HTTP request failed: {err}")))?;
+        .map_err(|err| PromptLabError::internal(format!("HTTP request failed: {err}")))?;
 
         let status = response.status();
         if is_retryable_status(status.as_u16()) {
-            return Err(AisecError::internal(format!(
+            return Err(PromptLabError::internal(format!(
                 "HTTP {} after retries",
                 status.as_u16()
             )));
@@ -106,7 +106,7 @@ impl HttpClient {
         self.snapshot(response).await
     }
 
-    async fn snapshot(&self, response: Response) -> AisecResult<HttpSnapshot> {
+    async fn snapshot(&self, response: Response) -> PromptLabResult<HttpSnapshot> {
         let url = response.url().to_string();
         let status = response.status().as_u16();
         let content_type = response
@@ -118,10 +118,10 @@ impl HttpClient {
         let bytes = response
             .bytes()
             .await
-            .map_err(|err| AisecError::internal(format!("failed to read body: {err}")))?;
+            .map_err(|err| PromptLabError::internal(format!("failed to read body: {err}")))?;
 
         if bytes.len() > self.config.max_body_bytes {
-            return Err(AisecError::invalid_input(format!(
+            return Err(PromptLabError::invalid_input(format!(
                 "response body exceeds max_body_bytes ({})",
                 self.config.max_body_bytes
             )));
@@ -142,7 +142,7 @@ impl HttpClient {
         headers.insert(
             USER_AGENT,
             HeaderValue::from_str(&self.config.user_agent)
-                .unwrap_or_else(|_| HeaderValue::from_static("AISec-Discovery")),
+                .unwrap_or_else(|_| HeaderValue::from_static("PromptLab-Discovery")),
         );
         headers
     }

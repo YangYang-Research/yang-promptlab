@@ -4,7 +4,7 @@ use aes_gcm::{
     aead::{Aead, KeyInit, OsRng},
     Aes256Gcm, Nonce,
 };
-use aisec_core::{AisecError, AisecResult};
+use promptlab_core::{PromptLabError, PromptLabResult};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
@@ -23,9 +23,9 @@ pub struct ModelCredentialVault {
 }
 
 impl ModelCredentialVault {
-    pub fn new(data_dir: &Path) -> AisecResult<Self> {
+    pub fn new(data_dir: &Path) -> PromptLabResult<Self> {
         let dir = data_dir.join("models/.credentials");
-        std::fs::create_dir_all(&dir).map_err(AisecError::from)?;
+        std::fs::create_dir_all(&dir).map_err(PromptLabError::from)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -34,7 +34,7 @@ impl ModelCredentialVault {
 
         let key = derive_key(data_dir);
         let cipher = Aes256Gcm::new_from_slice(&key)
-            .map_err(|err| AisecError::internal(format!("model credential cipher: {err}")))?;
+            .map_err(|err| PromptLabError::internal(format!("model credential cipher: {err}")))?;
 
         Ok(Self { cipher, dir })
     }
@@ -43,26 +43,26 @@ impl ModelCredentialVault {
         self.dir.join(format!("{id}.enc"))
     }
 
-    pub fn store(&self, secret: &str) -> AisecResult<CredentialReferenceId> {
+    pub fn store(&self, secret: &str) -> PromptLabResult<CredentialReferenceId> {
         let id = CredentialReferenceId::new();
         self.store_with_id(&id, secret)?;
         Ok(id)
     }
 
-    pub fn store_with_id(&self, id: &CredentialReferenceId, secret: &str) -> AisecResult<()> {
+    pub fn store_with_id(&self, id: &CredentialReferenceId, secret: &str) -> PromptLabResult<()> {
         let mut nonce = [0u8; NONCE_LEN];
         OsRng.fill_bytes(&mut nonce);
         let ciphertext = self
             .cipher
             .encrypt(Nonce::from_slice(&nonce), secret.as_bytes())
-            .map_err(|err| AisecError::internal(format!("encrypt model credential: {err}")))?;
+            .map_err(|err| PromptLabError::internal(format!("encrypt model credential: {err}")))?;
 
         let mut payload = Vec::with_capacity(NONCE_LEN + ciphertext.len());
         payload.extend_from_slice(&nonce);
         payload.extend_from_slice(&ciphertext);
 
         let path = self.path(id.as_str());
-        std::fs::write(&path, STANDARD.encode(payload)).map_err(AisecError::from)?;
+        std::fs::write(&path, STANDARD.encode(payload)).map_err(PromptLabError::from)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -71,35 +71,35 @@ impl ModelCredentialVault {
         Ok(())
     }
 
-    pub fn load(&self, id: &CredentialReferenceId) -> AisecResult<String> {
+    pub fn load(&self, id: &CredentialReferenceId) -> PromptLabResult<String> {
         let path = self.path(id.as_str());
-        let encoded = std::fs::read_to_string(&path).map_err(AisecError::from)?;
+        let encoded = std::fs::read_to_string(&path).map_err(PromptLabError::from)?;
         let payload = STANDARD
             .decode(encoded.trim())
-            .map_err(|err| AisecError::internal(format!("decode model credential: {err}")))?;
+            .map_err(|err| PromptLabError::internal(format!("decode model credential: {err}")))?;
         if payload.len() <= NONCE_LEN {
-            return Err(AisecError::internal("model credential blob too short"));
+            return Err(PromptLabError::internal("model credential blob too short"));
         }
         let (nonce, ciphertext) = payload.split_at(NONCE_LEN);
         let plaintext = self
             .cipher
             .decrypt(Nonce::from_slice(nonce), ciphertext)
-            .map_err(|err| AisecError::internal(format!("decrypt model credential: {err}")))?;
-        String::from_utf8(plaintext).map_err(|err| AisecError::internal(err.to_string()))
+            .map_err(|err| PromptLabError::internal(format!("decrypt model credential: {err}")))?;
+        String::from_utf8(plaintext).map_err(|err| PromptLabError::internal(err.to_string()))
     }
 
-    pub fn delete(&self, id: &CredentialReferenceId) -> AisecResult<()> {
+    pub fn delete(&self, id: &CredentialReferenceId) -> PromptLabResult<()> {
         match std::fs::remove_file(self.path(id.as_str())) {
             Ok(()) => Ok(()),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(AisecError::from(err)),
+            Err(err) => Err(PromptLabError::from(err)),
         }
     }
 }
 
 fn derive_key(data_dir: &Path) -> [u8; 32] {
     let mut hasher = Sha256::new();
-    hasher.update(b"aisec-model-credential-vault-v1");
+    hasher.update(b"promptlab-model-credential-vault-v1");
     hasher.update(data_dir.to_string_lossy().as_bytes());
     hasher.finalize().into()
 }

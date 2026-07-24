@@ -36,7 +36,7 @@ impl Harness for OpenAiHarness {
         if request.body.is_none() {
             request.body = Some(
                 serde_json::json!({
-                    "model": "aisec-probe",
+                    "model": "promptlab-probe",
                     "messages": [
                         { "role": "user", "content": "{{payload}}" }
                     ]

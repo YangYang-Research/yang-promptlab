@@ -1,4 +1,4 @@
-use aisec_harness::models::HarnessKind;
+use promptlab_harness::models::HarnessKind;
 
 use crate::types::{TargetProfile, TargetProvider};
 

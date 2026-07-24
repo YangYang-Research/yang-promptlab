@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use aisec_attack::{
+use promptlab_attack::{
     AttackResult, HarnessTransport, TargetTransport, TransportRequest, TransportResponse,
 };
-use aisec_plugin_host::{mutate_attack_payload, PluginManager};
+use promptlab_plugin_host::{mutate_attack_payload, PluginManager};
 use async_trait::async_trait;
 use tauri::async_runtime::Mutex as AsyncMutex;
 

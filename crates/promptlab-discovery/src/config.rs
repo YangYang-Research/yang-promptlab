@@ -39,7 +39,7 @@ impl Default for DiscoveryConfig {
             retry: RetryConfig::default(),
             same_origin_only: true,
             allow_private_network: false,
-            user_agent: format!("AISec-Discovery/{}", env!("CARGO_PKG_VERSION")),
+            user_agent: format!("PromptLab-Discovery/{}", env!("CARGO_PKG_VERSION")),
             probe_static_paths: true,
             max_body_bytes: 2 * 1024 * 1024,
         }

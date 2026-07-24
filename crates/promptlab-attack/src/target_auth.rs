@@ -1,6 +1,6 @@
 //! Map target `descriptor_json.auth` onto [`AttackTarget`] HTTP headers.
 //!
-//! Credential auth (`basic`, `api_key`, `jwt`) follows `aisec-auth` header semantics.
+//! Credential auth (`basic`, `api_key`, `jwt`) follows `promptlab-auth` header semantics.
 //! Playwright-backed auth applies persisted session tokens when present.
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};

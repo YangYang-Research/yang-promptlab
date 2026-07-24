@@ -1,4 +1,4 @@
-//! AI endpoint fingerprinting engine for AISec.
+//! AI endpoint fingerprinting engine for PromptLab.
 //!
 //! Identifies inference providers (OpenAI, Anthropic, Gemini, Bedrock, Azure OpenAI,
 //! Ollama, LiteLLM, vLLM) from URL, header, and response body signals.

@@ -74,7 +74,7 @@ impl ReportFormatter for JsonFormatter {
         Ok(GeneratedReport {
             kind,
             format: ReportFormat::Json,
-            filename: format!("aisec-{}-{}.json", kind.as_str(), input.scan_id),
+            filename: format!("promptlab-{}-{}.json", kind.as_str(), input.scan_id),
             bytes,
             content_type: ReportFormat::Json.content_type().into(),
         })

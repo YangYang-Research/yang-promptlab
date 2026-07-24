@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use aisec_core::{AisecError, AisecResult};
+use promptlab_core::{PromptLabError, PromptLabResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -81,7 +81,7 @@ impl Default for BrowserConfig {
             node_bin: "node".into(),
             runner_path: None,
             headless: true,
-            user_agent: Some(format!("AISec-Discovery/{}", env!("CARGO_PKG_VERSION"))),
+            user_agent: Some(format!("PromptLab-Discovery/{}", env!("CARGO_PKG_VERSION"))),
             wait_until: WaitUntil::NetworkIdle,
             nav_timeout_ms: 30_000,
             settle_ms: 1_500,
@@ -185,7 +185,7 @@ impl BrowserCrawler {
         &self.config
     }
 
-    fn runner_path(&self) -> AisecResult<PathBuf> {
+    fn runner_path(&self) -> PromptLabResult<PathBuf> {
         if let Some(path) = &self.config.runner_path {
             return Ok(path.clone());
         }
@@ -193,7 +193,7 @@ impl BrowserCrawler {
         if path.exists() {
             Ok(path)
         } else {
-            Err(AisecError::config(format!(
+            Err(PromptLabError::config(format!(
                 "playwright runner not found at {}",
                 path.display()
             )))
@@ -203,13 +203,13 @@ impl BrowserCrawler {
     /// Launch Chromium, navigate the target, wait for SPA rendering, and capture
     /// network traffic. Captured API requests are exported as endpoints.
     #[instrument(skip(self), fields(url = %url))]
-    pub async fn capture(&self, url: &str) -> AisecResult<BrowserCapture> {
+    pub async fn capture(&self, url: &str) -> PromptLabResult<BrowserCapture> {
         let parsed =
-            Url::parse(url).map_err(|e| AisecError::invalid_input(format!("invalid URL: {e}")))?;
+            Url::parse(url).map_err(|e| PromptLabError::invalid_input(format!("invalid URL: {e}")))?;
         match parsed.scheme() {
             "http" | "https" => {}
             other => {
-                return Err(AisecError::invalid_input(format!(
+                return Err(PromptLabError::invalid_input(format!(
                     "unsupported scheme '{other}'; only http/https allowed"
                 )))
             }
@@ -262,7 +262,7 @@ impl BrowserCrawler {
     }
 
     /// Gracefully close the browser and terminate the runner process.
-    pub async fn close(&self) -> AisecResult<()> {
+    pub async fn close(&self) -> PromptLabResult<()> {
         let _ = self.call::<Value>("close", serde_json::json!({})).await;
         let mut guard = self.proc.lock().await;
         if let Some(mut child) = guard.child.take() {
@@ -273,7 +273,7 @@ impl BrowserCrawler {
         Ok(())
     }
 
-    async fn ensure_process(&self) -> AisecResult<()> {
+    async fn ensure_process(&self) -> PromptLabResult<()> {
         let mut guard = self.proc.lock().await;
         if guard.child.is_some() {
             return Ok(());
@@ -290,7 +290,7 @@ impl BrowserCrawler {
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| {
-                AisecError::internal(format!(
+                PromptLabError::internal(format!(
                     "failed to spawn playwright runner via '{}': {e}",
                     self.config.node_bin
                 ))
@@ -299,11 +299,11 @@ impl BrowserCrawler {
         let stdin = child
             .stdin
             .take()
-            .ok_or_else(|| AisecError::internal("runner stdin unavailable"))?;
+            .ok_or_else(|| PromptLabError::internal("runner stdin unavailable"))?;
         let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| AisecError::internal("runner stdout unavailable"))?;
+            .ok_or_else(|| PromptLabError::internal("runner stdout unavailable"))?;
 
         guard.child = Some(child);
         guard.stdin = Some(stdin);
@@ -315,7 +315,7 @@ impl BrowserCrawler {
         &self,
         cmd: &str,
         payload: Value,
-    ) -> AisecResult<T> {
+    ) -> PromptLabResult<T> {
         self.ensure_process().await?;
 
         let mut guard = self.proc.lock().await;
@@ -330,25 +330,25 @@ impl BrowserCrawler {
             }
         }
         let line =
-            serde_json::to_string(&body).map_err(|e| AisecError::internal(e.to_string()))?;
+            serde_json::to_string(&body).map_err(|e| PromptLabError::internal(e.to_string()))?;
 
         {
             let stdin = guard
                 .stdin
                 .as_mut()
-                .ok_or_else(|| AisecError::internal("runner stdin closed"))?;
+                .ok_or_else(|| PromptLabError::internal("runner stdin closed"))?;
             stdin
                 .write_all(line.as_bytes())
                 .await
-                .map_err(|e| AisecError::internal(e.to_string()))?;
+                .map_err(|e| PromptLabError::internal(e.to_string()))?;
             stdin
                 .write_all(b"\n")
                 .await
-                .map_err(|e| AisecError::internal(e.to_string()))?;
+                .map_err(|e| PromptLabError::internal(e.to_string()))?;
             stdin
                 .flush()
                 .await
-                .map_err(|e| AisecError::internal(e.to_string()))?;
+                .map_err(|e| PromptLabError::internal(e.to_string()))?;
         }
 
         let mut response_line = String::new();
@@ -356,25 +356,25 @@ impl BrowserCrawler {
             let stdout = guard
                 .stdout
                 .as_mut()
-                .ok_or_else(|| AisecError::internal("runner stdout closed"))?;
+                .ok_or_else(|| PromptLabError::internal("runner stdout closed"))?;
             let n = stdout
                 .read_line(&mut response_line)
                 .await
-                .map_err(|e| AisecError::internal(e.to_string()))?;
+                .map_err(|e| PromptLabError::internal(e.to_string()))?;
             if n == 0 {
-                return Err(AisecError::internal(
+                return Err(PromptLabError::internal(
                     "playwright runner closed unexpectedly (is the 'playwright' npm package installed?)",
                 ));
             }
         }
 
         let response: RunnerResponse = serde_json::from_str(response_line.trim())
-            .map_err(|e| AisecError::internal(format!("invalid runner response: {e}")))?;
+            .map_err(|e| PromptLabError::internal(format!("invalid runner response: {e}")))?;
         if response.id != id {
-            return Err(AisecError::internal("runner response id mismatch"));
+            return Err(PromptLabError::internal("runner response id mismatch"));
         }
         if !response.ok {
-            return Err(AisecError::internal(
+            return Err(PromptLabError::internal(
                 response
                     .error
                     .unwrap_or_else(|| "playwright command failed".into()),
@@ -382,7 +382,7 @@ impl BrowserCrawler {
         }
 
         serde_json::from_value(response.result)
-            .map_err(|e| AisecError::internal(format!("failed to decode runner result: {e}")))
+            .map_err(|e| PromptLabError::internal(format!("failed to decode runner result: {e}")))
     }
 }
 

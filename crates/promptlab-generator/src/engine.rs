@@ -1,4 +1,4 @@
-use aisec_planner::AttackPlan;
+use promptlab_planner::AttackPlan;
 
 use crate::advanced::apply_advanced_options;
 use crate::error::GeneratorResult;

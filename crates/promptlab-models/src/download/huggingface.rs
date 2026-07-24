@@ -14,7 +14,7 @@ impl HuggingFaceClient {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::builder()
-                .user_agent("aisec-models/0.1")
+                .user_agent("promptlab-models/0.1")
                 .redirect(reqwest::redirect::Policy::limited(10))
                 .connect_timeout(std::time::Duration::from_secs(60))
                 .no_gzip()

@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use aisec_core::AisecError;
+use promptlab_core::PromptLabError;
 
 #[derive(Debug, Error)]
 pub enum ModelError {
@@ -26,7 +26,7 @@ pub enum ModelError {
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
-    Core(#[from] AisecError),
+    Core(#[from] PromptLabError),
 }
 
 pub type ModelResult<T> = Result<T, ModelError>;

@@ -1,4 +1,4 @@
-# AISec — MVP Execution Plan (First Real Scan)
+# PromptLab — MVP Execution Plan (First Real Scan)
 
 > **Trạng thái (2026-06-12):** Kế hoạch lịch sử. Luồng MVP B1–B8 đã triển khai qua PR #19.
 > Xem `docs/MVP_VALIDATION_REPORT.md` cho kết quả validation.
@@ -6,7 +6,7 @@
 **Author role:** Principal Software Architect
 **Date:** 2026-06-11
 **Source of truth:** `docs/REAL_IMPLEMENTATION_AUDIT.md` (per-module status, verified by live build/test)
-**Goal:** Define the **smallest** AISec MVP that performs a **real** end-to-end scan against a live
+**Goal:** Define the **smallest** PromptLab MVP that performs a **real** end-to-end scan against a live
 target — not mock data — through the desktop app.
 
 > Planning document only. No code is written or modified here. "Gaps" describe work to be done in a
@@ -44,13 +44,13 @@ Legend for "Module readiness" uses the audit's labels (COMPLETE / PARTIAL / BROK
 | # | Step | Primary module(s) | Module readiness | What already works | Gap to close for MVP |
 |---|------|-------------------|------------------|--------------------|----------------------|
 | 1 | Launch desktop app | `desktop-ui` (Tauri shell + React) | PARTIAL / backend SKELETON | App boots, routes, renders, `health`/`app_info` IPC | None functional; backend must gain a DB + domain commands (steps 2-8) |
-| 2 | Create project | `aisec-storage` (project repo) + `desktop-ui` | storage BROKEN-on-test / lib OK | `ProjectRepository::create` is real SQL | No IPC command; no form/handler (button is dead); store is mock; Tauri doesn't open a DB |
-| 3 | Add target URL | `aisec-storage` (target repo) + `desktop-ui` | lib OK | `TargetRepository::create` is real SQL | Same as step 2: no IPC, no form, no persistence wiring |
-| 4 | Crawl target | `aisec-discovery` (crawler, client, url_policy) | BROKEN | Single-worker BFS crawl, link extraction, SSRF guard all real | **Multi-worker deadlock** (default 8) → must run `worker_count: 1`; `localhost` blocked → needs `allow_private_network`; no IPC; endpoints not persisted |
-| 5 | Discover AI endpoints | `aisec-discovery` (AI detector + static probes) | BROKEN (crate) / detector real | AI path/JSON detection real; finds `/v1/models` etc. | **POST-only blind spot**: `/v1/chat/completions` missed when GET→404; no persistence of discovered endpoints |
-| 6 | Execute Prompt Injection | `aisec-attack` (prompt_injection, executor, HTTP transport) + `aisec-payload` (transitive) | attack BROKEN-on-test / lib OK | Production path real: `default_executor()` → `HttpTransport`; 3 built-in injection payloads + heuristic eval | No IPC; no mapping discovered endpoint → `AttackTarget`; no result persistence |
-| 7 | Evaluate result | `aisec-attack` built-in evaluator (MVP) **or** `aisec-judge` (optional) | attack eval real / judge BROKEN | `PromptInjection::evaluate()` returns severity + indicators with no extra deps | If judge is added: its **consensus bug only affects secret/`API key:` detection, not injection** — rule evaluator works; still optional for MVP |
-| 8 | Generate HTML report | `aisec-report` (HTML formatter, data builder) | PARTIAL | HTML formatter + `ReportDataBuilder::from_storage_findings` are real and tested | No IPC; must map persisted findings → `ReportInput`; write file + reveal/open it |
+| 2 | Create project | `promptlab-storage` (project repo) + `desktop-ui` | storage BROKEN-on-test / lib OK | `ProjectRepository::create` is real SQL | No IPC command; no form/handler (button is dead); store is mock; Tauri doesn't open a DB |
+| 3 | Add target URL | `promptlab-storage` (target repo) + `desktop-ui` | lib OK | `TargetRepository::create` is real SQL | Same as step 2: no IPC, no form, no persistence wiring |
+| 4 | Crawl target | `promptlab-discovery` (crawler, client, url_policy) | BROKEN | Single-worker BFS crawl, link extraction, SSRF guard all real | **Multi-worker deadlock** (default 8) → must run `worker_count: 1`; `localhost` blocked → needs `allow_private_network`; no IPC; endpoints not persisted |
+| 5 | Discover AI endpoints | `promptlab-discovery` (AI detector + static probes) | BROKEN (crate) / detector real | AI path/JSON detection real; finds `/v1/models` etc. | **POST-only blind spot**: `/v1/chat/completions` missed when GET→404; no persistence of discovered endpoints |
+| 6 | Execute Prompt Injection | `promptlab-attack` (prompt_injection, executor, HTTP transport) + `promptlab-payload` (transitive) | attack BROKEN-on-test / lib OK | Production path real: `default_executor()` → `HttpTransport`; 3 built-in injection payloads + heuristic eval | No IPC; no mapping discovered endpoint → `AttackTarget`; no result persistence |
+| 7 | Evaluate result | `promptlab-attack` built-in evaluator (MVP) **or** `promptlab-judge` (optional) | attack eval real / judge BROKEN | `PromptInjection::evaluate()` returns severity + indicators with no extra deps | If judge is added: its **consensus bug only affects secret/`API key:` detection, not injection** — rule evaluator works; still optional for MVP |
+| 8 | Generate HTML report | `promptlab-report` (HTML formatter, data builder) | PARTIAL | HTML formatter + `ReportDataBuilder::from_storage_findings` are real and tested | No IPC; must map persisted findings → `ReportInput`; write file + reveal/open it |
 
 ---
 
@@ -58,17 +58,17 @@ Legend for "Module readiness" uses the audit's labels (COMPLETE / PARTIAL / BROK
 
 | Module | Audit status | MVP role | MVP readiness notes |
 |--------|--------------|----------|---------------------|
-| `aisec-core` | COMPLETE | Errors + logging used everywhere | Ready as-is |
-| `aisec-storage` | BROKEN (test compile only) | Persist project, target, scan, finding | **Library compiles and runs**; only the test harness fails (missing `ScanRepository` import). Production path is usable; recommend fixing tests for CI |
-| `aisec-discovery` | BROKEN | Crawl (step 4) + AI endpoint detection (step 5) | Usable **only** with `worker_count: 1` + `allow_private_network` for local targets; POST-only detection gap limits coverage |
-| `aisec-payload` | COMPLETE | Transitive dependency of `aisec-attack`; supplies injection payloads/mutators | Ready; mutations can be left at defaults or disabled |
-| `aisec-attack` | BROKEN (test compile only) | Execute prompt injection (step 6) + built-in evaluation (step 7) | **Library compiles and runs**; only a unit test fails (`PayloadRunner::new` borrow). Production executor path is correct |
-| `aisec-report` | PARTIAL | HTML report (step 8) | HTML formatter is real and tested; PDF/SARIF/JSON not needed for MVP |
+| `promptlab-core` | COMPLETE | Errors + logging used everywhere | Ready as-is |
+| `promptlab-storage` | BROKEN (test compile only) | Persist project, target, scan, finding | **Library compiles and runs**; only the test harness fails (missing `ScanRepository` import). Production path is usable; recommend fixing tests for CI |
+| `promptlab-discovery` | BROKEN | Crawl (step 4) + AI endpoint detection (step 5) | Usable **only** with `worker_count: 1` + `allow_private_network` for local targets; POST-only detection gap limits coverage |
+| `promptlab-payload` | COMPLETE | Transitive dependency of `promptlab-attack`; supplies injection payloads/mutators | Ready; mutations can be left at defaults or disabled |
+| `promptlab-attack` | BROKEN (test compile only) | Execute prompt injection (step 6) + built-in evaluation (step 7) | **Library compiles and runs**; only a unit test fails (`PayloadRunner::new` borrow). Production executor path is correct |
+| `promptlab-report` | PARTIAL | HTML report (step 8) | HTML formatter is real and tested; PDF/SARIF/JSON not needed for MVP |
 | `desktop-ui` | PARTIAL (backend SKELETON) | The app itself: project/target forms, scan trigger, results view, report button | Frontend shell exists; needs real IPC calls + a thin domain command surface in the Tauri backend |
 
-**Minimum dependency change:** the Tauri crate (`src-tauri`) must depend on `aisec-storage`,
-`aisec-discovery`, `aisec-attack`, `aisec-report` (and transitively `aisec-payload`, `aisec-core`)
-— today it links **only `aisec-core`**.
+**Minimum dependency change:** the Tauri crate (`src-tauri`) must depend on `promptlab-storage`,
+`promptlab-discovery`, `promptlab-attack`, `promptlab-report` (and transitively `promptlab-payload`, `promptlab-core`)
+— today it links **only `promptlab-core`**.
 
 ---
 
@@ -76,11 +76,11 @@ Legend for "Module readiness" uses the audit's labels (COMPLETE / PARTIAL / BROK
 
 | Module | Audit status | Why optional for this flow |
 |--------|--------------|----------------------------|
-| `aisec-fingerprint` | COMPLETE | Step 5 only needs to *discover* AI endpoints; provider identification is value-add, not required. Cheap to add later (already complete). |
-| `aisec-judge` | BROKEN | Step 7 is satisfied by `aisec-attack`'s built-in heuristic evaluator. Judge adds rule+regex+LLM consensus; its known bug affects secret detection, not injection, but it is unnecessary for MVP. |
-| `aisec-models` | PARTIAL | Only needed if judging uses a local LLM. MVP uses heuristic/rule evaluation, so no `llama-server`, no model download. |
-| `aisec-auth` | BROKEN | Needed only for authenticated targets. MVP targets an unauthenticated URL. **Caveat:** keep it building in the unified workspace build; do not pull it into the MVP runtime path. |
-| `aisec-plugin-host` | PARTIAL | Extensibility; not part of the core scan loop. |
+| `promptlab-fingerprint` | COMPLETE | Step 5 only needs to *discover* AI endpoints; provider identification is value-add, not required. Cheap to add later (already complete). |
+| `promptlab-judge` | BROKEN | Step 7 is satisfied by `promptlab-attack`'s built-in heuristic evaluator. Judge adds rule+regex+LLM consensus; its known bug affects secret detection, not injection, but it is unnecessary for MVP. |
+| `promptlab-models` | PARTIAL | Only needed if judging uses a local LLM. MVP uses heuristic/rule evaluation, so no `llama-server`, no model download. |
+| `promptlab-auth` | BROKEN | Needed only for authenticated targets. MVP targets an unauthenticated URL. **Caveat:** keep it building in the unified workspace build; do not pull it into the MVP runtime path. |
+| `promptlab-plugin-host` | PARTIAL | Extensibility; not part of the core scan loop. |
 
 ---
 
@@ -90,7 +90,7 @@ These are the gaps that **must** be closed (or worked around as noted) before th
 for real. Most are **integration** gaps, not domain-logic gaps.
 
 ### B1 — No integration spine (CRITICAL)
-The Tauri shell links only `aisec-core`; there is no path from the UI to storage or any engine.
+The Tauri shell links only `promptlab-core`; there is no path from the UI to storage or any engine.
 - Add domain crate dependencies to `src-tauri`.
 - Add a `Database` handle to `AppState` and open SQLite on startup (storage migrations already run on `connect()`).
 - Without this, **no step beyond launch is possible**.
@@ -122,10 +122,10 @@ missed even though it's the canonical injection target.
 ### B7 — Discovery → attack → report data mapping (MEDIUM)
 No code converts a `DiscoveredEndpoint` into an `AttackTarget`, nor attack outcomes into stored
 `Finding`s, nor stored findings into a `ReportInput`.
-- `aisec-report::ReportDataBuilder::from_storage_findings` exists; the storage→attack and discovery→attack adapters do not. This is glue code in the orchestration layer.
+- `promptlab-report::ReportDataBuilder::from_storage_findings` exists; the storage→attack and discovery→attack adapters do not. This is glue code in the orchestration layer.
 
 ### B8 — No scan orchestration entry point (MEDIUM)
-There is no single function that runs crawl → discover → attack → evaluate → persist. `aisec-attack`
+There is no single function that runs crawl → discover → attack → evaluate → persist. `promptlab-attack`
 has an internal sequential orchestrator for *attacks only*; the cross-engine pipeline is absent.
 - The MVP needs a thin orchestrator (can live in `src-tauri` or a small new module) invoked by the scan command.
 
@@ -166,24 +166,24 @@ flowchart LR
   IPC[[Tauri IPC commands]]
 
   subgraph Backend["src-tauri (thin orchestrator)"]
-    DB[(SQLite via aisec-storage)]
+    DB[(SQLite via promptlab-storage)]
     ORCH[scan_run orchestration]
   end
 
   IPC --> ORCH
   ORCH -->|persist| DB
-  ORCH --> DISC[aisec-discovery: crawl + AI detect]
+  ORCH --> DISC[promptlab-discovery: crawl + AI detect]
   DISC --> ORCH
-  ORCH --> ATK[aisec-attack: PromptInjection + HttpTransport]
+  ORCH --> ATK[promptlab-attack: PromptInjection + HttpTransport]
   ATK -->|heuristic evaluate| ORCH
   ORCH -->|findings| DB
-  ORCH --> REP[aisec-report: HTML]
+  ORCH --> REP[promptlab-report: HTML]
   REP -->|file path| IPC
   DB --> V
 ```
 
-Optional later: `aisec-fingerprint` after discovery; `aisec-judge` (+`aisec-models`) in place of the
-built-in evaluator; `aisec-auth` before crawl for authenticated targets.
+Optional later: `promptlab-fingerprint` after discovery; `promptlab-judge` (+`promptlab-models`) in place of the
+built-in evaluator; `promptlab-auth` before crawl for authenticated targets.
 
 ---
 
@@ -192,9 +192,9 @@ built-in evaluator; `aisec-auth` before crawl for authenticated targets.
 These appear in the audit as red items but do **not** block the MVP runtime (they should still be
 fixed for CI/quality):
 
-- `aisec-storage` / `aisec-attack` **test** compile errors — the production libraries build and run; only `cargo test` for those crates fails.
-- `aisec-judge` failing test and `aisec-plugin-host` failing test — both modules are optional/excluded from the MVP.
-- `aisec-auth` not compiling in isolation — excluded from the MVP path; keep it out of `src-tauri`'s dependency set so it doesn't enter the app build.
+- `promptlab-storage` / `promptlab-attack` **test** compile errors — the production libraries build and run; only `cargo test` for those crates fails.
+- `promptlab-judge` failing test and `promptlab-plugin-host` failing test — both modules are optional/excluded from the MVP.
+- `promptlab-auth` not compiling in isolation — excluded from the MVP path; keep it out of `src-tauri`'s dependency set so it doesn't enter the app build.
 - PDF/SARIF/JSON report limitations — MVP ships HTML only.
 - No encryption at rest — acceptable for an MVP demo; required before handling real credentials (which the MVP avoids).
 
@@ -220,8 +220,8 @@ backend, not the current mock fallback.
 
 | Category | Modules |
 |----------|---------|
-| **Required** | `aisec-core`, `aisec-storage`, `aisec-discovery`, `aisec-payload`, `aisec-attack`, `aisec-report`, `desktop-ui` |
-| **Optional** | `aisec-fingerprint`, `aisec-judge`, `aisec-models`, `aisec-auth`, `aisec-plugin-host` |
+| **Required** | `promptlab-core`, `promptlab-storage`, `promptlab-discovery`, `promptlab-payload`, `promptlab-attack`, `promptlab-report`, `desktop-ui` |
+| **Optional** | `promptlab-fingerprint`, `promptlab-judge`, `promptlab-models`, `promptlab-auth`, `promptlab-plugin-host` |
 | **Blocking gaps** | B1 integration spine · B2 IPC surface · B3 un-mock the UI · B4 crawler `worker_count:1` · B5 `allow_private_network` · B6 AI POST probe · B7 cross-engine data mapping · B8 scan orchestrator |
 
 **Bottom line:** every domain capability the MVP needs already exists as real library code. The MVP

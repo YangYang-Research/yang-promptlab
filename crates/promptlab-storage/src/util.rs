@@ -12,9 +12,9 @@ pub fn now() -> OffsetDateTime {
 pub fn ensure_rows_affected(
     result: sqlx::sqlite::SqliteQueryResult,
     entity: &str,
-) -> aisec_core::AisecResult<()> {
+) -> promptlab_core::PromptLabResult<()> {
     if result.rows_affected() == 0 {
-        return Err(aisec_core::AisecError::not_found(format!("{entity} not found")));
+        return Err(promptlab_core::PromptLabError::not_found(format!("{entity} not found")));
     }
     Ok(())
 }

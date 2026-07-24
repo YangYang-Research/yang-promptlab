@@ -203,7 +203,7 @@ impl RemoteProviderAdapter {
         let mut req = self.client.post(url).json(&body);
         req = req.header("Authorization", format!("Bearer {}", self.settings.api_key));
         if self.settings.provider == InferenceProvider::OpenRouter || self.is_openrouter_endpoint() {
-            req = req.header("HTTP-Referer", "https://aisec.local");
+            req = req.header("HTTP-Referer", "https://promptlab.local");
             req = req.header("X-Title", "PromptLab");
         }
 
@@ -243,7 +243,7 @@ impl RemoteProviderAdapter {
 
         let mut req = self.client.post(url).json(&body);
         req = req.header("Authorization", format!("Bearer {}", self.settings.api_key));
-        req = req.header("HTTP-Referer", "https://aisec.local");
+        req = req.header("HTTP-Referer", "https://promptlab.local");
         req = req.header("X-Title", "PromptLab");
 
         let response = req

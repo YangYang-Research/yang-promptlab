@@ -1,12 +1,12 @@
 [plugin]
-id = "com.aisec.sample.judge-keyword"
+id = "com.promptlab.sample.judge-keyword"
 name = "Keyword Judge"
 version = "1.0.0"
 api_version = "1"
 plugin_type = "judge"
 language = "python"
 description = "Rule-based keyword judge plugin"
-author = "AISec"
+author = "PromptLab"
 
 [runtime]
 type = "subprocess"

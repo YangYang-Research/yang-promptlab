@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use aisec_models::types::{InferenceRequest, InferenceResponse};
+use promptlab_models::types::{InferenceRequest, InferenceResponse};
 use serde::{Deserialize, Serialize};
 
 use crate::error::RuntimeResult;

@@ -1,4 +1,4 @@
-# AISec Architecture
+# PromptLab Architecture
 
 **Version:** 1.0  
 **Status:** Draft  
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-AISec is an offline-first, cross-platform desktop application for AI security testing. It provides a unified workbench for assessing LLM applications, chatbots, AI agents, agentic workflows, MCP servers, and RAG systems. The product combines local inference (llama.cpp), browser automation (Playwright), structured test orchestration (Rust), and a modern UI (React + Tauri) with durable local storage (SQLite).
+PromptLab is an offline-first, cross-platform desktop application for AI security testing. It provides a unified workbench for assessing LLM applications, chatbots, AI agents, agentic workflows, MCP servers, and RAG systems. The product combines local inference (llama.cpp), browser automation (Playwright), structured test orchestration (Rust), and a modern UI (React + Tauri) with durable local storage (SQLite).
 
 Design principles:
 
@@ -80,11 +80,11 @@ flowchart TB
 
 ### 1.3 Deployment Topology
 
-AISec ships as a **single installable bundle** per platform:
+PromptLab ships as a **single installable bundle** per platform:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    AISec Desktop App                     │
+│                    PromptLab Desktop App                     │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
 │  │ Tauri Shell │  │ React UI    │  │ Rust Core       │  │
 │  │ (WebView)   │◄─┤ (Frontend)  │◄─┤ (Backend)       │  │
@@ -338,22 +338,22 @@ flowchart LR
 
 | Module | Crate | Purpose |
 |--------|-------|---------|
-| `commands` | `aisec-app` | Tauri command definitions |
-| `orchestrator` | `aisec-orchestrator` | Run scheduling, DAG, checkpoints |
-| `engines/llm` | `aisec-engine-llm` | API-level LLM testing |
-| `engines/chatbot` | `aisec-engine-chatbot` | Playwright-driven UI testing |
-| `engines/agent` | `aisec-engine-agent` | Single-agent tool abuse |
-| `engines/workflow` | `aisec-engine-workflow` | Multi-agent orchestration tests |
-| `engines/mcp` | `aisec-engine-mcp` | MCP protocol security |
-| `engines/rag` | `aisec-engine-rag` | Retrieval pipeline testing |
-| `inference` | `aisec-inference` | llama.cpp FFI wrapper |
-| `browser` | `aisec-browser` | Playwright subprocess manager |
-| `storage` | `aisec-storage` | SQLite + migrations + repos |
-| `vault` | `aisec-vault` | Encrypted artifact storage |
-| `plugins` | `aisec-plugin-host` | Plugin lifecycle + sandbox |
-| `update` | `aisec-update` | Signed update pipeline |
-| `license` | `aisec-license` | Entitlement verification |
-| `telemetry` | `aisec-telemetry` | Local-only metrics (opt-in export) |
+| `commands` | `promptlab-app` | Tauri command definitions |
+| `orchestrator` | `promptlab-orchestrator` | Run scheduling, DAG, checkpoints |
+| `engines/llm` | `promptlab-engine-llm` | API-level LLM testing |
+| `engines/chatbot` | `promptlab-engine-chatbot` | Playwright-driven UI testing |
+| `engines/agent` | `promptlab-engine-agent` | Single-agent tool abuse |
+| `engines/workflow` | `promptlab-engine-workflow` | Multi-agent orchestration tests |
+| `engines/mcp` | `promptlab-engine-mcp` | MCP protocol security |
+| `engines/rag` | `promptlab-engine-rag` | Retrieval pipeline testing |
+| `inference` | `promptlab-inference` | llama.cpp FFI wrapper |
+| `browser` | `promptlab-browser` | Playwright subprocess manager |
+| `storage` | `promptlab-storage` | SQLite + migrations + repos |
+| `vault` | `promptlab-vault` | Encrypted artifact storage |
+| `plugins` | `promptlab-plugin-host` | Plugin lifecycle + sandbox |
+| `update` | `promptlab-update` | Signed update pipeline |
+| `license` | `promptlab-license` | Entitlement verification |
+| `telemetry` | `promptlab-telemetry` | Local-only metrics (opt-in export) |
 
 ### 4.3 Shared Contracts
 
@@ -370,7 +370,7 @@ flowchart LR
 ## 5. Folder Structure
 
 ```
-aisec/
+promptlab/
 ├── apps/
 │   └── desktop/                    # Tauri application root
 │       ├── src-tauri/              # Rust backend entry + Tauri config
@@ -392,23 +392,23 @@ aisec/
 │           └── package.json
 │
 ├── crates/                         # Rust workspace members
-│   ├── aisec-core/                 # Shared types, errors, traits
-│   ├── aisec-orchestrator/
-│   ├── aisec-inference/
-│   ├── aisec-browser/
-│   ├── aisec-storage/
-│   ├── aisec-vault/
-│   ├── aisec-plugin-host/
-│   ├── aisec-update/
-│   ├── aisec-license/
-│   ├── aisec-telemetry/
+│   ├── promptlab-core/                 # Shared types, errors, traits
+│   ├── promptlab-orchestrator/
+│   ├── promptlab-inference/
+│   ├── promptlab-browser/
+│   ├── promptlab-storage/
+│   ├── promptlab-vault/
+│   ├── promptlab-plugin-host/
+│   ├── promptlab-update/
+│   ├── promptlab-license/
+│   ├── promptlab-telemetry/
 │   └── engines/
-│       ├── aisec-engine-llm/
-│       ├── aisec-engine-chatbot/
-│       ├── aisec-engine-agent/
-│       ├── aisec-engine-workflow/
-│       ├── aisec-engine-mcp/
-│       └── aisec-engine-rag/
+│       ├── promptlab-engine-llm/
+│       ├── promptlab-engine-chatbot/
+│       ├── promptlab-engine-agent/
+│       ├── promptlab-engine-workflow/
+│       ├── promptlab-engine-mcp/
+│       └── promptlab-engine-rag/
 │
 ├── packages/                       # Shared non-Rust assets
 │   ├── playbook-schema/            # JSON Schema + examples
@@ -454,15 +454,15 @@ Platform-specific application data (not in repo):
 
 | OS | Default Path |
 |----|--------------|
-| macOS | `~/Library/Application Support/com.aisec.desktop/` |
-| Windows | `%APPDATA%\AISec\` |
-| Linux | `~/.local/share/aisec/` |
+| macOS | `~/Library/Application Support/com.promptlab.desktop/` |
+| Windows | `%APPDATA%\PromptLab\` |
+| Linux | `~/.local/share/promptlab/` |
 
 Contents:
 
 ```
 <app-data>/
-├── aisec.db                 # SQLite primary database
+├── promptlab.db                 # SQLite primary database
 ├── vault/                   # Encrypted artifacts (screenshots, HARs, responses)
 ├── models/                  # GGUF model files
 ├── plugins/                 # Installed third-party plugins
@@ -482,16 +482,16 @@ Contents:
 [workspace]
 members = [
     "apps/desktop/src-tauri",
-    "crates/aisec-core",
-    "crates/aisec-orchestrator",
-    "crates/aisec-inference",
-    "crates/aisec-browser",
-    "crates/aisec-storage",
-    "crates/aisec-vault",
-    "crates/aisec-plugin-host",
-    "crates/aisec-update",
-    "crates/aisec-license",
-    "crates/aisec-telemetry",
+    "crates/promptlab-core",
+    "crates/promptlab-orchestrator",
+    "crates/promptlab-inference",
+    "crates/promptlab-browser",
+    "crates/promptlab-storage",
+    "crates/promptlab-vault",
+    "crates/promptlab-plugin-host",
+    "crates/promptlab-update",
+    "crates/promptlab-license",
+    "crates/promptlab-telemetry",
     "crates/engines/*",
 ]
 resolver = "2"
@@ -501,24 +501,24 @@ resolver = "2"
 
 ```mermaid
 flowchart BT
-    APP[aisec-desktop / src-tauri]
-    CORE[aisec-core]
-    ORCH[aisec-orchestrator]
-    INF[aisec-inference]
-    BRW[aisec-browser]
-    STO[aisec-storage]
-    VLT[aisec-vault]
-    PLG[aisec-plugin-host]
-    UPD[aisec-update]
-    LIC[aisec-license]
-    TEL[aisec-telemetry]
+    APP[promptlab-desktop / src-tauri]
+    CORE[promptlab-core]
+    ORCH[promptlab-orchestrator]
+    INF[promptlab-inference]
+    BRW[promptlab-browser]
+    STO[promptlab-storage]
+    VLT[promptlab-vault]
+    PLG[promptlab-plugin-host]
+    UPD[promptlab-update]
+    LIC[promptlab-license]
+    TEL[promptlab-telemetry]
 
-    ENG_LLM[aisec-engine-llm]
-    ENG_BOT[aisec-engine-chatbot]
-    ENG_AGT[aisec-engine-agent]
-    ENG_WFL[aisec-engine-workflow]
-    ENG_MCP[aisec-engine-mcp]
-    ENG_RAG[aisec-engine-rag]
+    ENG_LLM[promptlab-engine-llm]
+    ENG_BOT[promptlab-engine-chatbot]
+    ENG_AGT[promptlab-engine-agent]
+    ENG_WFL[promptlab-engine-workflow]
+    ENG_MCP[promptlab-engine-mcp]
+    ENG_RAG[promptlab-engine-rag]
 
     APP --> ORCH & STO & VLT & PLG & UPD & LIC & TEL & INF & BRW
     ORCH --> ENG_LLM & ENG_BOT & ENG_AGT & ENG_WFL & ENG_MCP & ENG_RAG & PLG
@@ -529,16 +529,16 @@ flowchart BT
 
 ### 6.3 Crate Specifications
 
-#### `aisec-core`
+#### `promptlab-core`
 
 Foundation crate. No Tauri dependency.
 
-- Error types (`AisecError`)
+- Error types (`PromptLabError`)
 - Domain models: `Project`, `Target`, `Playbook`, `Run`, `Finding`, `Evidence`
 - Traits: `SecurityEngine`, `Probe`, `Evaluator`, `PluginHook`
 - Config primitives, IDs (UUID v7), timestamps
 
-#### `aisec-orchestrator`
+#### `promptlab-orchestrator`
 
 - Run DAG builder from playbook
 - Worker pool with configurable concurrency
@@ -546,46 +546,46 @@ Foundation crate. No Tauri dependency.
 - Checkpoint/resume via SQLite run state
 - Event emission to Tauri
 
-#### `aisec-inference`
+#### `promptlab-inference`
 
 - Subprocess or FFI bridge to llama.cpp
 - Model lifecycle: load, infer, unload
 - Streaming token channel
 - Backend abstraction: CPU, CUDA, Metal, Vulkan
 
-#### `aisec-browser`
+#### `promptlab-browser`
 
 - Playwright driver as managed subprocess
 - Isolated browser contexts per run
 - Artifact capture: screenshot, video, HAR, DOM snapshot
 - Network interception for API discovery
 
-#### `aisec-storage`
+#### `promptlab-storage`
 
 - `sqlx` + SQLite with embedded migrations (`refinery` or `sqlx migrate`)
 - Repository pattern per aggregate
 - Full-text search on findings (FTS5)
 
-#### `aisec-vault`
+#### `promptlab-vault`
 
 - AES-256-GCM encrypted blob store for sensitive artifacts
 - Key derived from OS keychain (Windows DPAPI, macOS Keychain, Linux libsecret)
 - Content-addressed storage (SHA-256)
 
-#### `aisec-plugin-host`
+#### `promptlab-plugin-host`
 
 - WASM runtime (Wasmtime) for sandboxed plugins; optional native plugins for enterprise (signed)
 - Capability tokens: `probe:mutate`, `finding:emit`, `http:request` (scoped)
 - Resource limits: memory, CPU time, network allowlist
 
-#### `aisec-update`
+#### `promptlab-update`
 
 - Tauri updater integration
 - Ed25519 signature verification
 - Delta patch application
 - Rollback on failed migration
 
-#### `aisec-license`
+#### `promptlab-license`
 
 - Offline license file validation (JWT or custom signed blob)
 - Optional online refresh with grace period
@@ -593,16 +593,16 @@ Foundation crate. No Tauri dependency.
 
 #### Engine Crates
 
-Each engine crate depends on `aisec-core` and relevant infrastructure:
+Each engine crate depends on `promptlab-core` and relevant infrastructure:
 
 | Crate | Key Dependencies |
 |-------|------------------|
-| `aisec-engine-llm` | `reqwest`, `aisec-inference` |
-| `aisec-engine-chatbot` | `aisec-browser`, `aisec-inference` |
-| `aisec-engine-agent` | `aisec-inference`, tool simulators |
-| `aisec-engine-workflow` | orchestration graph, `aisec-engine-agent` |
-| `aisec-engine-mcp` | MCP JSON-RPC client, schema validator |
-| `aisec-engine-rag` | embedding hooks, corpus fixtures, `aisec-inference` |
+| `promptlab-engine-llm` | `reqwest`, `promptlab-inference` |
+| `promptlab-engine-chatbot` | `promptlab-browser`, `promptlab-inference` |
+| `promptlab-engine-agent` | `promptlab-inference`, tool simulators |
+| `promptlab-engine-workflow` | orchestration graph, `promptlab-engine-agent` |
+| `promptlab-engine-mcp` | MCP JSON-RPC client, schema validator |
+| `promptlab-engine-rag` | embedding hooks, corpus fixtures, `promptlab-inference` |
 
 ---
 
@@ -610,7 +610,7 @@ Each engine crate depends on `aisec-core` and relevant infrastructure:
 
 ### 7.1 Tauri IPC Model
 
-AISec uses **Tauri v2** with explicit capability files. All frontend→backend communication flows through typed commands; backend→frontend uses events and streaming channels.
+PromptLab uses **Tauri v2** with explicit capability files. All frontend→backend communication flows through typed commands; backend→frontend uses events and streaming channels.
 
 ```mermaid
 flowchart TB
@@ -804,7 +804,7 @@ flowchart LR
     BUILD[CI Build Matrix] --> SIGN[Sign with Ed25519]
     SIGN --> CDN[Update CDN / S3]
     SIGN --> OFFLINE[Offline Bundle Generator]
-    CDN --> CLIENT[AISec Update Service]
+    CDN --> CLIENT[PromptLab Update Service]
     OFFLINE --> USB[Air-gap Import]
     USB --> CLIENT
     CLIENT --> VERIFY[Signature + Hash Verify]
@@ -836,8 +836,8 @@ flowchart LR
 
 ### 9.5 Database Migrations
 
-- Forward-only migrations in `aisec-storage/migrations/`
-- Backup `aisec.db` to `aisec.db.pre-update` before apply
+- Forward-only migrations in `promptlab-storage/migrations/`
+- Backup `promptlab.db` to `promptlab.db.pre-update` before apply
 - Migration failure triggers automatic binary rollback
 
 ### 9.6 Version Compatibility
@@ -866,7 +866,7 @@ Default distribution: **WASM only**. Native plugins require enterprise license a
 ### 10.2 Plugin Manifest
 
 ```toml
-# aisec-plugin.toml (conceptual)
+# promptlab-plugin.toml (conceptual)
 [plugin]
 id = "com.example.owasp-llm"
 name = "OWASP LLM Top 10 Pack"
@@ -878,7 +878,7 @@ description = "Pre-built probes mapped to OWASP LLM Top 10"
 [runtime]
 type = "wasm"
 entry = "plugin.wasm"
-min_aisec = "1.0.0"
+min_promptlab = "1.0.0"
 
 [capabilities]
 probe_mutate = true
@@ -932,7 +932,7 @@ stateDiagram-v2
 | Source | Verification |
 |--------|--------------|
 | Built-in | Shipped with binary |
-| AISec Marketplace | Publisher signature + AISec review signature |
+| PromptLab Marketplace | Publisher signature + PromptLab review signature |
 | Side-load | User accepts risk dialog; dev mode only |
 | Enterprise registry | Customer CA + optional allowlist |
 
@@ -941,9 +941,9 @@ stateDiagram-v2
 Deliverables in `packages/plugin-sdk/`:
 
 - WIT interface definitions
-- Rust helper crate (`aisec-plugin-sdk`)
+- Rust helper crate (`promptlab-plugin-sdk`)
 - TypeScript types for manifest validation
-- CLI: `aisec-plugin init`, `aisec-plugin build`, `aisec-plugin sign`
+- CLI: `promptlab-plugin init`, `promptlab-plugin build`, `promptlab-plugin sign`
 - Reference plugin: `plugins/owasp-llm-top10`
 
 ### 10.7 Hook Points

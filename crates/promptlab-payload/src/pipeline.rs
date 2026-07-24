@@ -230,7 +230,7 @@ impl PayloadPipeline {
             let mutated = self.mutator.apply(kind, &seed)?;
             if out.iter().any(|v| v.content == mutated) {
                 out.push(MutatedVariant {
-                    content: format!("[aisec-variant:{}] {content}", out.len()),
+                    content: format!("[promptlab-variant:{}] {content}", out.len()),
                     mutations: vec![],
                 });
             } else {

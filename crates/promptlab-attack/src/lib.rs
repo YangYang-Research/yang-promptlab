@@ -1,4 +1,4 @@
-//! AISec Attack Framework.
+//! PromptLab Attack Framework.
 //!
 //! Trait-based attack plugins with payload execution, mutation, orchestration,
 //! and structured result collection.

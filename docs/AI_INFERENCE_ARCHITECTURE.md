@@ -1,6 +1,6 @@
-# AISec AI Inference Architecture
+# PromptLab AI Inference Architecture
 
-All LLM inference flows through **`aisec-inference`**. Local GGUF inference uses **embedded libllama** (in-process FFI) — no `llama-server`, no localhost HTTP.
+All LLM inference flows through **`promptlab-inference`**. Local GGUF inference uses **embedded libllama** (in-process FFI) — no `llama-server`, no localhost HTTP.
 
 ## Layer diagram
 
@@ -19,19 +19,19 @@ flowchart TB
     GS[GatewaySession]
   end
 
-  subgraph Inference["aisec-inference"]
+  subgraph Inference["promptlab-inference"]
     GW[AiInferenceGateway]
     RA[LocalRuntimeAdapterBridge]
     PA[ProviderAdapter]
   end
 
-  subgraph Runtime["aisec-runtime"]
+  subgraph Runtime["promptlab-runtime"]
     RM[RuntimeManager]
     RS[RuntimeSupervisor]
     LRA[LocalRuntimeAdapter]
   end
 
-  subgraph Native["aisec-models / llama-cpp-2"]
+  subgraph Native["promptlab-models / llama-cpp-2"]
     LIP[LlamaInProcessRuntime]
     LL[libllama FFI]
   end

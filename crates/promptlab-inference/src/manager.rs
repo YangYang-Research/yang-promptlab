@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use aisec_models::{ModelEntry, ModelProvider, ModelSource};
-use aisec_runtime::{ModelProviderRuntime, RuntimeManager, SharedModelProvider};
+use promptlab_models::{ModelEntry, ModelProvider, ModelSource};
+use promptlab_runtime::{ModelProviderRuntime, RuntimeManager, SharedModelProvider};
 use tokio::sync::Mutex;
 
 use crate::capabilities::ModelCapabilities;

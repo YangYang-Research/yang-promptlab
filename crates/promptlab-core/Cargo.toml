@@ -1,5 +1,5 @@
 [package]
-name = "aisec-core"
+name = "promptlab-core"
 description = "Shared foundations for PromptLab (errors, environment, OCSF logging)"
 version.workspace = true
 edition.workspace = true

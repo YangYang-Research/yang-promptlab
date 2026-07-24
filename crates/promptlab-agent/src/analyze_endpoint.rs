@@ -4,8 +4,8 @@
 
 use std::collections::HashMap;
 
-use aisec_planner::PlannerLlm;
-use aisec_target_profile::{
+use promptlab_planner::PlannerLlm;
+use promptlab_target_profile::{
     validate_http_response_with_llm, verify_target_profile_with_llm, TargetProfile,
     VerificationAttempt, VerificationConsoleEntry, VerificationResult, VerifyHttpSuccess,
 };

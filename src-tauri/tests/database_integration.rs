@@ -8,15 +8,15 @@
 
 use std::path::Path;
 
-use aisec_core::{init_logging, LogOptions};
-use aisec_desktop_lib::db::{open_database, resolve_db_path, DB_PATH_ENV};
-use aisec_desktop_lib::state::AppState;
-use aisec_storage::{CreateProject, ProjectRepository};
+use promptlab_core::{init_logging, LogOptions};
+use promptlab_desktop_lib::db::{open_database, resolve_db_path, DB_PATH_ENV};
+use promptlab_desktop_lib::state::AppState;
+use promptlab_storage::{CreateProject, ProjectRepository};
 
 #[tokio::test]
 async fn database_opens_and_runs_migrations_on_startup() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("aisec.db");
+    let path = dir.path().join("promptlab.db");
 
     let db = open_database(&path).await.expect("startup: open database");
     assert!(path.exists(), "database file must be created on startup");
@@ -42,18 +42,18 @@ async fn database_opens_and_runs_migrations_on_startup() {
 async fn database_is_accessible_via_app_state() {
     // Mirrors exactly how a Tauri command reaches the DB: State<AppState> -> repositories().
     let dir = tempfile::tempdir().unwrap();
-    let db = open_database(&dir.path().join("aisec.db")).await.unwrap();
-    let guard = init_logging(LogOptions::bootstrap("aisec-it")).unwrap();
+    let db = open_database(&dir.path().join("promptlab.db")).await.unwrap();
+    let guard = init_logging(LogOptions::bootstrap("promptlab-it")).unwrap();
     let (manager, provider, meta, harness_factory, plugin_manager) =
-        aisec_desktop_lib::model_registry::open_test_model_stack(dir.path()).expect("model stack");
+        promptlab_desktop_lib::model_registry::open_test_model_stack(dir.path()).expect("model stack");
     let state = AppState::new(
         db,
         dir.path().to_path_buf(),
         guard,
-        aisec_auth::AuthEngineConfig::default(),
+        promptlab_auth::AuthEngineConfig::default(),
         harness_factory,
         plugin_manager,
-        aisec_runtime::RuntimeManager::new(dir.path(), None),
+        promptlab_runtime::RuntimeManager::new(dir.path(), None),
         manager,
         provider,
         meta,
@@ -81,7 +81,7 @@ async fn database_is_accessible_via_app_state() {
 fn resolve_db_path_defaults_under_data_dir() {
     std::env::remove_var(DB_PATH_ENV);
     assert_eq!(
-        resolve_db_path(Path::new("/data/aisec")),
-        Path::new("/data/aisec/aisec.db")
+        resolve_db_path(Path::new("/data/promptlab")),
+        Path::new("/data/promptlab/promptlab.db")
     );
 }

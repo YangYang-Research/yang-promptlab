@@ -1,6 +1,6 @@
 [package]
-name = "aisec-attack"
-description = "AISec attack framework — payload execution, mutation, orchestration"
+name = "promptlab-attack"
+description = "PromptLab attack framework — payload execution, mutation, orchestration"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,13 +9,13 @@ rust-version.workspace = true
 
 [features]
 default = []
-storage = ["dep:aisec-storage"]
+storage = ["dep:promptlab-storage"]
 
 [dependencies]
-aisec-core = { workspace = true }
-aisec-harness = { workspace = true }
-aisec-payload = { workspace = true }
-aisec-storage = { workspace = true, optional = true }
+promptlab-core = { workspace = true }
+promptlab-harness = { workspace = true }
+promptlab-payload = { workspace = true }
+promptlab-storage = { workspace = true, optional = true }
 async-trait = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }

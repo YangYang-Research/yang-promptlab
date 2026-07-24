@@ -1,6 +1,6 @@
 [package]
-name = "aisec-desktop"
-description = "AISec desktop application (Tauri shell)"
+name = "promptlab-desktop"
+description = "PromptLab desktop application (Tauri shell)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,34 +8,34 @@ authors.workspace = true
 rust-version.workspace = true
 
 [lib]
-name = "aisec_desktop_lib"
+name = "promptlab_desktop_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [[bin]]
-name = "aisec-desktop"
+name = "promptlab-desktop"
 path = "src/main.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-aisec-core = { workspace = true }
-aisec-storage = { workspace = true }
-aisec-report = { workspace = true }
-aisec-endpoint-metadata = { workspace = true }
-aisec-attack = { workspace = true }
-aisec-auth = { workspace = true }
-aisec-harness = { workspace = true, features = ["playwright"] }
-aisec-runtime = { workspace = true }
-aisec-inference = { workspace = true }
-aisec-judge = { workspace = true }
-aisec-models = { workspace = true }
-aisec-planner = { workspace = true }
-aisec-generator = { workspace = true }
-aisec-payload = { workspace = true }
-aisec-plugin-host = { workspace = true }
-aisec-target-profile = { workspace = true }
-aisec-agent = { workspace = true }
+promptlab-core = { workspace = true }
+promptlab-storage = { workspace = true }
+promptlab-report = { workspace = true }
+promptlab-endpoint-metadata = { workspace = true }
+promptlab-attack = { workspace = true }
+promptlab-auth = { workspace = true }
+promptlab-harness = { workspace = true, features = ["playwright"] }
+promptlab-runtime = { workspace = true }
+promptlab-inference = { workspace = true }
+promptlab-judge = { workspace = true }
+promptlab-models = { workspace = true }
+promptlab-planner = { workspace = true }
+promptlab-generator = { workspace = true }
+promptlab-payload = { workspace = true }
+promptlab-plugin-host = { workspace = true }
+promptlab-target-profile = { workspace = true }
+promptlab-agent = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 time = { workspace = true }

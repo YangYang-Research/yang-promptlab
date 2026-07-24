@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="$ROOT/src-tauri/resources/playwright"
 AUTH_DEST="$DEST/auth"
 NODE_DEST="$DEST/node"
-CRATE_PLAYWRIGHT="$ROOT/crates/aisec-auth/playwright"
+CRATE_PLAYWRIGHT="$ROOT/crates/promptlab-auth/playwright"
 NODE_VERSION="${NODE_VERSION:-22.21.0}"
 
 echo "==> Bundling Playwright auth runtime into $DEST"
@@ -79,7 +79,7 @@ case "$(uname -s)" in
 esac
 
 cat > "$DEST/BUNDLE.txt" <<EOF
-AISec bundled Playwright auth runtime
+PromptLab bundled Playwright auth runtime
 node_version=${NODE_VERSION}
 playwright_version=$(node -p "require('$AUTH_DEST/node_modules/playwright/package.json').version")
 built_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")

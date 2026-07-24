@@ -1,5 +1,5 @@
 {
-  "name": "aisec-playwright-runner",
+  "name": "promptlab-playwright-runner",
   "private": true,
   "version": "0.1.0",
   "type": "module",

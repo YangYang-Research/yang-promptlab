@@ -1,1 +1,1 @@
-//! Integration test harness for cross-crate AISec tests.
+//! Integration test harness for cross-crate PromptLab tests.

@@ -1,4 +1,4 @@
-# AISec Architecture & Implementation Audit Report
+# PromptLab Architecture & Implementation Audit Report
 
 **Date:** 2026-06-13  
 **Revision:** 2 (post Model Registry + Judge Runtime + Embedded Runtime integration)  
@@ -9,9 +9,9 @@
 
 ## Executive Summary
 
-Since the first audit (score **57/100**), the desktop app has closed several architecture gaps. **`resources/models.json` is loaded at startup** and drives browse/install/download. **`RuntimeSupervisor` is wired into `AppState`** with IPC (`runtime_status`, `runtime_restart`, `runtime_stop`) and judge Ollama lifecycle. **Judge local modes route through `ModelProvider` → `EmbeddedModelProvider` → `LocalModelManager`**, not direct Ollama/llama.cpp coupling. **Harness-normalized responses flow end-to-end** from `HarnessFactory` through `TransportResponse` to `judge_normalized`. **`aisec-attack` no longer ships a parallel `HttpTransport` path** — scanner and default executor use `HarnessTransport`.
+Since the first audit (score **57/100**), the desktop app has closed several architecture gaps. **`resources/models.json` is loaded at startup** and drives browse/install/download. **`RuntimeSupervisor` is wired into `AppState`** with IPC (`runtime_status`, `runtime_restart`, `runtime_stop`) and judge Ollama lifecycle. **Judge local modes route through `ModelProvider` → `EmbeddedModelProvider` → `LocalModelManager`**, not direct Ollama/llama.cpp coupling. **Harness-normalized responses flow end-to-end** from `HarnessFactory` through `TransportResponse` to `judge_normalized`. **`promptlab-attack` no longer ships a parallel `HttpTransport` path** — scanner and default executor use `HarnessTransport`.
 
-Remaining gaps: **no bundled Ollama binary** (`runtime/ollama` absent), **`HarnessRegistry` unused in production**, **model import UI uses manual file paths** (no native dialog), **registry entry URL quality** (Qwen GGUF 404 observed at runtime), **`aisec-plugin-host` not wired to Tauri**, and **legacy plaintext descriptors** may still exist for records created before credential sanitization.
+Remaining gaps: **no bundled Ollama binary** (`runtime/ollama` absent), **`HarnessRegistry` unused in production**, **model import UI uses manual file paths** (no native dialog), **registry entry URL quality** (Qwen GGUF 404 observed at runtime), **`promptlab-plugin-host` not wired to Tauri**, and **legacy plaintext descriptors** may still exist for records created before credential sanitization.
 
 **Overall score: 72/100** (was 57/100)
 
@@ -22,13 +22,13 @@ Remaining gaps: **no bundled Ollama binary** (`runtime/ollama` absent), **`Harne
 | Area | Rev 1 | Rev 2 |
 |------|-------|-------|
 | `resources/models.json` loaded | ❌ | ✅ `model_registry.rs:35-48`, `lib.rs` startup |
-| `aisec-runtime` in Tauri | ❌ | ✅ `state.rs:23-46`, `runtime.rs`, `judge_config.rs:93-98` |
+| `promptlab-runtime` in Tauri | ❌ | ✅ `state.rs:23-46`, `runtime.rs`, `judge_config.rs:93-98` |
 | Judge → ModelProvider bridge | ❌ | ✅ `factory.rs:99-129`, `judge_config.rs:76-105` |
 | Normalized → Judge path | ⚠️ rebuilt from raw body | ✅ `attack.rs:126-134` |
-| `aisec-attack` direct reqwest | ❌ parallel path | ✅ removed; `HarnessTransport` only |
+| `promptlab-attack` direct reqwest | ❌ parallel path | ✅ removed; `HarnessTransport` only |
 | GGUF/ZIP import IPC | ❌ | ✅ `models.rs:271+`, `ModelsPage.tsx` |
 | Download pause/resume/cancel | ⚠️ backend only | ✅ IPC + UI polling |
-| `aisec-browser` crate | ⚠️ unwired duplicate | ✅ removed; consolidated into `aisec-auth` |
+| `promptlab-browser` crate | ⚠️ unwired duplicate | ✅ removed; consolidated into `promptlab-auth` |
 | Credential encryption | ❌ plaintext | ⚠️ OS keychain + AES vault on new saves |
 | Bundled Ollama | ❌ | ❌ still missing |
 
@@ -36,16 +36,16 @@ Remaining gaps: **no bundled Ollama binary** (`runtime/ollama` absent), **`Harne
 
 ## SECTION 1 — Harness Architecture
 
-### Crate existence: `crates/aisec-harness`
+### Crate existence: `crates/promptlab-harness`
 
 | Component | Status | Evidence |
 |-----------|--------|----------|
-| `Harness` trait | ✅ IMPLEMENTED | `crates/aisec-harness/src/traits/harness.rs` |
-| `HarnessFactory` | ✅ IMPLEMENTED | `crates/aisec-harness/src/factory/harness_factory.rs` |
-| `HarnessRegistry` | ✅ IMPLEMENTED (library only) | `crates/aisec-harness/src/registry/harness_registry.rs` |
-| `HttpHarness` | ✅ IMPLEMENTED | `crates/aisec-harness/src/providers/http.rs` |
-| `PlaywrightHarness` | ✅ IMPLEMENTED | `crates/aisec-harness/src/providers/playwright.rs` |
-| `OpenAiHarness` | ✅ IMPLEMENTED | `crates/aisec-harness/src/providers/openai.rs` |
+| `Harness` trait | ✅ IMPLEMENTED | `crates/promptlab-harness/src/traits/harness.rs` |
+| `HarnessFactory` | ✅ IMPLEMENTED | `crates/promptlab-harness/src/factory/harness_factory.rs` |
+| `HarnessRegistry` | ✅ IMPLEMENTED (library only) | `crates/promptlab-harness/src/registry/harness_registry.rs` |
+| `HttpHarness` | ✅ IMPLEMENTED | `crates/promptlab-harness/src/providers/http.rs` |
+| `PlaywrightHarness` | ✅ IMPLEMENTED | `crates/promptlab-harness/src/providers/playwright.rs` |
+| `OpenAiHarness` | ✅ IMPLEMENTED | `crates/promptlab-harness/src/providers/openai.rs` |
 
 ### Q1: Does Attack Engine execute through Harness, or still call reqwest directly?
 
@@ -56,12 +56,12 @@ Remaining gaps: **no bundled Ollama binary** (`runtime/ollama` absent), **`Harne
 - `src-tauri/src/harness_runtime.rs:37-76` — `build_harness_attack_runtime_parts` → `HarnessFactory`
 - `src-tauri/src/commands/attack.rs:108-136` — executor + `judge_normalized`
 
-**`aisec-attack` library:**
+**`promptlab-attack` library:**
 
-- `crates/aisec-attack/src/lib.rs:42-47` — `default_executor_for` uses `HarnessTransport`
-- `crates/aisec-attack/src/scanner.rs:8-9,88-89` — scanner uses `HarnessTransport` → `HarnessFactory`
-- `crates/aisec-attack/src/transport/harness.rs:82-101` — forwards `NormalizedResponse` from harness
-- **No `HttpTransport` module** remains in `aisec-attack`
+- `crates/promptlab-attack/src/lib.rs:42-47` — `default_executor_for` uses `HarnessTransport`
+- `crates/promptlab-attack/src/scanner.rs:8-9,88-89` — scanner uses `HarnessTransport` → `HarnessFactory`
+- `crates/promptlab-attack/src/transport/harness.rs:82-101` — forwards `NormalizedResponse` from harness
+- **No `HttpTransport` module** remains in `promptlab-attack`
 
 **Note:** `HttpHarness` still uses `reqwest` internally — that is harness-layer HTTP, not bypassing the abstraction.
 
@@ -75,13 +75,13 @@ Remaining gaps: **no bundled Ollama binary** (`runtime/ollama` absent), **`Harne
 
 ### Q4: Any TODO in harness?
 
-**Status: ✅ No TODO/FIXME in production `aisec-harness` sources.**
+**Status: ✅ No TODO/FIXME in production `promptlab-harness` sources.**
 
 ### Q5: Mock harnesses / registry usage?
 
 **Status: ⚠️ PARTIALLY IMPLEMENTED**
 
-- `MockTransport` for tests only (`crates/aisec-attack/src/transport/mock.rs`)
+- `MockTransport` for tests only (`crates/promptlab-attack/src/transport/mock.rs`)
 - **`HarnessRegistry` production usage: ❌ NOT IMPLEMENTED** — Tauri uses `HarnessFactory` only
 
 ---
@@ -90,7 +90,7 @@ Remaining gaps: **no bundled Ollama binary** (`runtime/ollama` absent), **`Harne
 
 ### `NormalizedResponse` existence
 
-**Status: ✅ IMPLEMENTED** — `crates/aisec-harness/src/models/normalized_response.rs`
+**Status: ✅ IMPLEMENTED** — `crates/promptlab-harness/src/models/normalized_response.rs`
 
 ### Q1: Do all harnesses return normalized responses?
 
@@ -100,8 +100,8 @@ Remaining gaps: **no bundled Ollama binary** (`runtime/ollama` absent), **`Harne
 
 **Status: ✅ IMPLEMENTED**
 
-- `crates/aisec-judge/src/engine.rs` — `judge_normalized` → `JudgeRequest::from_normalized`
-- `crates/aisec-attack/src/transport/mod.rs:19-26` — `TransportResponse` carries `normalized`
+- `crates/promptlab-judge/src/engine.rs` — `judge_normalized` → `JudgeRequest::from_normalized`
+- `crates/promptlab-attack/src/transport/mod.rs:19-26` — `TransportResponse` carries `normalized`
 - `src-tauri/src/commands/attack.rs:126-134` — `let normalized = &attempt.response.normalized; judge.judge_normalized(..., normalized)`
 
 **Rev 1 gap closed:** judge no longer rebuilds from raw HTTP body via `NormalizedResponse::from_http` on the attack IPC path.
@@ -117,12 +117,12 @@ Remaining gaps: **no bundled Ollama binary** (`runtime/ollama` absent), **`Harne
 
 ## SECTION 3 — Auth Session Framework
 
-### Crate: `aisec-auth` (replaces standalone `aisec-browser`)
+### Crate: `promptlab-auth` (replaces standalone `promptlab-browser`)
 
 **Status: ✅ IMPLEMENTED and wired**
 
-- `aisec-browser` **removed from workspace** — `Cargo.toml:3-18` (no member)
-- Session APIs live in `aisec-auth`; Tauri uses `auth-vault` + `AuthSessionManager`
+- `promptlab-browser` **removed from workspace** — `Cargo.toml:3-18` (no member)
+- Session APIs live in `promptlab-auth`; Tauri uses `auth-vault` + `AuthSessionManager`
 - `src-tauri/src/harness_runtime.rs:44-46` — `resolve_descriptor_for_runtime` before harness build
 
 ### Q1: Are browser sessions persisted?
@@ -130,7 +130,7 @@ Remaining gaps: **no bundled Ollama binary** (`runtime/ollama` absent), **`Harne
 **Status: ✅ IMPLEMENTED**
 
 - Finish: `src-tauri/src/commands/auth.rs`
-- Encrypted disk: `crates/aisec-auth/src/secrets/vault.rs:54-55` — `{session_id}.storage.enc`
+- Encrypted disk: `crates/promptlab-auth/src/secrets/vault.rs:54-55` — `{session_id}.storage.enc`
 - DB: `auth_sessions` table + migration `006_auth_secure_credentials.sql`
 
 ### Q2: Where stored?
@@ -143,8 +143,8 @@ Remaining gaps: **no bundled Ollama binary** (`runtime/ollama` absent), **`Harne
 
 **Status: ✅ IMPLEMENTED (Playwright storageState + token scraping)**
 
-- Runner: `crates/aisec-auth/playwright/runner.mjs`
-- Types: `crates/aisec-auth/src/types.rs`
+- Runner: `crates/promptlab-auth/playwright/runner.mjs`
+- Types: `crates/promptlab-auth/src/types.rs`
 
 ### Q6: Plaintext passwords?
 
@@ -186,7 +186,7 @@ Remaining gaps: **no bundled Ollama binary** (`runtime/ollama` absent), **`Harne
 scan.rs / attack.rs IPC
   → build_harness_attack_runtime (harness_runtime.rs)
     → HarnessFactory (+ Playwright when needed)
-    → HarnessTransport (aisec-attack)
+    → HarnessTransport (promptlab-attack)
   → AttackExecutor::execute_category
     → HarnessFactory::execute → NormalizedResponse
   → judge.judge_normalized(normalized)
@@ -205,7 +205,7 @@ scan.rs / attack.rs IPC
 
 ## SECTION 7 — Local AI Runtime
 
-Crate: `crates/aisec-runtime` — ✅ library + **Tauri integration**
+Crate: `crates/promptlab-runtime` — ✅ library + **Tauri integration**
 
 | Question | Status | Evidence |
 |----------|--------|----------|
@@ -242,11 +242,11 @@ Crate: `crates/aisec-runtime` — ✅ library + **Tauri integration**
 |----------|--------|----------|
 | `resources/models.json` exists | ✅ | `resources/models.json:1-29` |
 | Loaded by running app | ✅ | `model_registry.rs:35-48`; bundled in `tauri.conf.json` |
-| Optional remote merge | ✅ | `AISEC_MODEL_REGISTRY_URL` — `model_registry.rs:29-33` |
+| Optional remote merge | ✅ | `PROMPTLAB_MODEL_REGISTRY_URL` — `model_registry.rs:29-33` |
 | `models_registry_info` IPC | ✅ | `models.rs:223+`, `ModelsPage.tsx:315-322` |
 | Hardcoded `curated_catalog()` | ⚠️ deprecated | `catalog.rs:14-17` — returns empty; not used when manager has catalog |
 | Offline browse | ✅ | Loaded catalog slice |
-| `BuiltinModelRegistry` in `aisec-runtime` | ⚠️ | Separate crate registry; desktop uses `aisec-models::BuiltinCatalog` |
+| `BuiltinModelRegistry` in `promptlab-runtime` | ⚠️ | Separate crate registry; desktop uses `promptlab-models::BuiltinCatalog` |
 
 ---
 
@@ -287,9 +287,9 @@ Wizard state: browser `sessionStorage` (not SQLite).
 | Location | Type |
 |----------|------|
 | `TopBar.tsx` | UI "Mock mode" when IPC unavailable |
-| `aisec-attack/transport/mock.rs` | Test mock |
-| `aisec-models/runtime/mock.rs` | Test mock |
-| `aisec-judge/mock_runtime.rs` | Test mock |
+| `promptlab-attack/transport/mock.rs` | Test mock |
+| `promptlab-models/runtime/mock.rs` | Test mock |
+| `promptlab-judge/mock_runtime.rs` | Test mock |
 | `curated_catalog()` | Deprecated empty stub — not production catalog source |
 
 No `todo!()` / `unimplemented!()` in production hot paths.
@@ -338,7 +338,7 @@ No `todo!()` / `unimplemented!()` in production hot paths.
 
 4. **`HarnessRegistry` unused at runtime** — production uses factory only
 5. **Model import without native file picker** — manual path input — `ModelsPage.tsx`
-6. **`aisec-plugin-host` not wired to Tauri** — no references under `src-tauri/`
+6. **`promptlab-plugin-host` not wired to Tauri** — no references under `src-tauri/`
 7. **Platform-specific harnesses** (Dify, OpenWebUI, MCP) — not dedicated providers
 8. **SQLite `models` table unused** — vault is filesystem-based
 
@@ -347,10 +347,10 @@ No `todo!()` / `unimplemented!()` in production hot paths.
 9. Download UI lacks speed/ETA — progress bytes only
 10. Judge config stored as plaintext JSON — `judge_config.rs`
 11. Wizard state in `sessionStorage` only — not durable across browser profiles
-12. `BuiltinModelRegistry` in `aisec-runtime` vs `BuiltinCatalog` in `aisec-models` — dual registry types
+12. `BuiltinModelRegistry` in `promptlab-runtime` vs `BuiltinCatalog` in `promptlab-models` — dual registry types
 13. System Ollama fallback may surprise users expecting embedded-only behavior
 14. Attack results still embed raw body snippets in `response_json`
-15. Documentation drift — `docs/ARCHITECTURE.md` still references `aisec-browser` crate
+15. Documentation drift — `docs/ARCHITECTURE.md` still references `promptlab-browser` crate
 
 ### Low
 
@@ -366,7 +366,7 @@ No `todo!()` / `unimplemented!()` in production hot paths.
 
 | Requirement | Rev 1 | Rev 2 |
 |-------------|-------|-------|
-| `aisec-harness` + trait/factory/providers | ✅ | ✅ |
+| `promptlab-harness` + trait/factory/providers | ✅ | ✅ |
 | Desktop attacks via harness | ✅ | ✅ |
 | Library attacks always via harness | ❌ | ✅ |
 | All harnesses return `NormalizedResponse` | ✅ | ✅ |
@@ -374,7 +374,7 @@ No `todo!()` / `unimplemented!()` in production hot paths.
 | Auth sessions persisted + encrypted | ⚠️ | ✅ (new path) |
 | Wizard Step 2 auth recording | ✅ | ✅ |
 | Discovery authenticated sessions | ✅ | ✅ |
-| `aisec-runtime` operational in app | ❌ | ✅ (supervisor; binary missing) |
+| `promptlab-runtime` operational in app | ❌ | ✅ (supervisor; binary missing) |
 | `resources/models.json` drives catalog | ❌ | ✅ |
 | SQLite persistence for core entities | ✅ | ✅ |
 | Credential encryption | ❌ | ⚠️ (new saves + vault; legacy rows) |
@@ -385,7 +385,7 @@ No `todo!()` / `unimplemented!()` in production hot paths.
 
 ## Audit Conclusion
 
-The codebase now **substantially matches** the intended AISec architecture for the desktop hot path: harness-based attacks with preserved normalization, encrypted auth sessions, embedded runtime supervision wired through Tauri IPC, registry-driven model management, and judge inference through the `ModelProvider` bridge.
+The codebase now **substantially matches** the intended PromptLab architecture for the desktop hot path: harness-based attacks with preserved normalization, encrypted auth sessions, embedded runtime supervision wired through Tauri IPC, registry-driven model management, and judge inference through the `ModelProvider` bridge.
 
 Primary remaining work: **ship the Ollama binary**, **fix registry entry URLs**, **native import UX**, **plugin host wiring**, and **migrate/audit legacy plaintext credential rows**.
 

@@ -1,5 +1,5 @@
-use aisec_core::{AisecError, AisecResult};
-use aisec_storage::{
+use promptlab_core::{PromptLabError, PromptLabResult};
+use promptlab_storage::{
     AuthProfileRepository, AuthSessionRepository, Database, TargetRepository,
     UpdateAuthSessionRecord,
 };
@@ -20,7 +20,7 @@ struct SessionSecrets {
 }
 
 /// Migrate legacy plaintext session/profile secrets into the OS keychain.
-pub async fn migrate_legacy_auth_data(db: &Database, secrets: &SecretStore) -> AisecResult<u32> {
+pub async fn migrate_legacy_auth_data(db: &Database, secrets: &SecretStore) -> PromptLabResult<u32> {
     let repos = db.repositories();
     let mut migrated = 0u32;
 
@@ -47,7 +47,7 @@ pub async fn migrate_legacy_auth_data(db: &Database, secrets: &SecretStore) -> A
 
         let payload = SessionSecrets { cookies, tokens };
         let json = serde_json::to_string(&payload)
-            .map_err(|err| AisecError::internal(err.to_string()))?;
+            .map_err(|err| PromptLabError::internal(err.to_string()))?;
         let cred_id = if let Some(existing) = session.credential_reference_id.clone() {
             let id = CredentialReferenceId::parse(existing);
             secrets.store_with_id(SecretScope::Session, &id, &json)?;
@@ -86,7 +86,7 @@ pub async fn migrate_legacy_auth_data(db: &Database, secrets: &SecretStore) -> A
     Ok(migrated)
 }
 
-pub async fn migrate_legacy_target_descriptors(db: &Database, secrets: &SecretStore) -> AisecResult<u32> {
+pub async fn migrate_legacy_target_descriptors(db: &Database, secrets: &SecretStore) -> PromptLabResult<u32> {
     let repos = db.repositories();
     let targets = repos.targets().list_all().await?;
     let mut migrated = 0u32;
@@ -118,7 +118,7 @@ pub async fn migrate_legacy_storage_artifacts(
     db: &Database,
     data_dir: &Path,
     vault: &EncryptedVault,
-) -> AisecResult<u32> {
+) -> PromptLabResult<u32> {
     let legacy_dir = data_dir.join("auth-vault");
     let repos = db.repositories();
     let sessions = repos.auth_sessions().list_all().await?;
@@ -144,10 +144,10 @@ pub async fn migrate_legacy_storage_artifacts(
 
         let plaintext = tokio::fs::read_to_string(&read_path)
             .await
-            .map_err(AisecError::from)?;
+            .map_err(PromptLabError::from)?;
 
         let _: PlaywrightStorageState = serde_json::from_str(&plaintext)
-            .map_err(|err| AisecError::internal(format!("legacy storage state: {err}")))?;
+            .map_err(|err| PromptLabError::internal(format!("legacy storage state: {err}")))?;
 
         let encrypted_path = vault.write_json(&session.id, &plaintext).await?;
         repos
@@ -184,7 +184,7 @@ pub async fn run_database_secret_migration(
     data_dir: &Path,
     secrets: &SecretStore,
     vault: &EncryptedVault,
-) -> AisecResult<SecretMigrationResult> {
+) -> PromptLabResult<SecretMigrationResult> {
     let auth_migrated = migrate_legacy_auth_data(db, secrets).await?;
     let targets_migrated = migrate_legacy_target_descriptors(db, secrets).await?;
     let storage_migrated = migrate_legacy_storage_artifacts(db, data_dir, vault).await?;
@@ -215,7 +215,7 @@ pub fn profile_config_has_plaintext(config: &serde_json::Value) -> bool {
 fn migrate_profile_config(
     config: &mut serde_json::Value,
     secrets: &SecretStore,
-) -> AisecResult<bool> {
+) -> PromptLabResult<bool> {
     let Some(obj) = config.as_object_mut() else {
         return Ok(false);
     };
@@ -260,21 +260,21 @@ fn migrate_profile_config(
 pub fn session_secrets_to_json(
     cookies: &[CookieRecord],
     tokens: &[ExtractedToken],
-) -> AisecResult<String> {
+) -> PromptLabResult<String> {
     serde_json::to_string(&SessionSecrets {
         cookies: cookies.to_vec(),
         tokens: tokens.to_vec(),
     })
-    .map_err(|err| AisecError::internal(err.to_string()))
+    .map_err(|err| PromptLabError::internal(err.to_string()))
 }
 
-pub fn session_secrets_from_json(json: &str) -> AisecResult<(Vec<CookieRecord>, Vec<ExtractedToken>)> {
+pub fn session_secrets_from_json(json: &str) -> PromptLabResult<(Vec<CookieRecord>, Vec<ExtractedToken>)> {
     let parsed: SessionSecrets =
-        serde_json::from_str(json).map_err(|err| AisecError::internal(err.to_string()))?;
+        serde_json::from_str(json).map_err(|err| PromptLabError::internal(err.to_string()))?;
     Ok((parsed.cookies, parsed.tokens))
 }
 
-pub fn resolve_auth_config_secrets(config: &mut AuthConfig, secrets: &SecretStore) -> AisecResult<()> {
+pub fn resolve_auth_config_secrets(config: &mut AuthConfig, secrets: &SecretStore) -> PromptLabResult<()> {
     match config {
         AuthConfig::UsernamePassword {
             password,
@@ -316,7 +316,7 @@ pub fn resolve_auth_config_secrets(config: &mut AuthConfig, secrets: &SecretStor
     Ok(())
 }
 
-pub fn store_auth_config_secrets(config: &mut AuthConfig, secrets: &SecretStore) -> AisecResult<()> {
+pub fn store_auth_config_secrets(config: &mut AuthConfig, secrets: &SecretStore) -> PromptLabResult<()> {
     match config {
         AuthConfig::UsernamePassword {
             password,
@@ -358,7 +358,7 @@ pub fn store_auth_config_secrets(config: &mut AuthConfig, secrets: &SecretStore)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aisec_storage::CreateAuthSessionRecord;
+    use promptlab_storage::CreateAuthSessionRecord;
 
     #[tokio::test]
     async fn migrates_legacy_session_secrets() {
@@ -368,7 +368,7 @@ mod tests {
         let profile = db
             .repositories()
             .auth_profiles()
-            .create(aisec_storage::CreateAuthProfile {
+            .create(promptlab_storage::CreateAuthProfile {
                 project_id: None,
                 name: "p".into(),
                 method: "jwt".into(),

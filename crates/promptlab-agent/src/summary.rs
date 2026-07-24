@@ -2,8 +2,8 @@
 //!
 //! Kind **A**: LLM overview + highlights for project or scan scope.
 
-use aisec_planner::PlannerLlm;
-use aisec_target_profile::{
+use promptlab_planner::PlannerLlm;
+use promptlab_target_profile::{
     generate_project_summary_with_llm, generate_scan_summary_with_llm, AttackResultsSummary,
     SummaryBundle,
 };

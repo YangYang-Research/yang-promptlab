@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 use tracing::{debug, warn};
 
 use crate::config::RetryConfig;
@@ -20,10 +20,10 @@ pub async fn with_retry<T, F, Fut>(
     label: &str,
     config: &RetryConfig,
     mut operation: F,
-) -> AisecResult<T>
+) -> PromptLabResult<T>
 where
     F: FnMut() -> Fut,
-    Fut: Future<Output = AisecResult<T>>,
+    Fut: Future<Output = PromptLabResult<T>>,
 {
     let mut attempt = 0;
 
@@ -31,7 +31,7 @@ where
         attempt += 1;
         match operation().await {
             Ok(value) => return Ok(value),
-            Err(err) if attempt < config.max_attempts && is_retryable_aisec(&err) => {
+            Err(err) if attempt < config.max_attempts && is_retryable_promptlab(&err) => {
                 let delay = config.delay_for_attempt(attempt);
                 warn!(
                     label,
@@ -48,7 +48,7 @@ where
     }
 }
 
-fn is_retryable_aisec(err: &aisec_core::AisecError) -> bool {
+fn is_retryable_promptlab(err: &promptlab_core::PromptLabError) -> bool {
     matches!(
         err.client_message().as_str(),
         msg if msg.contains("timeout")
@@ -89,7 +89,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aisec_core::AisecError;
+    use promptlab_core::PromptLabError;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
@@ -110,7 +110,7 @@ mod tests {
             async move {
                 let n = calls.fetch_add(1, Ordering::SeqCst) + 1;
                 if n < 3 {
-                    Err(AisecError::internal("503 service unavailable"))
+                    Err(PromptLabError::internal("503 service unavailable"))
                 } else {
                     Ok("ok")
                 }

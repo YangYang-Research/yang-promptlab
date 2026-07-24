@@ -1,6 +1,6 @@
-# AISec Secret Migration
+# PromptLab Secret Migration
 
-This document describes how AISec detects and migrates legacy plaintext secrets into secure storage.
+This document describes how PromptLab detects and migrates legacy plaintext secrets into secure storage.
 
 ## Goals
 
@@ -74,8 +74,8 @@ Rust integration tests: `src-tauri/tests/security_commands.rs`.
 
 ## Related Code
 
-- `crates/aisec-auth/src/secrets/audit.rs` — database + storage artifact audit
-- `crates/aisec-auth/src/secrets/migrate.rs` — session/profile/target/storage migrations
+- `crates/promptlab-auth/src/secrets/audit.rs` — database + storage artifact audit
+- `crates/promptlab-auth/src/secrets/migrate.rs` — session/profile/target/storage migrations
 - `src-tauri/src/judge_config.rs` — judge API key sanitize/resolve/migrate
 - `src-tauri/src/commands/security.rs` — IPC orchestration
-- `crates/aisec-storage/migrations/006_auth_secure_credentials.sql` — session credential reference column
+- `crates/promptlab-storage/migrations/006_auth_secure_credentials.sql` — session credential reference column

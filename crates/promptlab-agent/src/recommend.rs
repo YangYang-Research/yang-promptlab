@@ -2,8 +2,8 @@
 //!
 //! Kind **A**: LLM remediation guidance from an attack-results summary.
 
-use aisec_planner::PlannerLlm;
-use aisec_target_profile::{
+use promptlab_planner::PlannerLlm;
+use promptlab_target_profile::{
     ensure_failed_scan_action_recommendation, generate_attack_recommendations_with_llm,
     AttackRecommendationsBundle, AttackResultsSummary,
 };

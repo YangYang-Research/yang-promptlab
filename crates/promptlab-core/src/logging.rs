@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-use crate::error::{AisecError, AisecResult};
+use crate::error::{PromptLabError, PromptLabResult};
 
 /// Holds the non-blocking file writer guard for the lifetime of the process.
 pub struct LogGuard {
@@ -41,7 +41,7 @@ impl LogOptions {
 
 /// Initialize global tracing subscriber. Returns a guard that must be kept alive
 /// when file logging is enabled.
-pub fn init_logging(options: LogOptions) -> AisecResult<LogGuard> {
+pub fn init_logging(options: LogOptions) -> PromptLabResult<LogGuard> {
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(options.default_filter.clone()));
 
@@ -56,7 +56,7 @@ pub fn init_logging(options: LogOptions) -> AisecResult<LogGuard> {
     let registry = tracing_subscriber::registry().with(env_filter);
 
     let init_result = if let Some(log_dir) = options.log_dir.as_deref() {
-        std::fs::create_dir_all(log_dir).map_err(AisecError::from)?;
+        std::fs::create_dir_all(log_dir).map_err(PromptLabError::from)?;
 
         let file_appender = tracing_appender::rolling::daily(log_dir, "promptlab-trace.log");
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
@@ -102,8 +102,8 @@ mod tests {
 
     #[test]
     fn log_options_builder() {
-        let options = LogOptions::bootstrap("aisec-test").with_log_dir("/tmp/aisec-test-logs");
-        assert_eq!(options.app_name, "aisec-test");
+        let options = LogOptions::bootstrap("promptlab-test").with_log_dir("/tmp/promptlab-test-logs");
+        assert_eq!(options.app_name, "promptlab-test");
         assert!(options.log_dir.is_some());
     }
 }

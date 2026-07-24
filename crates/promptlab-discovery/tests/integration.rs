@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use aisec_discovery::{DiscoveryConfig, DiscoveryEngine, EndpointKind};
+use promptlab_discovery::{DiscoveryConfig, DiscoveryEngine, EndpointKind};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

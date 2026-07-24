@@ -4,7 +4,7 @@ use aes_gcm::{
     aead::{Aead, KeyInit, OsRng},
     Aes256Gcm, Nonce,
 };
-use aisec_core::{AisecError, AisecResult};
+use promptlab_core::{PromptLabError, PromptLabResult};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use rand::RngCore;
 use tracing::debug;
@@ -22,7 +22,7 @@ pub struct EncryptedVault {
 }
 
 impl EncryptedVault {
-    pub fn new(secrets: &SecretStore, vault_dir: impl Into<PathBuf>) -> AisecResult<Self> {
+    pub fn new(secrets: &SecretStore, vault_dir: impl Into<PathBuf>) -> PromptLabResult<Self> {
         let master_id = CredentialReferenceId::parse(MASTER_KEY_ID);
         let key_bytes = match secrets.load(SecretScope::VaultKey, &master_id) {
             Ok(existing) => decode_key(&existing)?,
@@ -39,7 +39,7 @@ impl EncryptedVault {
         };
 
         let cipher = Aes256Gcm::new_from_slice(&key_bytes)
-            .map_err(|err| AisecError::internal(format!("vault cipher: {err}")))?;
+            .map_err(|err| PromptLabError::internal(format!("vault cipher: {err}")))?;
 
         Ok(Self {
             cipher,
@@ -59,10 +59,10 @@ impl EncryptedVault {
         &self,
         session_id: &str,
         plaintext: &str,
-    ) -> AisecResult<PathBuf> {
+    ) -> PromptLabResult<PathBuf> {
         tokio::fs::create_dir_all(&self.vault_dir)
             .await
-            .map_err(AisecError::from)?;
+            .map_err(PromptLabError::from)?;
 
         let path = self.encrypted_path(session_id);
         let mut nonce = [0u8; NONCE_LEN];
@@ -70,7 +70,7 @@ impl EncryptedVault {
         let ciphertext = self
             .cipher
             .encrypt(Nonce::from_slice(&nonce), plaintext.as_bytes())
-            .map_err(|err| AisecError::internal(format!("encrypt vault artifact: {err}")))?;
+            .map_err(|err| PromptLabError::internal(format!("encrypt vault artifact: {err}")))?;
 
         let mut payload = Vec::with_capacity(NONCE_LEN + ciphertext.len());
         payload.extend_from_slice(&nonce);
@@ -78,44 +78,44 @@ impl EncryptedVault {
 
         tokio::fs::write(&path, STANDARD.encode(payload))
             .await
-            .map_err(AisecError::from)?;
+            .map_err(PromptLabError::from)?;
         debug!(%session_id, path = %path.display(), "wrote encrypted session artifact");
         Ok(path)
     }
 
-    pub async fn read_json(&self, path: &Path) -> AisecResult<String> {
+    pub async fn read_json(&self, path: &Path) -> PromptLabResult<String> {
         let encoded = tokio::fs::read_to_string(path)
             .await
-            .map_err(AisecError::from)?;
+            .map_err(PromptLabError::from)?;
         let payload = STANDARD
             .decode(encoded.trim())
-            .map_err(|err| AisecError::internal(format!("decode vault artifact: {err}")))?;
+            .map_err(|err| PromptLabError::internal(format!("decode vault artifact: {err}")))?;
         if payload.len() <= NONCE_LEN {
-            return Err(AisecError::internal("vault artifact too short"));
+            return Err(PromptLabError::internal("vault artifact too short"));
         }
         let (nonce, ciphertext) = payload.split_at(NONCE_LEN);
         let plaintext = self
             .cipher
             .decrypt(Nonce::from_slice(nonce), ciphertext)
-            .map_err(|err| AisecError::internal(format!("decrypt vault artifact: {err}")))?;
-        String::from_utf8(plaintext).map_err(|err| AisecError::internal(err.to_string()))
+            .map_err(|err| PromptLabError::internal(format!("decrypt vault artifact: {err}")))?;
+        String::from_utf8(plaintext).map_err(|err| PromptLabError::internal(err.to_string()))
     }
 
-    pub async fn delete_artifact(&self, path: &Path) -> AisecResult<()> {
+    pub async fn delete_artifact(&self, path: &Path) -> PromptLabResult<()> {
         match tokio::fs::remove_file(path).await {
             Ok(()) => Ok(()),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(AisecError::from(err)),
+            Err(err) => Err(PromptLabError::from(err)),
         }
     }
 }
 
-fn decode_key(encoded: &str) -> AisecResult<Vec<u8>> {
+fn decode_key(encoded: &str) -> PromptLabResult<Vec<u8>> {
     let bytes = STANDARD
         .decode(encoded)
-        .map_err(|err| AisecError::internal(format!("decode vault key: {err}")))?;
+        .map_err(|err| PromptLabError::internal(format!("decode vault key: {err}")))?;
     if bytes.len() != 32 {
-        return Err(AisecError::internal("invalid vault master key length"));
+        return Err(PromptLabError::internal("invalid vault master key length"));
     }
     Ok(bytes)
 }

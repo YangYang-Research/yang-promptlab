@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AISec prompt-injection demo target — serves http://localhost:3300
+"""PromptLab prompt-injection demo target — serves http://localhost:3300
 
 Emulates a *vulnerable* OpenAI-compatible chat endpoint: when a request's
 content carries prompt-injection markers, the "model" complies and leaks its

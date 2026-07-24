@@ -1,6 +1,6 @@
 # Models Page UI
 
-AISec Desktop **Models** page — vault overview, native imports, download manager, and installed model inventory.
+PromptLab Desktop **Models** page — vault overview, native imports, download manager, and installed model inventory.
 
 ## Vault overview
 
@@ -92,4 +92,4 @@ Each installed entry shows human-readable **installed size** (`formatBytes` on `
 | Models IPC | `src/shared/ipc/models.ts` |
 | Runtime IPC | `src/shared/ipc/runtime.ts` |
 | Backend | `src-tauri/src/commands/models.rs` |
-| Download engine | `crates/aisec-models/src/download/` |
+| Download engine | `crates/promptlab-models/src/download/` |

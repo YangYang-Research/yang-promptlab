@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use aisec_fingerprint::StackFingerprintReport;
+use promptlab_fingerprint::StackFingerprintReport;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -196,12 +196,12 @@ pub struct RawObservation {
 }
 
 impl AiEndpointMetadata {
-    pub fn to_json(&self) -> aisec_core::AisecResult<String> {
-        serde_json::to_string(self).map_err(|e| aisec_core::AisecError::internal(e.to_string()))
+    pub fn to_json(&self) -> promptlab_core::PromptLabResult<String> {
+        serde_json::to_string(self).map_err(|e| promptlab_core::PromptLabError::internal(e.to_string()))
     }
 
-    pub fn from_json(raw: &str) -> aisec_core::AisecResult<Self> {
-        serde_json::from_str(raw).map_err(|e| aisec_core::AisecError::internal(e.to_string()))
+    pub fn from_json(raw: &str) -> promptlab_core::PromptLabResult<Self> {
+        serde_json::from_str(raw).map_err(|e| promptlab_core::PromptLabError::internal(e.to_string()))
     }
 
     pub fn endpoint_type_str(&self) -> &str {

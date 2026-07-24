@@ -1,6 +1,6 @@
 # Judge Runtime Integration
 
-The judge engine evaluates attack probe results using deterministic rules, regex heuristics, and optional LLM evaluators. Local LLM modes route inference through the AISec runtime abstraction instead of constructing Ollama or llama.cpp clients directly.
+The judge engine evaluates attack probe results using deterministic rules, regex heuristics, and optional LLM evaluators. Local LLM modes route inference through the PromptLab runtime abstraction instead of constructing Ollama or llama.cpp clients directly.
 
 ## Architecture
 
@@ -18,14 +18,14 @@ flowchart TB
   Supervisor -->|ensure_running for Ollama| Model
 ```
 
-**Chain:** Judge → ModelProvider → AISec Runtime → Model
+**Chain:** Judge → ModelProvider → PromptLab Runtime → Model
 
 | Layer | Crate | Responsibility |
 |-------|-------|----------------|
-| Judge | `aisec-judge` | Modes, consensus, structured verdict JSON |
-| ModelProvider | `aisec-runtime` | Vault-backed install/list/inference contract |
-| Runtime supervisor | `aisec-runtime` | Embedded Ollama process lifecycle |
-| Model vault | `aisec-models` | Registry, downloads, `LocalInferenceEngine` |
+| Judge | `promptlab-judge` | Modes, consensus, structured verdict JSON |
+| ModelProvider | `promptlab-runtime` | Vault-backed install/list/inference contract |
+| Runtime supervisor | `promptlab-runtime` | Embedded Ollama process lifecycle |
+| Model vault | `promptlab-models` | Registry, downloads, `LocalInferenceEngine` |
 
 ## Judge modes
 
@@ -71,10 +71,10 @@ Final verdicts expose:
 
 | File | Purpose |
 |------|---------|
-| `crates/aisec-runtime/src/inference_adapter.rs` | `ModelProviderRuntime` → `InferenceRuntime` |
-| `crates/aisec-runtime/src/embedded.rs` | `EmbeddedModelProvider` bridge |
-| `crates/aisec-judge/src/runtime_context.rs` | `JudgeRuntimeContext` |
-| `crates/aisec-judge/src/factory.rs` | Engine factory (no direct Ollama/llama.cpp) |
+| `crates/promptlab-runtime/src/inference_adapter.rs` | `ModelProviderRuntime` → `InferenceRuntime` |
+| `crates/promptlab-runtime/src/embedded.rs` | `EmbeddedModelProvider` bridge |
+| `crates/promptlab-judge/src/runtime_context.rs` | `JudgeRuntimeContext` |
+| `crates/promptlab-judge/src/factory.rs` | Engine factory (no direct Ollama/llama.cpp) |
 | `src-tauri/src/judge_config.rs` | Vault resolution + runtime context prep |
 | `src-tauri/src/commands/judge.rs` | IPC connectivity/model tests |
 | `src-tauri/src/commands/attack.rs` | Attack pipeline judge wiring |
@@ -82,19 +82,19 @@ Final verdicts expose:
 ## Tests
 
 ```bash
-cargo test -p aisec-judge
-cargo test -p aisec-runtime
-cargo test -p aisec-desktop --tests
+cargo test -p promptlab-judge
+cargo test -p promptlab-runtime
+cargo test -p promptlab-desktop --tests
 ```
 
 Integration coverage:
 
-- `crates/aisec-judge/tests/runtime_integration.rs` — provider bridge + structured JSON
-- `crates/aisec-runtime/src/inference_adapter.rs` — unit test for adapter
+- `crates/promptlab-judge/tests/runtime_integration.rs` — provider bridge + structured JSON
+- `crates/promptlab-runtime/src/inference_adapter.rs` — unit test for adapter
 
 ## Migration note
 
-Previous builds constructed `OllamaRuntime` / `LlamaCppRuntime` inside `aisec-judge/src/factory.rs`. Local judge modes now require:
+Previous builds constructed `OllamaRuntime` / `LlamaCppRuntime` inside `promptlab-judge/src/factory.rs`. Local judge modes now require:
 
 1. A selected vault model (`localVaultModelId`)
 2. A wired `SharedModelProvider` from `AppState`

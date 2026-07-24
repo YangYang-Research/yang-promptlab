@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use aisec_plugin_host::{
+use promptlab_plugin_host::{
     persist_enabled, restore_enabled, PluginManager, PluginResult,
 };
 

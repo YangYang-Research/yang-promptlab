@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 
 use crate::error::StorageResultExt;
 use crate::models::{CreateProject, Project, UpdateProject};
@@ -21,7 +21,7 @@ impl SqliteProjectRepository {
 
 #[async_trait]
 impl ProjectRepository for SqliteProjectRepository {
-    async fn create(&self, input: CreateProject) -> AisecResult<Project> {
+    async fn create(&self, input: CreateProject) -> PromptLabResult<Project> {
         let id = new_id();
         let timestamp = now();
 
@@ -43,7 +43,7 @@ impl ProjectRepository for SqliteProjectRepository {
         self.get(&id).await
     }
 
-    async fn get(&self, id: &str) -> AisecResult<Project> {
+    async fn get(&self, id: &str) -> PromptLabResult<Project> {
         sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
@@ -51,14 +51,14 @@ impl ProjectRepository for SqliteProjectRepository {
             .map_storage()
     }
 
-    async fn list(&self) -> AisecResult<Vec<Project>> {
+    async fn list(&self) -> PromptLabResult<Vec<Project>> {
         sqlx::query_as::<_, Project>("SELECT * FROM projects ORDER BY created_at DESC")
             .fetch_all(&self.pool)
             .await
             .map_storage()
     }
 
-    async fn update(&self, id: &str, input: UpdateProject) -> AisecResult<Project> {
+    async fn update(&self, id: &str, input: UpdateProject) -> PromptLabResult<Project> {
         let existing = self.get(id).await?;
         let name = input.name.unwrap_or(existing.name);
         let description = input.description.or(existing.description);
@@ -85,7 +85,7 @@ impl ProjectRepository for SqliteProjectRepository {
         self.get(id).await
     }
 
-    async fn delete(&self, id: &str) -> AisecResult<()> {
+    async fn delete(&self, id: &str) -> PromptLabResult<()> {
         let result = sqlx::query("DELETE FROM projects WHERE id = ?")
             .bind(id)
             .execute(&self.pool)

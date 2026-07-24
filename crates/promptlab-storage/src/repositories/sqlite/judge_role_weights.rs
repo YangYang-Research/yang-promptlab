@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 
-use aisec_core::{AisecError, AisecResult};
+use promptlab_core::{PromptLabError, PromptLabResult};
 
 use crate::error::StorageResultExt;
 use crate::models::{JudgeRoleWeights, UpdateJudgeRoleWeights};
@@ -19,9 +19,9 @@ impl SqliteJudgeRoleWeightsRepository {
     }
 }
 
-fn validate_weight(name: &str, value: f64) -> AisecResult<()> {
+fn validate_weight(name: &str, value: f64) -> PromptLabResult<()> {
     if !(0.01..=2.0).contains(&value) || !value.is_finite() {
-        return Err(AisecError::invalid_input(format!(
+        return Err(PromptLabError::invalid_input(format!(
             "{name} weight must be between 0.01 and 2.0"
         )));
     }
@@ -30,7 +30,7 @@ fn validate_weight(name: &str, value: f64) -> AisecResult<()> {
 
 #[async_trait]
 impl JudgeRoleWeightsRepository for SqliteJudgeRoleWeightsRepository {
-    async fn get(&self) -> AisecResult<JudgeRoleWeights> {
+    async fn get(&self) -> PromptLabResult<JudgeRoleWeights> {
         let row = sqlx::query_as::<_, JudgeRoleWeights>(
             r#"
             SELECT id, judge, classifier, attacker, default_llm, updated_at
@@ -69,7 +69,7 @@ impl JudgeRoleWeightsRepository for SqliteJudgeRoleWeightsRepository {
         })
     }
 
-    async fn update(&self, input: UpdateJudgeRoleWeights) -> AisecResult<JudgeRoleWeights> {
+    async fn update(&self, input: UpdateJudgeRoleWeights) -> PromptLabResult<JudgeRoleWeights> {
         validate_weight("judge", input.judge)?;
         validate_weight("classifier", input.classifier)?;
         validate_weight("attacker", input.attacker)?;

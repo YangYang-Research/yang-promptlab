@@ -3,8 +3,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
-use aisec_attack::AttackCategory;
-use aisec_planner::types::{AttackPlan, CategoryRationale, PlannerMode};
+use promptlab_attack::AttackCategory;
+use promptlab_planner::types::{AttackPlan, CategoryRationale, PlannerMode};
 use serde::{Deserialize, Serialize};
 
 use crate::payload_strategy::{
@@ -495,7 +495,7 @@ fn catalog_tests_by_category() -> &'static HashMap<AttackCategory, Vec<String>> 
     static INDEX: OnceLock<HashMap<AttackCategory, Vec<String>>> = OnceLock::new();
     INDEX.get_or_init(|| {
         let mut map: HashMap<AttackCategory, Vec<String>> = HashMap::new();
-        let Ok(entries) = aisec_payload::PayloadDatabase::seed_entries() else {
+        let Ok(entries) = promptlab_payload::PayloadDatabase::seed_entries() else {
             return map;
         };
         for entry in entries {

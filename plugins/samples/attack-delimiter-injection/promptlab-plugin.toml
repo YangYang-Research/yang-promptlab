@@ -1,18 +1,18 @@
 [plugin]
-id = "com.aisec.sample.attack-delimiter"
+id = "com.promptlab.sample.attack-delimiter"
 name = "Delimiter Injection Pack"
 version = "1.0.0"
 api_version = "1"
 plugin_type = "attack"
 language = "javascript"
 description = "Generates delimiter-based prompt injection payloads"
-author = "AISec"
+author = "PromptLab"
 
 [runtime]
 type = "subprocess"
 entry = "plugin.js"
 interpreter = "node"
-min_aisec = "0.1.0"
+min_promptlab = "0.1.0"
 
 [capabilities]
 probe_mutate = true

@@ -3,13 +3,13 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "aisec-plugin-sdk"
+name = "promptlab-plugin-sdk"
 version = "0.1.0"
-description = "AISec Plugin SDK for Python"
+description = "PromptLab Plugin SDK for Python"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Proprietary" }
-authors = [{ name = "AISec" }]
+authors = [{ name = "PromptLab" }]
 dependencies = []
 
 [project.optional-dependencies]
@@ -17,4 +17,4 @@ dev = ["pytest>=7.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["aisec_plugin*"]
+include = ["promptlab_plugin*"]

@@ -1,4 +1,4 @@
-# AISec UI Refactor — Implementation Task Breakdown
+# PromptLab UI Refactor — Implementation Task Breakdown
 
 > Source spec: `docs/SCAN_WIZARD_REDESIGN.md` (approved).
 > Rules: every task ≤ **4h**, has **dependencies** + **acceptance criteria**, grouped by layer
@@ -58,9 +58,9 @@ listeners in `src/shared/ipc`), `F*` frontend (React UI). Dependencies reference
 - **Accept:** a target with API-key auth sends the header on attack requests (verified against a test endpoint).
 
 ### B9 — Auth: SSO via Playwright (`auth_record_session`) (4h)
-- Wrap `aisec-auth` Playwright login capture; persist to `auth_profiles`/`auth_sessions`; return `sessionId`;
+- Wrap `promptlab-auth` Playwright login capture; persist to `auth_profiles`/`auth_sessions`; return `sessionId`;
   link session to target descriptor.
-- **Deps:** B2; `aisec-auth` reachable from `src-tauri` (add dep).
+- **Deps:** B2; `promptlab-auth` reachable from `src-tauri` (add dep).
 - **Accept:** launching SSO records a session row; the session token/cookies are reused by the scan job; manual test.
 
 ### B10 — Scan Job Manager foundation (4h)
@@ -71,7 +71,7 @@ listeners in `src/shared/ipc`), `F*` frontend (React UI). Dependencies reference
 
 ### B11 — Reusable single-unit attack+judge runner (3h)
 - Extract the existing `attack_run_prompt_injection` logic into `run_category_on_endpoint(state, scan, endpoint, category)`
-  that executes `aisec-attack` + `aisec-judge` and persists `attack_results` + `findings`.
+  that executes `promptlab-attack` + `promptlab-judge` and persists `attack_results` + `findings`.
 - **Deps:** none (refactor of existing code).
 - **Accept:** existing prompt-injection behavior unchanged (same findings); function reused by old command + B12.
 
@@ -109,7 +109,7 @@ listeners in `src/shared/ipc`), `F*` frontend (React UI). Dependencies reference
 - **Accept:** generating PDF produces a valid PDF file; HTML/JSON/SARIF unaffected; download returns intact bytes.
 
 ### B18 (optional) — Discovery live progress (4h)
-- Add a progress callback to `aisec-discovery`; emit `discovery://progress` phases (crawl/JS/API/GraphQL/OpenAPI).
+- Add a progress callback to `promptlab-discovery`; emit `discovery://progress` phases (crawl/JS/API/GraphQL/OpenAPI).
 - **Deps:** none.
 - **Accept:** Step 3 receives phase events during a real crawl. *Optional polish — wizard works without it (indeterminate phases).*
 
@@ -219,7 +219,7 @@ listeners in `src/shared/ipc`), `F*` frontend (React UI). Dependencies reference
 
 ### F10 — Step 4 Attack Planning (4h)
 - Profile presets (Quick/Standard/Deep/Custom) mapped to real `AttackCategory` values; category accordion with
-  test count + names (from `aisec-payload`) + per-test toggle; **Estimated Requests/Runtime** (client-side from real
+  test count + names (from `promptlab-payload`) + per-test toggle; **Estimated Requests/Runtime** (client-side from real
   payload counts × selected endpoints). Back / Start Scan.
 - **Deps:** F5.
 - **Accept:** presets select the correct categories; toggling tests updates the estimate; Custom lets user pick categories.

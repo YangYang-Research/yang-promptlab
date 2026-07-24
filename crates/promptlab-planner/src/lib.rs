@@ -1,4 +1,4 @@
-//! Shared attack-plan types and LLM bridge trait for AISec.
+//! Shared attack-plan types and LLM bridge trait for PromptLab.
 
 pub mod error;
 pub mod local_llm;

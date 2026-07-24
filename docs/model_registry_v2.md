@@ -1,4 +1,4 @@
-# AISec Model Registry v2 (GGUF-first)
+# PromptLab Model Registry v2 (GGUF-first)
 
 **Version:** 2.0  
 **Date:** 2026-06-13  
@@ -53,8 +53,8 @@ Downloads use a direct **`download_url`** (typically HuggingFace `resolve/main/.
 On app startup (`BuiltinCatalog::load_with_optional_remote`):
 
 1. Parse `resources/models.json`
-2. Optionally merge remote registry (`AISEC_MODEL_REGISTRY_URL`)
-3. Run `validate_registry()` — `crates/aisec-models/src/registry_validate.rs`
+2. Optionally merge remote registry (`PROMPTLAB_MODEL_REGISTRY_URL`)
+3. Run `validate_registry()` — `crates/promptlab-models/src/registry_validate.rs`
 
 ### Checks
 
@@ -97,8 +97,8 @@ Scan Wizard is unchanged.
 | Component | Path |
 |-----------|------|
 | Registry file | `resources/models.json` |
-| Parser | `crates/aisec-models/src/builtin_catalog.rs` |
-| Validator | `crates/aisec-models/src/registry_validate.rs` |
+| Parser | `crates/promptlab-models/src/builtin_catalog.rs` |
+| Validator | `crates/promptlab-models/src/registry_validate.rs` |
 | Startup load | `src-tauri/src/model_registry.rs` |
 | IPC | `src-tauri/src/commands/models.rs` |
 | Frontend | `src/features/models/ModelsPage.tsx` |
@@ -108,7 +108,7 @@ Scan Wizard is unchanged.
 
 ## Remote Merge
 
-Set `AISEC_MODEL_REGISTRY_URL` to an HTTPS JSON file using the same v2 schema. Remote entries with new `id` values are appended; duplicates are skipped.
+Set `PROMPTLAB_MODEL_REGISTRY_URL` to an HTTPS JSON file using the same v2 schema. Remote entries with new `id` values are appended; duplicates are skipped.
 
 ---
 

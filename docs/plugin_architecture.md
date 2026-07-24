@@ -1,16 +1,16 @@
-# AISec Plugin Architecture
+# PromptLab Plugin Architecture
 
 This document describes the extensibility layer: harness registry wiring, plugin host integration, and how discovery / attack / judge engines consume plugins.
 
 ## Overview
 
-AISec separates **target delivery** (harness) from **engine extensions** (plugins):
+PromptLab separates **target delivery** (harness) from **engine extensions** (plugins):
 
 | Layer | Crate | Responsibility |
 |-------|-------|----------------|
-| Harness registry | `aisec-harness` | Route payloads to HTTP, OpenAI-compatible, or Playwright targets |
-| Harness factory | `aisec-harness` | Resolve `HarnessKind` → registered `Harness` implementation |
-| Plugin host | `aisec-plugin-host` | Discover, enable, sandbox, and invoke extension plugins |
+| Harness registry | `promptlab-harness` | Route payloads to HTTP, OpenAI-compatible, or Playwright targets |
+| Harness factory | `promptlab-harness` | Resolve `HarnessKind` → registered `Harness` implementation |
+| Plugin host | `promptlab-plugin-host` | Discover, enable, sandbox, and invoke extension plugins |
 | Desktop runtime | `src-tauri` | Shared `AppState`, IPC, engine hook integration |
 
 ## Harness pipeline (production)
@@ -64,7 +64,7 @@ Discovered → Installed → Enabled → Loaded → Active
             Disabled (persisted in plugins_state.json)
 ```
 
-Plugins are discovered from `{data_dir}/plugins/` by scanning for `aisec-plugin.toml`. On first launch, bundled samples from `plugins/samples/` are copied when the directory is empty.
+Plugins are discovered from `{data_dir}/plugins/` by scanning for `promptlab-plugin.toml`. On first launch, bundled samples from `plugins/samples/` are copied when the directory is empty.
 
 ### Sandbox
 
@@ -110,10 +110,10 @@ After `JudgeEngine::judge_normalized()`, enabled judge plugins may elevate confi
 
 ## Related code
 
-- `crates/aisec-harness/src/factory/harness_factory.rs`
-- `crates/aisec-harness/src/registry/harness_registry.rs`
-- `crates/aisec-plugin-host/src/manager.rs`
-- `crates/aisec-plugin-host/src/integrations.rs`
+- `crates/promptlab-harness/src/factory/harness_factory.rs`
+- `crates/promptlab-harness/src/registry/harness_registry.rs`
+- `crates/promptlab-plugin-host/src/manager.rs`
+- `crates/promptlab-plugin-host/src/integrations.rs`
 - `src-tauri/src/plugin_service.rs`
 - `src-tauri/src/plugin_transport.rs`
 - `src-tauri/src/commands/plugins.rs`

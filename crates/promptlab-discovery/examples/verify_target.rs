@@ -1,9 +1,9 @@
 //! Run: start scripts/discovery-test-target.py, then
-//!   cargo run -p aisec-discovery --example verify_target
+//!   cargo run -p promptlab-discovery --example verify_target
 
 use std::time::Duration;
 
-use aisec_discovery::{DiscoveryConfig, DiscoveryEngine, EndpointKind};
+use promptlab_discovery::{DiscoveryConfig, DiscoveryEngine, EndpointKind};
 
 #[tokio::main]
 async fn main() {
@@ -20,7 +20,7 @@ async fn main() {
         ..Default::default()
     };
 
-    println!("=== AISec Discovery Verification ===");
+    println!("=== PromptLab Discovery Verification ===");
     println!("Target: {target}");
     println!("allow_private_network: true\n");
 

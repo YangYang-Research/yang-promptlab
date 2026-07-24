@@ -3,7 +3,7 @@ use std::path::Path;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::ConnectOptions;
 
-use aisec_core::{AisecError, AisecResult};
+use promptlab_core::{PromptLabError, PromptLabResult};
 
 use crate::error::StorageResultExt;
 use crate::repositories::Repositories;
@@ -19,9 +19,9 @@ pub struct Database {
 impl Database {
     /// Open (or create) a database at `database_url` and run pending migrations.
     ///
-    /// Use `sqlite://path/to/aisec.db` for file-backed storage or
+    /// Use `sqlite://path/to/promptlab.db` for file-backed storage or
     /// `sqlite::memory:` for ephemeral databases (tests).
-    pub async fn connect(database_url: &str) -> AisecResult<Self> {
+    pub async fn connect(database_url: &str) -> PromptLabResult<Self> {
         let mut options: SqliteConnectOptions = database_url.parse().map_storage()?;
         options = options
             .create_if_missing(true)
@@ -40,7 +40,7 @@ impl Database {
         MIGRATOR
             .run(&pool)
             .await
-            .map_err(|err| aisec_core::AisecError::internal(format!("migration failed: {err}")))?;
+            .map_err(|err| promptlab_core::PromptLabError::internal(format!("migration failed: {err}")))?;
 
         tracing::debug!(%database_url, "database connected and migrations applied");
 
@@ -57,7 +57,7 @@ impl Database {
     /// journal** (`TRUNCATE`) when the filesystem does not support WAL's
     /// shared-memory files — some overlay/network filesystems return a disk I/O
     /// error otherwise. This keeps startup reliable across environments.
-    pub async fn connect_path(path: impl AsRef<Path>) -> AisecResult<Self> {
+    pub async fn connect_path(path: impl AsRef<Path>) -> PromptLabResult<Self> {
         let path = path.as_ref();
         match Self::open_file(path, sqlx::sqlite::SqliteJournalMode::Wal).await {
             Ok(db) => {
@@ -82,7 +82,7 @@ impl Database {
         }
     }
 
-    async fn open_file(path: &Path, journal_mode: sqlx::sqlite::SqliteJournalMode) -> AisecResult<Self> {
+    async fn open_file(path: &Path, journal_mode: sqlx::sqlite::SqliteJournalMode) -> PromptLabResult<Self> {
         let options = SqliteConnectOptions::new()
             .filename(path)
             .create_if_missing(true)
@@ -100,7 +100,7 @@ impl Database {
         MIGRATOR
             .run(&pool)
             .await
-            .map_err(|err| AisecError::internal(format!("migration failed: {err}")))?;
+            .map_err(|err| PromptLabError::internal(format!("migration failed: {err}")))?;
 
         Ok(Self { pool })
     }
@@ -148,7 +148,7 @@ mod tests {
     #[tokio::test]
     async fn connect_path_creates_file_and_runs_migrations() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("aisec.db");
+        let path = dir.path().join("promptlab.db");
         let db = Database::connect_path(&path).await.expect("connect_path");
         assert!(path.exists(), "database file should be created");
 

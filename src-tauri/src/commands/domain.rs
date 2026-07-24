@@ -4,15 +4,15 @@
 //! function that takes `&AppState`, so the same logic is exercised by the
 //! integration tests without a Tauri runtime.
 
-use aisec_auth::{
+use promptlab_auth::{
     resolve_descriptor_for_wizard, sanitize_target_descriptor, SecretStore,
 };
-use aisec_core::AisecError;
-use aisec_report::{
+use promptlab_core::PromptLabError;
+use promptlab_report::{
     parse_sarif_import, ReportDataBuilder, ReportFormat, ReportKind, ReportingEngine,
     StorageFindingRow,
 };
-use aisec_storage::{
+use promptlab_storage::{
     CreateFinding, CreateReport, CreateScan, CreateTarget, FindingRepository, ProjectRepository,
     ReportRepository, ScanRepository, TargetRepository, UpdateFinding,
 };
@@ -25,8 +25,8 @@ use crate::dto::{
 use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
 
-fn map_report_err(err: aisec_report::ReportError) -> CommandError {
-    CommandError::from(AisecError::internal(err.to_string()))
+fn map_report_err(err: promptlab_report::ReportError) -> CommandError {
+    CommandError::from(PromptLabError::internal(err.to_string()))
 }
 
 fn parse_format(value: Option<&str>) -> ReportFormat {
@@ -61,13 +61,13 @@ pub async fn target_create_op(
 ) -> CommandResult<TargetDto> {
     let descriptor_json = if let Some(descriptor) = descriptor {
         let raw = serde_json::to_string(&descriptor).map_err(|err| {
-            CommandError::from(AisecError::invalid_input(err.to_string()))
+            CommandError::from(PromptLabError::invalid_input(err.to_string()))
         })?;
         let secrets = SecretStore::new().map_err(CommandError::from)?;
         let (sanitized, _) = sanitize_target_descriptor(&raw, &secrets).map_err(CommandError::from)?;
         Some(
             serde_json::from_str(&sanitized).map_err(|err| {
-                CommandError::from(AisecError::invalid_input(err.to_string()))
+                CommandError::from(PromptLabError::invalid_input(err.to_string()))
             })?,
         )
     } else {
@@ -127,7 +127,7 @@ pub async fn target_wizard_descriptor_op(
     let resolved = resolve_descriptor_for_wizard(&descriptor_json, &secrets)
         .map_err(CommandError::from)?;
     dto.descriptor = serde_json::from_str(&resolved).map_err(|err| {
-        CommandError::from(AisecError::internal(format!(
+        CommandError::from(PromptLabError::internal(format!(
             "invalid resolved descriptor json: {err}"
         )))
     })?;
@@ -140,7 +140,7 @@ pub async fn target_update_descriptor_op(
     descriptor: serde_json::Value,
 ) -> CommandResult<TargetDto> {
     let raw = serde_json::to_string(&descriptor).map_err(|err| {
-        CommandError::from(AisecError::invalid_input(err.to_string()))
+        CommandError::from(PromptLabError::invalid_input(err.to_string()))
     })?;
     let secrets = SecretStore::new().map_err(CommandError::from)?;
     let (sanitized, _) = sanitize_target_descriptor(&raw, &secrets).map_err(CommandError::from)?;
@@ -286,7 +286,7 @@ pub async fn finding_import_sarif_op(
     let repos = state.repositories();
 
     let raw = std::fs::read_to_string(&path).map_err(|err| {
-        CommandError::from(AisecError::invalid_input(format!(
+        CommandError::from(PromptLabError::invalid_input(format!(
             "failed to read SARIF file: {err}"
         )))
     })?;
@@ -324,7 +324,7 @@ pub async fn finding_import_sarif_op(
         match repos.scans().get(existing_id).await {
             Ok(scan) if scan.project_id == resolved_project_id => scan,
             Ok(_) => {
-                return Err(CommandError::from(AisecError::invalid_input(
+                return Err(CommandError::from(PromptLabError::invalid_input(
                     "SARIF scan_id belongs to a different project",
                 )));
             }
@@ -401,7 +401,7 @@ fn normalize_finding_status(status: &str) -> CommandResult<String> {
     let normalized = status.trim().to_ascii_lowercase().replace('-', "_");
     match normalized.as_str() {
         "open" | "confirmed" | "false_positive" | "fixed" => Ok(normalized),
-        _ => Err(CommandError::from(AisecError::invalid_input(
+        _ => Err(CommandError::from(PromptLabError::invalid_input(
             "status must be one of: open, confirmed, false_positive, fixed",
         ))),
     }
@@ -445,8 +445,8 @@ pub async fn finding_delete_op(state: &AppState, id: String) -> CommandResult<()
 }
 
 async fn resolve_import_project_id(
-    repos: &aisec_storage::Repositories,
-    ctx: &aisec_report::SarifRunContext,
+    repos: &promptlab_storage::Repositories,
+    ctx: &promptlab_report::SarifRunContext,
     override_project_id: Option<String>,
 ) -> CommandResult<String> {
     if let Some(id) = override_project_id.filter(|s| !s.trim().is_empty()) {
@@ -467,7 +467,7 @@ async fn resolve_import_project_id(
         }
     }
 
-    Err(CommandError::from(AisecError::invalid_input(
+    Err(CommandError::from(PromptLabError::invalid_input(
         "SARIF is missing a resolvable project_id/project_name; select a destination project",
     )))
 }
@@ -564,7 +564,7 @@ pub async fn report_read_op(state: &AppState, id: String) -> CommandResult<Repor
         .clone()
         .ok_or_else(|| CommandError::invalid_input("Report has no saved file"))?;
     let content = std::fs::read_to_string(&path)
-        .map_err(|err| CommandError::from(AisecError::from(err)))?;
+        .map_err(|err| CommandError::from(PromptLabError::from(err)))?;
     Ok(ReportContentDto {
         id: report.id,
         name: report.name,
@@ -583,7 +583,7 @@ pub async fn report_export_op(state: &AppState, id: String) -> CommandResult<Str
     let downloads = std::env::var_os("HOME")
         .map(|home| std::path::PathBuf::from(home).join("Downloads"))
         .unwrap_or_else(|| state.workspaces_dir().join("downloads"));
-    std::fs::create_dir_all(&downloads).map_err(|err| CommandError::from(AisecError::from(err)))?;
+    std::fs::create_dir_all(&downloads).map_err(|err| CommandError::from(PromptLabError::from(err)))?;
 
     let file_name = std::path::Path::new(&src)
         .file_name()
@@ -591,7 +591,7 @@ pub async fn report_export_op(state: &AppState, id: String) -> CommandResult<Str
         .unwrap_or_else(|| format!("{}.{}", report.name, report.format).into());
     let dest = downloads.join(file_name);
 
-    std::fs::copy(&src, &dest).map_err(|err| CommandError::from(AisecError::from(err)))?;
+    std::fs::copy(&src, &dest).map_err(|err| CommandError::from(PromptLabError::from(err)))?;
     let dest_str = dest.to_string_lossy().into_owned();
     info!(report_id = %report.id, dest = %dest_str, "report exported");
     Ok(dest_str)

@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use aisec_inference::PromptRegistry;
-use aisec_planner::{PlannerError, PlannerLlm, PlannerResult};
+use promptlab_inference::PromptRegistry;
+use promptlab_planner::{PlannerError, PlannerLlm, PlannerResult};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

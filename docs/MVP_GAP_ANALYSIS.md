@@ -8,17 +8,17 @@
 
 ## Executive Summary
 
-AISec has **complete domain libraries** for every MVP step, but **zero integration** between them and the desktop app. The UI renders the workflow with mock data; Tauri exposes only `health` and `app_info`.
+PromptLab has **complete domain libraries** for every MVP step, but **zero integration** between them and the desktop app. The UI renders the workflow with mock data; Tauri exposes only `health` and `app_info`.
 
 **The blocker is not missing engines — it is the missing integration spine.**
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌─────────────────────────────────────┐
-│  React UI   │ ─X─ │  src-tauri   │ ─X─ │  aisec-storage                      │
-│  (mock)     │     │  (2 IPC)     │     │  aisec-discovery                    │
-└─────────────┘     └──────────────┘     │  aisec-attack                       │
-                                           │  aisec-judge                        │
-                                           │  aisec-report                       │
+│  React UI   │ ─X─ │  src-tauri   │ ─X─ │  promptlab-storage                      │
+│  (mock)     │     │  (2 IPC)     │     │  promptlab-discovery                    │
+└─────────────┘     └──────────────┘     │  promptlab-attack                       │
+                                           │  promptlab-judge                        │
+                                           │  promptlab-report                       │
                                            └─────────────────────────────────────┘
                                                     ↑ all implemented, not wired
 ```
@@ -48,16 +48,16 @@ AISec has **complete domain libraries** for every MVP step, but **zero integrati
 
 | Module | Location | Capability |
 |--------|----------|------------|
-| **Database** | `crates/aisec-storage` | SQLite pool, migrations, WAL |
-| **Project model** | `crates/aisec-storage/src/models.rs` | `CreateProject`, `Project`, `UpdateProject` |
-| **Project repository** | `crates/aisec-storage/src/repositories/sqlite/project.rs` | `create`, `list`, `get`, `update`, `delete` |
+| **Database** | `crates/promptlab-storage` | SQLite pool, migrations, WAL |
+| **Project model** | `crates/promptlab-storage/src/models.rs` | `CreateProject`, `Project`, `UpdateProject` |
+| **Project repository** | `crates/promptlab-storage/src/repositories/sqlite/project.rs` | `create`, `list`, `get`, `update`, `delete` |
 | **UI (read-only)** | `src/features/projects/ProjectsPage.tsx` | Table renders project list from mock store |
 
 ### Blocking this step
 
 | Blocker | Type | Notes |
 |---------|------|-------|
-| Tauri does not depend on `aisec-storage` | **Integration** | `src-tauri/Cargo.toml` → only `aisec-core` |
+| Tauri does not depend on `promptlab-storage` | **Integration** | `src-tauri/Cargo.toml` → only `promptlab-core` |
 | `AppState` has no `Database` | **Integration** | `state.rs` holds log guard only |
 | No `project_create` / `project_list` IPC | **Integration** | `lib.rs` registers 2 commands |
 | No create-project UI | **Frontend** | Projects page has no modal/form |
@@ -66,7 +66,7 @@ AISec has **complete domain libraries** for every MVP step, but **zero integrati
 
 ### Shortest fix
 
-1. Open DB at Tauri startup (`Database::connect` → `~/.aisec/aisec.db`)
+1. Open DB at Tauri startup (`Database::connect` → `~/.promptlab/promptlab.db`)
 2. Add `project_create`, `project_list` commands
 3. Add "New Project" modal + `LOAD_PROJECTS` store action
 
@@ -80,9 +80,9 @@ AISec has **complete domain libraries** for every MVP step, but **zero integrati
 
 | Module | Location | Capability |
 |--------|----------|------------|
-| **Target model** | `aisec-storage/src/models.rs` | `CreateTarget` with `descriptor_json` |
+| **Target model** | `promptlab-storage/src/models.rs` | `CreateTarget` with `descriptor_json` |
 | **Target repository** | `repositories/sqlite/target.rs` | CRUD, list by project |
-| **URL validation** | `aisec-discovery/src/url_policy.rs` | `validate_target_url()` — reuse in IPC |
+| **URL validation** | `promptlab-discovery/src/url_policy.rs` | `validate_target_url()` — reuse in IPC |
 | **UI (read-only)** | `src/features/targets/TargetsPage.tsx` | Table from mock data |
 
 ### Blocking this step
@@ -110,12 +110,12 @@ AISec has **complete domain libraries** for every MVP step, but **zero integrati
 
 | Module | Location | Capability |
 |--------|----------|------------|
-| **Discovery engine** | `crates/aisec-discovery` | `DiscoveryEngine::discover(seed_url)` |
+| **Discovery engine** | `crates/promptlab-discovery` | `DiscoveryEngine::discover(seed_url)` |
 | **Crawler** | `crawler.rs` | BFS, depth/page limits, link extraction |
 | **Static probes** | `detectors/paths.rs` | OpenAPI, GraphQL, AI path lists |
 | **Detectors** | `detectors/{openapi,graphql,ai,api}.rs` | Classify endpoints |
 | **Report type** | `types.rs` | `DiscoveryReport`, `DiscoveredEndpoint`, `EndpointKind` |
-| **Scan model** | `aisec-storage` | `CreateScan`, status field (`pending/running/completed`) |
+| **Scan model** | `promptlab-storage` | `CreateScan`, status field (`pending/running/completed`) |
 | **UI shell** | `DiscoveryPage.tsx` | Cards + "Start Scan" button (inert) |
 
 ### Blocking this step
@@ -147,13 +147,13 @@ AISec has **complete domain libraries** for every MVP step, but **zero integrati
 
 | Module | Location | Capability |
 |--------|----------|------------|
-| **Prompt injection attack** | `aisec-attack/src/attacks/prompt_injection.rs` | 3 default payloads, plan, evaluate |
-| **Attack executor** | `aisec-attack/src/executor.rs` | `execute_category(PromptInjection, ctx)` |
-| **HTTP transport** | `aisec-attack/src/transport/http.rs` | POST with JSON body template |
-| **Attack target** | `aisec-attack/src/types.rs` | `AttackTarget::llm_api(url)` with `{{payload}}` placeholder |
+| **Prompt injection attack** | `promptlab-attack/src/attacks/prompt_injection.rs` | 3 default payloads, plan, evaluate |
+| **Attack executor** | `promptlab-attack/src/executor.rs` | `execute_category(PromptInjection, ctx)` |
+| **HTTP transport** | `promptlab-attack/src/transport/http.rs` | POST with JSON body template |
+| **Attack target** | `promptlab-attack/src/types.rs` | `AttackTarget::llm_api(url)` with `{{payload}}` placeholder |
 | **Attack context** | `types.rs` | `scan_id`, `probe_id`, budget |
-| **Attack results storage** | `aisec-storage` | `CreateAttackResult`, repository |
-| **Payload pipeline** | `aisec-payload` | Mutations (optional; attack has built-in payloads) |
+| **Attack results storage** | `promptlab-storage` | `CreateAttackResult`, repository |
+| **Payload pipeline** | `promptlab-payload` | Mutations (optional; attack has built-in payloads) |
 | **UI shell** | `AttacksPage.tsx` | Mock attack runs |
 
 ### Blocking this step
@@ -191,11 +191,11 @@ Inside `scan_run` after discovery:
 
 | Module | Location | Capability |
 |--------|----------|------------|
-| **Judge engine** | `crates/aisec-judge` | `JudgeEngine::judge_deterministic()` — no LLM required |
+| **Judge engine** | `crates/promptlab-judge` | `JudgeEngine::judge_deterministic()` — no LLM required |
 | **Rule evaluator** | `evaluators/rule.rs` | Substring signals per attack category |
 | **Regex evaluator** | `evaluators/regex.rs` | Credential/pattern matching |
 | **Consensus scoring** | `scoring.rs` | Weighted vote, confidence |
-| **Finding model** | `aisec-storage` | `CreateFinding`, severity, evidence_json |
+| **Finding model** | `promptlab-storage` | `CreateFinding`, severity, evidence_json |
 | **Finding repository** | `repositories/sqlite/finding.rs` | CRUD, FTS5 search |
 | **Inline attack evaluate** | `prompt_injection.rs` | Basic indicators (alternative to judge) |
 | **UI shell** | `FindingsPage.tsx` | Mock findings, local status toggle only |
@@ -234,10 +234,10 @@ Fix judge regex before MVP sign-off (or lower consensus threshold for determinis
 
 | Module | Location | Capability |
 |--------|----------|------------|
-| **Reporting engine** | `crates/aisec-report/src/engine.rs` | `generate(Html, input)` → writes file |
+| **Reporting engine** | `crates/promptlab-report/src/engine.rs` | `generate(Html, input)` → writes file |
 | **HTML formatter** | `formatters/html.rs` | Full report template |
 | **Report data builder** | `data.rs` | `ReportDataBuilder::build()`, `from_storage_findings()` |
-| **Report repository** | `aisec-storage` | `CreateReport`, list by project |
+| **Report repository** | `promptlab-storage` | `CreateReport`, list by project |
 | **UI shell** | `ReportsPage.tsx` | Mock report list |
 
 ### Blocking this step
@@ -298,13 +298,13 @@ Every step fails at the same architectural gap:
 
 | Module | Crate | MVP role |
 |--------|-------|----------|
-| Core errors/logging | `aisec-core` | IPC error mapping |
-| SQLite + repos | `aisec-storage` | Projects, targets, scans, findings, reports, attack results |
-| Discovery engine | `aisec-discovery` | Step 3 |
-| Attack framework | `aisec-attack` | Step 4 |
-| Payload library | `aisec-payload` | Optional; built-in payloads sufficient |
-| Judge engine | `aisec-judge` | Step 5 |
-| Report engine | `aisec-report` | Step 6 |
+| Core errors/logging | `promptlab-core` | IPC error mapping |
+| SQLite + repos | `promptlab-storage` | Projects, targets, scans, findings, reports, attack results |
+| Discovery engine | `promptlab-discovery` | Step 3 |
+| Attack framework | `promptlab-attack` | Step 4 |
+| Payload library | `promptlab-payload` | Optional; built-in payloads sufficient |
+| Judge engine | `promptlab-judge` | Step 5 |
+| Report engine | `promptlab-report` | Step 6 |
 | Desktop shell | `src-tauri` | Host — needs deps + commands |
 | UI pages | `src/features/*` | Shell — needs forms + IPC |
 
@@ -326,14 +326,14 @@ Every step fails at the same architectural gap:
 
 | Module | Reason |
 |--------|--------|
-| `aisec-plugin-host` | Plugins out of scope |
-| `aisec-models` / llama.cpp | Deterministic judge only |
-| `aisec-auth` / Playwright | Unauthenticated targets only |
-| `aisec-fingerprint` | Nice-to-have post-discovery |
+| `promptlab-plugin-host` | Plugins out of scope |
+| `promptlab-models` / llama.cpp | Deterministic judge only |
+| `promptlab-auth` / Playwright | Unauthenticated targets only |
+| `promptlab-fingerprint` | Nice-to-have post-discovery |
 | All 8 other attack categories | Prompt injection only |
 | PDF/SARIF export | HTML only |
 | Run Console / streaming events | Sync `scan_run` sufficient |
-| `aisec-orchestrator` crate | Inline in Tauri for MVP |
+| `promptlab-orchestrator` crate | Inline in Tauri for MVP |
 | Zustand / generated IPC types | Context store + hand-written DTOs OK |
 
 ---
@@ -406,7 +406,7 @@ For MVP, **one command wins**.
 
 ## Definition of Done
 
-- [ ] User creates project and target URL in UI → persisted in `~/.aisec/aisec.db`
+- [ ] User creates project and target URL in UI → persisted in `~/.promptlab/promptlab.db`
 - [ ] User clicks "Run Scan" → discovery crawls target
 - [ ] Prompt injection executes against resolved API endpoint
 - [ ] Findings appear in Findings page (from DB, not mock)

@@ -1,4 +1,4 @@
-use aisec_core::{AisecError, AisecResult};
+use promptlab_core::{PromptLabError, PromptLabResult};
 use serde_json::{json, Value};
 
 use super::store::{CredentialReferenceId, SecretScope, SecretStore};
@@ -11,9 +11,9 @@ const SECRET_KEYS: &[&str] = &["password", "token", "key", "value"];
 pub fn sanitize_target_descriptor(
     descriptor_json: &str,
     secrets: &SecretStore,
-) -> AisecResult<(String, bool)> {
+) -> PromptLabResult<(String, bool)> {
     let mut value: Value = serde_json::from_str(descriptor_json)
-        .map_err(|err| AisecError::invalid_input(format!("invalid descriptor json: {err}")))?;
+        .map_err(|err| PromptLabError::invalid_input(format!("invalid descriptor json: {err}")))?;
     let mut changed = sanitize_auth_block(value.get_mut("auth"), secrets)?;
     Ok((value.to_string(), changed))
 }
@@ -63,9 +63,9 @@ fn descriptor_value_has_plaintext(value: &Value) -> bool {
 pub fn resolve_descriptor_for_runtime(
     descriptor_json: &str,
     secrets: &SecretStore,
-) -> AisecResult<String> {
+) -> PromptLabResult<String> {
     let mut value: Value = serde_json::from_str(descriptor_json)
-        .map_err(|err| AisecError::invalid_input(format!("invalid descriptor json: {err}")))?;
+        .map_err(|err| PromptLabError::invalid_input(format!("invalid descriptor json: {err}")))?;
     resolve_auth_block(value.get_mut("auth"), secrets, false)?;
     Ok(value.to_string())
 }
@@ -74,14 +74,14 @@ pub fn resolve_descriptor_for_runtime(
 pub fn resolve_descriptor_for_wizard(
     descriptor_json: &str,
     secrets: &SecretStore,
-) -> AisecResult<String> {
+) -> PromptLabResult<String> {
     let mut value: Value = serde_json::from_str(descriptor_json)
-        .map_err(|err| AisecError::invalid_input(format!("invalid descriptor json: {err}")))?;
+        .map_err(|err| PromptLabError::invalid_input(format!("invalid descriptor json: {err}")))?;
     resolve_auth_block(value.get_mut("auth"), secrets, true)?;
     Ok(value.to_string())
 }
 
-fn sanitize_auth_block(auth: Option<&mut Value>, secrets: &SecretStore) -> AisecResult<bool> {
+fn sanitize_auth_block(auth: Option<&mut Value>, secrets: &SecretStore) -> PromptLabResult<bool> {
     let Some(auth_value) = auth else {
         return Ok(false);
     };
@@ -121,7 +121,7 @@ fn resolve_auth_block(
     auth: Option<&mut Value>,
     secrets: &SecretStore,
     lenient: bool,
-) -> AisecResult<()> {
+) -> PromptLabResult<()> {
     let Some(auth_value) = auth else {
         return Ok(());
     };
@@ -170,7 +170,7 @@ fn sanitize_secret_field(
     secret_key: &str,
     ref_key: &str,
     secrets: &SecretStore,
-) -> AisecResult<bool> {
+) -> PromptLabResult<bool> {
     if let Some(raw) = obj.remove(secret_key).and_then(|v| v.as_str().map(str::to_string)) {
         if raw.is_empty() {
             return Ok(false);
@@ -188,7 +188,7 @@ fn resolve_secret_field(
     secret_key: &str,
     secrets: &SecretStore,
     lenient: bool,
-) -> AisecResult<()> {
+) -> PromptLabResult<()> {
     if obj.contains_key(secret_key) {
         return Ok(());
     }

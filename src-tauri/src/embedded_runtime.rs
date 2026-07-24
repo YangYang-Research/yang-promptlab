@@ -2,10 +2,10 @@
 
 use std::path::Path;
 
-use aisec_core::AisecResult;
-use aisec_inference::config::InferenceMode;
-use aisec_models::ModelProvider;
-use aisec_runtime::RuntimeManager;
+use promptlab_core::PromptLabResult;
+use promptlab_inference::config::InferenceMode;
+use promptlab_models::ModelProvider;
+use promptlab_runtime::RuntimeManager;
 use tauri::{AppHandle, Manager};
 use tracing::{info, warn};
 
@@ -19,7 +19,7 @@ use crate::state::AppState;
 pub async fn bootstrap_runtime_manager(
     _app: &AppHandle,
     data_dir: &Path,
-) -> AisecResult<(RuntimeManager, bool)> {
+) -> PromptLabResult<(RuntimeManager, bool)> {
     let mut manager = RuntimeManager::new(data_dir);
 
     match manager.bootstrap().await {

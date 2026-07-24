@@ -216,7 +216,7 @@ pub fn template_for_provider(provider: TargetProvider) -> TargetProfile {
             r#"{
   "query": "{{PROMPT}}",
   "response_mode": "blocking",
-  "user": "aisec-probe"
+  "user": "promptlab-probe"
 }"#,
             None,
             Some("response_mode"),

@@ -1,10 +1,10 @@
 //! End-to-end attack framework integration tests.
 
-use aisec_attack::{
+use promptlab_attack::{
     AttackCategory, AttackContext, AttackExecutor, AttackOrchestrator, AttackRegistry,
     AttackTarget, MockTransport, OrchestratorConfig, ResultCollector,
 };
-use aisec_attack::lifecycle::AttackPhase;
+use promptlab_attack::lifecycle::AttackPhase;
 
 #[tokio::test]
 async fn full_orchestration_with_collector() {

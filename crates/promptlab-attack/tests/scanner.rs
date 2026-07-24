@@ -6,9 +6,9 @@
 //! mocked, and findings are derived from actual responses.
 #![cfg(feature = "storage")]
 
-use aisec_attack::scanner::{PromptInjectionScanner, ScanContext};
-use aisec_attack::{AttackBudget, AttackTarget};
-use aisec_storage::{
+use promptlab_attack::scanner::{PromptInjectionScanner, ScanContext};
+use promptlab_attack::{AttackBudget, AttackTarget};
+use promptlab_storage::{
     AttackResultRepository, CreateProject, CreateScan, Database, FindingRepository,
     ProjectRepository, ScanRepository,
 };

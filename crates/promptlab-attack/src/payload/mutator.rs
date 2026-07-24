@@ -1,4 +1,4 @@
-use aisec_payload::{base64_encode, unicode_obfuscate};
+use promptlab_payload::{base64_encode, unicode_obfuscate};
 
 use crate::error::AttackResult;
 use crate::payload::{MutatorConfig, MutatorKind};

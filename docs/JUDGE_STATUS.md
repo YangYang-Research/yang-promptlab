@@ -1,7 +1,7 @@
 # Judge Engine Status
 
-**Crate:** `aisec-judge` v0.1.0  
-**Dependency:** `aisec-models` (llama.cpp runtime)  
+**Crate:** `promptlab-judge` v0.1.0  
+**Dependency:** `promptlab-models` (llama.cpp runtime)  
 **Date:** 2026-06-10  
 **Classification:** **Partial implementation**
 
@@ -15,7 +15,7 @@
 | **2. Partial implementation** | **Yes** | Deterministic path works; LLM path untested with real models; consensus bug; no app integration |
 | **3. Skeleton** | No | 15 source modules, 3 evaluator backends, role pool, scoring engine |
 
-`aisec-judge` is a **working evaluation library**, not a skeleton. It is **not production-complete** because all automated LLM tests use `JsonMockRuntime`, llama.cpp is integrated only via external wiring, one integration test fails on consensus false-negative, and the engine is not connected to the attack pipeline or desktop app.
+`promptlab-judge` is a **working evaluation library**, not a skeleton. It is **not production-complete** because all automated LLM tests use `JsonMockRuntime`, llama.cpp is integrated only via external wiring, one integration test fails on consensus false-negative, and the engine is not connected to the attack pipeline or desktop app.
 
 ---
 
@@ -26,7 +26,7 @@
 | Capability | Status | Confidence | Evidence |
 |------------|--------|------------|----------|
 | Local model execution | **Partial** | High | `LlmEvaluator` calls `InferenceRuntime::complete()`; no CI test with real model |
-| llama.cpp integration | **Partial** | High | Implemented in `aisec-models`; judge uses trait only |
+| llama.cpp integration | **Partial** | High | Implemented in `promptlab-models`; judge uses trait only |
 | Rule-based evaluation | **Real** | High | Category signal rules + refusal detection; unit tests pass |
 | Regex evaluation | **Real** | High | 5 default patterns; unit tests pass; spaced-credential gap |
 
@@ -64,7 +64,7 @@ JudgeEngine::judge(request)
 
 ### Production wiring (manual, documented)
 
-`aisec-judge` does **not** instantiate a local model itself. Caller must inject a runtime:
+`promptlab-judge` does **not** instantiate a local model itself. Caller must inject a runtime:
 
 ```rust
 // From docs/JUDGE.md — caller-owned setup
@@ -93,18 +93,18 @@ The **inference call path is real** (trait-based, async, prompt + parse). **Veri
 
 ## 2. llama.cpp Integration
 
-**Status: Partial implementation (delegated to `aisec-models`)**
+**Status: Partial implementation (delegated to `promptlab-models`)**
 
 ### Where llama.cpp lives
 
-`aisec-judge` has **zero direct llama.cpp imports**. Integration is through `aisec-models::runtime::InferenceRuntime`.
+`promptlab-judge` has **zero direct llama.cpp imports**. Integration is through `promptlab-models::runtime::InferenceRuntime`.
 
 | Component | Crate | File | Behavior |
 |-----------|-------|------|----------|
-| `InferenceRuntime` trait | `aisec-models` | `runtime/mod.rs` | `load_model`, `unload`, `complete`, `health` |
-| `LlamaCppRuntime` | `aisec-models` | `runtime/llama_cpp.rs` | Spawns `llama-server` subprocess; POST `/completion` |
-| `LlamaCppConfig` | `aisec-models` | `runtime/llama_cpp.rs` | Binary path, host/port, GPU layers, ctx size |
-| `LocalModelManager` | `aisec-models` | `manager.rs` | Vault, download, verify, runtime lifecycle |
+| `InferenceRuntime` trait | `promptlab-models` | `runtime/mod.rs` | `load_model`, `unload`, `complete`, `health` |
+| `LlamaCppRuntime` | `promptlab-models` | `runtime/llama_cpp.rs` | Spawns `llama-server` subprocess; POST `/completion` |
+| `LlamaCppConfig` | `promptlab-models` | `runtime/llama_cpp.rs` | Binary path, host/port, GPU layers, ctx size |
+| `LocalModelManager` | `promptlab-models` | `manager.rs` | Vault, download, verify, runtime lifecycle |
 
 ### LlamaCppRuntime behavior (real)
 
@@ -121,29 +121,29 @@ Default binary: `llama-server` on port **8081**.
 ### Judge ↔ llama.cpp relationship
 
 ```
-aisec-judge                          aisec-models
+promptlab-judge                          promptlab-models
 ────────────                         ────────────
 LlmEvaluator ──complete()──►  InferenceRuntime trait
 ModelRolePool ──holds──►      Arc<Mutex<dyn InferenceRuntime>>
                                           ▲
                                           │ impl
                                    LlamaCppRuntime (llama-server HTTP)
-                                   JsonMockRuntime   (aisec-judge tests)
-                                   MockInferenceRuntime (aisec-models tests)
+                                   JsonMockRuntime   (promptlab-judge tests)
+                                   MockInferenceRuntime (promptlab-models tests)
 ```
 
 ### Gaps
 
 | Issue | Severity | Detail |
 |-------|----------|--------|
-| No judge-side factory for `LlamaCppRuntime` | Medium | Caller must know `aisec-models` API |
+| No judge-side factory for `LlamaCppRuntime` | Medium | Caller must know `promptlab-models` API |
 | No end-to-end judge + llama.cpp integration test | High | Requires binary + GGUF on disk |
 | `JsonMockRuntime` exported from judge public API | Low | Convenience for tests; blurs prod vs mock boundary |
 | Runtime not ready → LLM pass skipped | Medium | `LlamaCppRuntime::complete()` returns error if not `Ready`; engine swallows it |
 
 ### Classification rationale
 
-llama.cpp support is **real in `aisec-models`**. `aisec-judge` **consumes it correctly via trait** but **does not own, test, or ship** the runtime → **partial** at the judge layer.
+llama.cpp support is **real in `promptlab-models`**. `promptlab-judge` **consumes it correctly via trait** but **does not own, test, or ship** the runtime → **partial** at the judge layer.
 
 ---
 
@@ -246,9 +246,9 @@ All mock/simulated behavior in and around the judge engine:
 
 | Attribute | Detail |
 |-----------|--------|
-| **File** | `aisec-judge/src/mock_runtime.rs` |
+| **File** | `promptlab-judge/src/mock_runtime.rs` |
 | **Exported** | Yes — `pub use mock_runtime::JsonMockRuntime` in `lib.rs` |
-| **Implements** | `aisec_models::runtime::InferenceRuntime` |
+| **Implements** | `promptlab_models::runtime::InferenceRuntime` |
 | **Behavior** | Returns fixed JSON string from `complete()` regardless of prompt |
 | **Load model** | Sets `ready = true`; `complete()` works even when `Unloaded` (auto-ready comment) |
 | **Helpers** | `judge_vulnerable(confidence)`, `classifier(category)`, `new(json)` |
@@ -266,9 +266,9 @@ All mock/simulated behavior in and around the judge engine:
 
 | Attribute | Detail |
 |-----------|--------|
-| **File** | `aisec-models/src/runtime/mock.rs` |
+| **File** | `promptlab-models/src/runtime/mock.rs` |
 | **Behavior** | Returns `"{response_text} [mock: {prompt}]"` — not valid judge JSON |
-| **Used by judge** | ❌ No references in `aisec-judge` |
+| **Used by judge** | ❌ No references in `promptlab-judge` |
 
 ### 3. Test harness patterns (mock-adjacent)
 
@@ -375,8 +375,8 @@ JudgeEngine::judge(JudgeRequest)
 | llama.cpp E2E | ❌ None | No test spawns real `llama-server` |
 
 ```bash
-cargo test -p aisec-judge --lib              # 12/12 pass
-cargo test -p aisec-judge --test integration # 2/3 pass
+cargo test -p promptlab-judge --lib              # 12/12 pass
+cargo test -p promptlab-judge --test integration # 2/3 pass
 ```
 
 ---
@@ -388,8 +388,8 @@ cargo test -p aisec-judge --test integration # 2/3 pass
 | Library API (`JudgeEngine::judge`) | ✅ Callable |
 | Deterministic-only MVP path | ✅ `deterministic_engine()` / `judge_deterministic()` |
 | llama.cpp via `ModelRolePool` | ✅ Supported, manual setup |
-| `aisec-attack` post-eval hook | ❌ Attack uses its own heuristic `evaluate()` |
-| `aisec-storage` persistence | ❌ Verdicts not stored |
+| `promptlab-attack` post-eval hook | ❌ Attack uses its own heuristic `evaluate()` |
+| `promptlab-storage` persistence | ❌ Verdicts not stored |
 | Tauri IPC | ❌ Not wired |
 | UI | ❌ No judge page; mock findings in UI |
 
@@ -426,7 +426,7 @@ cargo test -p aisec-judge --test integration # 2/3 pass
 | Surface LLM skip errors to caller | ❌ |
 | Rule sets for all 9 attack categories | ❌ |
 | External rule/pattern configuration | ❌ |
-| Wire into `aisec-attack` executor | ❌ |
+| Wire into `promptlab-attack` executor | ❌ |
 | Tauri IPC + storage persistence | ❌ |
 
 ---
@@ -449,10 +449,10 @@ A skeleton would return hardcoded `JudgeVerdict` values or empty evaluator lists
 ## Final Classification
 
 ```
-aisec-judge
+promptlab-judge
 ├── Overall ...................... PARTIAL IMPLEMENTATION
 ├── Local model execution ........ PARTIAL (trait path real; CI all mock)
-├── llama.cpp integration ........ PARTIAL (in aisec-models; judge trait consumer)
+├── llama.cpp integration ........ PARTIAL (in promptlab-models; judge trait consumer)
 ├── Rule-based evaluation ........ REAL
 ├── Regex evaluation ............. REAL (spaced-credential false negative)
 ├── Mocked in CI ................. JsonMockRuntime (all LLM tests)

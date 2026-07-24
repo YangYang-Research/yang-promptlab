@@ -1,4 +1,4 @@
-//! Unified AI inference gateway for AISec.
+//! Unified AI inference gateway for PromptLab.
 //!
 //! All AI capabilities (judge, planner, generator, reports, future modules)
 //! must obtain inference exclusively through [`AiInferenceGateway`] / [`GatewaySession`].

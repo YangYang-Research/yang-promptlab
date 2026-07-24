@@ -1,18 +1,18 @@
 [plugin]
-id = "com.aisec.sample.discovery-openapi"
+id = "com.promptlab.sample.discovery-openapi"
 name = "OpenAPI Path Discovery"
 version = "1.0.0"
 api_version = "1"
 plugin_type = "discovery"
 language = "python"
 description = "Probes common OpenAPI and AI endpoint paths"
-author = "AISec"
+author = "PromptLab"
 
 [runtime]
 type = "subprocess"
 entry = "plugin.py"
 interpreter = "python3"
-min_aisec = "0.1.0"
+min_promptlab = "0.1.0"
 
 [capabilities]
 finding_emit = true

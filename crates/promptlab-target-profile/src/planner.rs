@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use aisec_attack::AttackCategory;
-use aisec_planner::types::{AttackPlan, CategoryRationale, PlannerMode};
+use promptlab_attack::AttackCategory;
+use promptlab_planner::types::{AttackPlan, CategoryRationale, PlannerMode};
 
 use crate::types::{TargetCapabilities, TargetProfile};
 

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 
 use crate::error::StorageResultExt;
 use crate::models::{CreatePlugin, Plugin, UpdatePlugin};
@@ -21,7 +21,7 @@ impl SqlitePluginRepository {
 
 #[async_trait]
 impl PluginRepository for SqlitePluginRepository {
-    async fn create(&self, input: CreatePlugin) -> AisecResult<Plugin> {
+    async fn create(&self, input: CreatePlugin) -> PromptLabResult<Plugin> {
         let id = new_id();
         let timestamp = now();
         let enabled = input.enabled.unwrap_or(false);
@@ -52,7 +52,7 @@ impl PluginRepository for SqlitePluginRepository {
         self.get(&id).await
     }
 
-    async fn get(&self, id: &str) -> AisecResult<Plugin> {
+    async fn get(&self, id: &str) -> PromptLabResult<Plugin> {
         sqlx::query_as::<_, Plugin>("SELECT * FROM plugins WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
@@ -60,7 +60,7 @@ impl PluginRepository for SqlitePluginRepository {
             .map_storage()
     }
 
-    async fn get_by_plugin_id(&self, plugin_id: &str) -> AisecResult<Plugin> {
+    async fn get_by_plugin_id(&self, plugin_id: &str) -> PromptLabResult<Plugin> {
         sqlx::query_as::<_, Plugin>("SELECT * FROM plugins WHERE plugin_id = ?")
             .bind(plugin_id)
             .fetch_one(&self.pool)
@@ -68,14 +68,14 @@ impl PluginRepository for SqlitePluginRepository {
             .map_storage()
     }
 
-    async fn list(&self) -> AisecResult<Vec<Plugin>> {
+    async fn list(&self) -> PromptLabResult<Vec<Plugin>> {
         sqlx::query_as::<_, Plugin>("SELECT * FROM plugins ORDER BY created_at DESC")
             .fetch_all(&self.pool)
             .await
             .map_storage()
     }
 
-    async fn update(&self, id: &str, input: UpdatePlugin) -> AisecResult<Plugin> {
+    async fn update(&self, id: &str, input: UpdatePlugin) -> PromptLabResult<Plugin> {
         let existing = self.get(id).await?;
         let name = input.name.unwrap_or(existing.name);
         let version = input.version.unwrap_or(existing.version);
@@ -110,7 +110,7 @@ impl PluginRepository for SqlitePluginRepository {
         self.get(id).await
     }
 
-    async fn delete(&self, id: &str) -> AisecResult<()> {
+    async fn delete(&self, id: &str) -> PromptLabResult<()> {
         let result = sqlx::query("DELETE FROM plugins WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
@@ -132,7 +132,7 @@ mod tests {
         let repo = db.repositories().plugins();
 
         repo.create(CreatePlugin {
-            plugin_id: "com.aisec.owasp".into(),
+            plugin_id: "com.promptlab.owasp".into(),
             name: "OWASP Pack".into(),
             version: "1.0.0".into(),
             enabled: Some(true),
@@ -142,11 +142,11 @@ mod tests {
         .await
         .unwrap();
 
-        let found = repo.get_by_plugin_id("com.aisec.owasp").await.unwrap();
+        let found = repo.get_by_plugin_id("com.promptlab.owasp").await.unwrap();
         assert!(found.enabled);
 
         let dup = repo.create(CreatePlugin {
-            plugin_id: "com.aisec.owasp".into(),
+            plugin_id: "com.promptlab.owasp".into(),
             name: "dup".into(),
             version: "1.0.1".into(),
             enabled: None,

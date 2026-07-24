@@ -1,7 +1,7 @@
 use thiserror::Error;
 
-use aisec_core::AisecError;
-use aisec_models::ModelError;
+use promptlab_core::PromptLabError;
+use promptlab_models::ModelError;
 
 #[derive(Debug, Error)]
 pub enum JudgeError {
@@ -21,7 +21,7 @@ pub enum JudgeError {
     Model(#[from] ModelError),
 
     #[error(transparent)]
-    Core(#[from] AisecError),
+    Core(#[from] PromptLabError),
 }
 
 pub type JudgeResult<T> = Result<T, JudgeError>;

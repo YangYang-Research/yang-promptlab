@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use aisec_models::runtime::InferenceRuntime;
-use aisec_models::{InferenceRequest, LocalModelManager};
+use promptlab_models::runtime::InferenceRuntime;
+use promptlab_models::{InferenceRequest, LocalModelManager};
 use tokio::sync::Mutex;
 
 use crate::error::RuntimeResult;
 use crate::provider::{ModelProvider, ModelProviderHealth};
 
-/// Bridges the embedded runtime supervisor to `aisec-models` vault operations.
+/// Bridges the embedded runtime supervisor to `promptlab-models` vault operations.
 pub struct EmbeddedModelProvider {
     manager: Arc<Mutex<LocalModelManager>>,
 }
@@ -61,7 +61,7 @@ impl ModelProvider for EmbeddedModelProvider {
         &self,
         model_id: &str,
         request: &InferenceRequest,
-    ) -> RuntimeResult<aisec_models::types::InferenceResponse> {
+    ) -> RuntimeResult<promptlab_models::types::InferenceResponse> {
         let manager = self.manager.lock().await;
         let engine = manager.inference_engine(model_id).await?;
         engine

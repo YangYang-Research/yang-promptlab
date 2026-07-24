@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 
-use aisec_core::AisecResult;
+use promptlab_core::PromptLabResult;
 
 use crate::error::StorageResultExt;
 use crate::models::{CreateReport, Report, UpdateReport};
@@ -21,7 +21,7 @@ impl SqliteReportRepository {
 
 #[async_trait]
 impl ReportRepository for SqliteReportRepository {
-    async fn create(&self, input: CreateReport) -> AisecResult<Report> {
+    async fn create(&self, input: CreateReport) -> PromptLabResult<Report> {
         let id = new_id();
         let timestamp = now();
         let status = input.status.unwrap_or_else(|| "pending".to_string());
@@ -53,7 +53,7 @@ impl ReportRepository for SqliteReportRepository {
         self.get(&id).await
     }
 
-    async fn get(&self, id: &str) -> AisecResult<Report> {
+    async fn get(&self, id: &str) -> PromptLabResult<Report> {
         sqlx::query_as::<_, Report>("SELECT * FROM reports WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
@@ -61,7 +61,7 @@ impl ReportRepository for SqliteReportRepository {
             .map_storage()
     }
 
-    async fn list_by_project(&self, project_id: &str) -> AisecResult<Vec<Report>> {
+    async fn list_by_project(&self, project_id: &str) -> PromptLabResult<Vec<Report>> {
         sqlx::query_as::<_, Report>(
             "SELECT * FROM reports WHERE project_id = ? ORDER BY created_at DESC",
         )
@@ -71,7 +71,7 @@ impl ReportRepository for SqliteReportRepository {
         .map_storage()
     }
 
-    async fn update(&self, id: &str, input: UpdateReport) -> AisecResult<Report> {
+    async fn update(&self, id: &str, input: UpdateReport) -> PromptLabResult<Report> {
         let existing = self.get(id).await?;
         let name = input.name.unwrap_or(existing.name);
         let format = input.format.unwrap_or(existing.format);
@@ -106,7 +106,7 @@ impl ReportRepository for SqliteReportRepository {
         self.get(id).await
     }
 
-    async fn delete(&self, id: &str) -> AisecResult<()> {
+    async fn delete(&self, id: &str) -> PromptLabResult<()> {
         let result = sqlx::query("DELETE FROM reports WHERE id = ?")
             .bind(id)
             .execute(&self.pool)

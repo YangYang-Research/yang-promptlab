@@ -72,7 +72,7 @@ impl ReportFormatter for CsvFormatter {
 
         // Prefix metadata as comment lines so spreadsheets stay findings-first.
         let header = format!(
-            "# aisec report_kind={} scan_id={} project={} target={} generated_at={}\n",
+            "# promptlab report_kind={} scan_id={} project={} target={} generated_at={}\n",
             kind.as_str(),
             csv_escape(&input.scan_id),
             csv_escape(&input.project_name),
@@ -86,7 +86,7 @@ impl ReportFormatter for CsvFormatter {
         Ok(GeneratedReport {
             kind,
             format: ReportFormat::Csv,
-            filename: format!("aisec-{}-{}.csv", kind.as_str(), input.scan_id),
+            filename: format!("promptlab-{}-{}.csv", kind.as_str(), input.scan_id),
             bytes,
             content_type: ReportFormat::Csv.content_type().into(),
         })

@@ -1,7 +1,7 @@
-# AISec Database Schema
+# PromptLab Database Schema
 
 **Engine:** SQLite 3 (WAL mode)  
-**Access layer:** `aisec-storage` (`sqlx` + embedded migrations)  
+**Access layer:** `promptlab-storage` (`sqlx` + embedded migrations)  
 **Version:** 001 — initial schema
 
 ---
@@ -274,7 +274,7 @@ Installed plugin registry.
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | TEXT PK | UUID v7 (internal) |
-| `plugin_id` | TEXT UNIQUE | Manifest ID e.g. `com.aisec.owasp` |
+| `plugin_id` | TEXT UNIQUE | Manifest ID e.g. `com.promptlab.owasp` |
 | `name` | TEXT | |
 | `version` | TEXT | Semver |
 | `enabled` | INTEGER | Boolean |
@@ -289,8 +289,8 @@ Installed plugin registry.
 
 | Version | File | Description |
 |---------|------|-------------|
-| 001 | `crates/aisec-storage/migrations/001_initial_schema.sql` | Core tables, indexes, FTS5 |
-| 002 | `crates/aisec-storage/migrations/002_auth_schema.sql` | Auth profiles, sessions, recordings |
+| 001 | `crates/promptlab-storage/migrations/001_initial_schema.sql` | Core tables, indexes, FTS5 |
+| 002 | `crates/promptlab-storage/migrations/002_auth_schema.sql` | Auth profiles, sessions, recordings |
 
 Migrations run automatically on `Database::connect()`.
 
@@ -298,7 +298,7 @@ Migrations run automatically on `Database::connect()`.
 
 ## Repository API
 
-Each table has an async trait in `aisec-storage::repositories` with SQLite implementation:
+Each table has an async trait in `promptlab-storage::repositories` with SQLite implementation:
 
 | Trait | CRUD | Extra queries |
 |-------|------|---------------|
@@ -315,7 +315,7 @@ Each table has an async trait in `aisec-storage::repositories` with SQLite imple
 Access via:
 
 ```rust
-let db = Database::connect("sqlite://path/to/aisec.db").await?;
+let db = Database::connect("sqlite://path/to/promptlab.db").await?;
 let repos = db.repositories();
 repos.projects().create(...).await?;
 ```

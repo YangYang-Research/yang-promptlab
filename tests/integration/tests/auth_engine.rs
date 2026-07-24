@@ -1,8 +1,8 @@
-use aisec_auth::{
+use promptlab_auth::{
     AuthConfig, AuthEngine, AuthEngineConfig, AuthMethod, AuthProfile, RecordLoginOptions,
     MockPlaywrightDriver, SessionStore,
 };
-use aisec_storage::Database;
+use promptlab_storage::Database;
 use std::sync::Arc;
 
 #[tokio::test]

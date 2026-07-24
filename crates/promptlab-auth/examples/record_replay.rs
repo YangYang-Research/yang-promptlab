@@ -2,21 +2,21 @@
 //!
 //! Run:
 //!   python3 scripts/auth-login-target.py
-//!   cargo run -p aisec-auth --example record_replay
+//!   cargo run -p promptlab-auth --example record_replay
 //!
 //! Requires the bundled Playwright runner dependencies:
-//!   (cd crates/aisec-auth/playwright && npm install && npx playwright install chromium)
+//!   (cd crates/promptlab-auth/playwright && npm install && npx playwright install chromium)
 
-use aisec_auth::{
+use promptlab_auth::{
     AuthConfig, AuthEngine, AuthEngineConfig, AuthMethod, AuthProfile, RecordLoginOptions,
     ReplayOptions, SessionStore,
 };
-use aisec_storage::Database;
+use promptlab_storage::Database;
 
 #[tokio::main]
 async fn main() {
     let base = std::env::var("AUTH_TARGET").unwrap_or_else(|_| "http://localhost:3200".into());
-    let vault = std::env::temp_dir().join("aisec-auth-demo-vault");
+    let vault = std::env::temp_dir().join("promptlab-auth-demo-vault");
     std::fs::create_dir_all(&vault).expect("vault dir");
 
     let db = Database::connect("sqlite::memory:").await.expect("db");

@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from aisec_plugin.protocol import host_call, read_message, respond, respond_error
+from promptlab_plugin.protocol import host_call, read_message, respond, respond_error
 
 
 @dataclass
@@ -26,7 +26,7 @@ Handler = Callable[[PluginContext], Any]
 
 
 class Plugin:
-    """Base AISec plugin with JSON-lines runtime loop."""
+    """Base PromptLab plugin with JSON-lines runtime loop."""
 
     handlers: dict[str, Handler] = {}
 
@@ -37,8 +37,8 @@ class Plugin:
     @classmethod
     def run(cls) -> None:
         ctx_base = PluginContext(
-            plugin_id=os.environ.get("AISEC_PLUGIN_ID", "unknown"),
-            plugin_dir=os.environ.get("AISEC_PLUGIN_DIR", "."),
+            plugin_id=os.environ.get("PROMPTLAB_PLUGIN_ID", "unknown"),
+            plugin_dir=os.environ.get("PROMPTLAB_PLUGIN_DIR", "."),
         )
 
         while True:

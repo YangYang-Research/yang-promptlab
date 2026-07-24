@@ -1,4 +1,4 @@
-//! SQLite persistence layer for AISec.
+//! SQLite persistence layer for PromptLab.
 
 pub mod auth_models;
 pub mod error;
@@ -138,7 +138,7 @@ mod integration_tests {
         repos
             .plugins()
             .create(CreatePlugin {
-                plugin_id: "com.aisec.builtin".into(),
+                plugin_id: "com.promptlab.builtin".into(),
                 name: "Built-in".into(),
                 version: "0.1.0".into(),
                 enabled: Some(true),

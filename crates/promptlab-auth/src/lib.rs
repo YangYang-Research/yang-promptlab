@@ -1,4 +1,4 @@
-//! AISec Authentication Engine — Playwright-backed login recording and session management.
+//! PromptLab Authentication Engine — Playwright-backed login recording and session management.
 
 pub mod config;
 pub mod cookies;

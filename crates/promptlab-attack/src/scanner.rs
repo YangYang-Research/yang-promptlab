@@ -9,11 +9,11 @@
 //! 3. **Capture responses** — the actual target responses, evaluated for
 //!    injection indicators.
 //! 4. **Store findings** — successful injections are persisted to SQLite via
-//!    `aisec-storage` (along with every probe as an `attack_result`).
+//!    `promptlab-storage` (along with every probe as an `attack_result`).
 //!
 //! This module is only compiled with the `storage` feature.
 
-use aisec_storage::{
+use promptlab_storage::{
     AttackResultRepository, CreateAttackResult, CreateFinding, Database, FindingRepository,
 };
 use tracing::{info, instrument};

@@ -7,7 +7,7 @@
 
 ## Summary
 
-AISec now has **one** persisted AI configuration: `ai_inference_settings.json` (`AiInferenceSettings`). All inference-consuming features route through **`AiRuntimeService`** (`src-tauri/src/ai_runtime_service.rs`).
+PromptLab now has **one** persisted AI configuration: `ai_inference_settings.json` (`AiInferenceSettings`). All inference-consuming features route through **`AiRuntimeService`** (`src-tauri/src/ai_runtime_service.rs`).
 
 Legacy `judge_config.json` is migrated automatically on startup and renamed to `judge_config.json.migrated`.
 
@@ -142,7 +142,7 @@ Model credentials for third-party APIs remain in **model registry metadata** + e
 | No judge configuration IPC | ✅ commands removed |
 | No Judge Provider page | ✅ removed |
 | Legacy judge config migrated | ✅ startup migration |
-| `cargo check -p aisec-desktop` | ✅ passes |
+| `cargo check -p promptlab-desktop` | ✅ passes |
 | `npm run build` | ✅ passes |
 
 ---
@@ -152,7 +152,7 @@ Model credentials for third-party APIs remain in **model registry metadata** + e
 | Item | Notes |
 |------|-------|
 | Fingerprint LLM usage | Fingerprint engine is rule-based HTTP; no separate LLM config existed — N/A |
-| Report generator AI | Reports remain deterministic (`aisec-report`); no LLM path today |
+| Report generator AI | Reports remain deterministic (`promptlab-report`); no LLM path today |
 | `stream()` on AiRuntimeService | Not exposed yet; all backends use `stream: false` |
 | `embed()` on AiRuntimeService | Embeddings IPC exists (`models_test_embeddings`) but not wired through runtime service |
 | AIRuntimePage test buttons | IPC added; UI can call `testRuntimeConnectivity` / `testRuntimeInference` (optional UX follow-up) |

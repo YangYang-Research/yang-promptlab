@@ -3,14 +3,14 @@
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use aisec_auth::SecretStore;
-use aisec_core::{AisecError, LogCategory};
-use aisec_models::{
+use promptlab_auth::SecretStore;
+use promptlab_core::{PromptLabError, LogCategory};
+use promptlab_models::{
     DownloadManager, DownloadProgress, DownloadStatus, LocalModelManager, ModelCatalogEntry,
     ModelEntry, ModelFormat, ModelProvider, ModelSource, VerificationResult, remote_entry_id,
 };
-use aisec_inference::prompts::PromptRegistry;
-use aisec_runtime::{InferRequest, RuntimeError};
+use promptlab_inference::prompts::PromptRegistry;
+use promptlab_runtime::{InferRequest, RuntimeError};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tauri::async_runtime::Mutex as AsyncMutex;
@@ -20,8 +20,8 @@ use crate::inference_host::test_remote_connectivity_only;
 use crate::inference_settings::{
     apply_third_party_health_check, format_health_check_timestamp,
 };
-use aisec_inference::config::InferenceMode;
-use aisec_inference::InferenceRuntimeManager;
+use promptlab_inference::config::InferenceMode;
+use promptlab_inference::InferenceRuntimeManager;
 use crate::error::{CommandError, CommandResult};
 use crate::state::AppState;
 use crate::third_party_credentials::{
@@ -444,7 +444,7 @@ async fn run_third_party_connectivity_test(
         Some(credentials.aws_secret_access_key).filter(|s| !s.trim().is_empty()),
         Some(credentials.aws_session_token).filter(|s| !s.trim().is_empty()),
     )
-    .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+    .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     let result = test_remote_connectivity_only(&entry, remote).await?;
 
     log_model_connectivity_test(
@@ -479,7 +479,7 @@ fn staging_remote_entry(
         format: ModelFormat::Api,
         provider: ModelProvider::Remote,
         version: String::new(),
-        capabilities: aisec_models::ModelCapabilities {
+        capabilities: promptlab_models::ModelCapabilities {
             chat: true,
             completion: true,
             embeddings: false,
@@ -570,7 +570,7 @@ pub(crate) fn entry_to_dto(entry: &ModelEntry, vault: &std::path::Path) -> Model
         size_bytes: entry.size_bytes,
         size_gb,
         verified,
-        path: aisec_models::ModelRegistry::display_uri(vault, &entry.file_path),
+        path: promptlab_models::ModelRegistry::display_uri(vault, &entry.file_path),
         sha256: entry.checksum_sha256.clone(),
         capabilities: ModelCapabilitiesDto {
             chat: entry.capabilities.chat,
@@ -693,7 +693,7 @@ async fn run_download_finalize(
         manager
             .prepare_finalize()
             .await
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?
     };
 
     let Some(plan) = plan else {
@@ -708,7 +708,7 @@ async fn run_download_finalize(
         );
     }
 
-    let verification = match aisec_models::VerificationEngine::verify_file(
+    let verification = match promptlab_models::VerificationEngine::verify_file(
         &plan.destination,
         expected_sha256,
     )
@@ -729,7 +729,7 @@ async fn run_download_finalize(
     let entry = manager
         .complete_finalize(plan, verification)
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
 
     let vault = manager.vault_path().to_path_buf();
     Ok(entry.map(|item| entry_to_dto(&item, &vault)))
@@ -873,7 +873,7 @@ pub async fn models_install(
     let entry = manager
         .install_catalog(&request.catalog_id, None)
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     let vault = manager.vault_path().to_path_buf();
     Ok(entry_to_dto(&entry, &vault))
 }
@@ -914,14 +914,14 @@ pub async fn models_save_third_party(
             resolve_third_party_base_url(&provider, request.base_url.clone(), Some(model)),
             request.region.clone().filter(|value| !value.trim().is_empty()),
         )
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
 
     if let Some(old_id) = existing_id {
         if old_id != entry.id {
             manager
                 .remove_model(old_id)
                 .await
-                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+                .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
         }
     }
 
@@ -948,7 +948,7 @@ pub async fn models_save_third_party(
 
         manager
             .update_model_metadata(&entry.id, metadata)
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
 
         let is_new_model = existing_id.is_none();
         let renamed = existing_id.is_some_and(|old_id| old_id != entry.id);
@@ -964,14 +964,14 @@ pub async fn models_save_third_party(
             apply_model_connectivity_metadata(&mut metadata, true, latency_ms, &checked_at);
             manager
                 .update_model_metadata(&entry.id, metadata)
-                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+                .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
             manager
                 .set_model_verified(&entry.id, true)
-                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+                .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
         } else if is_new_model || renamed || credential_input_changed {
             manager
                 .set_model_verified(&entry.id, false)
-                .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+                .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
         }
     } else {
         return Err(CommandError::invalid_input(
@@ -1096,10 +1096,10 @@ async fn persist_third_party_model_connectivity(
         apply_model_connectivity_metadata(&mut metadata, ok, latency_ms, &checked_at);
         manager
             .update_model_metadata(model_id, metadata)
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
         manager
             .set_model_verified(model_id, ok)
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     }
 
     let mut inference = state.inference_manager().lock().await;
@@ -1113,7 +1113,7 @@ async fn persist_third_party_model_connectivity(
         inference
             .save()
             .await
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     }
 
     Ok(())
@@ -1127,7 +1127,7 @@ pub async fn models_import_gguf(
     let mut manager = state.model_manager().lock().await;
     let entry = manager
         .import_local(&request.name, &request.path)
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     let vault = manager.vault_path().to_path_buf();
     Ok(entry_to_dto(&entry, &vault))
 }
@@ -1140,7 +1140,7 @@ pub async fn models_import_zip(
     let mut manager = state.model_manager().lock().await;
     let entry = manager
         .import_zip_package(&request.name, &request.path)
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     let vault = manager.vault_path().to_path_buf();
     Ok(entry_to_dto(&entry, &vault))
 }
@@ -1154,7 +1154,7 @@ pub async fn models_download_start(
     let progress = manager
         .start_catalog_download(&request.catalog_id)
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     Ok(progress_to_dto(&progress))
 }
 
@@ -1173,7 +1173,7 @@ pub async fn models_download_pause(
     let progress = manager
         .pause_download()
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     Ok(progress_to_dto(&progress))
 }
 
@@ -1185,7 +1185,7 @@ pub async fn models_download_resume(
     let progress = manager
         .resume_download()
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     Ok(progress_to_dto(&progress))
 }
 
@@ -1199,7 +1199,7 @@ pub async fn models_download_retry_verify(
         manager
             .begin_catalog_verify(&request.catalog_id)
             .await
-            .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?
     };
     spawn_download_finalize(state.inner());
     Ok(ModelDownloadStatusDto {
@@ -1217,7 +1217,7 @@ pub async fn models_download_cancel_verify(
     let progress = manager
         .cancel_catalog_verify()
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     Ok(progress_to_dto_enriched(&progress).await)
 }
 
@@ -1227,7 +1227,7 @@ pub async fn models_download_cancel(state: State<'_, AppState>) -> CommandResult
     manager
         .cancel_download()
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 
 #[tauri::command]
@@ -1239,7 +1239,7 @@ pub async fn models_remove(
     let entry = manager
         .remove_model(&model_id)
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     let vault = manager.vault_path().to_path_buf();
     Ok(entry_to_dto(&entry, &vault))
 }
@@ -1253,7 +1253,7 @@ pub async fn models_verify(
     manager
         .verify_model(&model_id)
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 
 fn runtime_unavailable_error() -> CommandError {
@@ -1265,14 +1265,14 @@ fn runtime_unavailable_error() -> CommandError {
 fn map_runtime_err(err: RuntimeError) -> CommandError {
     match err {
         RuntimeError::Unavailable => runtime_unavailable_error(),
-        other => CommandError::from(AisecError::internal(other.to_string())),
+        other => CommandError::from(PromptLabError::internal(other.to_string())),
     }
 }
 
-fn map_runtime_test_error(err: RuntimeError, _supervisor: &aisec_runtime::RuntimeSupervisor) -> CommandError {
+fn map_runtime_test_error(err: RuntimeError, _supervisor: &promptlab_runtime::RuntimeSupervisor) -> CommandError {
     match err {
         RuntimeError::Unavailable => runtime_unavailable_error(),
-        other => CommandError::from(AisecError::internal(other.to_string())),
+        other => CommandError::from(PromptLabError::internal(other.to_string())),
     }
 }
 
@@ -1409,13 +1409,13 @@ pub async fn models_test_embeddings(
     let engine = manager
         .inference_engine(&model_id)
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     let response = engine
-        .embeddings(aisec_models::EmbeddingRequest {
-            input: input.unwrap_or_else(|| "AISec embedding test".into()),
+        .embeddings(promptlab_models::EmbeddingRequest {
+            input: input.unwrap_or_else(|| "PromptLab embedding test".into()),
         })
         .await
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     Ok(ModelInferenceTestResult {
         ok: !response.vector.is_empty(),
         mode: "embeddings".into(),
@@ -1438,7 +1438,7 @@ pub async fn models_vault_stats_op(state: &AppState) -> CommandResult<ModelVault
     let manager = state.model_manager().lock().await;
     let stats = manager
         .vault_stats()
-        .map_err(|e| CommandError::from(AisecError::internal(e.to_string())))?;
+        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     Ok(ModelVaultStatsDto {
         vault_path: stats.vault_path.to_string_lossy().into_owned(),
         registered_count: stats.registered_count,

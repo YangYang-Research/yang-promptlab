@@ -8,8 +8,8 @@
 
 | # | Item | Status | Where |
 |---|------|--------|-------|
-| 1 | Project Repository | ✅ **Exists (complete CRUD)** | `crates/aisec-storage` |
-| 2 | Project DTOs | ✅ **Exists** (storage models + Rust/TS IPC DTOs) | `aisec-storage` + `src-tauri` + `src/shared/ipc` |
+| 1 | Project Repository | ✅ **Exists (complete CRUD)** | `crates/promptlab-storage` |
+| 2 | Project DTOs | ✅ **Exists** (storage models + Rust/TS IPC DTOs) | `promptlab-storage` + `src-tauri` + `src/shared/ipc` |
 | 3 | Project Service | ⚠️ **Partial** — command-op layer, no dedicated service module; **update not exposed** | `src-tauri/src/commands/domain.rs` |
 | 4 | SQLite persistence | ✅ **Exists** | `migrations/001_initial_schema.sql` + `Database` / `AppState` |
 
@@ -21,15 +21,15 @@ IPC wrapper `updateProject` (**I1**). No new repository, schema, or service modu
 
 ## 1. Project Repository — ✅ Exists (complete CRUD)
 
-- **Trait:** `ProjectRepository` — `crates/aisec-storage/src/repositories/traits.rs`
+- **Trait:** `ProjectRepository` — `crates/promptlab-storage/src/repositories/traits.rs`
   - `create(CreateProject) -> Project`
   - `get(id) -> Project`
   - `list() -> Vec<Project>`
   - `update(id, UpdateProject) -> Project`
   - `delete(id) -> ()`
-- **Implementation:** `SqliteProjectRepository` — `crates/aisec-storage/src/repositories/sqlite/project.rs`
+- **Implementation:** `SqliteProjectRepository` — `crates/promptlab-storage/src/repositories/sqlite/project.rs`
   - Real SQL for all five methods, including partial `update` (merge optional fields, bump `updated_at`).
-- **Factory:** `Repositories::projects()` — `crates/aisec-storage/src/repositories/sqlite/mod.rs`
+- **Factory:** `Repositories::projects()` — `crates/promptlab-storage/src/repositories/sqlite/mod.rs`
 - **Tests:** `project_crud` unit test in `project.rs` (create → update → list → delete).
 
 **Refactor impact:** B1 (`project_update` command) calls `update` directly — no repository work needed.
@@ -38,7 +38,7 @@ IPC wrapper `updateProject` (**I1**). No new repository, schema, or service modu
 
 ## 2. Project DTOs — ✅ Exists
 
-### Storage / domain models (`crates/aisec-storage/src/models.rs`)
+### Storage / domain models (`crates/promptlab-storage/src/models.rs`)
 
 | Type | Purpose |
 |------|---------|
@@ -87,7 +87,7 @@ beyond the plan.
 
 ### Schema
 
-- `crates/aisec-storage/migrations/001_initial_schema.sql`:
+- `crates/promptlab-storage/migrations/001_initial_schema.sql`:
   ```sql
   CREATE TABLE IF NOT EXISTS projects (
       id          TEXT PRIMARY KEY NOT NULL,
@@ -101,10 +101,10 @@ beyond the plan.
 
 ### Runtime
 
-- `Database::connect` / `Database::connect_path` — `crates/aisec-storage/src/pool.rs`
+- `Database::connect` / `Database::connect_path` — `crates/promptlab-storage/src/pool.rs`
   - Embeds migrations via `sqlx::migrate!("./migrations")`, applies on connect.
   - WAL journal (with TRUNCATE fallback), foreign keys enabled.
-- Desktop app opens `<app_data_dir>/aisec.db` — `src-tauri/src/db.rs` (`DB_FILENAME = "aisec.db"`).
+- Desktop app opens `<app_data_dir>/promptlab.db` — `src-tauri/src/db.rs` (`DB_FILENAME = "promptlab.db"`).
 - `AppState` holds `Database` and exposes `repositories()` — `src-tauri/src/state.rs`.
 
 ### Tests

@@ -38,7 +38,7 @@ impl ErrorCode {
 
 /// Application-wide error type for Rust services.
 #[derive(Debug, Error)]
-pub enum AisecError {
+pub enum PromptLabError {
     #[error("[{code}] {message}")]
     Tagged {
         code: ErrorCode,
@@ -60,9 +60,9 @@ pub enum AisecError {
     Io(#[from] std::io::Error),
 }
 
-pub type AisecResult<T> = Result<T, AisecError>;
+pub type PromptLabResult<T> = Result<T, PromptLabError>;
 
-impl AisecError {
+impl PromptLabError {
     pub fn internal(message: impl Into<String>) -> Self {
         Self::Tagged {
             code: ErrorCode::Internal,
@@ -110,9 +110,9 @@ mod tests {
 
     #[test]
     fn error_codes_are_stable() {
-        assert_eq!(AisecError::config("missing key").code(), ErrorCode::Config);
+        assert_eq!(PromptLabError::config("missing key").code(), ErrorCode::Config);
         assert_eq!(
-            AisecError::invalid_input("bad uuid").code(),
+            PromptLabError::invalid_input("bad uuid").code(),
             ErrorCode::InvalidInput
         );
     }

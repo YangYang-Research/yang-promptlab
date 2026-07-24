@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use aisec_models::ModelEntry;
-use aisec_runtime::{RuntimeManager, SharedModelProvider};
+use promptlab_models::ModelEntry;
+use promptlab_runtime::{RuntimeManager, SharedModelProvider};
 use async_trait::async_trait;
 
 use crate::capabilities::ModelCapabilities;

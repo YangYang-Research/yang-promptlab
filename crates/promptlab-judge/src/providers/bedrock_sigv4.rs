@@ -182,7 +182,7 @@ mod tests {
     }
 
     /// Run manually: `AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_SESSION_TOKEN=... \
-    /// cargo test -p aisec-judge bedrock_live_converse -- --ignored --nocapture`
+    /// cargo test -p promptlab-judge bedrock_live_converse -- --ignored --nocapture`
     #[tokio::test]
     #[ignore = "requires live AWS Bedrock credentials"]
     async fn bedrock_live_converse() {

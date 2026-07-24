@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * AISec Playwright runner — JSON-lines protocol over stdin/stdout.
+ * PromptLab Playwright runner — JSON-lines protocol over stdin/stdout.
  *
  * Commands: launch, close, record_login, replay_session, extract_tokens,
  *           get_cookies, set_cookies

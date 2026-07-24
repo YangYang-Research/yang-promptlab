@@ -1,4 +1,4 @@
-# AISec — Mock / Placeholder Removal Plan
+# PromptLab — Mock / Placeholder Removal Plan
 
 > **Trạng thái (2026-06-12):** Một phần đã thực hiện (PR #19: xóa `src/shared/mock/data.ts`,
 > IPC-backed store). Các mục còn lại trong tài liệu vẫn có thể áp dụng.
@@ -57,7 +57,7 @@ never hydrates from the backend.
 | `src/shared/mock/data.ts` | `mockReports` | Load via `report_list` / result of `report_generate` | **P0** |
 | `src/shared/mock/data.ts` | `mockDiscoveryJobs` | Derive from `scan_run` result/status | P1 |
 | `src/shared/mock/data.ts` | `mockAttackRuns` | Derive from `scan_run` / attack results | P1 |
-| `src/shared/mock/data.ts` | `mockModels` | Load from `aisec-models` registry via IPC | P2 (optional module) |
+| `src/shared/mock/data.ts` | `mockModels` | Load from `promptlab-models` registry via IPC | P2 (optional module) |
 | `src/shared/mock/data.ts` | `mockActivity` | Derive from scan/finding events or audit log | P2 |
 | `src/shared/mock/data.ts` | `computeDashboardStats`, `severityCounts` | Recompute from real findings/scan data | P1 |
 | `src/app/store/AppStore.tsx` | `initialState` (seeded from all 8 mocks, lines 24-31) | Start empty; populate via IPC calls on mount; add reducer actions for create/list | **P0** |
@@ -85,7 +85,7 @@ store from IPC, and ensure the "Connected" badge reflects a real DB-backed backe
 | `src/features/attacks/AttacksPage.tsx:77,78,90` | "Playbook", "Launch Attack", "Configure" (×9) | Attack config/launch UI | P2 |
 | `src/features/findings/FindingsPage.tsx:88,89` | "Export SARIF", "Triage" | SARIF export + triage workflow | P2 |
 | `src/features/reports/ReportsPage.tsx:69,83` | "Download", "Templates" | Report download + template picker | P2 |
-| `src/features/models/ModelsPage.tsx:20,21,54,55,59,62` | "Browse HuggingFace", "Download Model", "Verify", "Remove", "Download", "Cancel" | Wire to `aisec-models` via IPC | P2 (optional module) |
+| `src/features/models/ModelsPage.tsx:20,21,54,55,59,62` | "Browse HuggingFace", "Download Model", "Verify", "Remove", "Download", "Cancel" | Wire to `promptlab-models` via IPC | P2 (optional module) |
 | `src/features/settings/SettingsPage.tsx:124` | "View Logs" | Open log directory/file | P2 |
 | `src/features/findings/FindingsPage.tsx` | `UPDATE_FINDING_STATUS` (in-memory) | Persist status via IPC | P2 |
 | `src/features/settings/SettingsPage.tsx` | `UPDATE_SETTING` (in-memory) | Persist settings (config file/DB) | P2 |
@@ -97,8 +97,8 @@ store from IPC, and ensure the "Connected" badge reflects a real DB-backed backe
 | File | Function | Real implementation required | Priority |
 |------|----------|------------------------------|----------|
 | `src-tauri/src/commands/mod.rs` | `health`, `app_info` (only commands) | Add domain commands: `project_create`, `project_list`, `target_create`, `scan_run`, `findings_list`, `report_generate` | **P0** |
-| `src-tauri/src/state.rs` | `AppState` (holds only `_log_guard`) | Add a `Database` handle (open SQLite via `aisec-storage` on startup) | **P0** |
-| `src-tauri/Cargo.toml` | dependencies (only `aisec-core`) | Add `aisec-storage`, `aisec-discovery`, `aisec-attack`, `aisec-report` (+ transitive `aisec-payload`); add a thin `scan_run` orchestrator | **P0** |
+| `src-tauri/src/state.rs` | `AppState` (holds only `_log_guard`) | Add a `Database` handle (open SQLite via `promptlab-storage` on startup) | **P0** |
+| `src-tauri/Cargo.toml` | dependencies (only `promptlab-core`) | Add `promptlab-storage`, `promptlab-discovery`, `promptlab-attack`, `promptlab-report` (+ transitive `promptlab-payload`); add a thin `scan_run` orchestrator | **P0** |
 
 ---
 
@@ -108,13 +108,13 @@ These silently drop a parameter or substitute a hardcoded value in non-test code
 
 | File | Function | Real implementation required | Priority |
 |------|----------|------------------------------|----------|
-| `crates/aisec-core/src/logging.rs:66` | `init_logging` — `let _ = options.json_file;` | Honor the `json_file` flag (emit JSON-formatted file logs) or remove the flag | P2 |
-| `crates/aisec-auth/src/engine.rs:255` | `authenticate_api_key` — `let _ = header_name;` | Persist/apply the custom header name for downstream HTTP auth | P2 (auth is optional for MVP) |
-| `crates/aisec-attack/src/orchestrator.rs:97` | `run` — `let _ = idx;` | Implement real concurrency using `OrchestratorConfig.concurrency` (currently sequential) | P2 |
-| `crates/aisec-fingerprint/src/scoring.rs` | `suggest_method()` returns hardcoded `Some("POST")` | Derive method from matched signals/provider | P2 (fingerprint optional) |
-| `crates/aisec-models/src/hardware/detect.rs:79` | RAM fallback hardcodes 8 GiB on non-Linux/macOS | Real detection for other platforms or surface "unknown" | P2 |
-| `crates/aisec-models/src/types.rs:134` | `recommended_gpu_layers()` returns flat 35/0 | VRAM-aware layer count | P2 |
-| `crates/aisec-discovery/src/engine.rs` | `ProbeOutput.errors` always empty | Record probe failures so the UI/report can show coverage gaps | P1 |
+| `crates/promptlab-core/src/logging.rs:66` | `init_logging` — `let _ = options.json_file;` | Honor the `json_file` flag (emit JSON-formatted file logs) or remove the flag | P2 |
+| `crates/promptlab-auth/src/engine.rs:255` | `authenticate_api_key` — `let _ = header_name;` | Persist/apply the custom header name for downstream HTTP auth | P2 (auth is optional for MVP) |
+| `crates/promptlab-attack/src/orchestrator.rs:97` | `run` — `let _ = idx;` | Implement real concurrency using `OrchestratorConfig.concurrency` (currently sequential) | P2 |
+| `crates/promptlab-fingerprint/src/scoring.rs` | `suggest_method()` returns hardcoded `Some("POST")` | Derive method from matched signals/provider | P2 (fingerprint optional) |
+| `crates/promptlab-models/src/hardware/detect.rs:79` | RAM fallback hardcodes 8 GiB on non-Linux/macOS | Real detection for other platforms or surface "unknown" | P2 |
+| `crates/promptlab-models/src/types.rs:134` | `recommended_gpu_layers()` returns flat 35/0 | VRAM-aware layer count | P2 |
+| `crates/promptlab-discovery/src/engine.rs` | `ProbeOutput.errors` always empty | Record probe failures so the UI/report can show coverage gaps | P1 |
 
 ---
 
@@ -125,15 +125,15 @@ class).
 
 | File | Function / symbol | Real implementation required | Priority |
 |------|-------------------|------------------------------|----------|
-| `crates/aisec-discovery/src/crawler.rs` | worker pool (`notify_one`/`in_flight` race) | Fix multi-worker deadlock so `worker_count > 1` works (MVP runs `1` as workaround) | **P1** (B4) |
-| `crates/aisec-discovery/src/detectors/ai.rs` | `probe_ai_paths` skips POST on GET 404 | POST when GET is 404/405 so `/v1/chat/completions` is found | **P1** (B6) |
-| `crates/aisec-discovery/src/url_policy.rs` | SSRF guard | DNS resolution + redirect re-validation (hostname/literal-IP only today) | P2 |
-| `crates/aisec-attack/src/types.rs` | `AttackBudget.max_mutations_per_payload` (unused) | Enforce in mutator (uses hardcoded `max_per_payload: 3`) | P1 |
-| `crates/aisec-attack/src/types.rs` | `TargetKind`, `PayloadFormat::MultiTurn` (unused) | Route by target kind; support multi-turn attacks | P2 |
-| `crates/aisec-attack/src/error.rs` | `BudgetExhausted`, `Cancelled` (never constructed) | Wire budget/cancellation paths | P2 |
-| `crates/aisec-attack/src/traits.rs` | `supported_mutators()` (never called) | Use it to gate mutator selection per attack | P2 |
-| `crates/aisec-report/src/charts.rs:64` & `formatters/pdf.rs` | PDF "simplified as stacked bars"; single physical page | Real PDF pagination + risk-gauge/category charts | P2 (PDF not in MVP) |
-| `crates/aisec-plugin-host/src/permissions.rs` & `sandbox/runner.rs` | `check_path_read` never called; `max_output_bytes` unused; env stripping = 2 keys; `$PLUGIN_DIR` not expanded; host calls audit-only | Real permission enforcement + output cap + env hygiene + path expansion | P2 (plugin host not in MVP) |
+| `crates/promptlab-discovery/src/crawler.rs` | worker pool (`notify_one`/`in_flight` race) | Fix multi-worker deadlock so `worker_count > 1` works (MVP runs `1` as workaround) | **P1** (B4) |
+| `crates/promptlab-discovery/src/detectors/ai.rs` | `probe_ai_paths` skips POST on GET 404 | POST when GET is 404/405 so `/v1/chat/completions` is found | **P1** (B6) |
+| `crates/promptlab-discovery/src/url_policy.rs` | SSRF guard | DNS resolution + redirect re-validation (hostname/literal-IP only today) | P2 |
+| `crates/promptlab-attack/src/types.rs` | `AttackBudget.max_mutations_per_payload` (unused) | Enforce in mutator (uses hardcoded `max_per_payload: 3`) | P1 |
+| `crates/promptlab-attack/src/types.rs` | `TargetKind`, `PayloadFormat::MultiTurn` (unused) | Route by target kind; support multi-turn attacks | P2 |
+| `crates/promptlab-attack/src/error.rs` | `BudgetExhausted`, `Cancelled` (never constructed) | Wire budget/cancellation paths | P2 |
+| `crates/promptlab-attack/src/traits.rs` | `supported_mutators()` (never called) | Use it to gate mutator selection per attack | P2 |
+| `crates/promptlab-report/src/charts.rs:64` & `formatters/pdf.rs` | PDF "simplified as stacked bars"; single physical page | Real PDF pagination + risk-gauge/category charts | P2 (PDF not in MVP) |
+| `crates/promptlab-plugin-host/src/permissions.rs` & `sandbox/runner.rs` | `check_path_read` never called; `max_output_bytes` unused; env stripping = 2 keys; `$PLUGIN_DIR` not expanded; host calls audit-only | Real permission enforcement + output cap + env hygiene + path expansion | P2 (plugin host not in MVP) |
 
 ---
 
@@ -144,10 +144,10 @@ these are not used on production paths. Keep them; do not "remove."
 
 | File | Symbol | Real implementation (already exists) | Priority |
 |------|--------|--------------------------------------|----------|
-| `crates/aisec-attack/src/transport/mock.rs` | `MockTransport` (always returns response index 0) | `transport/http.rs` `HttpTransport` (production default) | P3 keep |
-| `crates/aisec-models/src/runtime/mock.rs` | `MockInferenceRuntime` | `runtime/llama_cpp.rs` `LlamaCppRuntime` (production default) | P3 keep |
-| `crates/aisec-auth/src/mock.rs` | `MockPlaywrightDriver` | `playwright/client.rs` `PlaywrightClient` (production default) | P3 keep |
-| `crates/aisec-judge/src/mock_runtime.rs` | `JsonMockRuntime` | Any real `InferenceRuntime` (e.g. `LlamaCppRuntime`) | P3 keep |
+| `crates/promptlab-attack/src/transport/mock.rs` | `MockTransport` (always returns response index 0) | `transport/http.rs` `HttpTransport` (production default) | P3 keep |
+| `crates/promptlab-models/src/runtime/mock.rs` | `MockInferenceRuntime` | `runtime/llama_cpp.rs` `LlamaCppRuntime` (production default) | P3 keep |
+| `crates/promptlab-auth/src/mock.rs` | `MockPlaywrightDriver` | `playwright/client.rs` `PlaywrightClient` (production default) | P3 keep |
+| `crates/promptlab-judge/src/mock_runtime.rs` | `JsonMockRuntime` | Any real `InferenceRuntime` (e.g. `LlamaCppRuntime`) | P3 keep |
 
 > Note: these are `pub`-exported from their crates. That is acceptable for test harnesses across the
 > workspace, but consider gating behind a `#[cfg(any(test, feature = "test-util"))]` so they cannot
@@ -161,10 +161,10 @@ Hardcoded bytes/paths inside `#[cfg(test)]` code. Not production placeholders.
 
 | File | Location | Note | Priority |
 |------|----------|------|----------|
-| `crates/aisec-models/tests/integration.rs:15` | `b"GGUF-stub-model-bytes-for-test"` | Test GGUF bytes | P3 keep |
-| `crates/aisec-models/tests/integration.rs:59` | `/tmp/fake.gguf` | Test path | P3 keep |
-| `crates/aisec-models/src/registry.rs:132` | `b"gguf-stub"` (in `#[cfg(test)]`) | Test fixture | P3 keep |
-| `crates/aisec-plugin-host/src/manager.rs:276` | `"print('stub')"` (in `#[cfg(test)]`) | Test plugin body | P3 keep |
+| `crates/promptlab-models/tests/integration.rs:15` | `b"GGUF-stub-model-bytes-for-test"` | Test GGUF bytes | P3 keep |
+| `crates/promptlab-models/tests/integration.rs:59` | `/tmp/fake.gguf` | Test path | P3 keep |
+| `crates/promptlab-models/src/registry.rs:132` | `b"gguf-stub"` (in `#[cfg(test)]`) | Test fixture | P3 keep |
+| `crates/promptlab-plugin-host/src/manager.rs:276` | `"print('stub')"` (in `#[cfg(test)]`) | Test plugin body | P3 keep |
 
 ---
 
@@ -175,10 +175,10 @@ is the intended contract, not a defect.
 
 | File | Function | Real implementation required | Priority |
 |------|----------|------------------------------|----------|
-| `packages/plugin-sdk-python/aisec_plugin/discovery.py:13` | `discover` → `NotImplementedError` | Override by plugin authors (keep abstract) | P3 |
-| `packages/plugin-sdk-python/aisec_plugin/attack.py:13` | `executeAttack` → `NotImplementedError` | Override by plugin authors | P3 |
-| `packages/plugin-sdk-python/aisec_plugin/judge.py:13` | `evaluate` → `NotImplementedError` | Override by plugin authors | P3 |
-| `packages/plugin-sdk-python/aisec_plugin/report.py:13` | `renderReport` → `NotImplementedError` | Override by plugin authors | P3 |
+| `packages/plugin-sdk-python/promptlab_plugin/discovery.py:13` | `discover` → `NotImplementedError` | Override by plugin authors (keep abstract) | P3 |
+| `packages/plugin-sdk-python/promptlab_plugin/attack.py:13` | `executeAttack` → `NotImplementedError` | Override by plugin authors | P3 |
+| `packages/plugin-sdk-python/promptlab_plugin/judge.py:13` | `evaluate` → `NotImplementedError` | Override by plugin authors | P3 |
+| `packages/plugin-sdk-python/promptlab_plugin/report.py:13` | `renderReport` → `NotImplementedError` | Override by plugin authors | P3 |
 | `packages/plugin-sdk-js/src/discovery.js:9` | `discover()` throws "not implemented" | Override by plugin authors | P3 |
 | `packages/plugin-sdk-js/src/attack.js:9` | `executeAttack()` throws | Override by plugin authors | P3 |
 | `packages/plugin-sdk-js/src/judge.js:9` | `evaluate()` throws | Override by plugin authors | P3 |
@@ -201,7 +201,7 @@ is the intended contract, not a defect.
 
 | File | Function | Real implementation required | Priority |
 |------|----------|------------------------------|----------|
-| `crates/aisec-discovery/examples/verify_target.rs:15` | `main` — `// TODO: use 4+ after crawler deadlock fix` | Restore `worker_count >= 4` after fixing the crawler deadlock (see Category E) | P1 |
+| `crates/promptlab-discovery/examples/verify_target.rs:15` | `main` — `// TODO: use 4+ after crawler deadlock fix` | Restore `worker_count >= 4` after fixing the crawler deadlock (see Category E) | P1 |
 
 **`unimplemented!()` / `todo!()` macros:** none found anywhere in the repository.
 

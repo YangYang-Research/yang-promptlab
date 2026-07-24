@@ -1,6 +1,6 @@
 //! Wizard scan draft — persist scan-wizard progress in `scans.playbook_json`.
 
-use aisec_storage::{CreateScan, ProjectRepository, ScanRepository, TargetRepository, UpdateScan};
+use promptlab_storage::{CreateScan, ProjectRepository, ScanRepository, TargetRepository, UpdateScan};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tracing::{info, instrument};

@@ -1,4 +1,4 @@
-# AISec AI Runtime SSOT — Strict Architecture Audit
+# PromptLab AI Runtime SSOT — Strict Architecture Audit
 
 **Audit date:** 2026-06-13  
 **Scope:** Source-code evidence only. No code modified.  
@@ -15,8 +15,8 @@
 | **Persisted global route** | `{data_dir}/ai_inference_settings.json` | `src-tauri/src/ai_inference_settings.rs:92-94` (`settings_path`) |
 | **Struct** | `AiInferenceSettings` | `src-tauri/src/ai_inference_settings.rs:40-48` |
 | **In-memory assembly** | `RuntimeConfigurationDto` built in `commands/runtime.rs` | `src-tauri/src/commands/runtime.rs:465-565` (`assemble_runtime_configuration`) |
-| **Model catalog (not route)** | `{vault}/registry.json` | `crates/aisec-models/src/registry.rs:32-34` |
-| **Embedded llama.cpp install** | `{data_dir}/runtime/manifest.json` | `crates/aisec-runtime/src/manifest.rs:67` |
+| **Model catalog (not route)** | `{vault}/registry.json` | `crates/promptlab-models/src/registry.rs:32-34` |
+| **Embedded llama.cpp install** | `{data_dir}/runtime/manifest.json` | `crates/promptlab-runtime/src/manifest.rs:67` |
 | **Legacy (migration only)** | `{data_dir}/judge_config.json` | `src-tauri/src/judge_config.rs:15-16` |
 
 ### 2. Is there exactly ONE runtime configuration?
@@ -25,7 +25,7 @@
 
 - **One active inference route file:** `AiInferenceSettings` in `ai_inference_settings.json` (`ai_inference_settings.rs:40-48`, `92-94`).
 - **Additional configuration surfaces still exist:**
-  - Per-model entries in `registry.json` with provider/credentials metadata (`registry.rs:32-34`, `ModelEntry` via `aisec-models`).
+  - Per-model entries in `registry.json` with provider/credentials metadata (`registry.rs:32-34`, `ModelEntry` via `promptlab-models`).
   - Llama.cpp lifecycle manifest (`manifest.rs:67`).
   - Legacy `judge_config.json` still readable for migration/audit (`judge_config.rs:15-16`, `125-128`).
 
@@ -154,16 +154,16 @@ Expected: `Feature → AI Service → Runtime Manager → Provider Adapter → P
 | Location | Import / usage | Classification |
 |----------|----------------|----------------|
 | `ai_runtime_service.rs:17-19,269-302` | `RemoteLlmBackend`, `LocalLlmBackend`, `RuntimeSupervisor` | **VALID** (SSOT module) |
-| `crates/aisec-judge/src/providers/remote.rs:15,28` | `reqwest`, OpenAI/Anthropic/Gemini URLs | **VALID** (provider layer) |
-| `crates/aisec-judge/src/providers/local.rs:37-46` | `InferenceRuntime` | **VALID** |
+| `crates/promptlab-judge/src/providers/remote.rs:15,28` | `reqwest`, OpenAI/Anthropic/Gemini URLs | **VALID** (provider layer) |
+| `crates/promptlab-judge/src/providers/local.rs:37-46` | `InferenceRuntime` | **VALID** |
 | `commands/models.rs:288-291` | `test_connectivity` + ephemeral `JudgeProviderConfig` | **ARCHITECTURE VIOLATION** (bypasses SSOT) |
 | `commands/models.rs:1086-1112` | Direct `RuntimeManager.supervisor().llama_runtime().infer` | **ARCHITECTURE VIOLATION** (bypasses `ai_runtime_service`) |
 | `fingerprint_service.rs:16-35` | `reqwest` for target HTTP probe | **VALID** (non-AI inference) |
 | `commands/discovery.rs:124` | `reqwest` for fingerprint probe | **VALID** (discovery infra) |
-| `crates/aisec-planner/src/deterministic.rs:150,158` | Provider name strings in rules | **VALID** (heuristics, not SDK) |
+| `crates/promptlab-planner/src/deterministic.rs:150,158` | Provider name strings in rules | **VALID** (heuristics, not SDK) |
 | `third_party_credentials.rs:295` | `load_judge_config` | **ARCHITECTURE VIOLATION** (legacy config read) |
 
-No OpenAI/Anthropic/Gemini SDK imports in `aisec-planner` or `aisec-generator` crates.
+No OpenAI/Anthropic/Gemini SDK imports in `promptlab-planner` or `promptlab-generator` crates.
 
 ---
 
@@ -173,25 +173,25 @@ No OpenAI/Anthropic/Gemini SDK imports in `aisec-planner` or `aisec-generator` c
 
 | Provider | Location | Evidence |
 |----------|----------|----------|
-| OpenAI / Anthropic / Gemini / Bedrock / Azure / OpenRouter | `crates/aisec-judge/src/providers/remote.rs` | `remote.rs:38-55`, `76-88` |
-| Bedrock SigV4 | `crates/aisec-judge/src/providers/bedrock_sigv4.rs` | `bedrock_sigv4.rs:209` |
-| Local llama.cpp / Ollama | `crates/aisec-judge/src/providers/local.rs` + `aisec-models` runtime | `local.rs:37-46`; `ai_runtime_service.rs:293-296` |
-| llama.cpp server HTTP | `crates/aisec-runtime/src/runtime/llama_cpp_runtime.rs` | `llama_cpp_runtime.rs:71` |
-| Ollama HTTP | `crates/aisec-models/src/runtime/ollama.rs` | `ollama.rs:34,42` |
+| OpenAI / Anthropic / Gemini / Bedrock / Azure / OpenRouter | `crates/promptlab-judge/src/providers/remote.rs` | `remote.rs:38-55`, `76-88` |
+| Bedrock SigV4 | `crates/promptlab-judge/src/providers/bedrock_sigv4.rs` | `bedrock_sigv4.rs:209` |
+| Local llama.cpp / Ollama | `crates/promptlab-judge/src/providers/local.rs` + `promptlab-models` runtime | `local.rs:37-46`; `ai_runtime_service.rs:293-296` |
+| llama.cpp server HTTP | `crates/promptlab-runtime/src/runtime/llama_cpp_runtime.rs` | `llama_cpp_runtime.rs:71` |
+| Ollama HTTP | `crates/promptlab-models/src/runtime/ollama.rs` | `ollama.rs:34,42` |
 
 ### Are they located ONLY inside Runtime layer?
 
 **NO.**
 
-- Remote/local LLM adapters live in **`aisec-judge`** (`providers/`), not `aisec-runtime`.
-- `aisec-runtime` owns embedded llama.cpp lifecycle/install (`manager.rs:1-2`, `121-140`).
+- Remote/local LLM adapters live in **`promptlab-judge`** (`providers/`), not `promptlab-runtime`.
+- `promptlab-runtime` owns embedded llama.cpp lifecycle/install (`manager.rs:1-2`, `121-140`).
 - `ai_runtime_service` instantiates judge providers directly — `ai_runtime_service.rs:269-302`.
 
 ---
 
 ## SECTION 5 — Runtime Manager
 
-`RuntimeManager` in `crates/aisec-runtime/src/manager.rs`:
+`RuntimeManager` in `crates/promptlab-runtime/src/manager.rs`:
 
 | Capability | Implemented? | Evidence |
 |------------|--------------|----------|
@@ -236,8 +236,8 @@ Underlying `LlmBackend` trait: `complete`, `health_check` — `providers/mod.rs:
 | Feature | Knows provider? | Knows runtime? | Knows model? | Knows endpoint? | Knows API key? |
 |---------|-----------------|----------------|--------------|-----------------|----------------|
 | **Judge** (`attack.rs`) | NO | NO (passes handles only) | NO | NO | NO |
-| **Planner** (`aisec-planner`) | NO | NO | NO | NO | NO |
-| **Generator** (`aisec-generator`) | NO | NO | NO | NO | NO |
+| **Planner** (`promptlab-planner`) | NO | NO | NO | NO | NO |
+| **Generator** (`promptlab-generator`) | NO | NO | NO | NO | NO |
 | **Fingerprint** | NO (detects target providers in rules) | NO | NO | NO | NO |
 | **Report** | NO | NO | NO | NO | NO |
 
@@ -367,10 +367,10 @@ Models page configures per-model provider credentials; AI Runtime selects which 
 
 | Package | Primary locations | Classification |
 |---------|-------------------|----------------|
-| `reqwest` | `aisec-judge/providers/remote.rs:15`; `aisec-runtime/llama_cpp_runtime.rs:71`; `fingerprint_service.rs:16`; `aisec-discovery`, `aisec-models` download | **Runtime / Infrastructure** |
-| OpenAI/Anthropic/Gemini | String URLs in `remote.rs:39-42` — no official SDK | **Runtime Layer** (`aisec-judge`) |
-| Ollama | `aisec-models/runtime/ollama.rs`; `ai_runtime_service.rs:58` | **Runtime Layer** |
-| llama.cpp | `aisec-runtime` supervisor | **Runtime Layer** |
+| `reqwest` | `promptlab-judge/providers/remote.rs:15`; `promptlab-runtime/llama_cpp_runtime.rs:71`; `fingerprint_service.rs:16`; `promptlab-discovery`, `promptlab-models` download | **Runtime / Infrastructure** |
+| OpenAI/Anthropic/Gemini | String URLs in `remote.rs:39-42` — no official SDK | **Runtime Layer** (`promptlab-judge`) |
+| Ollama | `promptlab-models/runtime/ollama.rs`; `ai_runtime_service.rs:58` | **Runtime Layer** |
+| llama.cpp | `promptlab-runtime` supervisor | **Runtime Layer** |
 
 **Architecture violations:** `commands/models.rs:288-291` (judge connectivity bypass); `commands/models.rs:1086-1112` (direct infer bypass).
 
@@ -431,21 +431,21 @@ flowchart TB
     LEG["judge_config.json LEGACY"]
   end
 
-  subgraph Providers["aisec-judge/providers"]
+  subgraph Providers["promptlab-judge/providers"]
     REM["RemoteLlmBackend reqwest"]
     LOC["LocalLlmBackend"]
   end
 
-  subgraph Embedded["aisec-runtime RuntimeManager"]
+  subgraph Embedded["promptlab-runtime RuntimeManager"]
     SUP["RuntimeSupervisor llama.cpp"]
   end
 
   subgraph Features["Feature crates"]
-    JUDGE["aisec-judge JudgeEngine"]
-    PLAN["aisec-planner"]
-    GENCR["aisec-generator"]
-    FP["aisec-fingerprint NO LLM"]
-    REP["aisec-report NO LLM"]
+    JUDGE["promptlab-judge JudgeEngine"]
+    PLAN["promptlab-planner"]
+    GENCR["promptlab-generator"]
+    FP["promptlab-fingerprint NO LLM"]
+    REP["promptlab-report NO LLM"]
   end
 
   RuntimePage --> RT
@@ -486,7 +486,7 @@ flowchart TB
 | Exactly one AI Runtime | **PARTIAL** | One route file; plus registry, manifest, legacy judge file |
 | Single Source of Truth | **PARTIAL** | Judge/planner/generator LLM paths use SSOT; models test paths bypass |
 | Unified AI Service | **PARTIAL** | Module exists; no `chat`/`stream`/`embed`; `complete`/`health_check` unused |
-| Provider isolation | **PARTIAL** | Providers in `aisec-judge`, not solely `aisec-runtime` |
+| Provider isolation | **PARTIAL** | Providers in `promptlab-judge`, not solely `promptlab-runtime` |
 | Runtime abstraction | **PARTIAL** | Third-party bypasses `RuntimeManager` |
 | Feature isolation | **PASS** | Feature crates don't touch providers |
 | No duplicated configuration | **FAIL** | `models.rs` ephemeral `JudgeProviderConfig`; registry + settings |
@@ -510,7 +510,7 @@ flowchart TB
 
 ### Medium
 
-5. **Provider implementations split across `aisec-judge` and `aisec-runtime`** — not a single runtime layer (`remote.rs` vs `manager.rs`).
+5. **Provider implementations split across `promptlab-judge` and `promptlab-runtime`** — not a single runtime layer (`remote.rs` vs `manager.rs`).
 6. **Models page is a second provider configuration surface** — `ThirdPartyModelsPanel.tsx:86-155` independent of `/runtime`.
 7. **Dashboard card omits Health** — DTO has `connectivity`/`lastHealthCheck` (`runtime.ts:123-124`) but card does not render them (`AiRuntimeDashboardCard.tsx:47-72`).
 
@@ -528,7 +528,7 @@ flowchart TB
 |------|-----------|-----------|
 | AI Runtime | **6** | Single route file; legacy + multi-file config remain |
 | AI Service | **5** | SSOT module works for 3 features; incomplete API, dead methods |
-| Provider Layer | **7** | Centralized in `aisec-judge`; bypass in models commands |
+| Provider Layer | **7** | Centralized in `promptlab-judge`; bypass in models commands |
 | Feature Isolation | **8** | Crates clean; desktop commands less so |
 | UI | **7** | One runtime page; Models duplicates provider UX |
 | IPC | **7** | No judge IPC; models IPC exposes provider setup |
@@ -555,13 +555,13 @@ flowchart TB
 
 ## Executive Summary
 
-AISec has a **real SSOT module** (`ai_runtime_service.rs`) backed by **`ai_inference_settings.json`**, and **Judge, Planner, and Generator LLM paths read it**. Legacy judge IPC/UI are removed (`lib.rs:177-266`, `nav.ts:18-19`).
+PromptLab has a **real SSOT module** (`ai_runtime_service.rs`) backed by **`ai_inference_settings.json`**, and **Judge, Planner, and Generator LLM paths read it**. Legacy judge IPC/UI are removed (`lib.rs:177-266`, `nav.ts:18-19`).
 
 Compliance is **PARTIAL**, not full:
 
 - Models test commands **bypass SSOT**
 - Legacy `judge_config.json` **still exists** for migration/audit
-- Provider code lives in **`aisec-judge`**, not exclusively in runtime layer
+- Provider code lives in **`promptlab-judge`**, not exclusively in runtime layer
 - **Fingerprint / Report / AI Summary / Security Packs** do not use AI Runtime (non-LLM or **NOT IMPLEMENTED**)
 
 **Overall architecture score: 6.5 / 10**

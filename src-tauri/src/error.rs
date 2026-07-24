@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use aisec_core::{AisecError, ErrorCode};
+use promptlab_core::{PromptLabError, ErrorCode};
 
 /// IPC-facing error envelope returned to the frontend.
 #[derive(Debug, Clone, Serialize)]
@@ -10,7 +10,7 @@ pub struct CommandError {
 }
 
 impl CommandError {
-    pub fn from_aisec(error: AisecError) -> Self {
+    pub fn from_promptlab(error: PromptLabError) -> Self {
         Self {
             code: error.code().as_str().to_string(),
             message: error.client_message(),
@@ -25,14 +25,14 @@ impl CommandError {
     }
 }
 
-impl From<AisecError> for CommandError {
-    fn from(value: AisecError) -> Self {
-        Self::from_aisec(value)
+impl From<PromptLabError> for CommandError {
+    fn from(value: PromptLabError) -> Self {
+        Self::from_promptlab(value)
     }
 }
 
-impl From<aisec_harness::HarnessError> for CommandError {
-    fn from(value: aisec_harness::HarnessError) -> Self {
+impl From<promptlab_harness::HarnessError> for CommandError {
+    fn from(value: promptlab_harness::HarnessError) -> Self {
         Self {
             code: ErrorCode::Internal.as_str().to_string(),
             message: value.to_string(),
@@ -40,8 +40,8 @@ impl From<aisec_harness::HarnessError> for CommandError {
     }
 }
 
-impl From<aisec_runtime::RuntimeError> for CommandError {
-    fn from(value: aisec_runtime::RuntimeError) -> Self {
+impl From<promptlab_runtime::RuntimeError> for CommandError {
+    fn from(value: promptlab_runtime::RuntimeError) -> Self {
         Self {
             code: ErrorCode::Internal.as_str().to_string(),
             message: value.to_string(),
@@ -49,8 +49,8 @@ impl From<aisec_runtime::RuntimeError> for CommandError {
     }
 }
 
-impl From<aisec_plugin_host::PluginError> for CommandError {
-    fn from(value: aisec_plugin_host::PluginError) -> Self {
+impl From<promptlab_plugin_host::PluginError> for CommandError {
+    fn from(value: promptlab_plugin_host::PluginError) -> Self {
         Self {
             code: ErrorCode::Internal.as_str().to_string(),
             message: value.to_string(),
@@ -73,8 +73,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn maps_aisec_error_to_command_error() {
-        let cmd_err = CommandError::from(AisecError::not_found("project"));
+    fn maps_promptlab_error_to_command_error() {
+        let cmd_err = CommandError::from(PromptLabError::not_found("project"));
         assert_eq!(cmd_err.code, "NOT_FOUND");
     }
 }
