@@ -52,6 +52,29 @@ describe("bodyToRequestTemplate", () => {
     expect(template).toContain(PROMPT_PLACEHOLDER);
     expect(template).not.toContain("Hello");
   });
+
+  it("preserves system role content and only replaces user", () => {
+    const template = bodyToRequestTemplate(
+      JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: "You are a helpful assistant." },
+          { role: "user", content: "Hello" },
+        ],
+      }),
+    );
+    const parsed = JSON.parse(template) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(parsed.messages[0]).toEqual({
+      role: "system",
+      content: "You are a helpful assistant.",
+    });
+    expect(parsed.messages[1]).toEqual({
+      role: "user",
+      content: PROMPT_PLACEHOLDER,
+    });
+  });
 });
 
 describe("curlToProfilePatch", () => {

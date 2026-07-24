@@ -260,6 +260,10 @@ function inferProvider(url: string, body: string | null): TargetProviderId {
   return "generic_http";
 }
 
+function isSystemRole(role: unknown): boolean {
+  return typeof role === "string" && role.trim().toLowerCase() === "system";
+}
+
 function replacePromptInValue(value: unknown): { value: unknown; found: boolean } {
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i += 1) {
@@ -297,6 +301,10 @@ function replacePromptInValue(value: unknown): { value: unknown; found: boolean 
     const messages = obj.messages.map((entry) => {
       if (!entry || typeof entry !== "object") return entry;
       const message = entry as Record<string, unknown>;
+      // Keep system prompts intact — only inject into non-system turns.
+      if (isSystemRole(message.role)) {
+        return message;
+      }
       if (typeof message.content === "string") {
         return { ...message, content: PROMPT_PLACEHOLDER };
       }
@@ -321,6 +329,9 @@ function replacePromptInValue(value: unknown): { value: unknown; found: boolean 
     const contents = obj.contents.map((entry) => {
       if (!entry || typeof entry !== "object") return entry;
       const content = entry as Record<string, unknown>;
+      if (isSystemRole(content.role)) {
+        return entry;
+      }
       if (!Array.isArray(content.parts)) return entry;
       const parts = content.parts.map((part) => {
         if (part && typeof part === "object" && typeof (part as Record<string, unknown>).text === "string") {
