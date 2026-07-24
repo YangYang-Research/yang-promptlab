@@ -47,7 +47,10 @@ impl PayloadGenerationStrategy {
 pub struct PayloadStrategy {
     pub strategy: PayloadGenerationStrategy,
     pub mutation_level: MutationLevel,
+    /// HTTP mutator expansions per generated payload at attack time
+    /// (`1` original + up to `N−1` mutations). Does not change generation count.
     pub variants_per_test: u32,
+    /// Generated payloads required/produced per testcase (enabled technique).
     pub max_total_payloads: u32,
     pub enable_context_awareness: bool,
     pub enable_conversation_memory: bool,

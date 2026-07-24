@@ -8,6 +8,7 @@ use promptlab_planner::PlannerLlm;
 use serde::Deserialize;
 use tracing::{info, warn};
 
+use crate::agent_log::{log_llm_call, AgentLogContext};
 use crate::attack_plan::{AdaptPlanOutcome, AdaptPlanRequest, AttackPlanAgent};
 use crate::endpoint_recovery::{
     heuristic_recovery, observation_needs_recovery, seed_pacing_from_prior_failure, EndpointPacing,
@@ -104,6 +105,24 @@ pub trait AttackExecutionTools: Send + Sync {
     async fn wait_backoff(&self, delay_ms: u64);
 }
 
+/// Push an agent timeline event and emit it to the host console immediately
+/// (so Thought/Action appear at occurrence time, not in a collapsed end dump).
+pub async fn emit_and_record(
+    tools: &dyn AttackExecutionTools,
+    events: &mut Vec<AgentEvent>,
+    event: AgentEvent,
+) {
+    tools
+        .emit_info(format!(
+            "[{}] {:?}: {}",
+            event.agent.as_str(),
+            event.kind,
+            event.message
+        ))
+        .await;
+    events.push(event);
+}
+
 /// LLMs used by AgenticAttackExecutionAgent and its sub-agents.
 pub struct AttackExecutionLlms<'a> {
     /// Orchestrator ReAct brain (may be same as plan/reflection).
@@ -190,13 +209,19 @@ impl AgenticAttackExecutionAgent {
         let max_attempts = request.max_attempts.max(1);
         let max_steps = request.max_react_steps.max(8);
 
-        let mut events = vec![AgentEvent::started(
-            AgentId::AgenticAttackExecution,
-            format!(
-                "Agentic execution for {} (max_attempts={max_attempts})",
-                request.category
+        let mut events = Vec::new();
+        emit_and_record(
+            tools,
+            &mut events,
+            AgentEvent::started(
+                AgentId::AgenticAttackExecution,
+                format!(
+                    "Agentic execution for {} (max_attempts={max_attempts})",
+                    request.category
+                ),
             ),
-        )];
+        )
+        .await;
 
         info!(
             category = %request.category,
@@ -314,9 +339,11 @@ impl AgenticAttackExecutionAgent {
              - Only those actions. Never use Yazg/Attack-Factory verbs \
                (generate_prompt, analyze_endpoint, attack_plan, recommend, …).\n\
              - Start with generate then attack for each attempt.\n\
-             - If attack fails or observation shows endpoint unhealthy (timeouts, 429, 5xx, high latency),\n\
+             - If attack fails or observation shows endpoint unhealthy (timeouts, 429, 5xx, or\n\
+               no HTTP successes with extreme latency),\n\
                call recover to adjust pacing (lower concurrency, add inter-request delay, serial wait,\n\
                raise timeout, backoff), then attack again with the same payloads.\n\
+             - Do not recover solely because successful responses were slow.\n\
              - Never recover before the first attack observation; never recover twice without a new unhealthy attack.\n\
              - After a healthy attack, call reflect when reflection is enabled (else finish or adapt/retry).\n\
              - If reflect says retry and attempts remain, call adapt when adaptive_planning is on, then generate again.\n\
@@ -345,10 +372,15 @@ impl AgenticAttackExecutionAgent {
             let action = if llms.llm_ready {
                 match decide_action(llms.orchestrator, &transcript, step, max_steps).await {
                     Ok((thought, action)) => {
-                        events.push(AgentEvent::info(
-                            AgentId::AgenticAttackExecution,
-                            format!("Thought: {thought}"),
-                        ));
+                        emit_and_record(
+                            tools,
+                            &mut events,
+                            AgentEvent::react(
+                                AgentId::AgenticAttackExecution,
+                                format!("Thought: {thought}"),
+                            ),
+                        )
+                        .await;
                         transcript.push_str(&format!(
                             "\n--- Step {step} ---\nThought: {thought}\nAction: {:?}\n",
                             action
@@ -414,10 +446,15 @@ impl AgenticAttackExecutionAgent {
                 action
             };
 
-            events.push(AgentEvent::info(
-                AgentId::AgenticAttackExecution,
-                format!("Action: {action:?}"),
-            ));
+            emit_and_record(
+                tools,
+                &mut events,
+                AgentEvent::react(
+                    AgentId::AgenticAttackExecution,
+                    format!("Action: {action:?}"),
+                ),
+            )
+            .await;
 
             match action {
                 ExecAction::Generate => {
@@ -449,7 +486,12 @@ impl AgenticAttackExecutionAgent {
                             reflected_for_attempt = None;
                             let obs = format!("generate ok attempt={attempt}");
                             transcript.push_str(&format!("Observation: {obs}\n"));
-                            events.push(AgentEvent::info(AgentId::AgenticAttackExecution, obs.clone()));
+                            emit_and_record(
+                                tools,
+                                &mut events,
+                                AgentEvent::info(AgentId::AgenticAttackExecution, obs.clone()),
+                            )
+                            .await;
                             remember_stm(
                                 memory,
                                 &memory_ctx,
@@ -466,10 +508,15 @@ impl AgenticAttackExecutionAgent {
                         }
                         Err(err) => {
                             stopped_reason = format!("generate_failed: {err}");
-                            events.push(AgentEvent::failed(
+                            emit_and_record(
+                                tools,
+                                &mut events,
+                                AgentEvent::failed(
                                 AgentId::AgenticAttackExecution,
                                 stopped_reason.clone(),
-                            ));
+                            ),
+                            )
+                            .await;
                             return Err(AgentError::AttackExecution(stopped_reason));
                         }
                     }
@@ -497,14 +544,24 @@ impl AgenticAttackExecutionAgent {
                             last_obs.endpoint_unhealthy = true;
                             attacked_for_attempt = None;
                             stopped_reason = format!("attack_failed: {err}");
-                            events.push(AgentEvent::info(
+                            emit_and_record(
+                                tools,
+                                &mut events,
+                                AgentEvent::info(
                                 AgentId::AgenticAttackExecution,
                                 format!("attack failed attempt={attempt}: {err}"),
-                            ));
-                            events.push(AgentEvent::failed(
+                            ),
+                            )
+                            .await;
+                            emit_and_record(
+                                tools,
+                                &mut events,
+                                AgentEvent::failed(
                                 AgentId::AgenticAttackExecution,
                                 stopped_reason.clone(),
-                            ));
+                            ),
+                            )
+                            .await;
                             return Err(AgentError::AttackExecution(stopped_reason));
                         }
                         Ok(obs) => {
@@ -524,7 +581,12 @@ impl AgenticAttackExecutionAgent {
                                 "Observation: {line}\nSummary: {}\nNeeds recover: {needs_recover}\n",
                                 last_obs.summary
                             ));
-                            events.push(AgentEvent::info(AgentId::AgenticAttackExecution, line.clone()));
+                            emit_and_record(
+                                tools,
+                                &mut events,
+                                AgentEvent::info(AgentId::AgenticAttackExecution, line.clone()),
+                            )
+                            .await;
                             remember_stm(
                                 memory,
                                 &memory_ctx,
@@ -552,10 +614,15 @@ impl AgenticAttackExecutionAgent {
                             transcript.push_str(&format!(
                                 "Observation: {line}\nNeeds recover: {needs_recover}\n"
                             ));
-                            events.push(AgentEvent::info(
+                            emit_and_record(
+                                tools,
+                                &mut events,
+                                AgentEvent::info(
                                 AgentId::AgenticAttackExecution,
                                 line.clone(),
-                            ));
+                            ),
+                            )
+                            .await;
                             remember_stm(
                                 memory,
                                 &memory_ctx,
@@ -571,10 +638,15 @@ impl AgenticAttackExecutionAgent {
                             .await;
                             if !needs_recover {
                                 stopped_reason = format!("attack_failed: {err}");
-                                events.push(AgentEvent::failed(
+                                emit_and_record(
+                                    tools,
+                                    &mut events,
+                                    AgentEvent::failed(
                                     AgentId::AgenticAttackExecution,
                                     stopped_reason.clone(),
-                                ));
+                                ),
+                                )
+                                .await;
                                 remember_attack_category_outcome(
                                     memory,
                                     &memory_ctx,
@@ -626,10 +698,15 @@ impl AgenticAttackExecutionAgent {
                         .await;
                     if let Err(err) = tools.apply_pacing(&plan.pacing).await {
                         stopped_reason = format!("recover_failed: {err}");
-                        events.push(AgentEvent::failed(
+                        emit_and_record(
+                            tools,
+                            &mut events,
+                            AgentEvent::failed(
                             AgentId::AgenticAttackExecution,
                             stopped_reason.clone(),
-                        ));
+                        ),
+                        )
+                        .await;
                         return Err(AgentError::AttackExecution(stopped_reason));
                     }
                     tools.wait_backoff(plan.wait_before_retry_ms).await;
@@ -643,7 +720,12 @@ impl AgenticAttackExecutionAgent {
                         plan.summary()
                     );
                     transcript.push_str(&format!("Observation: {line}\n"));
-                    events.push(AgentEvent::info(AgentId::AgenticAttackExecution, line.clone()));
+                    emit_and_record(
+                        tools,
+                        &mut events,
+                        AgentEvent::info(AgentId::AgenticAttackExecution, line.clone()),
+                    )
+                    .await;
                     remember_stm(
                         memory,
                         &memory_ctx,
@@ -728,7 +810,12 @@ impl AgenticAttackExecutionAgent {
                         reflection.should_retry, reflection.reason
                     );
                     transcript.push_str(&format!("Observation: {line}\n"));
-                    events.push(AgentEvent::info(AgentId::AgenticAttackExecution, line.clone()));
+                    emit_and_record(
+                        tools,
+                        &mut events,
+                        AgentEvent::info(AgentId::AgenticAttackExecution, line.clone()),
+                    )
+                    .await;
                     remember_stm(
                         memory,
                         &memory_ctx,
@@ -802,10 +889,15 @@ impl AgenticAttackExecutionAgent {
                     }
                     if let Err(err) = tools.apply_adapt(&adapt).await {
                         stopped_reason = format!("adapt_failed: {err}");
-                        events.push(AgentEvent::failed(
+                        emit_and_record(
+                            tools,
+                            &mut events,
+                            AgentEvent::failed(
                             AgentId::AgenticAttackExecution,
                             stopped_reason.clone(),
-                        ));
+                        ),
+                        )
+                        .await;
                         return Err(AgentError::AttackExecution(stopped_reason));
                     }
                     tools.bump_progress(1).await;
@@ -818,7 +910,12 @@ impl AgenticAttackExecutionAgent {
                         format!("adapt applied: {}", adapt.notes.join("; "))
                     };
                     transcript.push_str(&format!("Observation: {line}\n"));
-                    events.push(AgentEvent::info(AgentId::AgenticAttackExecution, line));
+                    emit_and_record(
+                        tools,
+                        &mut events,
+                        AgentEvent::info(AgentId::AgenticAttackExecution, line),
+                    )
+                    .await;
                 }
                 ExecAction::Finish => {
                     if let Some(ref reflection) = last_reflection {
@@ -850,13 +947,18 @@ impl AgenticAttackExecutionAgent {
             }
         }
 
-        events.push(AgentEvent::completed(
+        emit_and_record(
+            tools,
+            &mut events,
+            AgentEvent::completed(
             AgentId::AgenticAttackExecution,
             format!(
                 "{} done after {attempt} attempt(s): {stopped_reason}",
                 request.category
             ),
-        ));
+        ),
+        )
+        .await;
 
         remember_stm(
             memory,
@@ -992,10 +1094,30 @@ async fn decide_action(
     let prompt = format!(
         "{transcript}\nReAct step {step}/{max_steps}. Reply with one JSON object only.\n"
     );
-    let raw = llm
-        .complete(&prompt)
-        .await
-        .map_err(|e| e.to_string())?;
+    let raw = match llm.complete(&prompt).await {
+        Ok(raw) => {
+            log_llm_call(
+                AgentId::AgenticAttackExecution,
+                "orchestrator",
+                prompt.len(),
+                &raw,
+                true,
+                AgentLogContext::default(),
+            );
+            raw
+        }
+        Err(err) => {
+            log_llm_call(
+                AgentId::AgenticAttackExecution,
+                "orchestrator",
+                prompt.len(),
+                &err.to_string(),
+                false,
+                AgentLogContext::default(),
+            );
+            return Err(err.to_string());
+        }
+    };
     let parsed: ExecReactStep = {
         let json = extract_json_object(&raw)
             .ok_or_else(|| "no JSON in AgenticAttackExecutionAgent ReAct response".to_string())?;

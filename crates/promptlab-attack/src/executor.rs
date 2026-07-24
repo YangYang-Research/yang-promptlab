@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use promptlab_harness::NormalizedResponse;
 use time::OffsetDateTime;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -12,7 +14,8 @@ use crate::registry::AttackRegistry;
 use crate::traits::Attack;
 use crate::transport::TargetTransport;
 use crate::types::{
-    AttackContext, AttackExecutionResult, AttackPayload, PayloadAttempt,
+    AttackContext, AttackEvaluation, AttackExecutionResult, AttackPayload, AttackResponse,
+    PayloadAttempt,
 };
 
 pub type AttemptStreamItem = (usize, PayloadAttempt);
@@ -29,7 +32,8 @@ impl<T: TargetTransport + Clone + 'static> AttackExecutor<T> {
         Self {
             registry,
             transport,
-            mutator: PayloadMutator::with_defaults(),
+            // Never silently expand — scan paths set mutator from variantsPerTest.
+            mutator: PayloadMutator::identity(),
         }
     }
 
@@ -237,12 +241,40 @@ async fn run_work_item<T: TargetTransport>(
     item: WorkItem,
 ) -> AttackResult<(usize, PayloadAttempt)> {
     let runner = PayloadRunner::new(transport);
-    let response = runner
-        .execute(ctx, &item.payload, &item.content)
-        .await?;
-    let evaluation = attack
-        .evaluate(ctx, &item.payload, &response)
-        .await?;
+    let response = match runner.execute(ctx, &item.payload, &item.content).await {
+        Ok(response) => response,
+        Err(err) => {
+            // Soft-fail: keep sibling probes instead of aborting the whole pool.
+            let body = err.to_string();
+            let attempt = PayloadAttempt {
+                payload_id: item.payload.id.clone(),
+                payload_name: item.payload.name.clone(),
+                mutated_content: item.content,
+                mutators_applied: item.mutators,
+                response: AttackResponse {
+                    status: 0,
+                    headers: HashMap::new(),
+                    body: body.clone(),
+                    duration_ms: 0,
+                    normalized: NormalizedResponse {
+                        content: String::new(),
+                        raw_response: body.clone(),
+                        status_code: None,
+                        metadata: HashMap::from([
+                            ("error".into(), "transport".into()),
+                            ("harness".into(), "soft_fail".into()),
+                        ]),
+                    },
+                },
+                evaluation: AttackEvaluation::negative(format!("transport error: {body}")),
+            };
+            return Ok((item.seq, attempt));
+        }
+    };
+    let evaluation = match attack.evaluate(ctx, &item.payload, &response).await {
+        Ok(evaluation) => evaluation,
+        Err(err) => AttackEvaluation::negative(format!("evaluation error: {err}")),
+    };
 
     let attempt = PayloadAttempt {
         payload_id: item.payload.id.clone(),

@@ -168,6 +168,7 @@ pub fn fallback_attack_runtime() -> AttackRuntime {
 }
 
 pub fn attack_executor(transport: PluginAwareTransport) -> AttackExecutor<PluginAwareTransport> {
+    // Identity mutator (no expand). Prefer attack_executor_with_variants for strategy-driven N.
     AttackExecutor::new(AttackRegistry::with_builtins(), transport)
 }
 
@@ -176,11 +177,17 @@ pub fn attack_executor_with_variants(
     variants_per_test: usize,
 ) -> AttackExecutor<PluginAwareTransport> {
     use promptlab_attack::{MutatorConfig, MutatorKind, PayloadMutator};
+    // Model A: variants_per_test = total HTTP shapes per generated payload
+    // (original + up to N−1 mutators). variants=1 → identity.
     let max_per_payload = variants_per_test.saturating_sub(1);
-    let mutator = PayloadMutator::new(MutatorConfig {
-        enabled: MutatorKind::all().to_vec(),
-        max_per_payload,
-    });
+    let mutator = if max_per_payload == 0 {
+        PayloadMutator::identity()
+    } else {
+        PayloadMutator::new(MutatorConfig {
+            enabled: MutatorKind::all().to_vec(),
+            max_per_payload,
+        })
+    };
     attack_executor(transport).with_mutator(mutator)
 }
 

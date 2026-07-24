@@ -991,15 +991,8 @@ async fn run_sequential_category(
     }
 
     match agent_result {
-        Ok(outcome) => {
-            for event in &outcome.events {
-                ctx.emitter.info(format!(
-                    "[{}] {:?}: {}",
-                    event.agent.as_str(),
-                    event.kind,
-                    event.message
-                ));
-            }
+        Ok(_) => {
+            // ReAct / Info events were already live-emitted via emit_and_record.
             tools
                 .state
                 .lock()
@@ -1263,15 +1256,8 @@ async fn run_agentic_category(
     }
 
     match agent_result {
-        Ok(outcome) => {
-            for event in &outcome.events {
-                ctx.emitter.info(format!(
-                    "[{}] {:?}: {}",
-                    event.agent.as_str(),
-                    event.kind,
-                    event.message
-                ));
-            }
+        Ok(_) => {
+            // ReAct / Info events were already live-emitted via emit_and_record.
             tools
                 .state
                 .lock()

@@ -7,8 +7,9 @@ use promptlab_planner::PlannerLlm;
 use serde::Deserialize;
 use tracing::{info, warn};
 
+use crate::agent_log::{log_llm_call, AgentLogContext};
 use crate::attack_execution::{
-    AttackAttemptObservation, AttackExecutionOutcome, AttackExecutionTools,
+    emit_and_record, AttackAttemptObservation, AttackExecutionOutcome, AttackExecutionTools,
 };
 use crate::endpoint_recovery::{
     heuristic_recovery, observation_needs_recovery, seed_pacing_from_prior_failure,
@@ -73,13 +74,19 @@ impl SequentialAttackExecutionAgent {
         }
 
         let max_steps = request.max_react_steps.max(8);
-        let mut events = vec![AgentEvent::started(
-            AgentId::SequentialAttackExecution,
-            format!(
-                "Sequential execution for {} (endpoint recovery enabled)",
-                request.category
+        let mut events = Vec::new();
+        emit_and_record(
+            tools,
+            &mut events,
+            AgentEvent::started(
+                AgentId::SequentialAttackExecution,
+                format!(
+                    "Sequential execution for {} (endpoint recovery enabled)",
+                    request.category
+                ),
             ),
-        )];
+        )
+        .await;
 
         info!(
             category = %request.category,
@@ -191,9 +198,11 @@ impl SequentialAttackExecutionAgent {
              - Only those four actions. Never use Yazg/Attack-Factory verbs \
                (generate_prompt, analyze_endpoint, attack_plan, recommend, …).\n\
              - generate once, then attack.\n\
-             - If attack errors or observation is unhealthy (timeouts, 429, 5xx, high latency),\n\
+             - If attack errors or observation is unhealthy (timeouts, 429, 5xx, or\n\
+               no HTTP successes with extreme latency),\n\
                recover: lower concurrency / serial wait / raise delay from response latency /\n\
                raise timeout / backoff, then attack again with the same payloads.\n\
+             - Do not recover solely because successful responses were slow.\n\
              - Never recover before the first attack observation; never recover twice without a new unhealthy attack.\n\
              - finish only after at least one attack observation (healthy, or recoveries exhausted).\n\
              - Never invent HTTP results.\n",
@@ -214,10 +223,15 @@ impl SequentialAttackExecutionAgent {
                 if let Some(llm) = orchestrator {
                     match decide_action(llm, &transcript, step, max_steps).await {
                         Ok((thought, action)) => {
-                            events.push(AgentEvent::info(
-                                AgentId::SequentialAttackExecution,
-                                format!("Thought: {thought}"),
-                            ));
+                            emit_and_record(
+                                tools,
+                                &mut events,
+                                AgentEvent::react(
+                                    AgentId::SequentialAttackExecution,
+                                    format!("Thought: {thought}"),
+                                ),
+                            )
+                            .await;
                             transcript.push_str(&format!(
                                 "\n--- Step {step} ---\nThought: {thought}\nAction: {action:?}\n"
                             ));
@@ -269,10 +283,15 @@ impl SequentialAttackExecutionAgent {
                 &last_obs,
             );
 
-            events.push(AgentEvent::info(
-                AgentId::SequentialAttackExecution,
-                format!("Action: {action:?}"),
-            ));
+            emit_and_record(
+                tools,
+                &mut events,
+                AgentEvent::react(
+                    AgentId::SequentialAttackExecution,
+                    format!("Action: {action:?}"),
+                ),
+            )
+            .await;
 
             match action {
                 SeqAction::Generate => {
@@ -291,10 +310,15 @@ impl SequentialAttackExecutionAgent {
                     attacked = false;
                     let obs = format!("generate ok attempt={attempt}");
                     transcript.push_str(&format!("Observation: {obs}\n"));
-                    events.push(AgentEvent::info(
+                    emit_and_record(
+                        tools,
+                        &mut events,
+                        AgentEvent::info(
                         AgentId::SequentialAttackExecution,
                         obs.clone(),
-                    ));
+                    ),
+                    )
+                    .await;
                     remember_stm(
                         memory,
                         &memory_ctx,
@@ -330,14 +354,24 @@ impl SequentialAttackExecutionAgent {
                             attacked = false;
                             // Empty batch is not fixed by pacing recover — fail the category.
                             stopped_reason = format!("attack_failed: {err}");
-                            events.push(AgentEvent::info(
+                            emit_and_record(
+                                tools,
+                                &mut events,
+                                AgentEvent::info(
                                 AgentId::SequentialAttackExecution,
                                 format!("attack failed attempt={attempt}: {err}"),
-                            ));
-                            events.push(AgentEvent::failed(
+                            ),
+                            )
+                            .await;
+                            emit_and_record(
+                                tools,
+                                &mut events,
+                                AgentEvent::failed(
                                 AgentId::SequentialAttackExecution,
                                 stopped_reason.clone(),
-                            ));
+                            ),
+                            )
+                            .await;
                             remember_attack_category_outcome(
                                 memory,
                                 &memory_ctx,
@@ -382,10 +416,15 @@ impl SequentialAttackExecutionAgent {
                                 "Observation: {line}\nSummary: {}\nNeeds recover: {needs_recover}\n",
                                 last_obs.summary
                             ));
-                            events.push(AgentEvent::info(
+                            emit_and_record(
+                                tools,
+                                &mut events,
+                                AgentEvent::info(
                                 AgentId::SequentialAttackExecution,
                                 line.clone(),
-                            ));
+                            ),
+                            )
+                            .await;
                             remember_stm(
                                 memory,
                                 &memory_ctx,
@@ -413,10 +452,15 @@ impl SequentialAttackExecutionAgent {
                             transcript.push_str(&format!(
                                 "Observation: {line}\nNeeds recover: {needs_recover}\n"
                             ));
-                            events.push(AgentEvent::info(
+                            emit_and_record(
+                                tools,
+                                &mut events,
+                                AgentEvent::info(
                                 AgentId::SequentialAttackExecution,
                                 line.clone(),
-                            ));
+                            ),
+                            )
+                            .await;
                             remember_stm(
                                 memory,
                                 &memory_ctx,
@@ -432,10 +476,15 @@ impl SequentialAttackExecutionAgent {
                             .await;
                             if !needs_recover {
                                 stopped_reason = format!("attack_failed: {err}");
-                                events.push(AgentEvent::failed(
+                                emit_and_record(
+                                    tools,
+                                    &mut events,
+                                    AgentEvent::failed(
                                     AgentId::SequentialAttackExecution,
                                     stopped_reason.clone(),
-                                ));
+                                ),
+                                )
+                                .await;
                                 remember_attack_category_outcome(
                                     memory,
                                     &memory_ctx,
@@ -499,10 +548,15 @@ impl SequentialAttackExecutionAgent {
                         plan.summary()
                     );
                     transcript.push_str(&format!("Observation: {line}\n"));
-                    events.push(AgentEvent::info(
+                    emit_and_record(
+                        tools,
+                        &mut events,
+                        AgentEvent::info(
                         AgentId::SequentialAttackExecution,
                         line.clone(),
-                    ));
+                    ),
+                    )
+                    .await;
                     remember_stm(
                         memory,
                         &memory_ctx,
@@ -574,10 +628,15 @@ impl SequentialAttackExecutionAgent {
                 .unwrap_or_else(|| {
                     "sequential category produced no successful attack attempts".into()
                 });
-            events.push(AgentEvent::failed(
+            emit_and_record(
+                tools,
+                &mut events,
+                AgentEvent::failed(
                 AgentId::SequentialAttackExecution,
                 reason.clone(),
-            ));
+            ),
+            )
+            .await;
             remember_attack_category_outcome(
                 memory,
                 &memory_ctx,
@@ -606,10 +665,15 @@ impl SequentialAttackExecutionAgent {
             return Err(AgentError::AttackExecution(reason));
         }
 
-        events.push(AgentEvent::completed(
+        emit_and_record(
+            tools,
+            &mut events,
+            AgentEvent::completed(
             AgentId::SequentialAttackExecution,
             format!("{} done: {stopped_reason}", request.category),
-        ));
+        ),
+        )
+        .await;
 
         remember_stm(
             memory,
@@ -745,7 +809,30 @@ async fn decide_action(
     let prompt = format!(
         "{transcript}\nReAct step {step}/{max_steps}. Reply with one JSON object only.\n"
     );
-    let raw = llm.complete(&prompt).await.map_err(|e| e.to_string())?;
+    let raw = match llm.complete(&prompt).await {
+        Ok(raw) => {
+            log_llm_call(
+                AgentId::SequentialAttackExecution,
+                "orchestrator",
+                prompt.len(),
+                &raw,
+                true,
+                AgentLogContext::default(),
+            );
+            raw
+        }
+        Err(err) => {
+            log_llm_call(
+                AgentId::SequentialAttackExecution,
+                "orchestrator",
+                prompt.len(),
+                &err.to_string(),
+                false,
+                AgentLogContext::default(),
+            );
+            return Err(err.to_string());
+        }
+    };
     let parsed: SeqReactStep = {
         let json = extract_json_object(&raw)
             .ok_or_else(|| "no JSON in SequentialAttackExecutionAgent ReAct response".to_string())?;

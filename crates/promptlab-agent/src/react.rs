@@ -8,6 +8,7 @@ use promptlab_target_profile::{AttackResultsSummary, TargetProfile, VerifyHttpSu
 use serde::Deserialize;
 use tracing::{info, warn};
 
+use crate::agent_log::{log_llm_call, log_react, log_tool_call, AgentLogContext};
 use crate::analyze_endpoint::{AnalyzeEndpointAgent, AnalyzeEndpointAgentOutcome};
 use crate::attack_plan::{AttackPlanAgent, AttackPlanAgentOutcome};
 use crate::create_project::{CreateProjectTools, CreatedProject};
@@ -25,6 +26,8 @@ use crate::summary::{SummaryAgent, SummaryAgentOutcome, SummaryRequest};
 use crate::types::{AgentEvent, AgentId};
 
 const DEFAULT_MAX_STEPS: usize = 6;
+/// Invalid / non-JSON supervisor replies do not consume action steps; keep asking until valid.
+const MAX_PARSE_FAILURES: usize = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReactActionKind {
@@ -166,6 +169,13 @@ impl<'a> ReactRequest<'a> {
         self.max_steps = max_steps.max(1);
         self
     }
+
+    fn log_ctx(&self) -> AgentLogContext<'_> {
+        AgentLogContext::new()
+            .with_project(self.memory_ctx.project_id.as_deref())
+            .with_target(self.memory_ctx.target_id.as_deref())
+            .with_scan(self.memory_ctx.scan_id.as_deref())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -236,39 +246,141 @@ pub async fn run_react(
         request.judge_request.is_some() && request.judge_engine.is_some(),
     ));
     transcript.push_str(
-        "\nBegin ReAct. Respond with one JSON step (thought + action).\n",
+        "\nBegin ReAct. Respond with one JSON step (thought + action).\n\
+         Reply with a single JSON object only — no markdown fences, no prose outside JSON.\n\
+         Example: {\"thought\":\"Plan attacks for the verified target\",\"action\":\"attack_plan\"}\n",
     );
 
-    for step in 1..=request.max_steps {
-        info!(step, "Yazg ReAct step");
+    let mut step = 0usize;
+    let mut parse_failures = 0usize;
+    while step < request.max_steps {
+        let display_step = step + 1;
+        info!(step = display_step, "Yazg ReAct step");
         artifacts.events.push(AgentEvent::info(
             AgentId::Yazg,
-            format!("ReAct step {step}/{max}", max = request.max_steps),
+            format!("ReAct step {display_step}/{max}", max = request.max_steps),
         ));
 
-        let raw = llms
-            .supervisor
-            .complete(&transcript)
-            .await
-            .map_err(|err| AgentError::Supervisor(format!("ReAct reasoning failed: {err}")))?;
+        let raw = match llms.supervisor.complete(&transcript).await {
+            Ok(raw) => {
+                log_llm_call(
+                    AgentId::Yazg,
+                    "supervisor",
+                    transcript.len(),
+                    &raw,
+                    true,
+                    request.log_ctx(),
+                );
+                raw
+            }
+            Err(err) => {
+                log_llm_call(
+                    AgentId::Yazg,
+                    "supervisor",
+                    transcript.len(),
+                    &err.to_string(),
+                    false,
+                    request.log_ctx(),
+                );
+                return Err(AgentError::Supervisor(format!(
+                    "ReAct reasoning failed: {err}"
+                )));
+            }
+        };
 
-        let parsed = parse_react_step(&raw).map_err(|err| {
-            warn!(error = %err, raw = %truncate(&raw, 400), "Yazg ReAct parse failed");
-            AgentError::Supervisor(err)
-        })?;
+        let parsed = match parse_react_step(&raw) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                parse_failures = parse_failures.saturating_add(1);
+                warn!(
+                    error = %err,
+                    parse_failures,
+                    raw = %truncate(&raw, 400),
+                    "Yazg ReAct parse failed; retrying"
+                );
+                log_react(
+                    AgentId::Yazg,
+                    "parse_retry",
+                    format!("{err} ({parse_failures}/{MAX_PARSE_FAILURES})"),
+                    request.log_ctx(),
+                );
+                artifacts.events.push(AgentEvent::info(
+                    AgentId::Yazg,
+                    format!(
+                        "Invalid ReAct JSON ({parse_failures}/{MAX_PARSE_FAILURES}): {err} — retrying"
+                    ),
+                ));
+                if parse_failures >= MAX_PARSE_FAILURES {
+                    return Err(AgentError::Supervisor(format!(
+                        "ReAct response did not contain a valid JSON object after {parse_failures} attempts: {err}"
+                    )));
+                }
+                transcript.push_str(&format!(
+                    "\nObservation: INVALID supervisor response ({err}).\n\
+                     Raw preview: {}\n\
+                     Respond again with ONE JSON object only, no markdown, no extra text.\n\
+                     Required shape: {{\"thought\":\"...\",\"action\":\"analyze_endpoint|attack_plan|generate_prompt|recommend|summary|judge|create_project|finish\"}}\n\
+                     For attack planning use action \"attack_plan\".\n",
+                    truncate(&raw, 240)
+                ));
+                continue;
+            }
+        };
 
         let thought = parsed
             .thought
             .unwrap_or_else(|| "(no thought)".into())
             .trim()
             .to_string();
-        artifacts.events.push(AgentEvent::info(
+
+        let action = match parse_action_kind(&parsed.action) {
+            Ok(action) => action,
+            Err(err) => {
+                parse_failures = parse_failures.saturating_add(1);
+                let message = err.to_string();
+                warn!(
+                    error = %message,
+                    parse_failures,
+                    action = %parsed.action,
+                    "Yazg ReAct unknown action; retrying"
+                );
+                log_react(
+                    AgentId::Yazg,
+                    "action_retry",
+                    format!("{message} ({parse_failures}/{MAX_PARSE_FAILURES})"),
+                    request.log_ctx(),
+                );
+                artifacts.events.push(AgentEvent::info(
+                    AgentId::Yazg,
+                    format!(
+                        "Invalid ReAct action ({parse_failures}/{MAX_PARSE_FAILURES}): {message} — retrying"
+                    ),
+                ));
+                if parse_failures >= MAX_PARSE_FAILURES {
+                    return Err(err);
+                }
+                transcript.push_str(&format!(
+                    "\n--- Attempt ---\nThought: {thought}\nAction: {}\n\
+                     Observation: INVALID action ({message}).\n\
+                     Choose one of: analyze_endpoint, attack_plan, generate_prompt, recommend, \
+                     summary, judge, create_project, finish.\n\
+                     Reply with one JSON object only.\n",
+                    parsed.action
+                ));
+                continue;
+            }
+        };
+
+        step = step.saturating_add(1);
+        artifacts.last_action = Some(action);
+        artifacts.events.push(AgentEvent::react(
             AgentId::Yazg,
             format!("Thought: {thought}"),
         ));
-
-        let action = parse_action_kind(&parsed.action)?;
-        artifacts.last_action = Some(action);
+        artifacts.events.push(AgentEvent::react(
+            AgentId::Yazg,
+            format!("Action: {}", parsed.action),
+        ));
 
         transcript.push_str(&format!(
             "\n--- Step {step} ---\nThought: {thought}\nAction: {}\n",
@@ -282,6 +394,12 @@ pub async fn run_react(
                     .filter(|r| !r.trim().is_empty())
                     .unwrap_or_else(|| thought.clone());
                 artifacts.final_reply = reply.clone();
+                log_tool_call(
+                    AgentId::Yazg,
+                    "finish",
+                    truncate(&reply, 400),
+                    request.log_ctx(),
+                );
                 remember_stm(
                     request.memory,
                     &request.memory_ctx,
@@ -303,36 +421,72 @@ pub async fn run_react(
                 return Ok(artifacts);
             }
             ReactActionKind::AnalyzeEndpoint => {
+                log_tool_call(
+                    AgentId::Yazg,
+                    "analyze_endpoint",
+                    "delegating to AnalyzeEndpointAgent",
+                    request.log_ctx(),
+                );
                 let observation =
                     execute_analyze(&request, llms.analyze, &mut artifacts).await?;
                 push_observation(&mut transcript, &mut artifacts, &observation);
                 remember_observation(&request, AgentId::AnalyzeEndpoint, &observation).await;
             }
             ReactActionKind::AttackPlan => {
+                log_tool_call(
+                    AgentId::Yazg,
+                    "attack_plan",
+                    "delegating to AttackPlanAgent",
+                    request.log_ctx(),
+                );
                 let observation =
                     execute_attack_plan(&request, llms.plan, &mut artifacts).await?;
                 push_observation(&mut transcript, &mut artifacts, &observation);
                 remember_observation(&request, AgentId::AttackPlan, &observation).await;
             }
             ReactActionKind::GeneratePrompt => {
+                log_tool_call(
+                    AgentId::Yazg,
+                    "generate_prompt",
+                    "delegating to GeneratePromptAgent",
+                    request.log_ctx(),
+                );
                 let observation =
                     execute_generate_prompt(&request, llms.prompt, &mut artifacts).await?;
                 push_observation(&mut transcript, &mut artifacts, &observation);
                 remember_observation(&request, AgentId::GeneratePrompt, &observation).await;
             }
             ReactActionKind::Recommend => {
+                log_tool_call(
+                    AgentId::Yazg,
+                    "recommend",
+                    "delegating to RecommendAgent",
+                    request.log_ctx(),
+                );
                 let observation =
                     execute_recommend(&request, llms.recommend, &mut artifacts).await?;
                 push_observation(&mut transcript, &mut artifacts, &observation);
                 remember_observation(&request, AgentId::Recommend, &observation).await;
             }
             ReactActionKind::Summary => {
+                log_tool_call(
+                    AgentId::Yazg,
+                    "summary",
+                    "delegating to SummaryAgent",
+                    request.log_ctx(),
+                );
                 let observation =
                     execute_summary(&request, llms.summary, &mut artifacts).await?;
                 push_observation(&mut transcript, &mut artifacts, &observation);
                 remember_observation(&request, AgentId::Summary, &observation).await;
             }
             ReactActionKind::Judge => {
+                log_tool_call(
+                    AgentId::Yazg,
+                    "judge",
+                    "delegating to JudgeCoordinatorAgent",
+                    request.log_ctx(),
+                );
                 let observation = execute_judge(&request, &mut artifacts).await?;
                 push_observation(&mut transcript, &mut artifacts, &observation);
                 remember_observation(&request, AgentId::JudgeCoordinator, &observation).await;
@@ -343,6 +497,12 @@ pub async fn run_react(
                     .or(parsed.project_name)
                     .unwrap_or_default();
                 let description = parsed.description;
+                log_tool_call(
+                    AgentId::Yazg,
+                    "create_project",
+                    format!("name={name}"),
+                    request.log_ctx(),
+                );
                 let observation = execute_create_project(
                     &request,
                     &name,
@@ -358,7 +518,8 @@ pub async fn run_react(
         transcript.push_str(
             "\nContinue ReAct: choose the next action JSON \
              (analyze_endpoint, attack_plan, generate_prompt, recommend, summary, judge, \
-             create_project, or finish).\n",
+             create_project, or finish).\n\
+             Reply with one JSON object only.\n",
         );
     }
 
@@ -556,7 +717,7 @@ fn push_observation(
     observation: &str,
 ) {
     transcript.push_str(&format!("Observation:\n{observation}\n"));
-    artifacts.events.push(AgentEvent::info(
+    artifacts.events.push(AgentEvent::react(
         AgentId::Yazg,
         format!("Observation: {}", truncate(observation, 240)),
     ));
@@ -666,11 +827,29 @@ fn parse_action_kind(raw: &str) -> AgentResult<ReactActionKind> {
 }
 
 fn parse_react_step(raw: &str) -> Result<ReactStepJson, String> {
-    let trimmed = raw.trim();
-    let json_slice = extract_json_object(trimmed).ok_or_else(|| {
+    let cleaned = strip_markdown_fences(raw.trim());
+    let json_slice = extract_json_object(cleaned.trim()).ok_or_else(|| {
         "ReAct response did not contain a JSON object".to_string()
     })?;
     serde_json::from_str(json_slice).map_err(|err| format!("invalid ReAct JSON: {err}"))
+}
+
+/// Strip ``` / ```json wrappers so models that wrap JSON still parse.
+fn strip_markdown_fences(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if !trimmed.starts_with("```") {
+        return trimmed.to_string();
+    }
+    let mut lines = trimmed.lines();
+    let _ = lines.next(); // opening fence
+    let mut body: Vec<&str> = lines.collect();
+    if body
+        .last()
+        .is_some_and(|line| line.trim().starts_with("```"))
+    {
+        body.pop();
+    }
+    body.join("\n")
 }
 
 fn extract_json_object(raw: &str) -> Option<&str> {
@@ -1036,6 +1215,13 @@ mod tests {
         let step = parse_react_step(raw).expect("parse");
         assert_eq!(step.action, "analyze_endpoint");
         assert!(step.thought.unwrap().contains("classify"));
+    }
+
+    #[test]
+    fn parses_react_json_inside_markdown_fence() {
+        let raw = "```json\n{\"thought\":\"Re-plan\",\"action\":\"attack_plan\"}\n```";
+        let step = parse_react_step(raw).expect("parse fenced");
+        assert_eq!(step.action, "attack_plan");
     }
 
     #[test]

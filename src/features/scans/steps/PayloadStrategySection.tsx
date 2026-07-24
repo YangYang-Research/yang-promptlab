@@ -37,7 +37,9 @@ export function PayloadStrategySection({
         {strategy.enableResponseAdaptation ? <YazgBadge /> : null}
       </div>
       <p className="text-muted text-sm">
-        Configures how payloads are generated during Step 5 execution. No probes are built here.
+        Configures Step 5 generation and attack expansion. Budget = payloads per
+        testcase; variants = HTTP mutator expansions per payload. Estimated requests ≈
+        testcases × budget × variants.
       </p>
 
       <div className="wizard-attack-profiles">
@@ -83,7 +85,7 @@ export function PayloadStrategySection({
           min={VARIANTS_PER_TEST_MIN}
           max={VARIANTS_PER_TEST_MAX}
           formatValue={(value) => `${value}`}
-          title="Maximum payload candidates per test (not HTTP requests)."
+          title="HTTP mutator expansions per generated payload (1 original + up to N−1 mutations). Multiplies request count."
           onChange={(value) => applyChange({ variantsPerTest: clampVariantsPerTest(value) })}
           disabled={readOnly}
         />
@@ -94,7 +96,7 @@ export function PayloadStrategySection({
           max={PAYLOAD_BUDGET_MAX}
           step={PAYLOAD_BUDGET_STEP}
           formatValue={(value) => value.toLocaleString()}
-          title="Upper bound on generated payloads per testcase. Execution may stop earlier."
+          title="Generated payloads per testcase (technique). HTTP estimate ≈ testcases × budget × variants."
           onChange={(value) => applyChange({ maxTotalPayloads: clampPayloadBudget(value) })}
           disabled={readOnly}
         />

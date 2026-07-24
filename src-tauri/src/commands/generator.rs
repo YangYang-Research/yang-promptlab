@@ -150,6 +150,7 @@ pub fn validate_payload_map_per_testcase(
     disabled_tests: &[String],
     strategy: &PayloadStrategy,
 ) -> Result<(), String> {
+    // Model A: max_total_payloads = generated payloads required per testcase source.
     let budget = strategy.max_total_payloads;
     if budget == 0 {
         return Ok(());

@@ -35,7 +35,7 @@ use crate::dto::FindingDto;
 use crate::error::{CommandError, CommandResult};
 use crate::events::{ScanProgressEmitter, ScanProgressLevel};
 use crate::inference_host::build_judge_engine_from_gateway;
-use crate::session_auth::{attack_executor, attack_executor_with_variants, build_attack_runtime, AttackRuntime};
+use crate::session_auth::{attack_executor_with_variants, build_attack_runtime, AttackRuntime};
 use crate::jobs::{bump_scan_progress, ScanBatchCheckpoint, ScanJobControls, ScanProgress};
 use crate::scan_playbook::persist_scan_playbook_state;
 use crate::state::AppState;
@@ -50,6 +50,7 @@ pub struct CategoryRunOptions {
 }
 
 impl CategoryRunOptions {
+    /// Model A: HTTP work-item cap ≈ enabled_tests × variants_per_payload × payloads_per_testcase.
     pub fn from_strategy(
         category: AttackCategory,
         disabled_tests: &[String],
@@ -96,17 +97,6 @@ fn apply_options_to_budget(ctx: &mut AttackContext, options: Option<&CategoryRun
         }
     } else {
         ctx.budget.max_concurrent_requests = DEFAULT_ATTACK_CONCURRENCY;
-    }
-}
-
-fn attack_executor_for_options(
-    transport: crate::plugin_transport::PluginAwareTransport,
-    options: &CategoryRunOptions,
-) -> AttackExecutor<crate::plugin_transport::PluginAwareTransport> {
-    if options.variants_per_test <= 1 {
-        attack_executor(transport)
-    } else {
-        attack_executor_with_variants(transport, options.variants_per_test)
     }
 }
 
@@ -348,12 +338,22 @@ impl CategoryJudgeAccum {
     }
 
     fn endpoint_unhealthy(&self) -> bool {
-        self.transport_errors > 0
-            || self.rate_limited > 0
-            || self.server_errors > 0
-            || (self.attempt_count > 0
-                && self.http_successes == 0
-                && (self.avg_latency_ms() >= 10_000 || self.max_latency_ms >= 20_000))
+        if self.rate_limited > 0 {
+            return true;
+        }
+        if self.attempt_count == 0 {
+            return false;
+        }
+        let hard_failures = self
+            .transport_errors
+            .saturating_add(self.server_errors);
+        if self.http_successes == 0 {
+            return hard_failures > 0
+                || self.avg_latency_ms() >= 10_000
+                || self.max_latency_ms >= 20_000;
+        }
+        // Partial success: unhealthy only when hard failures dominate.
+        hard_failures > 0 && hard_failures >= self.http_successes
     }
 }
 
@@ -601,8 +601,25 @@ async fn collect_category_attempts(
     loop {
         tokio::select! {
             result = exec.as_mut() => {
-                result.map_err(|err| CommandError::from(promptlab_core::PromptLabError::internal(err.to_string())))?;
-                break;
+                match result {
+                    Ok(_) => break,
+                    Err(err) => {
+                        // Soft-fail safety net: keep already-streamed probes instead of
+                        // discarding partial success and forcing a full recover re-attack.
+                        if attempts.is_empty() {
+                            return Err(CommandError::from(
+                                promptlab_core::PromptLabError::internal(err.to_string()),
+                            ));
+                        }
+                        if let Some(emitter) = emitter {
+                            emitter.warn(format!(
+                                "Attack pool ended with error after {} successful probe(s): {err}",
+                                attempts.len()
+                            ));
+                        }
+                        break;
+                    }
+                }
             }
             item = rx.recv() => {
                 match item {
@@ -841,6 +858,14 @@ async fn execute_category_then_judge(
                 }
             }
 
+            // Soft-failed transport probes are already counted in health stats — skip judge.
+            if attempts[seq].response.status == 0 {
+                if let Some(progress_state) = env.progress_state {
+                    bump_scan_progress(progress_state, 1);
+                }
+                continue;
+            }
+
             judge_single_attempt(env, seq, attempts[seq].clone(), &mut accum).await?;
 
             if let Some(ctrl) = env.job_controls {
@@ -957,11 +982,10 @@ pub async fn run_category_on_endpoint(
         ctx = ctx.with_generated_payloads(payloads.clone());
     }
     apply_options_to_budget(&mut ctx, options);
-    let executor = if let Some(opts) = options {
-        attack_executor_for_options(runtime.transport, opts)
-    } else {
-        attack_executor(runtime.transport)
-    };
+    let variants = options
+        .map(|opts| opts.variants_per_test.max(1))
+        .unwrap_or(1);
+    let executor = attack_executor_with_variants(runtime.transport, variants);
 
     info!(
         scan_id = %scan_id,
@@ -1078,11 +1102,10 @@ pub async fn run_category_on_target_profile(
         ctx = ctx.with_generated_payloads(payloads.clone());
     }
     apply_options_to_budget(&mut ctx, options);
-    let executor = if let Some(opts) = options {
-        attack_executor_for_options(runtime.transport, opts)
-    } else {
-        attack_executor(runtime.transport)
-    };
+    let variants = options
+        .map(|opts| opts.variants_per_test.max(1))
+        .unwrap_or(1);
+    let executor = attack_executor_with_variants(runtime.transport, variants);
 
     info!(
         scan_id = %scan_id,

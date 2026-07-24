@@ -55,6 +55,7 @@ pub enum LogCategory {
     Settings,
     UserInterface,
     Scan,
+    Agent,
 }
 
 impl LogCategory {
@@ -76,6 +77,7 @@ impl LogCategory {
             Self::Settings => "Settings Activity",
             Self::UserInterface => "User Interface",
             Self::Scan => "Scan Activity",
+            Self::Agent => "Agent Activity",
         }
     }
 
@@ -97,6 +99,7 @@ impl LogCategory {
             Self::Settings => "settings.log",
             Self::UserInterface => "ui.log",
             Self::Scan => "scan.log",
+            Self::Agent => "agents.log",
         }
     }
 
@@ -118,6 +121,7 @@ impl LogCategory {
             Self::Settings => "settings",
             Self::UserInterface => "user_interface",
             Self::Scan => "scan",
+            Self::Agent => "agent",
         }
     }
 }
@@ -214,6 +218,7 @@ fn category_class_uid(category: LogCategory) -> u32 {
         LogCategory::Settings => 7001,
         LogCategory::UserInterface => 8001,
         LogCategory::Scan => 9001,
+        LogCategory::Agent => 4010,
     }
 }
 
@@ -408,6 +413,7 @@ impl CategoryFile for OcsfEvent {
             "settings" => "settings.log",
             "user_interface" => "ui.log",
             "scan" => "scan.log",
+            "agent" => "agents.log",
             _ => "app.log",
         }
     }

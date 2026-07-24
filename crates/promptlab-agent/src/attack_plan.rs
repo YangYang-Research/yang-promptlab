@@ -140,6 +140,7 @@ Return ONLY JSON:
 
 Rules:
 - Prefer escalating mutation/strategy/variants when the last attempt found nothing useful.
+- variantsPerTest controls HTTP mutator expansions per generated payload (not generation count).
 - enable_response_adaptation=true when judge feedback should guide payload regeneration.
 - disable_technique_ids: optional technique ids that clearly failed or wasted budget (may be empty).
 - notes: short operator-facing explanations (1-3).

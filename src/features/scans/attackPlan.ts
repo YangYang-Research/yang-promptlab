@@ -487,6 +487,7 @@ export function computeWizardPlanMetrics(
 > {
   let requests = 0;
   let totalTestcases = 0;
+  // Model A: HTTP ≈ enabledTests × payloadsPerTestcase × variantsPerPayload
   const variants = plan.payloadStrategy.variantsPerTest;
   const payloadsPerTestcase = plan.payloadStrategy.maxTotalPayloads;
   const disabled = new Set(plan.disabledTests);

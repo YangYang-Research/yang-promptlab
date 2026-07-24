@@ -54,7 +54,7 @@ function isLiveScan(scan: ScanRun): boolean {
 export function TargetDetailsPage() {
   const { targetId = "" } = useParams();
   const navigate = useNavigate();
-  const { targets, projects, scans, loading, actions } = useAppStore();
+  const { targets, projects, scans, findings, loading, actions } = useAppStore();
   const { notify } = useToast();
   const [deleting, setDeleting] = useState(false);
   const [pageSize, setPageSize] = usePageSizePreference("target-details-scans");
@@ -75,6 +75,14 @@ export function TargetDetailsPage() {
     () => targetScans.filter(isAttackScan),
     [targetScans],
   );
+
+  const findingsByScan = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const finding of findings) {
+      map.set(finding.scanId, (map.get(finding.scanId) ?? 0) + 1);
+    }
+    return map;
+  }, [findings]);
 
   const { page, setPage, pagination } = usePaginatedList(attackScans, pageSize);
 
@@ -97,13 +105,19 @@ export function TargetDetailsPage() {
         render: (scan: ScanRun) => <StatusBadge status={scan.status} />,
       },
       {
+        key: "findings",
+        header: "Findings",
+        width: "90px",
+        render: (scan: ScanRun) => findingsByScan.get(scan.id) ?? 0,
+      },
+      {
         key: "started",
         header: "Started",
         width: "180px",
         render: (scan: ScanRun) => formatTimestamp(scan.startedAt ?? scan.createdAt),
       },
     ],
-    [],
+    [findingsByScan],
   );
 
   const scanContext = useMemo(
@@ -389,6 +403,10 @@ export function TargetDetailsPage() {
                         {
                           label: "Scan ID",
                           value: <span className="mono text-sm">{scan.id}</span>,
+                        },
+                        {
+                          label: "Findings",
+                          value: findingsByScan.get(scan.id) ?? 0,
                         },
                         {
                           label: "Started",

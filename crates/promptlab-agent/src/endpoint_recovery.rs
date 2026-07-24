@@ -80,24 +80,34 @@ impl RecoveryPlan {
 }
 
 /// True when the last attack observation indicates the endpoint is unhealthy / throttling.
+///
+/// Partial success (some HTTP 200s + a minority of transport/5xx failures, or high latency
+/// alone) does **not** force recover — that was causing costly re-attacks after usable probes.
 pub fn observation_needs_recovery(obs: &AttackAttemptObservation) -> bool {
     if obs.endpoint_error.as_ref().is_some_and(|e| !e.trim().is_empty()) {
         return true;
     }
-    if obs.endpoint_unhealthy || obs.transport_errors > 0 || obs.rate_limited > 0 {
+    if obs.rate_limited > 0 {
         return true;
     }
-    if obs.server_errors > 0 {
+    if obs.endpoint_unhealthy {
         return true;
     }
-    // No usable HTTP successes and high latency → likely overload / hang.
-    if obs.attempts > 0
-        && obs.http_successes == 0
-        && (obs.avg_latency_ms >= 10_000 || obs.max_latency_ms >= 20_000)
-    {
-        return true;
+
+    let hard_failures = obs.transport_errors.saturating_add(obs.server_errors);
+    if obs.attempts > 0 && obs.http_successes == 0 {
+        if hard_failures > 0 {
+            return true;
+        }
+        // No usable HTTP successes and high latency → likely overload / hang.
+        if obs.avg_latency_ms >= 10_000 || obs.max_latency_ms >= 20_000 {
+            return true;
+        }
+        return false;
     }
-    false
+
+    // Partial success: only recover when hard failures dominate successes.
+    hard_failures > 0 && hard_failures >= obs.http_successes
 }
 
 /// Deterministic pacing adjustment from observation + recovery attempt index.
@@ -201,9 +211,10 @@ pub fn heuristic_recovery(
     }
 }
 
-/// Mild pacing seed from a prior-scan failure for this category.
+/// Strong pacing seed from a prior-scan failure for this category.
 ///
 /// Applied once at category start — does **not** consume a recovery slot.
+/// Uses recovery_index=1 (serial) so known-bad endpoints do not start at mild concurrency=5.
 /// Recover ReAct actions remain reserved for unhealthy observations in the current run.
 pub fn seed_pacing_from_prior_failure(current: &EndpointPacing) -> RecoveryPlan {
     let mut plan = heuristic_recovery(
@@ -215,7 +226,7 @@ pub fn seed_pacing_from_prior_failure(current: &EndpointPacing) -> RecoveryPlan 
             ..Default::default()
         },
         current,
-        0,
+        1,
     );
     plan.wait_before_retry_ms = 0;
     plan.notes.insert(
@@ -277,8 +288,35 @@ mod tests {
     fn seed_pacing_does_not_wait() {
         let plan = seed_pacing_from_prior_failure(&EndpointPacing::default());
         assert_eq!(plan.wait_before_retry_ms, 0);
-        assert!(plan.pacing.effective_concurrency() <= DEFAULT_ATTACK_CONCURRENCY);
+        assert!(plan.pacing.serial_wait);
+        assert_eq!(plan.pacing.effective_concurrency(), 1);
         assert!(plan.notes.iter().any(|n| n.contains("not counted as recover")));
+    }
+
+    #[test]
+    fn partial_success_does_not_need_recovery() {
+        let obs = AttackAttemptObservation {
+            attempts: 3,
+            http_successes: 2,
+            transport_errors: 1,
+            avg_latency_ms: 25_000,
+            max_latency_ms: 44_000,
+            endpoint_unhealthy: false,
+            ..Default::default()
+        };
+        assert!(!observation_needs_recovery(&obs));
+    }
+
+    #[test]
+    fn failures_dominating_successes_need_recovery() {
+        let obs = AttackAttemptObservation {
+            attempts: 3,
+            http_successes: 1,
+            transport_errors: 2,
+            endpoint_unhealthy: true,
+            ..Default::default()
+        };
+        assert!(observation_needs_recovery(&obs));
     }
 
     #[test]

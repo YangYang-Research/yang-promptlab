@@ -18,6 +18,7 @@
 //! └── ReflectionAgent       — agentic retry reflection
 //! ```
 
+pub mod agent_log;
 pub mod analyze_endpoint;
 pub mod attack_execution;
 pub mod attack_plan;
@@ -36,9 +37,10 @@ pub mod summary;
 pub mod supervisor;
 pub mod types;
 
+pub use agent_log::{log_agent_event, log_llm_call, log_react, log_tool_call, AgentLogContext};
 pub use analyze_endpoint::{AnalyzeEndpointAgent, AnalyzeEndpointAgentOutcome};
 pub use attack_execution::{
-    AgenticAttackExecutionAgent, AttackAttemptObservation, AttackExecutionLlms,
+    emit_and_record, AgenticAttackExecutionAgent, AttackAttemptObservation, AttackExecutionLlms,
     AttackExecutionOutcome, AttackExecutionRequest, AttackExecutionTools,
 };
 pub use endpoint_recovery::{

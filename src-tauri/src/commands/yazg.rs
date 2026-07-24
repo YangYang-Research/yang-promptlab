@@ -104,6 +104,9 @@ fn event_dto(event: AgentEvent) -> AgentEventDto {
             promptlab_agent::AgentEventKind::Completed => "completed".into(),
             promptlab_agent::AgentEventKind::Failed => "failed".into(),
             promptlab_agent::AgentEventKind::Info => "info".into(),
+            promptlab_agent::AgentEventKind::React => "react".into(),
+            promptlab_agent::AgentEventKind::ToolCall => "tool_call".into(),
+            promptlab_agent::AgentEventKind::Llm => "llm".into(),
         },
         message: event.message,
     }

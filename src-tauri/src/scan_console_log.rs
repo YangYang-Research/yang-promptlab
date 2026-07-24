@@ -134,11 +134,24 @@ fn format_console_line(event: &ScanProgressEvent) -> String {
     }
 
     if let Some(finding_id) = &event.finding_id {
-        let short = finding_id.chars().take(8).collect::<String>();
+        // UUIDv7 shares a time prefix — first 8 chars collide across near-simultaneous creates.
+        // Prefer first two segments (time + clock) which stay unique per row.
+        let short = short_finding_id(finding_id);
         parts.push(format!("[finding {short}]"));
     }
 
     parts.join(" ")
+}
+
+fn short_finding_id(id: &str) -> String {
+    let segments: Vec<&str> = id.split('-').collect();
+    if segments.len() >= 2 {
+        format!("{}-{}", segments[0], segments[1])
+    } else if id.len() > 13 {
+        id.chars().take(13).collect()
+    } else {
+        id.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -185,5 +198,21 @@ mod tests {
     #[test]
     fn rejects_path_traversal_scan_id() {
         assert!(scan_console_log_path(Path::new("/tmp"), "../evil").is_none());
+    }
+
+    #[test]
+    fn short_finding_id_uses_first_two_uuid_segments() {
+        assert_eq!(
+            short_finding_id("019f9464-e04b-72c0-a3a7-f872b475b459"),
+            "019f9464-e04b"
+        );
+        assert_eq!(
+            short_finding_id("019f9464-e9cb-70e1-be67-4510997666a0"),
+            "019f9464-e9cb"
+        );
+        assert_ne!(
+            short_finding_id("019f9464-e04b-72c0-a3a7-f872b475b459"),
+            short_finding_id("019f9464-e9cb-70e1-be67-4510997666a0")
+        );
     }
 }

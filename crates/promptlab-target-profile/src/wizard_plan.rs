@@ -526,6 +526,7 @@ pub fn expected_payload_objects(
     disabled_tests: &[String],
     strategy: &PayloadStrategy,
 ) -> u32 {
+    // Generated objects only (no HTTP mutator expand): testcases × payloads_per_testcase.
     categories
         .iter()
         .map(|category| {
@@ -541,6 +542,7 @@ pub fn estimate_scan_requests(
     execution: ExecutionStrategy,
     max_attempts: u32,
 ) -> u32 {
+    // Model A: HTTP ≈ enabled_tests × payloads_per_testcase × variants_per_payload.
     let variants = strategy.variants_per_test;
     let payloads_per_testcase = strategy.max_total_payloads;
     let mut requests = 0u32;

@@ -6,7 +6,9 @@ export type MutationLevel = "low" | "medium" | "high" | "extreme";
 export type PayloadStrategyConfig = {
   strategy: PayloadGenerationStrategy;
   mutationLevel: MutationLevel;
+  /** HTTP mutator expansions per generated payload (attack-time). */
   variantsPerTest: number;
+  /** Generated payloads required/produced per testcase (technique). */
   maxTotalPayloads: number;
   enableContextAwareness: boolean;
   enableConversationMemory: boolean;
@@ -200,7 +202,7 @@ export function formatPayloadStrategySummary(strategy: PayloadStrategyConfig): s
   const gen = GENERATION_STRATEGIES.find((item) => item.id === strategy.strategy)?.label ?? strategy.strategy;
   const mut =
     MUTATION_LEVELS.find((item) => item.id === strategy.mutationLevel)?.label ?? strategy.mutationLevel;
-  return `${gen} · ${mut} · ${strategy.variantsPerTest} variants/test · budget ${strategy.maxTotalPayloads}`;
+  return `${gen} · ${mut} · ${strategy.variantsPerTest} HTTP variants/payload · ${strategy.maxTotalPayloads} payloads/testcase`;
 }
 
 export function payloadStrategyMatchesRecommendation(

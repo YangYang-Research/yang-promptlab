@@ -925,14 +925,14 @@ fn parse_payload_strategy_strict(
     };
     let variants_per_test = if raw.variants_per_test == 0 {
         return Err(PlannerError::Llm(format!(
-            "modes.{profile_id}.payloadStrategy.variantsPerTest is required (derive from enabledTests/mutationLevel; do not omit or use 0)"
+            "modes.{profile_id}.payloadStrategy.variantsPerTest is required (HTTP expansions per generated payload, 1-20; do not omit or use 0)"
         )));
     } else {
         raw.variants_per_test
     };
     let max_total_payloads = if raw.max_total_payloads == 0 {
         return Err(PlannerError::Llm(format!(
-            "modes.{profile_id}.payloadStrategy.maxTotalPayloads is required (derive from enabledTests*variantsPerTest; do not omit or use 0)"
+            "modes.{profile_id}.payloadStrategy.maxTotalPayloads is required (generated payloads per testcase, 1-50; do not omit or use 0)"
         )));
     } else {
         raw.max_total_payloads

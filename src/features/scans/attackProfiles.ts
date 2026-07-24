@@ -38,8 +38,8 @@ export type AttackProfileDefinition = {
   categories?: AttackCategoryId[];
 };
 
-/** Original payload + up to 3 mutator variants (`PayloadMutator::with_defaults`). */
-export const VARIANTS_PER_PAYLOAD = 4;
+/** HTTP shapes per generated payload when variantsPerTest is unset (identity = original only). */
+export const VARIANTS_PER_PAYLOAD = 1;
 
 /** Average HTTP round-trip per payload attempt (UI estimate only). */
 export const SECONDS_PER_REQUEST = 2.5;

@@ -14,6 +14,18 @@ impl PayloadMutator {
         Self { config }
     }
 
+    /// No HTTP expand — original payload only (`variantsPerTest = 1`).
+    pub fn identity() -> Self {
+        Self {
+            config: MutatorConfig {
+                enabled: MutatorKind::all().to_vec(),
+                max_per_payload: 0,
+            },
+        }
+    }
+
+    /// Explicit opt-in expand (up to 3 mutators). Prefer strategy-driven
+    /// `max_per_payload = variants_per_test - 1` in production scan paths.
     pub fn with_defaults() -> Self {
         Self {
             config: MutatorConfig {
