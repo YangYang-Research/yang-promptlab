@@ -12,8 +12,8 @@ use crate::attack_execution::{
     emit_and_record, AttackAttemptObservation, AttackExecutionOutcome, AttackExecutionTools,
 };
 use crate::endpoint_recovery::{
-    heuristic_recovery, observation_needs_recovery, seed_pacing_from_prior_failure,
-    MAX_ENDPOINT_RECOVERIES,
+    error_is_endpoint_recoverable, heuristic_recovery, observation_needs_recovery,
+    seed_pacing_from_prior_failure, MAX_ENDPOINT_RECOVERIES,
 };
 use crate::error::{AgentError, AgentResult};
 use crate::memory::{
@@ -446,8 +446,9 @@ impl SequentialAttackExecutionAgent {
                             let empty_batch = err.contains("no requests")
                                 || err.contains("no payloads")
                                 || err.contains("empty payload");
-                            needs_recover =
-                                !empty_batch && recoveries_used < MAX_ENDPOINT_RECOVERIES;
+                            needs_recover = !empty_batch
+                                && error_is_endpoint_recoverable(&err)
+                                && recoveries_used < MAX_ENDPOINT_RECOVERIES;
                             let line = format!("attack failed attempt={attempt}: {err}");
                             transcript.push_str(&format!(
                                 "Observation: {line}\nNeeds recover: {needs_recover}\n"

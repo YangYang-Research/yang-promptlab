@@ -257,6 +257,51 @@ fn severity_str(severity: FindingSeverity) -> &'static str {
     }
 }
 
+fn judge_severity_from_attack(severity: FindingSeverity) -> JudgeSeverity {
+    match severity {
+        FindingSeverity::Info => JudgeSeverity::Info,
+        FindingSeverity::Low => JudgeSeverity::Low,
+        FindingSeverity::Medium => JudgeSeverity::Medium,
+        FindingSeverity::High => JudgeSeverity::High,
+        FindingSeverity::Critical => JudgeSeverity::Critical,
+    }
+}
+
+/// When JudgeCoordinator LLM roles are down, keep scanning with attack-side evaluation.
+fn fallback_verdict_from_attack_eval(attempt: &PayloadAttempt) -> JudgeVerdict {
+    let eval = &attempt.evaluation;
+    let vulnerable = eval.success;
+    JudgeVerdict {
+        probe_id: attempt.payload_id.clone(),
+        vulnerable,
+        confidence: eval.confidence,
+        severity: eval.severity.map(judge_severity_from_attack),
+        category: None,
+        summary: if eval.summary.trim().is_empty() {
+            "Attack evaluation fallback (judge LLM unavailable)".into()
+        } else {
+            format!("{} [attack-eval fallback]", eval.summary)
+        },
+        reasoning: "JudgeCoordinator unavailable — used attack evaluation signals".into(),
+        evidence: eval.indicators.clone(),
+        verdict: if vulnerable {
+            "vulnerable".into()
+        } else {
+            "not_vulnerable".into()
+        },
+        mode: promptlab_judge::JudgeMode::LocalLlm,
+        consensus: promptlab_judge::ConsensusReport {
+            agreement_ratio: 1.0,
+            participating_evaluators: 0,
+            vulnerable_votes: usize::from(vulnerable),
+            dissent: false,
+            method: "attack_evaluation_fallback".into(),
+        },
+        evaluator_results: Vec::new(),
+        judged_at: OffsetDateTime::now_utc(),
+    }
+}
+
 fn judge_severity_str(severity: JudgeSeverity) -> &'static str {
     match severity {
         JudgeSeverity::Info => "info",
@@ -418,10 +463,24 @@ async fn judge_single_attempt(
         attempt.mutated_content.clone(),
         normalized,
     );
-    let mut verdict: JudgeVerdict = JudgeCoordinatorAgent::run(&judge_request, env.judge)
-        .await
-        .map_err(|err| CommandError::from(promptlab_core::PromptLabError::internal(err.to_string())))?
-        .verdict;
+    let mut verdict: JudgeVerdict = match JudgeCoordinatorAgent::run(&judge_request, env.judge).await
+    {
+        Ok(out) => out.verdict,
+        Err(err) => {
+            warn!(
+                probe_id = %attempt.payload_id,
+                error = %err,
+                "JudgeCoordinator failed; falling back to attack evaluation"
+            );
+            if let Some(emitter) = env.progress {
+                emitter.info(format!(
+                    "Judge LLM unavailable for {} — attack-eval fallback",
+                    attempt.payload_name
+                ));
+            }
+            fallback_verdict_from_attack_eval(&attempt)
+        }
+    };
 
     {
         let mut plugins = env.plugin_manager.lock().await;

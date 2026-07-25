@@ -79,6 +79,21 @@ impl RecoveryPlan {
     }
 }
 
+/// True when an attack-tool error is an internal/judge failure — not an endpoint
+/// transport problem. Recover+re-attack would waste the whole batch.
+pub fn error_is_endpoint_recoverable(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    if lower.contains("[internal]")
+        || lower.contains("judge failed")
+        || lower.contains("judgecoordinator")
+        || lower.contains("all role workers failed")
+        || lower.contains("ai runtime")
+    {
+        return false;
+    }
+    true
+}
+
 /// True when the last attack observation indicates the endpoint is unhealthy / throttling.
 ///
 /// Partial success (some HTTP 200s + a minority of transport/5xx failures, or high latency
@@ -303,6 +318,19 @@ mod tests {
             ..Default::default()
         };
         assert!(!observation_needs_recovery(&obs));
+    }
+
+    #[test]
+    fn judge_internal_errors_are_not_endpoint_recoverable() {
+        assert!(!error_is_endpoint_recoverable(
+            "[INTERNAL] judge failed: JudgeCoordinatorAgent: all role workers failed — check AI runtime"
+        ));
+        assert!(!error_is_endpoint_recoverable(
+            "JudgeCoordinatorAgent: all role workers failed"
+        ));
+        assert!(error_is_endpoint_recoverable(
+            "transport error: connection reset"
+        ));
     }
 
     #[test]
