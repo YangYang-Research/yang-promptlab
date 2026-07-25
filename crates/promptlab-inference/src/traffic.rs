@@ -5,12 +5,12 @@
 //!
 //! **Choke points (must record here, not in feature crates):**
 //! - [`crate::provider::RemoteProviderAdapter::complete`] / [`crate::provider::LlamaCppAdapter::complete`]
-//!   — all gateway / agent / judge-via-adapter completions
+//!   — all [`crate::gateway::InferenceClient`] / session completions
 //! - Judge legacy backends (`promptlab-judge` `RemoteLlmBackend` / `LocalLlmBackend`)
-//! - Health/connectivity wrappers that call `health` without going through `complete`
-//!   ([`crate::gateway::GatewaySession::health`], `test_remote_connectivity_only`)
+//! - Health probes: [`crate::gateway::InferenceClient::health`],
+//!   [`crate::gateway::GatewaySession::health`]
 //!
-//! Do not also record in `GatewaySession::complete` / judge `AdapterRuntime` — that double-counts.
+//! Do not also record in `GatewaySession::complete` / judge client wrappers — that double-counts.
 
 use std::collections::VecDeque;
 use std::sync::{Mutex, OnceLock};

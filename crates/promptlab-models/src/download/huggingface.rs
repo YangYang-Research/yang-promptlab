@@ -12,15 +12,24 @@ pub struct HuggingFaceClient {
 
 impl HuggingFaceClient {
     pub fn new() -> Self {
-        Self {
-            client: reqwest::Client::builder()
+        let client = promptlab_core::build_http_client(
+            promptlab_core::HttpClientOptions::default()
+                .with_user_agent("promptlab-models/0.1")
+                .with_redirect_limit(10)
+                .with_connect_timeout(std::time::Duration::from_secs(60))
+                .without_gzip(),
+        )
+        .unwrap_or_else(|err| {
+            tracing::warn!(error = %err, "falling back to direct HTTP client for HuggingFace");
+            reqwest::Client::builder()
                 .user_agent("promptlab-models/0.1")
                 .redirect(reqwest::redirect::Policy::limited(10))
                 .connect_timeout(std::time::Duration::from_secs(60))
                 .no_gzip()
                 .build()
-                .expect("reqwest client"),
-        }
+                .expect("reqwest client")
+        });
+        Self { client }
     }
 
     pub fn client(&self) -> &reqwest::Client {

@@ -18,6 +18,7 @@ pub mod mutators;
 pub mod planner;
 pub mod plugins;
 pub mod projects;
+pub mod proxy;
 pub mod runtime;
 pub mod scan;
 pub mod scan_execution;

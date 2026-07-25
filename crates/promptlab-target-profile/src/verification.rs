@@ -389,7 +389,9 @@ pub async fn execute_verify_http_with_prompt(
         }
     }
 
-    let client = match reqwest::Client::builder().timeout(timeout).build() {
+    let client = match promptlab_core::build_http_client(
+        promptlab_core::HttpClientOptions::default().with_timeout(timeout),
+    ) {
         Ok(client) => client,
         Err(e) => {
             return Err(attempt_failure(

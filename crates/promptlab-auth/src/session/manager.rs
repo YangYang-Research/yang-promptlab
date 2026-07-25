@@ -305,11 +305,11 @@ fn cookie_matches_url(cookie: &CookieRecord, host: &str, path: &str) -> bool {
 }
 
 async fn probe_requires_reauth(url: &str, cookie_header: &str) -> bool {
-    let client = match reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(3))
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-    {
+    let client = match promptlab_core::build_http_client(
+        promptlab_core::HttpClientOptions::default()
+            .with_redirect_limit(3)
+            .with_timeout(std::time::Duration::from_secs(10)),
+    ) {
         Ok(client) => client,
         Err(_) => return false,
     };

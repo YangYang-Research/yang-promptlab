@@ -10,7 +10,7 @@ use crate::config::{
 };
 use crate::engine::JudgeEngine;
 use crate::error::{JudgeError, JudgeResult};
-use promptlab_inference::ProviderAdapter;
+use promptlab_inference::{CompleteRequest, InferenceClient};
 use crate::providers::local::LocalLlmBackend;
 use crate::providers::remote::RemoteLlmBackend;
 use crate::providers::LlmBackend;
@@ -18,17 +18,26 @@ use crate::roles::ModelRolePool;
 use crate::runtime_context::JudgeRuntimeContext;
 use crate::types::{JudgeMode, JudgeRequest};
 
-/// Build judge engine using a provider adapter from the AI Inference Gateway.
-pub async fn build_judge_engine_with_adapter(
-    adapter: Arc<dyn ProviderAdapter>,
+/// Build judge engine using a cloneable [`InferenceClient`] from the AI Inference Gateway.
+pub async fn build_judge_engine_with_client(
+    client: InferenceClient,
     config: &JudgeProviderConfig,
 ) -> JudgeResult<JudgeEngine> {
     let engine_config = config.to_engine_config();
     let mut pool = ModelRolePool::new();
     let runtime: Arc<Mutex<dyn InferenceRuntime>> =
-        Arc::new(Mutex::new(AdapterRuntime { adapter }));
+        Arc::new(Mutex::new(ClientRuntime { client }));
     pool.set_all(runtime);
     Ok(JudgeEngine::new(engine_config, pool))
+}
+
+/// Deprecated name — prefer [`build_judge_engine_with_client`].
+#[deprecated(note = "use build_judge_engine_with_client")]
+pub async fn build_judge_engine_with_adapter(
+    adapter: Arc<dyn promptlab_inference::ProviderAdapter>,
+    config: &JudgeProviderConfig,
+) -> JudgeResult<JudgeEngine> {
+    build_judge_engine_with_client(InferenceClient::from_adapter(adapter, 2048, 0.0), config).await
 }
 
 /// Build a hybrid judge engine from persisted provider configuration.
@@ -65,12 +74,12 @@ fn attach_backend_to_pool(pool: &mut ModelRolePool, backend: Arc<dyn crate::prov
     pool.set_all(runtime);
 }
 
-struct AdapterRuntime {
-    adapter: Arc<dyn ProviderAdapter>,
+struct ClientRuntime {
+    client: InferenceClient,
 }
 
 #[async_trait::async_trait]
-impl InferenceRuntime for AdapterRuntime {
+impl InferenceRuntime for ClientRuntime {
     fn state(&self) -> promptlab_models::types::RuntimeState {
         promptlab_models::types::RuntimeState::Ready
     }
@@ -90,14 +99,14 @@ impl InferenceRuntime for AdapterRuntime {
         &self,
         request: promptlab_models::types::InferenceRequest,
     ) -> promptlab_models::error::ModelResult<promptlab_models::types::InferenceResponse> {
-        // Traffic is recorded inside ProviderAdapter::complete (leaf choke point).
-        self.adapter
-            .complete(
-                request.system.as_deref(),
-                &request.prompt,
-                request.max_tokens,
-                request.temperature,
-            )
+        // All judge LLM calls go through InferenceClient (gateway hot-path).
+        self.client
+            .complete(CompleteRequest {
+                prompt: request.prompt,
+                system: request.system,
+                max_tokens: Some(request.max_tokens),
+                temperature: Some(request.temperature),
+            })
             .await
             .map(|text| promptlab_models::types::InferenceResponse {
                 text,
@@ -108,7 +117,7 @@ impl InferenceRuntime for AdapterRuntime {
     }
 
     async fn health(&self) -> promptlab_models::error::ModelResult<bool> {
-        self.adapter
+        self.client
             .health()
             .await
             .map_err(|e| promptlab_models::error::ModelError::runtime(e.to_string()))

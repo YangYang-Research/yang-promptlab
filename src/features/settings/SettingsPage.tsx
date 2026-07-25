@@ -10,10 +10,11 @@ import { clearAllAppData } from "@/shared/ipc/app";
 
 import { EnvironmentsPanel } from "./EnvironmentsPanel";
 import { JudgeRoleWeightsPanel } from "./JudgeRoleWeightsPanel";
+import { ProxySettingsPanel } from "./ProxySettingsPanel";
 import { RuntimeInferencePanel } from "./RuntimeInferencePanel";
 import { TroubleshootingPanel } from "./TroubleshootingPanel";
 
-type SettingsTab = "general" | "ai" | "storage" | "diagnostics" | "about";
+type SettingsTab = "general" | "ai" | "network" | "storage" | "diagnostics" | "about";
 
 const SETTINGS_SECTIONS: {
   id: SettingsTab;
@@ -22,6 +23,7 @@ const SETTINGS_SECTIONS: {
 }[] = [
   { id: "general", label: "General", hint: "Theme and privacy" },
   { id: "ai", label: "AI Runtime", hint: "Model and inference" },
+  { id: "network", label: "Network", hint: "Proxy and connectivity" },
   { id: "storage", label: "Data & storage", hint: "Paths and reset" },
   { id: "diagnostics", label: "Diagnostics", hint: "Logs and health" },
   { id: "about", label: "About", hint: "Version info" },
@@ -213,6 +215,17 @@ export function SettingsPage() {
                 description="Where the app invokes your AI Runtime model — verification, planning, execution, results, and Attack Factory."
               >
                 <RuntimeInferencePanel />
+              </SettingsSection>
+            </div>
+          )}
+
+          {activeTab === "network" && (
+            <div className="settings-tab-panel settings-sections">
+              <SettingsSection
+                title="Proxy"
+                description="Route outbound HTTP(S) and SOCKS traffic through a corporate or local proxy."
+              >
+                <ProxySettingsPanel backendConnected={backendConnected} />
               </SettingsSection>
             </div>
           )}

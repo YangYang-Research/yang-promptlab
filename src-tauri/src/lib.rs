@@ -73,6 +73,12 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             let environment = promptlab_core::bootstrap_environment()
                 .map_err(crate::error::CommandError::from)?;
 
+            let _ = promptlab_core::bootstrap_proxy_settings(&environment.config)
+                .map_err(|err| {
+                    tracing::warn!(error = %err, "failed to load proxy settings; using defaults");
+                    err
+                });
+
             let (event_bus, event_ring, event_log_guard) =
                 promptlab_core::spawn_event_logger(environment.logs.clone());
             let event_bus = std::sync::Arc::new(event_bus);
@@ -210,6 +216,9 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::environment::environment_get,
             commands::environment::environment_open_root,
             commands::environment::environment_update,
+            commands::proxy::proxy_get,
+            commands::proxy::proxy_set,
+            commands::proxy::proxy_test_connection,
             commands::environment::logs_list_files,
             commands::environment::logs_tail,
             commands::environment::logs_recent_events,

@@ -1,7 +1,9 @@
 //! Unified AI inference gateway for PromptLab.
 //!
 //! All AI capabilities (judge, planner, generator, reports, future modules)
-//! must obtain inference exclusively through [`AiInferenceGateway`] / [`GatewaySession`].
+//! must obtain inference through [`GatewaySession`] (setup) and/or
+//! [`InferenceClient`] (cloneable hot-path completions). Do not call
+//! [`ProviderAdapter`] from feature crates.
 
 pub mod capabilities;
 pub mod config;
@@ -22,7 +24,7 @@ pub use config::{
 pub use error::{InferenceError, InferenceResult};
 pub use gateway::{
     AiInferenceGateway, DefaultAiInferenceGateway, GatewayLlmBridge, GatewaySession,
-    InferenceSession,
+    InferenceClient, InferenceSession,
 };
 pub use manager::InferenceRuntimeManager;
 pub use prompts::{PromptBuilder, PromptComposer, PromptContext, PromptId, PromptRegistry, PromptTemplate};

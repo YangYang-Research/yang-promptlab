@@ -3,7 +3,9 @@
 pub mod environment;
 pub mod error;
 pub mod event_log;
+pub mod http;
 pub mod logging;
+pub mod proxy;
 
 pub use environment::{
     bootstrap_environment, ensure_environment, load_environment_config, resolve_db_path,
@@ -16,4 +18,13 @@ pub use event_log::{
     read_log_tail, spawn_event_logger, EventBus, EventLogGuard, EventRing, LogCategory,
     OcsfEvent, OcsfSeverity,
 };
+pub use http::{
+    apply_proxy_settings, build_http_client, build_http_client_with, default_http_client,
+    HttpClientOptions,
+};
 pub use logging::{init_logging, LogGuard, LogOptions};
+pub use proxy::{
+    bootstrap_proxy_settings, current_proxy_settings, install_proxy_settings, load_proxy_settings,
+    proxy_settings_path, save_proxy_settings, ProxySettings, DEFAULT_PROXY_TEST_URL,
+    PROXY_SETTINGS_FILE,
+};

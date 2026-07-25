@@ -3665,6 +3665,7 @@ dependencies = [
 name = "promptlab-core"
 version = "0.1.0"
 dependencies = [
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tempfile",
@@ -3673,6 +3674,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -3989,6 +3991,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "promptlab-attack",
+ "promptlab-core",
  "promptlab-harness",
  "promptlab-inference",
  "promptlab-payload",

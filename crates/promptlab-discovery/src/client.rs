@@ -21,12 +21,12 @@ pub struct HttpClient {
 impl HttpClient {
     pub fn new(config: DiscoveryConfig) -> PromptLabResult<Self> {
         let config = Arc::new(config);
-        let inner = Client::builder()
-            .user_agent(config.user_agent.clone())
-            .timeout(config.request_timeout)
-            .redirect(reqwest::redirect::Policy::limited(5))
-            .build()
-            .map_err(|err| PromptLabError::config(format!("failed to build HTTP client: {err}")))?;
+        let inner = promptlab_core::build_http_client(
+            promptlab_core::HttpClientOptions::default()
+                .with_user_agent(config.user_agent.clone())
+                .with_timeout(config.request_timeout)
+                .with_redirect_limit(5),
+        )?;
 
         Ok(Self {
             inner,

@@ -6,11 +6,11 @@ use std::sync::Arc;
 use promptlab_auth::SecretStore;
 use promptlab_core::PromptLabError;
 use promptlab_inference::{
-    CompleteRequest, ConnectivityTestResult, DefaultAiInferenceGateway, GatewaySession,
+    CompleteRequest, ConnectivityTestResult, GatewaySession,
     InferenceMode, InferenceProvider, InferenceRuntimeManager, InferenceSession,
     PromptRegistry, RemoteAdapterSettings,
 };
-use promptlab_judge::{build_judge_engine_with_adapter, JudgeEngine, JudgeMode, JudgeProviderConfig};
+use promptlab_judge::{build_judge_engine_with_client, JudgeEngine, JudgeMode, JudgeProviderConfig};
 use promptlab_models::{BuiltinCatalog, LocalModelManager, ModelEntry, ModelProvider};
 use promptlab_planner::PlannerLlm;
 use promptlab_generator::GeneratorLlm;
@@ -117,7 +117,8 @@ pub async fn build_judge_engine_from_gateway(
         runtime_manager,
     )
     .await?;
-    let adapter = DefaultAiInferenceGateway::adapter_for(&mut session.inner)
+    let client = session
+        .client()
         .await
         .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     let mut config = JudgeProviderConfig::default();
@@ -126,7 +127,7 @@ pub async fn build_judge_engine_from_gateway(
     } else {
         JudgeMode::LocalLlm
     };
-    build_judge_engine_with_adapter(adapter, &config)
+    build_judge_engine_with_client(client, &config)
         .await
         .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
@@ -746,17 +747,18 @@ pub async fn test_remote_connectivity_only(
     entry: &ModelEntry,
     remote: RemoteAdapterSettings,
 ) -> CommandResult<ConnectivityTestResult> {
-    use promptlab_inference::{ProviderAdapter, RemoteProviderAdapter};
+    use promptlab_inference::{InferenceClient, RemoteProviderAdapter};
+    use std::sync::Arc;
 
-    let adapter = RemoteProviderAdapter::new(remote.clone());
+    let client = InferenceClient::from_adapter(
+        Arc::new(RemoteProviderAdapter::new(remote.clone())),
+        32,
+        0.0,
+    );
     let started = std::time::Instant::now();
     let latency_ms = || started.elapsed().as_millis() as u64;
 
-    promptlab_inference::record_sent();
-    let result = ProviderAdapter::health(&adapter).await;
-    if result.is_ok() {
-        promptlab_inference::record_received();
-    }
+    let result = client.health().await;
 
     match result {
         Ok(true) => Ok(ConnectivityTestResult {

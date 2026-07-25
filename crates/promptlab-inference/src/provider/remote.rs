@@ -18,10 +18,11 @@ pub struct RemoteProviderAdapter {
 
 impl RemoteProviderAdapter {
     pub fn new(settings: RemoteAdapterSettings) -> Self {
-        Self {
-            settings,
-            client: reqwest::Client::new(),
-        }
+        let client = promptlab_core::default_http_client().unwrap_or_else(|err| {
+            tracing::warn!(error = %err, "falling back to direct HTTP client for remote inference");
+            reqwest::Client::new()
+        });
+        Self { settings, client }
     }
 
     fn base_url(&self) -> String {

@@ -37,9 +37,10 @@ pub struct OllamaRuntime {
 
 impl OllamaRuntime {
     pub fn new(config: OllamaConfig) -> Self {
+        let client = promptlab_core::default_http_client().unwrap_or_else(|_| reqwest::Client::new());
         Self {
             config,
-            client: reqwest::Client::new(),
+            client,
             state: Arc::new(AtomicU32::new(RuntimeState::Ready as u32)),
         }
     }

@@ -47,6 +47,10 @@ impl EnvironmentPaths {
         self.config.join("ai_runtime_config.json")
     }
 
+    pub fn proxy_settings_path(&self) -> PathBuf {
+        self.config.join(crate::proxy::PROXY_SETTINGS_FILE)
+    }
+
     pub fn plugins_state_path(&self) -> PathBuf {
         self.config.join("plugins_state.json")
     }

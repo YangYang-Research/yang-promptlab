@@ -1,6 +1,8 @@
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use promptlab_core::{build_http_client, current_proxy_settings, HttpClientOptions, ProxySettings};
 use reqwest::Client;
 use tracing::debug;
 
@@ -11,16 +13,32 @@ use crate::traits::Harness;
 /// Generic HTTP harness for REST and MCP-over-HTTP targets.
 #[derive(Clone)]
 pub struct HttpHarness {
-    client: Client,
+    /// Rebuilds when Settings → Proxy changes so attack traffic always follows current policy.
+    cache: Arc<Mutex<Option<(ProxySettings, Client)>>>,
 }
 
 impl HttpHarness {
     pub fn new() -> HarnessResult<Self> {
-        let client = Client::builder()
-            .redirect(reqwest::redirect::Policy::limited(5))
-            .build()
-            .map_err(HarnessError::from)?;
-        Ok(Self { client })
+        Ok(Self {
+            cache: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    fn client(&self) -> HarnessResult<Client> {
+        let current = current_proxy_settings();
+        let mut guard = self
+            .cache
+            .lock()
+            .map_err(|_| HarnessError::config("http harness proxy cache poisoned"))?;
+        if let Some((settings, client)) = guard.as_ref() {
+            if settings == &current {
+                return Ok(client.clone());
+            }
+        }
+        let client = build_http_client(HttpClientOptions::default().with_redirect_limit(5))
+            .map_err(|e| HarnessError::config(e.to_string()))?;
+        *guard = Some((current, client.clone()));
+        Ok(client)
     }
 }
 
@@ -41,9 +59,9 @@ impl Harness for HttpHarness {
         let headers = request.merged_headers();
         let method = request.method.as_str();
         let body = request.effective_body();
+        let client = self.client()?;
 
-        let mut builder = self
-            .client
+        let mut builder = client
             .request(
                 reqwest::Method::from_bytes(method.as_bytes())
                     .map_err(|e| HarnessError::config(e.to_string()))?,

@@ -157,10 +157,11 @@ impl BuiltinCatalog {
 }
 
 async fn merge_remote(entries: &mut Vec<BuiltinRegistryEntry>, url: &str) -> ModelResult<usize> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(8))
-        .build()
-        .map_err(|e| ModelError::download(e.to_string()))?;
+    let client = promptlab_core::build_http_client(
+        promptlab_core::HttpClientOptions::default()
+            .with_timeout(std::time::Duration::from_secs(8)),
+    )
+    .map_err(|e| ModelError::download(e.to_string()))?;
     let response = client
         .get(url)
         .send()

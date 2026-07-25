@@ -21,11 +21,15 @@ impl RemoteLlmBackend {
         api_key: String,
         aws_secret_access_key: Option<String>,
     ) -> Self {
+        let client = promptlab_core::default_http_client().unwrap_or_else(|err| {
+            tracing::warn!(error = %err, "falling back to direct HTTP client for remote judge");
+            reqwest::Client::new()
+        });
         Self {
             settings,
             api_key,
             aws_secret_access_key,
-            client: reqwest::Client::new(),
+            client,
         }
     }
 

@@ -109,38 +109,104 @@ impl AiInferenceGateway for DefaultAiInferenceGateway {
     }
 }
 
+/// Cloneable gateway completion handle — hot-path API for agents and judge.
+///
+/// Resolve once via [`GatewaySession::client`], then share across concurrent tasks.
+/// Prefer this over holding a raw [`ProviderAdapter`].
+#[derive(Clone)]
+pub struct InferenceClient {
+    adapter: Arc<dyn ProviderAdapter>,
+    default_max_tokens: u32,
+    default_temperature: f32,
+}
+
+impl InferenceClient {
+    /// Wrap an already-resolved provider adapter (crate-internal / host bootstrap only).
+    pub fn from_adapter(
+        adapter: Arc<dyn ProviderAdapter>,
+        default_max_tokens: u32,
+        default_temperature: f32,
+    ) -> Self {
+        Self {
+            adapter,
+            default_max_tokens,
+            default_temperature,
+        }
+    }
+
+    pub fn provider_id(&self) -> &str {
+        self.adapter.provider_id()
+    }
+
+    pub fn model_id(&self) -> &str {
+        self.adapter.model_id()
+    }
+
+    pub fn capabilities(&self) -> ModelCapabilities {
+        self.adapter.capabilities()
+    }
+
+    pub async fn complete(&self, request: CompleteRequest) -> InferenceResult<String> {
+        let max_tokens = request.max_tokens.unwrap_or(self.default_max_tokens);
+        let temperature = request.temperature.unwrap_or(self.default_temperature);
+        self.adapter
+            .complete(
+                request.system.as_deref(),
+                &request.prompt,
+                max_tokens,
+                temperature,
+            )
+            .await
+    }
+
+    pub async fn chat(&self, request: ChatRequest) -> InferenceResult<ChatResponse> {
+        let max_tokens = request.max_tokens.unwrap_or(self.default_max_tokens);
+        let temperature = request.temperature.unwrap_or(self.default_temperature);
+        let content = self
+            .adapter
+            .chat(&request.messages, max_tokens, temperature)
+            .await?;
+        Ok(ChatResponse {
+            content,
+            model: self.model_id().into(),
+            provider: self.provider_id().into(),
+        })
+    }
+
+    /// Provider health probe. Records traffic (health may bypass `complete`).
+    pub async fn health(&self) -> InferenceResult<bool> {
+        crate::traffic::record_sent();
+        let result = self.adapter.health().await;
+        if result.is_ok() {
+            crate::traffic::record_received();
+        }
+        result
+    }
+}
+
 /// Session-scoped gateway operations (used by desktop shell).
 pub struct GatewaySession<'a> {
     pub inner: InferenceSession<'a>,
 }
 
 impl<'a> GatewaySession<'a> {
-    pub async fn complete(&mut self, request: CompleteRequest) -> InferenceResult<String> {
-        // Traffic counters live in ProviderAdapter::complete (single leaf).
+    /// Resolve the active provider once into a cloneable [`InferenceClient`].
+    pub async fn client(&mut self) -> InferenceResult<InferenceClient> {
         let adapter = DefaultAiInferenceGateway::adapter_for(&mut self.inner).await?;
         let config = self.inner.manager.config();
-        let max_tokens = request.max_tokens.unwrap_or(config.max_tokens);
-        let temperature = request.temperature.unwrap_or(config.temperature);
-        adapter
-            .complete(request.system.as_deref(), &request.prompt, max_tokens, temperature)
-            .await
+        Ok(InferenceClient::from_adapter(
+            adapter,
+            config.max_tokens,
+            config.temperature,
+        ))
+    }
+
+    pub async fn complete(&mut self, request: CompleteRequest) -> InferenceResult<String> {
+        self.client().await?.complete(request).await
     }
 
     pub async fn chat(&mut self, request: ChatRequest) -> InferenceResult<ChatResponse> {
-        // Traffic counters live in ProviderAdapter::complete (chat delegates there).
-        let adapter = DefaultAiInferenceGateway::adapter_for(&mut self.inner).await?;
-        let config = self.inner.manager.config();
-        let max_tokens = request.max_tokens.unwrap_or(config.max_tokens);
-        let temperature = request.temperature.unwrap_or(config.temperature);
-        let content = adapter.chat(&request.messages, max_tokens, temperature).await;
-        match content {
-            Ok(content) => Ok(ChatResponse {
-                content,
-                model: adapter.model_id().into(),
-                provider: adapter.provider_id().into(),
-            }),
-            Err(err) => Err(err),
-        }
+        self.client().await?.chat(request).await
     }
 
     pub async fn generate_json(

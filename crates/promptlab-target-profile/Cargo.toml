@@ -8,6 +8,7 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+promptlab-core = { workspace = true }
 promptlab-attack = { workspace = true }
 promptlab-harness = { workspace = true }
 promptlab-inference = { workspace = true }

@@ -95,10 +95,11 @@ impl BuiltinModelRegistry {
 }
 
 async fn merge_remote(entries: &mut Vec<RegistryEntry>, url: &str) -> RuntimeResult<usize> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(8))
-        .build()
-        .map_err(|err| RuntimeError::Registry(err.to_string()))?;
+    let client = promptlab_core::build_http_client(
+        promptlab_core::HttpClientOptions::default()
+            .with_timeout(std::time::Duration::from_secs(8)),
+    )
+    .map_err(|err| RuntimeError::Registry(err.to_string()))?;
     let response = client
         .get(url)
         .send()
