@@ -116,36 +116,29 @@ pub struct GatewaySession<'a> {
 
 impl<'a> GatewaySession<'a> {
     pub async fn complete(&mut self, request: CompleteRequest) -> InferenceResult<String> {
-        crate::traffic::record_sent();
+        // Traffic counters live in ProviderAdapter::complete (single leaf).
         let adapter = DefaultAiInferenceGateway::adapter_for(&mut self.inner).await?;
         let config = self.inner.manager.config();
         let max_tokens = request.max_tokens.unwrap_or(config.max_tokens);
         let temperature = request.temperature.unwrap_or(config.temperature);
-        let result = adapter
+        adapter
             .complete(request.system.as_deref(), &request.prompt, max_tokens, temperature)
-            .await;
-        if result.is_ok() {
-            crate::traffic::record_received();
-        }
-        result
+            .await
     }
 
     pub async fn chat(&mut self, request: ChatRequest) -> InferenceResult<ChatResponse> {
-        crate::traffic::record_sent();
+        // Traffic counters live in ProviderAdapter::complete (chat delegates there).
         let adapter = DefaultAiInferenceGateway::adapter_for(&mut self.inner).await?;
         let config = self.inner.manager.config();
         let max_tokens = request.max_tokens.unwrap_or(config.max_tokens);
         let temperature = request.temperature.unwrap_or(config.temperature);
         let content = adapter.chat(&request.messages, max_tokens, temperature).await;
         match content {
-            Ok(content) => {
-                crate::traffic::record_received();
-                Ok(ChatResponse {
-                    content,
-                    model: adapter.model_id().into(),
-                    provider: adapter.provider_id().into(),
-                })
-            }
+            Ok(content) => Ok(ChatResponse {
+                content,
+                model: adapter.model_id().into(),
+                provider: adapter.provider_id().into(),
+            }),
             Err(err) => Err(err),
         }
     }

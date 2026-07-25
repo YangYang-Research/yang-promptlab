@@ -41,6 +41,8 @@ impl LlmBackend for LocalLlmBackend {
         max_tokens: u32,
         temperature: f32,
     ) -> JudgeResult<String> {
+        // Legacy local judge path — record at leaf so Traffic monitor sees it.
+        promptlab_inference::record_sent();
         let runtime = self.runtime.lock().await;
         let response = runtime
             .complete(InferenceRequest {
@@ -50,8 +52,14 @@ impl LlmBackend for LocalLlmBackend {
                 temperature,
             })
             .await
-            .map_err(|e| JudgeError::evaluation(e.to_string()))?;
-        Ok(response.text)
+            .map_err(|e| JudgeError::evaluation(e.to_string()));
+        match response {
+            Ok(response) => {
+                promptlab_inference::record_received();
+                Ok(response.text)
+            }
+            Err(err) => Err(err),
+        }
     }
 
     async fn health_check(&self) -> JudgeResult<bool> {

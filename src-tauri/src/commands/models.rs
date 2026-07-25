@@ -1363,6 +1363,7 @@ pub async fn models_test_inference(
             PromptRegistry::health_check_user()
         );
         let started = std::time::Instant::now();
+        promptlab_inference::record_sent();
         let response = runtime_mgr
             .supervisor()
             .infer(InferRequest {
@@ -1372,6 +1373,7 @@ pub async fn models_test_inference(
             })
             .await
             .map_err(|err| map_runtime_test_error(err, runtime_mgr.supervisor()))?;
+        promptlab_inference::record_received();
         let sample = response.text;
         let ok = !sample.trim().is_empty();
 

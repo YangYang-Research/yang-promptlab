@@ -90,6 +90,7 @@ impl InferenceRuntime for AdapterRuntime {
         &self,
         request: promptlab_models::types::InferenceRequest,
     ) -> promptlab_models::error::ModelResult<promptlab_models::types::InferenceResponse> {
+        // Traffic is recorded inside ProviderAdapter::complete (leaf choke point).
         self.adapter
             .complete(
                 request.system.as_deref(),
@@ -139,6 +140,7 @@ impl InferenceRuntime for BackendRuntime {
         &self,
         request: promptlab_models::types::InferenceRequest,
     ) -> promptlab_models::error::ModelResult<promptlab_models::types::InferenceResponse> {
+        // Traffic is recorded inside LlmBackend::complete (leaf choke point).
         self.backend
             .complete(
                 request.system.as_deref(),

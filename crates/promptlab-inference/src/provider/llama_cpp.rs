@@ -51,6 +51,8 @@ impl ProviderAdapter for LlamaCppAdapter {
         max_tokens: u32,
         temperature: f32,
     ) -> InferenceResult<String> {
+        // Leaf choke point for local AI Runtime completions (agents / gateway / judge).
+        crate::traffic::record_sent();
         let runtime = self.runtime.lock().await;
         let response = runtime
             .complete(InferenceRequest {
@@ -59,8 +61,14 @@ impl ProviderAdapter for LlamaCppAdapter {
                 max_tokens,
                 temperature,
             })
-            .await?;
-        Ok(response.text)
+            .await;
+        match response {
+            Ok(response) => {
+                crate::traffic::record_received();
+                Ok(response.text)
+            }
+            Err(err) => Err(err.into()),
+        }
     }
 
     async fn health(&self) -> InferenceResult<bool> {

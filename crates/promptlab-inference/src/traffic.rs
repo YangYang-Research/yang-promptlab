@@ -2,6 +2,15 @@
 //!
 //! Hot-path recording stays in-memory and queues events for DB persistence.
 //! Historical charts are built from persisted events via [`snapshot_from_events`].
+//!
+//! **Choke points (must record here, not in feature crates):**
+//! - [`crate::provider::RemoteProviderAdapter::complete`] / [`crate::provider::LlamaCppAdapter::complete`]
+//!   — all gateway / agent / judge-via-adapter completions
+//! - Judge legacy backends (`promptlab-judge` `RemoteLlmBackend` / `LocalLlmBackend`)
+//! - Health/connectivity wrappers that call `health` without going through `complete`
+//!   ([`crate::gateway::GatewaySession::health`], `test_remote_connectivity_only`)
+//!
+//! Do not also record in `GatewaySession::complete` / judge `AdapterRuntime` — that double-counts.
 
 use std::collections::VecDeque;
 use std::sync::{Mutex, OnceLock};

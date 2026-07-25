@@ -80,8 +80,11 @@ impl ProviderAdapter for RemoteProviderAdapter {
         max_tokens: u32,
         temperature: f32,
     ) -> InferenceResult<String> {
+        // Leaf choke point: every AI Runtime completion (agents, gateway, judge
+        // AdapterRuntime) must hit Traffic monitor via this path.
+        crate::traffic::record_sent();
         let system = system.unwrap_or(PromptRegistry::inference_system());
-        match self.settings.provider {
+        let result = match self.settings.provider {
             InferenceProvider::Anthropic => {
                 self.complete_anthropic(system, prompt, max_tokens, temperature)
                     .await
@@ -96,7 +99,11 @@ impl ProviderAdapter for RemoteProviderAdapter {
                 self.complete_openai_compatible(system, prompt, max_tokens, temperature)
                     .await
             }
+        };
+        if result.is_ok() {
+            crate::traffic::record_received();
         }
+        result
     }
 
     async fn chat(

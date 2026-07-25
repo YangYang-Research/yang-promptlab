@@ -82,7 +82,9 @@ impl LlmBackend for RemoteLlmBackend {
         max_tokens: u32,
         temperature: f32,
     ) -> JudgeResult<String> {
-        match self.settings.provider {
+        // Legacy judge path (not ProviderAdapter) — still must hit Traffic monitor.
+        promptlab_inference::record_sent();
+        let result = match self.settings.provider {
             RemoteProvider::Anthropic => {
                 self.complete_anthropic(system, prompt, max_tokens, temperature)
                     .await
@@ -102,7 +104,11 @@ impl LlmBackend for RemoteLlmBackend {
                 self.complete_openai_compatible(system, prompt, max_tokens, temperature)
                     .await
             }
+        };
+        if result.is_ok() {
+            promptlab_inference::record_received();
         }
+        result
     }
 
     async fn health_check(&self) -> JudgeResult<bool> {
