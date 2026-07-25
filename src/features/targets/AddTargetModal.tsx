@@ -14,7 +14,9 @@ import {
   createInitialTargetProfile,
   fullProfileUrl,
   profileToPayload,
+  PROVIDER_OPTIONS,
   type TargetProfileFormState,
+  type TargetProviderId,
 } from "@/features/scans/targetProfile";
 import { saveTargetProfile } from "@/shared/ipc/targetProfile";
 import { Button, Modal, Select } from "@/shared/components";
@@ -43,6 +45,7 @@ export function AddTargetModal({ open, onClose, defaultProjectId = null }: AddTa
   const [projectId, setProjectId] = useState("");
   const [form, setForm] = useState<TargetFormState>(() => createInitialTargetForm());
   const [curlText, setCurlText] = useState("");
+  const [importProvider, setImportProvider] = useState<TargetProviderId>("openai_compatible");
   const [importedProfile, setImportedProfile] = useState<TargetProfileFormState | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -53,6 +56,7 @@ export function AddTargetModal({ open, onClose, defaultProjectId = null }: AddTa
     setProjectId(defaultProjectId ?? "");
     setForm(createInitialTargetForm());
     setCurlText("");
+    setImportProvider("openai_compatible");
     setImportedProfile(null);
     setFormError(null);
     setSubmitting(false);
@@ -75,7 +79,10 @@ export function AddTargetModal({ open, onClose, defaultProjectId = null }: AddTa
     onClose();
   }
 
-  function applyCurlToForm(raw: string):
+  function applyCurlToForm(
+    raw: string,
+    providerOverride?: TargetProviderId,
+  ):
     | { ok: true; form: TargetFormState; profile: TargetProfileFormState }
     | { ok: false; error: string } {
     const result = curlToProfilePatch(raw);
@@ -83,7 +90,12 @@ export function AddTargetModal({ open, onClose, defaultProjectId = null }: AddTa
       return result;
     }
 
-    const profile = { ...createInitialTargetProfile(), ...result.patch };
+    const provider = providerOverride ?? (result.patch.provider as TargetProviderId | undefined);
+    const profile = {
+      ...createInitialTargetProfile(),
+      ...result.patch,
+      ...(provider ? { provider } : {}),
+    };
     const url = fullProfileUrl(profile);
     let headers: Record<string, string> = {};
     try {
@@ -103,6 +115,15 @@ export function AddTargetModal({ open, onClose, defaultProjectId = null }: AddTa
     };
   }
 
+  function handleCurlChange(value: string) {
+    setFormError(null);
+    setCurlText(value);
+    const result = curlToProfilePatch(value);
+    if (result.ok && result.patch.provider) {
+      setImportProvider(result.patch.provider as TargetProviderId);
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!projectId) {
@@ -114,15 +135,15 @@ export function AddTargetModal({ open, onClose, defaultProjectId = null }: AddTa
     let nextProfile = importedProfile;
 
     if (mode === "import") {
-      const applied = applyCurlToForm(curlText);
+      const applied = applyCurlToForm(curlText, importProvider);
       if (!applied.ok) {
         setFormError(applied.error);
         return;
       }
       nextForm = applied.form;
-      nextProfile = applied.profile;
+      nextProfile = { ...applied.profile, provider: importProvider };
       setForm(applied.form);
-      setImportedProfile(applied.profile);
+      setImportedProfile(nextProfile);
     }
 
     const validationError = validateTargetStep(nextForm);
@@ -136,10 +157,13 @@ export function AddTargetModal({ open, onClose, defaultProjectId = null }: AddTa
     try {
       const descriptor = buildTargetDescriptor(nextForm);
       const name = deriveTargetName(nextForm.url);
+      // Same as Scan Wizard: AI target profiles are stored as llm_api; UI Type
+      // column shows the profile provider label (wizard Step 2 Type options).
       const targetType = nextProfile ? "llm_api" : "web";
       const target = await actions.createTarget(projectId, name, targetType, descriptor);
       if (nextProfile) {
         await saveTargetProfile(target.id, profileToPayload(nextProfile));
+        await actions.refresh();
       }
       notify(`Target "${name}" added`, "success");
       onClose();
@@ -207,15 +231,26 @@ export function AddTargetModal({ open, onClose, defaultProjectId = null }: AddTa
             ) : (
               <div className="import-api-modal">
                 <label className="field">
+                  <span className="field__label">Type</span>
+                  <Select
+                    value={importProvider}
+                    onChange={(e) => setImportProvider(e.target.value as TargetProviderId)}
+                    disabled={submitting}
+                  >
+                    {PROVIDER_OPTIONS.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="field">
                   <span className="field__label">cURL command</span>
                   <textarea
                     className="input textarea import-api-modal__curl wizard-target-form__mono"
                     rows={12}
                     value={curlText}
-                    onChange={(e) => {
-                      setFormError(null);
-                      setCurlText(e.target.value);
-                    }}
+                    onChange={(e) => handleCurlChange(e.target.value)}
                     placeholder={EXAMPLE_CURL}
                     spellCheck={false}
                     autoFocus

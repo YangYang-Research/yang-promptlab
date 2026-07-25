@@ -20,11 +20,11 @@ use crate::generate_prompt::{GeneratePromptAgentOutcome, TechniquePromptContext}
 use crate::judge_coordinator::JudgeCoordinatorAgentOutcome;
 use crate::memory::{AgentMemoryStore, MemoryContext};
 use crate::react::{run_react, ReactActionKind, ReactArtifacts, ReactLlms, ReactRequest};
-use crate::recommend::RecommendAgentOutcome;
+use crate::recommend::{RecommendAgent, RecommendAgentOutcome};
 use crate::sequential_attack_execution::{
     SequentialAttackExecutionAgent, SequentialAttackExecutionRequest,
 };
-use crate::summary::{SummaryAgentOutcome, SummaryRequest};
+use crate::summary::{SummaryAgent, SummaryAgentOutcome, SummaryRequest};
 use crate::types::{AgentEvent, AgentId};
 
 /// Soft hint for the ReAct goal (not a hard route).
@@ -327,6 +327,7 @@ impl YazgSupervisor {
 
     /// Post-scan recommendations.
     /// Soft intent hint only — Yazg ReAct chooses the agent/action.
+    /// Recovers by calling RecommendAgent when ReAct finishes early due to STM/LTM.
     pub async fn react_recommend(
         results: &AttackResultsSummary,
         llms: &ReactLlms<'_>,
@@ -334,9 +335,12 @@ impl YazgSupervisor {
         memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
         let message = format!(
-            "Scan results: produce prioritized remediation recommendations for this completed \
-             attack scan (status={}, findings={}). No live target probe is required — attack \
-             results context is enough. Call recommend, then finish with a short UI summary.",
+            "Scan results: produce FRESH prioritized remediation recommendations for this completed \
+             attack scan (status={}, findings={}).\n\
+             You MUST call action \"recommend\" in this turn even if memory mentions prior recommendations \
+             — memory is historical context only.\n\
+             After RecommendAgent succeeds, finish with a short UI summary.\n\
+             Do not finish early claiming recommendations already exist.",
             results.scan_status, results.total_findings
         );
         let goal = Self::build_goal(&message, SupervisorIntent::Recommend);
@@ -344,11 +348,40 @@ impl YazgSupervisor {
             .with_attack_results(Some(results))
             .with_memory(memory, memory_ctx)
             .with_max_steps(4);
-        Self::react(request, llms).await
+        let delegation = Self::react(request, llms).await?;
+        if matches!(delegation, YazgDelegation::Recommended { .. }) {
+            return Ok(delegation);
+        }
+
+        warn!(
+            findings = results.total_findings,
+            "Yazg ReAct missed RecommendAgent; forcing RecommendAgent::run"
+        );
+        let outcome = RecommendAgent::run(results, llms.recommend).await?;
+        let mut events = vec![AgentEvent::info(
+            AgentId::Yazg,
+            "ReAct recovery: forced RecommendAgent after misrouted recommendations turn",
+        )];
+        events.extend(outcome.events.clone());
+        Ok(YazgDelegation::Recommended {
+            turn: YazgTurn {
+                reply: format!(
+                    "Recommendations ready ({} items).",
+                    outcome.bundle.recommendations.len()
+                ),
+                intent: SupervisorIntent::Recommend,
+                events,
+                verified: None,
+                plan_summary: None,
+            },
+            outcome,
+        })
     }
 
     /// Project or scan posture summary.
     /// Soft intent hint only — Yazg ReAct chooses the agent/action.
+    /// Recovers by calling SummaryAgent when ReAct finishes early due to STM/LTM
+    /// (common misfire: memory of a prior SummaryAgent OK causes finish without calling summary).
     pub async fn react_summarize(
         summary_request: &SummaryRequest,
         llms: &ReactLlms<'_>,
@@ -357,14 +390,18 @@ impl YazgSupervisor {
     ) -> AgentResult<YazgDelegation> {
         let message = match summary_request {
             SummaryRequest::Project { project_name, .. } => format!(
-                "Project Summary: summarize overall security posture for project `{project_name}`. \
-                 No live scan target is required — project assessment context is enough. \
-                 Call summary, then finish with a short UI summary."
+                "Project Summary: produce a FRESH security-posture summary for project `{project_name}`.\n\
+                 You MUST call action \"summary\" in this turn even if short-term or long-term memory \
+                 mentions a prior summary — memory is historical context only, not a substitute.\n\
+                 After SummaryAgent succeeds, finish with a short UI summary.\n\
+                 Do not finish early claiming a summary already exists."
             ),
             SummaryRequest::Scan { summary } => format!(
-                "Scan Summary: summarize this attack scan (status={}, findings={}). \
-                 No live target probe is required — scan results context is enough. \
-                 Call summary, then finish with a short UI summary.",
+                "Scan Summary: produce a FRESH summary for this attack scan (status={}, findings={}).\n\
+                 You MUST call action \"summary\" in this turn even if memory mentions a prior summary \
+                 — memory is historical context only.\n\
+                 After SummaryAgent succeeds, finish with a short UI summary.\n\
+                 Do not finish early claiming a summary already exists.",
                 summary.scan_status, summary.total_findings
             ),
         };
@@ -373,7 +410,35 @@ impl YazgSupervisor {
             .with_summary_request(Some(summary_request))
             .with_memory(memory, memory_ctx)
             .with_max_steps(4);
-        Self::react(request, llms).await
+        let delegation = Self::react(request, llms).await?;
+        if matches!(delegation, YazgDelegation::Summarized { .. }) {
+            return Ok(delegation);
+        }
+
+        warn!(
+            kind = %summary_request.kind_label(),
+            "Yazg ReAct missed SummaryAgent; forcing SummaryAgent::run"
+        );
+        let outcome = SummaryAgent::run(summary_request, llms.summary).await?;
+        let mut events = vec![AgentEvent::info(
+            AgentId::Yazg,
+            "ReAct recovery: forced SummaryAgent after misrouted summary turn",
+        )];
+        events.extend(outcome.events.clone());
+        Ok(YazgDelegation::Summarized {
+            turn: YazgTurn {
+                reply: format!(
+                    "{} summary ready ({} highlights).",
+                    outcome.kind,
+                    outcome.bundle.highlights.len()
+                ),
+                intent: SupervisorIntent::Summary,
+                events,
+                verified: None,
+                plan_summary: None,
+            },
+            outcome,
+        })
     }
 
     /// Consensus judge a single probe via JudgeCoordinatorAgent workers.

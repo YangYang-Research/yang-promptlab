@@ -12,9 +12,7 @@ import {
   ContentToolbar,
   DataTable,
   EmptyState,
-  IconArrowRight,
   IconFolder,
-  IconPlus,
   IconProgress,
   IconTrash,
   ListCard,
@@ -166,10 +164,19 @@ export function TargetDetailsPage() {
     }
   }, [actions, navigate, notify, scans, target]);
 
-  const startNewScan = useCallback(() => {
+  const startContinueSetup = useCallback(() => {
     if (!target) return;
-    navigate(buildScanWizardUrl(target.projectId, target.id, { step: 2 }));
-  }, [navigate, target]);
+    if (scanAction?.kind === "setup") {
+      navigate(
+        buildScanWizardUrl(target.projectId, target.id, {
+          step: scanAction.step,
+          scanId: scanAction.scanId,
+        }),
+      );
+      return;
+    }
+    navigate(buildScanWizardUrl(target.projectId, target.id, { step: 3 }));
+  }, [navigate, scanAction, target]);
 
   const actionItems = useMemo((): ActionsDropdownItem[] => {
     if (!target || !scanAction) return [];
@@ -183,27 +190,6 @@ export function TargetDetailsPage() {
         icon: <IconProgress />,
         onClick: () =>
           navigate(buildScanProgressUrl(target.projectId, scanAction.scanId, target.id)),
-      });
-    } else if (scanAction.kind === "retry") {
-      // Retry is the primary CTA when failed; New Scan lives in the menu.
-      items.push({
-        id: "new-scan",
-        label: "New Scan",
-        icon: <IconPlus />,
-        onClick: startNewScan,
-      });
-    } else if (scanAction.kind === "setup") {
-      items.push({
-        id: "continue-setup",
-        label: "Continue Setup",
-        icon: <IconArrowRight />,
-        onClick: () =>
-          navigate(
-            buildScanWizardUrl(target.projectId, target.id, {
-              step: scanAction.step,
-              scanId: scanAction.scanId,
-            }),
-          ),
       });
     }
 
@@ -226,7 +212,7 @@ export function TargetDetailsPage() {
     });
 
     return items;
-  }, [deleting, handleDeleteTarget, navigate, project, scanAction, startNewScan, target]);
+  }, [deleting, handleDeleteTarget, navigate, project, scanAction, target]);
 
   if (!target && !loading) {
     return (
@@ -264,21 +250,12 @@ export function TargetDetailsPage() {
                 }),
               ),
           }
-        : scanAction?.kind === "setup" && scanContext.scanStatusLabel !== "Never Scanned"
+        : scanAction?.kind === "setup" || target.status === "pending"
           ? {
-              label: "Continue setup",
-              onClick: () =>
-                navigate(
-                  buildScanWizardUrl(target.projectId, target.id, {
-                    step: scanAction.step,
-                    scanId: scanAction.scanId,
-                  }),
-                ),
+              label: "Continue Setup",
+              onClick: startContinueSetup,
             }
-          : {
-              label: "New Scan",
-              onClick: startNewScan,
-            };
+          : null;
 
   return (
     <div className="page target-details">
@@ -288,9 +265,11 @@ export function TargetDetailsPage() {
         title={target.name}
         actions={
           <div className="page-actions">
-            <Button variant="primary" onClick={primaryCta.onClick}>
-              {primaryCta.label}
-            </Button>
+            {primaryCta ? (
+              <Button variant="primary" onClick={primaryCta.onClick}>
+                {primaryCta.label}
+              </Button>
+            ) : null}
             <ActionsDropdown
               label="Target actions"
               disabled={deleting}

@@ -545,10 +545,12 @@ export function ScanDetailsPage() {
               valueSm
             />
             <ScanSummaryStat
-              label="Pipeline"
+              label="Requests"
               value={
                 status
-                  ? `${status.completed}/${status.total || "—"}`
+                  ? `${status.attacks_completed ?? status.completed}/${
+                      status.attacks_total || status.total || "—"
+                    }`
                   : "—"
               }
               valueSm

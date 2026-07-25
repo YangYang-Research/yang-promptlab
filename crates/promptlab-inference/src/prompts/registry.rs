@@ -186,14 +186,15 @@ Rules:
 - overview must be non-empty and specific to the project stats/findings provided.
 - Use per-target finding_count, scan_count, latest_scan_status, scan_status_counts, and severity_counts when comparing posture across targets.
 - latest_scan_status is the newest attack-scan status for that target (`none` means never scanned). scan_status_counts breaks down statuses (completed/failed/running/pending/cancelled/etc).
-- Call out failed, cancelled, or stuck (running/pending) scans when they affect coverage confidence.
-- When the input includes a non-empty `failed_scans` array (or any target has latest_scan_status / scan_status_counts failed|cancelled|stopped): include Retry Scan as ONE of the 4–6 highlights (prefer first). In that highlight, mention each failed item using its full endpoint URL (`target_url`) and `scan_id` from `failed_scans` — write natural prose; do not use a fixed template. Remaining highlights cover posture/coverage/remediation. Do not suggest "Start Attack" as a separate CTA.
-- highlights: 3 to 5 short bullets (each one sentence). Cover severity posture, coverage gaps, hottest targets, scan-status issues, and next actions when relevant.
+- A scan with status `completed` (or `completed` in scan_status_counts) is a successful assessment — even when findings are numerous. Do NOT call completed scans "failed".
+- ONLY mention failed/cancelled/stopped scans, Retry Scan, or re-run CTAs when `failed_scans` is a non-empty array. If `failed_scans` is [] or missing, never invent failed scans, never say scans need to be retried, and never invent ordinal scan IDs like "1" or "2".
+- When `failed_scans` is non-empty: include Retry Scan as ONE of the 4–6 highlights (prefer first). In that highlight, mention each failed item using its full endpoint URL (`target_url`) and the exact `scan_id` UUID from `failed_scans` — write natural prose; do not use a fixed template. Remaining highlights cover posture/coverage/remediation. Do not suggest "Start Attack" as a separate CTA.
+- highlights: 3 to 5 short bullets (each one sentence). Cover severity posture, coverage gaps, hottest targets, and next remediation actions when relevant.
 - If targets exist but project scan_count is 0 (or every target has scan_count 0 / latest_scan_status none): this is an unscanned project. Do NOT invent findings or residual risk. Overview should state assessment has not started yet. Highlights must recommend concrete next steps: start authorized attack scans on priority targets, verify auth/endpoints before scanning, cover high-value LLM/API targets first, and establish a baseline scan cadence.
 - If some targets are scanned and others are not: call out the unscanned coverage gap and recommend scanning those next.
 - If there are scans with zero findings: say so clearly and recommend continuous testing / baseline hardening.
 - If findings exist: prioritize remediation by severity and name the hottest targets when useful.
-- Do not invent vulnerabilities that are not supported by the input.
+- Do not invent vulnerabilities, scan failures, or scan IDs that are not supported by the input.
 - No markdown fences, no commentary outside the JSON object."#
     }
 

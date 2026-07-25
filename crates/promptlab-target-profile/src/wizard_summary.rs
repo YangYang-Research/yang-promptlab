@@ -91,13 +91,16 @@ where
 }
 
 /// Attach a typed Retry Scan action when failed scans exist.
-/// Does **not** rewrite highlight text — that must come from the LLM (or fallback)
-/// as one of the normal highlight items.
+/// When no retryable scans exist, strip hallucinated failure/retry highlights/actions.
 pub fn ensure_failed_project_summary_action(
     has_retryable_scan: bool,
     mut bundle: SummaryBundle,
 ) -> SummaryBundle {
     if !has_retryable_scan {
+        bundle.highlights.retain(|h| !highlight_claims_scan_failure(h));
+        bundle
+            .actions
+            .retain(|a| !matches!(a.action.as_str(), "retry_scan" | "start_attack"));
         return bundle;
     }
 
@@ -125,6 +128,25 @@ fn highlight_looks_like_retry(text: &str) -> bool {
         || t.contains("rerun")
         || t.contains("start attack")
         || (t.contains("failed scan") && (t.contains("re-run") || t.contains("retry")))
+}
+
+/// Detect LLM hallucinations that invent failed/retryable scans.
+fn highlight_claims_scan_failure(text: &str) -> bool {
+    let t = text.to_ascii_lowercase();
+    if highlight_looks_like_retry(text) {
+        return true;
+    }
+    let failed_scan_phrase = t.contains("failed scan")
+        || t.contains("failed scans")
+        || t.contains("scans have failed")
+        || t.contains("scan failed")
+        || t.contains("scans failed");
+    let mentions_retry = t.contains("retry")
+        || t.contains("retried")
+        || t.contains("re-run")
+        || t.contains("rerun")
+        || t.contains("need to be retried");
+    failed_scan_phrase || (t.contains("scan") && mentions_retry && (t.contains("failed") || t.contains("cancelled") || t.contains("canceled") || t.contains("stopped")))
 }
 
 fn order_summary_action_highlight_first(mut bundle: SummaryBundle) -> SummaryBundle {
@@ -227,5 +249,25 @@ mod tests {
         let out = ensure_failed_project_summary_action(false, bundle);
         assert!(out.actions.is_empty());
         assert_eq!(out.highlights.len(), 1);
+    }
+
+    #[test]
+    fn ensure_strips_hallucinated_failed_scan_highlight() {
+        let bundle = SummaryBundle {
+            overview: "Completed assessments found issues.".into(),
+            highlights: vec![
+                "Failed scans on the LLM API target with scan IDs 1 and 2 need to be retried.".into(),
+                "Prioritize critical findings on the hottest target.".into(),
+            ],
+            actions: vec![SummaryAction {
+                title: "Retry Scan".into(),
+                description: "should be removed".into(),
+                action: "retry_scan".into(),
+            }],
+        };
+        let out = ensure_failed_project_summary_action(false, bundle);
+        assert!(out.actions.is_empty());
+        assert_eq!(out.highlights.len(), 1);
+        assert!(out.highlights[0].contains("Prioritize critical"));
     }
 }

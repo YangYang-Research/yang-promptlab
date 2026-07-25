@@ -187,6 +187,13 @@ export function ProjectDetailsPage() {
         render: (target: Target) => <StatusBadge status={target.status} />,
       },
       {
+        key: "scans",
+        header: "Attack Scans",
+        width: "110px",
+        render: (target: Target) =>
+          buildTargetScanContext(target.id, projectScans).scanCount,
+      },
+      {
         key: "actions",
         header: "",
         width: "56px",
@@ -205,7 +212,7 @@ export function ProjectDetailsPage() {
         ),
       },
     ],
-    [projectId, scans, navigate, wizardSession, deletingTargetId, handleDeleteTarget],
+    [projectId, projectScans, scans, navigate, wizardSession, deletingTargetId, handleDeleteTarget],
   );
 
   async function handleDelete() {
