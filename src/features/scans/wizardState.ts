@@ -297,14 +297,8 @@ export function applyWizardEntryStep(
     };
   }
 
-  if (step === 5) {
-    return {
-      ...session,
-      currentStep: 5,
-      submittedScanId: session.submittedScanId ?? session.draftScanId,
-    };
-  }
-
+  // Step 5 is Attack review until Start Attack — do not promote draftScanId to
+  // submittedScanId (Continue Setup used to do that and auto-looked like a live run).
   return { ...session, currentStep: step };
 }
 

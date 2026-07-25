@@ -55,4 +55,28 @@ describe("applyWizardEntryStep", () => {
     expect(next.submittedScanId).toBeNull();
     expect(next.attackPlan).toBeNull();
   });
+
+  it("does not promote draftScanId to submittedScanId when resuming step 5", () => {
+    const session = createInitialSession("project-1");
+    session.currentStep = 5;
+    session.draftScanId = "draft-1";
+    session.submittedScanId = null;
+    session.attackPlan = { profileId: "standard", categories: ["prompt-injection"] } as never;
+
+    const next = applyWizardEntryStep(session, 5);
+    expect(next.currentStep).toBe(5);
+    expect(next.draftScanId).toBe("draft-1");
+    expect(next.submittedScanId).toBeNull();
+  });
+
+  it("keeps an existing submittedScanId when entering step 5", () => {
+    const session = createInitialSession("project-1");
+    session.currentStep = 5;
+    session.draftScanId = "scan-1";
+    session.submittedScanId = "scan-1";
+
+    const next = applyWizardEntryStep(session, 5);
+    expect(next.currentStep).toBe(5);
+    expect(next.submittedScanId).toBe("scan-1");
+  });
 });

@@ -144,7 +144,15 @@ export async function hydrateWizardSessionForScanResume(
     }
   }
 
-  if (["running", "paused", "pending"].includes(scan.status)) {
+  // Draft = still in wizard review. Never treat it as submitted (clears polluted
+  // local/remote wizard state that used to set submittedScanId from draftScanId).
+  if (scan.status === "draft") {
+    next = { ...next, submittedScanId: null };
+  } else if (
+    ["running", "paused", "pending", "completed", "failed", "cancelled", "stopped"].includes(
+      scan.status,
+    )
+  ) {
     next = { ...next, submittedScanId: scan.id };
   }
 

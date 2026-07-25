@@ -263,7 +263,9 @@ export function ScanWizardPage() {
         const readyForEntry = sessionReadyForWizardEntry(session, savedTarget, entryStep);
         const resumeKey = `${lockedScanId}:${entryStep ?? ""}`;
 
-        if (session.draftScanId === lockedScanId && readyForEntry) {
+        // Step 5 needs DB status so a draft is not treated as an already-started attack
+        // (sessionStorage may still have a polluted submittedScanId).
+        if (session.draftScanId === lockedScanId && readyForEntry && entryStep !== 5) {
           if (entryStep) {
             setSession((prev) => {
               const next = applyWizardEntryStep(prev, entryStep);
@@ -292,11 +294,16 @@ export function ScanWizardPage() {
             lockedTargetId,
             entryStep,
           });
-          const merged = withNormalizedAttackPlan(
+          let merged = withNormalizedAttackPlan(
             peekWizardSession()?.draftScanId === lockedScanId
               ? mergeWizardSessions(peekWizardSession()!, next)
               : next,
           );
+          // Authoritative: draft scans are never "submitted" (merge can reintroduce
+          // a polluted submittedScanId from sessionStorage).
+          if (loaded.scan.status === "draft" && merged.submittedScanId) {
+            merged = { ...merged, submittedScanId: null };
+          }
           const projectId = lockedProjectId || loaded.scan.project_id;
           storeDraftScanId(
             projectId,
@@ -733,8 +740,12 @@ export function ScanWizardPage() {
   const submittedLiveStatus = session.submittedScanId
     ? submittedStatuses.get(session.submittedScanId)
     : undefined;
+  const submittedStoreStatus =
+    session.submittedScanId != null
+      ? (scans.find((scan) => scan.id === session.submittedScanId)?.status ?? "pending")
+      : null;
   const submittedStatus = session.submittedScanId
-    ? mergeScanStatus(session.submittedScanId, "running", submittedLiveStatus, 0)
+    ? mergeScanStatus(session.submittedScanId, submittedStoreStatus ?? "pending", submittedLiveStatus, 0)
     : null;
 
   useEffect(() => {
