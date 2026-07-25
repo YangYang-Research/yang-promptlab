@@ -783,6 +783,9 @@ fn gate_seq_action(
     recoveries_used: u32,
     last_obs: &AttackAttemptObservation,
 ) -> SeqAction {
+    if last_obs.high_confidence_vuln && attacked {
+        return SeqAction::Finish;
+    }
     if needs_recover && recoveries_used < MAX_ENDPOINT_RECOVERIES {
         return SeqAction::Recover;
     }

@@ -10,7 +10,6 @@ import {
   Button,
   Card,
   EmptyState,
-  IconButton,
   IconDownload,
   IconPause,
   IconPlay,
@@ -22,14 +21,16 @@ import {
   scanOpenActionIcon,
   SeverityBadge,
   StatusBadge,
-  YazgBadge,
 } from "@/shared/components";
 import {
-  exportStoredReport,
   generateAndExportScanReport,
   reportExportLabel,
   type ReportExportFormat,
 } from "@/features/reports/reportDownloads";
+import {
+  buildFindingsByCategory,
+  FindingsByCategoryChart,
+} from "@/features/scans/FindingsByCategoryChart";
 import {
   extractAuthKind,
   extractAuthType,
@@ -80,7 +81,7 @@ import {
 } from "./scanConfigExport";
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
-const SCAN_REPORTS_PAGE_SIZE = 5;
+const SCAN_FINDINGS_PAGE_SIZE = 5;
 
 function isMonitorableAttackScan(scan: Pick<ScanRun, "name">): boolean {
   return scan.name.startsWith("Scan (") || scan.name.startsWith("Agent Scan (");
@@ -90,7 +91,7 @@ export function ScanDetailsPage() {
   const { scanId = "" } = useParams();
   const navigate = useNavigate();
   const { notify, dismiss } = useToast();
-  const { scans, projects, targets, findings, reports, actions } = useAppStore();
+  const { scans, projects, targets, findings, actions } = useAppStore();
   const [detail, setDetail] = useState<ScanDetailDto | null>(null);
   const [targetDto, setTargetDto] = useState<TargetDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -138,22 +139,20 @@ export function ScanDetailsPage() {
     () => findings.filter((finding) => finding.scanId === scanId),
     [findings, scanId],
   );
-  const scanReports = useMemo(
-    () => reports.filter((report) => report.scanId === scanId),
-    [reports, scanId],
-  );
-  const {
-    page: reportsPage,
-    setPage: setReportsPage,
-    pagination: reportsPagination,
-  } = usePaginatedList(scanReports, SCAN_REPORTS_PAGE_SIZE);
-
-  const severityCounts = useMemo(() => countSeverities(scanFindings), [scanFindings]);
   const recentFindings = useMemo(
     () =>
-      [...scanFindings]
-        .sort((a, b) => b.discoveredAt.localeCompare(a.discoveredAt))
-        .slice(0, 5),
+      [...scanFindings].sort((a, b) => b.discoveredAt.localeCompare(a.discoveredAt)),
+    [scanFindings],
+  );
+  const {
+    page: findingsPage,
+    setPage: setFindingsPage,
+    pagination: findingsPagination,
+  } = usePaginatedList(recentFindings, SCAN_FINDINGS_PAGE_SIZE);
+
+  const severityCounts = useMemo(() => countSeverities(scanFindings), [scanFindings]);
+  const findingsByCategory = useMemo(
+    () => buildFindingsByCategory(scanFindings),
     [scanFindings],
   );
   const statuses = useScanStatuses(scanId ? [scanId] : [], Boolean(scanId));
@@ -625,7 +624,7 @@ export function ScanDetailsPage() {
         </section>
       )}
 
-      <section className="scan-details__insights" aria-label="Findings and reports">
+      <section className="scan-details__insights" aria-label="Findings overview">
         <Card className="detail-section scan-details__findings-panel">
           <div className="detail-section__header">
             <div>
@@ -635,14 +634,6 @@ export function ScanDetailsPage() {
                   ? "No vulnerabilities recorded for this scan."
                   : `${scanFindings.length} finding${scanFindings.length === 1 ? "" : "s"} across severity levels`}
               </p>
-            </div>
-            <div className="detail-section__header-actions">
-              {scanFindings.length > 0 ? <YazgBadge /> : null}
-              {scanFindings.length > 0 ? (
-                <Link to={`/findings?scanId=${encodeURIComponent(scanId)}`} className="link">
-                  View all
-                </Link>
-              ) : null}
             </div>
           </div>
 
@@ -660,7 +651,7 @@ export function ScanDetailsPage() {
             <div className="scan-details__subsection">
               <h3 className="scan-details__subsection-title">Recent findings</h3>
               <ul className="detail-list">
-                {recentFindings.map((finding) => (
+                {findingsPagination.items.map((finding) => (
                   <li key={finding.id} className="detail-list-row">
                     <SeverityBadge severity={finding.severity} />
                     <Link
@@ -675,56 +666,33 @@ export function ScanDetailsPage() {
                   </li>
                 ))}
               </ul>
+              {findingsPagination.totalPages > 1 ? (
+                <Pagination
+                  page={findingsPage}
+                  totalPages={findingsPagination.totalPages}
+                  totalItems={findingsPagination.totalItems}
+                  rangeStart={findingsPagination.rangeStart}
+                  rangeEnd={findingsPagination.rangeEnd}
+                  onPageChange={setFindingsPage}
+                />
+              ) : null}
             </div>
           )}
         </Card>
 
-        <Card className="detail-section scan-details__reports-panel">
+        <Card className="detail-section scan-details__category-panel">
           <div className="detail-section__header">
             <div>
-              <h2 className="detail-section__title">Reports</h2>
+              <h2 className="detail-section__title">By attack category</h2>
               <p className="detail-section__hint">
-                {scanReports.length === 0
-                  ? "Export findings when the scan completes."
-                  : `${scanReports.length} generated report${scanReports.length === 1 ? "" : "s"}`}
+                {scanFindings.length === 0
+                  ? "Finding counts will appear here after the scan records issues."
+                  : `${findingsByCategory.length} categor${findingsByCategory.length === 1 ? "y" : "ies"} with findings`}
               </p>
             </div>
           </div>
 
-          {scanReports.length === 0 ? (
-            <p className="text-muted text-sm">No reports generated yet.</p>
-          ) : (
-            <>
-              <ul className="detail-list">
-                {reportsPagination.items.map((report) => (
-                  <li key={report.id} className="detail-list-row detail-list-row--reports">
-                    <span className="detail-list-row__title">{report.title}</span>
-                    <Badge variant="muted">{report.format.toUpperCase()}</Badge>
-                    <span className="text-muted text-sm detail-list-row__meta">
-                      {formatTimestamp(report.createdAt)}
-                    </span>
-                    <IconButton
-                      ariaLabel={`Download ${report.title}`}
-                      size="sm"
-                      onClick={() => void exportStoredReport(report.id)}
-                    >
-                      <IconDownload />
-                    </IconButton>
-                  </li>
-                ))}
-              </ul>
-              {reportsPagination.totalPages > 1 ? (
-                <Pagination
-                  page={reportsPage}
-                  totalPages={reportsPagination.totalPages}
-                  totalItems={reportsPagination.totalItems}
-                  rangeStart={reportsPagination.rangeStart}
-                  rangeEnd={reportsPagination.rangeEnd}
-                  onPageChange={setReportsPage}
-                />
-              ) : null}
-            </>
-          )}
+          <FindingsByCategoryChart data={findingsByCategory} />
 
           {playbook && isAttackScanName(scan?.name ?? "") && (
             <div className="scan-details__subsection scan-details__report-actions">

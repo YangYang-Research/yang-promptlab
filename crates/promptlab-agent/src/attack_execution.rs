@@ -423,8 +423,18 @@ impl AgenticAttackExecutionAgent {
                     &last_obs,
                 )
             };
-            // Hard-gate: recover only after an unhealthy observation; never Finish before attack.
-            let action = if needs_recover && recoveries_used < MAX_ENDPOINT_RECOVERIES {
+            // Hard-gate: recover only when unhealthy; never Finish before attack;
+            // never re-attack after high-confidence findings for this attempt.
+            let action = if last_obs.high_confidence_vuln
+                && attacked_for_attempt == Some(attempt)
+                && attempt > 0
+            {
+                if reflected_for_attempt != Some(attempt) {
+                    ExecAction::Reflect
+                } else {
+                    ExecAction::Finish
+                }
+            } else if needs_recover && recoveries_used < MAX_ENDPOINT_RECOVERIES {
                 ExecAction::Recover
             } else if matches!(action, ExecAction::Recover)
                 || (matches!(action, ExecAction::Finish) && attacked_for_attempt.is_none())
@@ -1062,6 +1072,12 @@ fn policy_next_action(
     }
     if attacked_for_attempt != Some(attempt) {
         return ExecAction::Attack;
+    }
+    if last_obs.high_confidence_vuln {
+        if reflected_for_attempt != Some(attempt) {
+            return ExecAction::Reflect;
+        }
+        return ExecAction::Finish;
     }
     if observation_needs_recovery(last_obs) && recoveries_used < MAX_ENDPOINT_RECOVERIES {
         return ExecAction::Recover;

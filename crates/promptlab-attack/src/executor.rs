@@ -262,11 +262,13 @@ async fn run_work_item<T: TargetTransport>(
     item: WorkItem,
 ) -> AttackResult<(usize, PayloadAttempt)> {
     let runner = PayloadRunner::new(transport);
+    let started = std::time::Instant::now();
     let response = match runner.execute(ctx, &item.payload, &item.content).await {
         Ok(response) => response,
         Err(err) => {
             // Soft-fail: keep sibling probes instead of aborting the whole pool.
             let body = err.to_string();
+            let duration_ms = started.elapsed().as_millis() as u64;
             let attempt = PayloadAttempt {
                 payload_id: item.payload.id.clone(),
                 payload_name: item.payload.name.clone(),
@@ -276,7 +278,7 @@ async fn run_work_item<T: TargetTransport>(
                     status: 0,
                     headers: HashMap::new(),
                     body: body.clone(),
-                    duration_ms: 0,
+                    duration_ms,
                     normalized: NormalizedResponse {
                         content: String::new(),
                         raw_response: body.clone(),
@@ -287,7 +289,8 @@ async fn run_work_item<T: TargetTransport>(
                         ]),
                     },
                 },
-                evaluation: AttackEvaluation::negative(format!("transport error: {body}")),
+                // `AttackError::Transport` already prefixes "transport error:".
+                evaluation: AttackEvaluation::negative(body),
             };
             return Ok((item.seq, attempt));
         }

@@ -83,7 +83,11 @@ impl RecoveryPlan {
 ///
 /// Partial success (some HTTP 200s + a minority of transport/5xx failures, or high latency
 /// alone) does **not** force recover — that was causing costly re-attacks after usable probes.
+/// High-confidence findings also skip recover: the category already succeeded for vuln goals.
 pub fn observation_needs_recovery(obs: &AttackAttemptObservation) -> bool {
+    if obs.high_confidence_vuln && obs.http_successes > 0 {
+        return false;
+    }
     if obs.endpoint_error.as_ref().is_some_and(|e| !e.trim().is_empty()) {
         return true;
     }
@@ -138,11 +142,19 @@ pub fn heuristic_recovery(
         || err.contains("transport");
     let latency_signal = obs.avg_latency_ms >= 5_000 || obs.max_latency_ms >= 15_000;
 
-    // After the first recovery, always serialize to one request + wait for response.
-    if recovery_index >= 1 || current.serial_wait {
+    // Total wipeout (no HTTP successes) or later recoveries → serialize immediately.
+    let total_transport_wipeout = obs.attempts > 0
+        && obs.http_successes == 0
+        && (obs.transport_errors > 0 || obs.server_errors > 0 || transport_signal);
+
+    if recovery_index >= 1 || current.serial_wait || total_transport_wipeout {
         next.serial_wait = true;
         next.max_concurrent_requests = 1;
-        notes.push("serial: one request, wait for response".into());
+        if total_transport_wipeout && recovery_index == 0 && !current.serial_wait {
+            notes.push("serial: total transport/server wipeout on first recover".into());
+        } else {
+            notes.push("serial: one request, wait for response".into());
+        }
     } else {
         let lowered = (current.effective_concurrency() / 2).max(1);
         next.max_concurrent_requests = lowered;
@@ -171,15 +183,24 @@ pub fn heuristic_recovery(
             .saturating_add(1_000)
             .saturating_add(500 * u64::from(recovery_index))
             .min(30_000);
-        next.timeout_ms = current
-            .timeout_ms
-            .saturating_mul(3)
-            .saturating_div(2)
-            .clamp(30_000, 120_000);
-        notes.push(format!(
-            "transport/server recovery timeout_ms={} delay_ms={}",
-            next.timeout_ms, next.inter_request_delay_ms
-        ));
+        if total_transport_wipeout {
+            // Full wipeout: longer timeouts only stall serial retries when the
+            // endpoint is dead or hanging until the previous timeout fires.
+            notes.push(format!(
+                "transport wipeout keep timeout_ms={} delay_ms={}",
+                next.timeout_ms, next.inter_request_delay_ms
+            ));
+        } else {
+            next.timeout_ms = current
+                .timeout_ms
+                .saturating_mul(3)
+                .saturating_div(2)
+                .clamp(30_000, 120_000);
+            notes.push(format!(
+                "transport/server recovery timeout_ms={} delay_ms={}",
+                next.timeout_ms, next.inter_request_delay_ms
+            ));
+        }
     } else if latency_signal {
         let extra = (obs.avg_latency_ms / 2).clamp(500, 10_000);
         next.inter_request_delay_ms = current
@@ -245,7 +266,7 @@ mod tests {
         let obs = AttackAttemptObservation {
             rate_limited: 2,
             attempts: 5,
-            http_successes: 0,
+            http_successes: 1,
             endpoint_unhealthy: true,
             ..Default::default()
         };
@@ -253,6 +274,35 @@ mod tests {
         assert_eq!(plan.pacing.effective_concurrency(), 5);
         assert!(plan.pacing.inter_request_delay_ms >= 2_000);
         assert!(plan.wait_before_retry_ms >= 2_000);
+    }
+
+    #[test]
+    fn total_transport_wipeout_serializes_on_first_recover() {
+        let obs = AttackAttemptObservation {
+            attempts: 29,
+            http_successes: 0,
+            transport_errors: 29,
+            endpoint_unhealthy: true,
+            ..Default::default()
+        };
+        let plan = heuristic_recovery(&obs, &EndpointPacing::default(), 0);
+        assert!(plan.pacing.serial_wait);
+        assert_eq!(plan.pacing.effective_concurrency(), 1);
+        // Wipeout must not inflate timeout — that stalls serial fail-fast retries.
+        assert_eq!(plan.pacing.timeout_ms, DEFAULT_TIMEOUT_MS);
+    }
+
+    #[test]
+    fn high_confidence_skips_recovery() {
+        let obs = AttackAttemptObservation {
+            attempts: 29,
+            http_successes: 5,
+            transport_errors: 24,
+            high_confidence_vuln: true,
+            endpoint_unhealthy: true,
+            ..Default::default()
+        };
+        assert!(!observation_needs_recovery(&obs));
     }
 
     #[test]

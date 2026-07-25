@@ -28,7 +28,14 @@ impl<'a, T: TargetTransport + ?Sized> PayloadRunner<'a, T> {
             .transport
             .send(request)
             .await
-            .map_err(|e| AttackError::transport(e.to_string()))?;
+            .map_err(|e| {
+                let msg = e.to_string();
+                // Harness already prefixes "transport error:"; avoid double-wrapping.
+                let msg = msg
+                    .strip_prefix("transport error: ")
+                    .unwrap_or(msg.as_str());
+                AttackError::transport(msg.to_string())
+            })?;
 
         debug!(
             probe_id = %ctx.probe_id,
