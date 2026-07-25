@@ -42,6 +42,10 @@ pub struct ScanProgress {
     pub current_attempt: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_retry: Option<u32>,
+    /// Live execution trail (e.g. generate → attack → recover → attack → judge).
+    /// Appends on each distinct phase transition; capped to bound memory/UI size.
+    #[serde(default)]
+    pub phase_trail: Vec<String>,
 }
 
 impl ScanProgress {
@@ -69,6 +73,7 @@ impl ScanProgress {
             current_phase: None,
             current_attempt: None,
             current_retry: None,
+            phase_trail: Vec::new(),
         }
     }
 
@@ -76,11 +81,34 @@ impl ScanProgress {
         if self.total == 0 {
             return 0.0;
         }
-        (self.completed as f64 / self.total as f64) * 100.0
+        let raw = ((self.completed as f64 / self.total as f64) * 100.0).min(100.0);
+        // Planned units (est. requests × pipeline) fill before Sequential recovery /
+        // auto-retry finishes. Never show 100% while the job is still active.
+        match self.status.as_str() {
+            "completed" | "failed" | "cancelled" | "stopped" | "error" => raw,
+            _ => raw.min(99.0),
+        }
     }
 
     pub fn bump(&mut self, units: u64) {
         self.completed = self.completed.saturating_add(units).min(self.total);
+    }
+
+    /// Record a phase transition for the live Execution pipeline trail.
+    pub fn push_phase(&mut self, phase: &str) {
+        const MAX_TRAIL: usize = 64;
+        let normalized = phase.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
+            return;
+        }
+        if self.phase_trail.last().map(String::as_str) == Some(normalized.as_str()) {
+            return;
+        }
+        self.phase_trail.push(normalized);
+        if self.phase_trail.len() > MAX_TRAIL {
+            let drop = self.phase_trail.len() - MAX_TRAIL;
+            self.phase_trail.drain(0..drop);
+        }
     }
 
     /// Map finished HTTP requests to enabled test cases (ceil), capped at total.
@@ -287,5 +315,16 @@ mod tests {
         progress.attacks_completed = 1200;
         progress.sync_testcases_completed();
         assert_eq!(progress.testcases_completed, 12);
+    }
+
+    #[test]
+    fn progress_percent_caps_below_100_while_running() {
+        let mut progress = ScanProgress::new(4);
+        progress.completed = 4;
+        progress.status = "running".into();
+        assert_eq!(progress.progress_percent(), 99.0);
+
+        progress.status = "completed".into();
+        assert_eq!(progress.progress_percent(), 100.0);
     }
 }

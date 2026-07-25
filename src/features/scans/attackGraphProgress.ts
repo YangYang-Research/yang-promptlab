@@ -81,6 +81,13 @@ export function attackGraphStateLabel(
   }
   if (phase === "judge") return "Judging";
   if (phase === "attack") return "Attacking";
+  if (phase === "generate") return "Generating";
+  // Sequential endpoint recovery between attack retries — was falling through to
+  // "Running" and looked like Attacking ↔ Running flicker.
+  if (phase === "recover") return "Recovering";
+  if (phase === "reflection") return "Reflecting";
+  if (phase === "adaptive") return "Adapting";
+  if (phase === "retry") return "Retrying";
   return "Running";
 }
 

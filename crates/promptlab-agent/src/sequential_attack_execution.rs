@@ -305,7 +305,9 @@ impl SequentialAttackExecutionAgent {
                     tools.generate_payloads(attempt, &[]).await.map_err(|err| {
                         AgentError::AttackExecution(format!("sequential generate failed: {err}"))
                     })?;
-                    tools.bump_progress(1).await;
+                    // Host already bumped the sequential "generate" pipeline unit after
+                    // pre-generation — do not double-count here or Progress jumps to 75%
+                    // with Est. requests still 0/N while Attack is in flight.
                     generated = true;
                     attacked = false;
                     let obs = format!("generate ok attempt={attempt}");
@@ -341,7 +343,6 @@ impl SequentialAttackExecutionAgent {
                                 "sequential generate before attack: {err}"
                             ))
                         })?;
-                        tools.bump_progress(1).await;
                         generated = true;
                     }
                     tools.set_phase("attack", attempt, recoveries_used).await;
@@ -543,7 +544,9 @@ impl SequentialAttackExecutionAgent {
                     recoveries_used = recoveries_used.saturating_add(1);
                     needs_recover = false;
                     attacked = false;
-                    tools.bump_progress(1).await;
+                    // Recoveries are outside the planned sequential pipeline budget
+                    // (preparing + generate + attack + judge). Bumping here fills the
+                    // bar while Est. requests stay flat and Attack retries continue.
                     let line = format!(
                         "recover#{recoveries_used} applied: {}",
                         plan.summary()

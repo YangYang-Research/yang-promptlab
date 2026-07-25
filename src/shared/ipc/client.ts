@@ -121,6 +121,8 @@ export type ScanStatusDto = {
   current_phase: string | null;
   current_attempt: number | null;
   current_retry: number | null;
+  /** Live phase trail — e.g. generate → attack → recover → attack. */
+  phase_trail?: string[];
 };
 
 export type ScanProgressEvent = {

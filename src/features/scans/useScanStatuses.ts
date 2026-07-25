@@ -67,5 +67,6 @@ export function mergeScanStatus(
     current_phase: null,
     current_attempt: null,
     current_retry: null,
+    phase_trail: [],
   };
 }

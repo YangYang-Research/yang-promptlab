@@ -178,6 +178,11 @@ export function TargetDetailsPage() {
     navigate(buildScanWizardUrl(target.projectId, target.id, { step: 3 }));
   }, [navigate, scanAction, target]);
 
+  const startNewScan = useCallback(() => {
+    if (!target) return;
+    navigate(buildScanWizardUrl(target.projectId, target.id, { step: 2 }));
+  }, [navigate, target]);
+
   const actionItems = useMemo((): ActionsDropdownItem[] => {
     if (!target || !scanAction) return [];
 
@@ -190,6 +195,19 @@ export function TargetDetailsPage() {
         icon: <IconProgress />,
         onClick: () =>
           navigate(buildScanProgressUrl(target.projectId, scanAction.scanId, target.id)),
+      });
+    }
+
+    // Keep New Scan available when primary CTA is Progress / Retry — not while
+    // the target is still Pending (Continue Setup is the only path).
+    if (
+      target.status !== "pending" &&
+      (scanAction.kind === "view_scan" || scanAction.kind === "retry")
+    ) {
+      items.push({
+        id: "new-scan",
+        label: "New Scan",
+        onClick: startNewScan,
       });
     }
 
@@ -212,7 +230,7 @@ export function TargetDetailsPage() {
     });
 
     return items;
-  }, [deleting, handleDeleteTarget, navigate, project, scanAction, target]);
+  }, [deleting, handleDeleteTarget, navigate, project, scanAction, startNewScan, target]);
 
   if (!target && !loading) {
     return (
@@ -255,7 +273,11 @@ export function TargetDetailsPage() {
               label: "Continue Setup",
               onClick: startContinueSetup,
             }
-          : null;
+          : {
+              // Completed / verified ready target — primary entry for a fresh wizard run.
+              label: "New Scan",
+              onClick: startNewScan,
+            };
 
   return (
     <div className="page target-details">
@@ -265,11 +287,9 @@ export function TargetDetailsPage() {
         title={target.name}
         actions={
           <div className="page-actions">
-            {primaryCta ? (
-              <Button variant="primary" onClick={primaryCta.onClick}>
-                {primaryCta.label}
-              </Button>
-            ) : null}
+            <Button variant="primary" onClick={primaryCta.onClick}>
+              {primaryCta.label}
+            </Button>
             <ActionsDropdown
               label="Target actions"
               disabled={deleting}

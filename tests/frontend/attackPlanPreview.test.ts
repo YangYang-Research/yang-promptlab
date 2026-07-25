@@ -10,6 +10,7 @@ import {
   recomputePlanPreview,
   resolveActivePlannerRationales,
   resolvePlannerSummaryBadge,
+  syncAttackPlanUiAfterAdjust,
   type AttackPlanConfig,
 } from "@/features/scans/attackPlan";
 import { getCategory } from "@/features/scans/attackProfiles";
@@ -221,6 +222,29 @@ describe("attack plan preview", () => {
     expect(custom.disabledGraphNodes).toEqual(ui.disabledGraphNodes);
     expect(custom.payloadStrategy.variantsPerTest).toBe(2);
     expect(custom.executionStrategy).toBe("sequential");
+  });
+
+  it("repairs incomplete disabledGraphNodes after custom adjust sync", () => {
+    const quick = previewPlanForProfile(samplePlan(), "quick", []);
+    const custom = previewPlanForCustomTransition(quick, quick.categories, [], "quick");
+    // Simulate DTO round-trip that only disables nodes present in attackGraph.
+    const corrupted = {
+      ...custom,
+      disabledGraphNodes: custom.attackGraph
+        .filter((node) => !node.enabled)
+        .map((node) => node.category),
+    };
+    expect(corrupted.disabledGraphNodes.length).toBeLessThan(
+      planUiForCustomFromCategories(quick.categories).disabledGraphNodes.length,
+    );
+
+    const synced = syncAttackPlanUiAfterAdjust(corrupted, createInitialAttackPlanUi());
+    expect(synced.customCategories).toEqual(quick.categories);
+    expect(synced.disabledGraphNodes).toEqual(
+      planUiForCustomFromCategories(quick.categories).disabledGraphNodes,
+    );
+    expect(synced.disabledGraphNodes).toContain("mcp_abuse");
+    expect(synced.disabledGraphNodes).toContain("rag_leakage");
   });
 
   it("inherits execution and payload strategy from the source preset when entering custom", () => {

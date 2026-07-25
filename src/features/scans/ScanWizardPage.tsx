@@ -828,7 +828,7 @@ export function ScanWizardPage() {
       return "Importing…";
     }
     if (session.currentStep === 4) {
-      return startingScan ? "Starting attack…" : "Start Attack";
+      return "Review Attack";
     }
     if (persistingTarget) return "Saving target…";
     return "Next";
@@ -1070,13 +1070,10 @@ export function ScanWizardPage() {
       updateSession({ currentStep: 5 });
       logWizardEvent({
         activityName: "wizard_step_advance",
-        message: "Advanced to Attack",
+        message: "Advanced to Attack review",
         projectId,
         attributes: { from: fromStep, to: 5 },
       });
-      if (canStartScan(draft)) {
-        await submitScanJob();
-      }
       return;
     }
 

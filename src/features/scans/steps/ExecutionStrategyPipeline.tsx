@@ -3,9 +3,9 @@ import { useMemo } from "react";
 import type { AttackPlanConfig } from "@/features/scans/attackPlan";
 import {
   executionPipelineLiveDetail,
-  executionStrategySteps,
   executionStrategyTitle,
-  resolveExecutionStepStates,
+  phaseLabel,
+  resolveExecutionTrail,
   type ExecutionStepState,
 } from "@/features/scans/executionStrategyPipeline";
 import type { ScanStatusDto } from "@/shared/ipc";
@@ -27,12 +27,10 @@ export function ExecutionStrategyPipeline({
   status = null,
   compact = false,
 }: ExecutionStrategyPipelineProps) {
-  const steps = useMemo(() => executionStrategySteps(attackPlan), [attackPlan]);
-  const states = useMemo(
-    () => resolveExecutionStepStates(steps, status),
-    [steps, status],
-  );
+  const liveTrail = useMemo(() => resolveExecutionTrail(status), [status]);
   const liveDetail = executionPipelineLiveDetail(status);
+  const hasLiveStatus = Boolean(status && status.status !== "draft");
+  const showLiveTrail = hasLiveStatus && liveTrail.length > 0;
 
   return (
     <section className="wizard-fingerprint-summary">
@@ -41,38 +39,40 @@ export function ExecutionStrategyPipeline({
         <span className="text-sm text-muted">{executionStrategyTitle(attackPlan)}</span>
       </div>
 
-      <ol
-        className={`wizard-execution-pipeline${compact ? " wizard-execution-pipeline--compact" : ""}`}
-      >
-        {steps.map((step, index) => {
-          const state = states[index] ?? "pending";
-          return (
+      {showLiveTrail ? (
+        <ol
+          className={`wizard-execution-pipeline wizard-execution-pipeline--live${compact ? " wizard-execution-pipeline--compact" : ""}`}
+        >
+          {liveTrail.map((step, index) => (
             <li
               key={step.id}
               className={[
                 "wizard-execution-pipeline__step",
-                state !== "pending" ? `wizard-execution-pipeline__step--${state}` : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
+                `wizard-execution-pipeline__step--${step.state}`,
+              ].join(" ")}
             >
               <span className="wizard-execution-pipeline__marker" aria-hidden>
-                {stepMarker(state, index)}
+                {stepMarker(step.state, index)}
               </span>
               <div className="wizard-execution-pipeline__body">
                 <span className="wizard-execution-pipeline__label-row">
                   <span className="wizard-execution-pipeline__label">{step.label}</span>
                 </span>
-                {!compact && (
-                  <span className="wizard-execution-pipeline__description text-sm text-muted">
-                    {step.description}
-                  </span>
-                )}
               </div>
             </li>
-          );
-        })}
-      </ol>
+          ))}
+        </ol>
+      ) : hasLiveStatus ? (
+        <p className="wizard-execution-pipeline__live text-sm text-muted">
+          {status?.current_phase
+            ? `${phaseLabel(status.current_phase)} in progress…`
+            : "Waiting for the first pipeline stage…"}
+        </p>
+      ) : (
+        <p className="text-sm text-muted">
+          Stages appear as the attack runs — e.g. Generate → Attack → Recover → Attack → Judge.
+        </p>
+      )}
 
       {!compact && liveDetail && (
         <p className="wizard-execution-pipeline__live text-sm text-muted">{liveDetail}</p>

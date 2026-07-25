@@ -2,11 +2,33 @@ import { describe, expect, it } from "vitest";
 
 import {
   executionStrategySteps,
-  resolveExecutionStepStates,
+  resolveExecutionTrail,
+  resolvePhaseTrail,
 } from "@/features/scans/executionStrategyPipeline";
+import type { ScanStatusDto } from "@/shared/ipc";
+
+function status(partial: Partial<ScanStatusDto>): ScanStatusDto {
+  return {
+    scan_id: "s1",
+    status: "running",
+    progress_percent: 40,
+    completed: 1,
+    total: 4,
+    findings_count: 0,
+    current_endpoint: "https://api.example/v1/chat",
+    current_test: "Jailbreak",
+    started_at: null,
+    agent_mode: false,
+    current_phase: null,
+    current_attempt: null,
+    current_retry: null,
+    phase_trail: [],
+    ...partial,
+  };
+}
 
 describe("executionStrategySteps", () => {
-  it("returns sequential generate → attack → judge", () => {
+  it("returns sequential generate → attack → judge outline", () => {
     const steps = executionStrategySteps({
       executionStrategy: "sequential",
       reflectionEnabled: false,
@@ -31,70 +53,51 @@ describe("executionStrategySteps", () => {
       "retry",
     ]);
   });
-
-  it("includes adaptive plan between reflection and retry", () => {
-    const steps = executionStrategySteps({
-      executionStrategy: "agentic",
-      reflectionEnabled: true,
-      adaptivePlanning: true,
-      maxAttempts: 3,
-    });
-    expect(steps.map((step) => step.id)).toEqual([
-      "generate",
-      "attack",
-      "judge",
-      "reflection",
-      "adaptive",
-      "retry",
-    ]);
-  });
 });
 
-describe("resolveExecutionStepStates", () => {
-  const sequential = executionStrategySteps({
-    executionStrategy: "sequential",
-    reflectionEnabled: false,
-    adaptivePlanning: false,
-    maxAttempts: 1,
-  });
-
-  it("marks completed scans as done", () => {
-    expect(
-      resolveExecutionStepStates(sequential, {
-        scan_id: "s1",
-        status: "completed",
-        progress_percent: 100,
-        completed: 3,
-        total: 3,
-        findings_count: 1,
-        current_endpoint: null,
-        current_test: null,
-        started_at: null,
-        agent_mode: false,
+describe("resolveExecutionTrail", () => {
+  it("builds a live trail with repeated stages", () => {
+    const trail = resolveExecutionTrail(
+      status({
+        phase_trail: ["generate", "attack", "recover", "attack", "judge"],
         current_phase: "judge",
-        current_attempt: null,
-        current_retry: null,
       }),
-    ).toEqual(["done", "done", "done"]);
+    );
+    expect(trail.map((step) => step.label)).toEqual([
+      "Generate",
+      "Attack",
+      "Recover",
+      "Attack",
+      "Judge",
+    ]);
+    expect(trail.map((step) => step.state)).toEqual([
+      "done",
+      "done",
+      "done",
+      "done",
+      "active",
+    ]);
   });
 
-  it("highlights the active phase while running", () => {
+  it("appends current_phase when trail lags behind", () => {
     expect(
-      resolveExecutionStepStates(sequential, {
-        scan_id: "s1",
-        status: "running",
-        progress_percent: 40,
-        completed: 1,
-        total: 3,
-        findings_count: 0,
-        current_endpoint: "https://api.example/v1/chat",
-        current_test: "Prompt Injection",
-        started_at: null,
-        agent_mode: false,
-        current_phase: "attack",
-        current_attempt: null,
-        current_retry: null,
+      resolvePhaseTrail(
+        status({
+          phase_trail: ["generate", "attack"],
+          current_phase: "recover",
+        }),
+      ),
+    ).toEqual(["generate", "attack", "recover"]);
+  });
+
+  it("marks the whole trail done when scan completed", () => {
+    const trail = resolveExecutionTrail(
+      status({
+        status: "completed",
+        phase_trail: ["generate", "attack", "judge"],
+        current_phase: "judge",
       }),
-    ).toEqual(["done", "active", "pending"]);
+    );
+    expect(trail.every((step) => step.state === "done")).toBe(true);
   });
 });

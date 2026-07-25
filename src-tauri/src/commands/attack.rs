@@ -139,6 +139,7 @@ fn update_scan_phase(
         return;
     };
     if let Ok(mut state) = progress.lock() {
+        state.push_phase(phase);
         state.current_phase = Some(phase.into());
         if let Some(label) = test {
             state.current_test = Some(label.into());
@@ -685,15 +686,72 @@ async fn collect_category_attempts(
     let mut next_seq = 0usize;
     let mut attempts = Vec::new();
 
+    let take_attempt =
+        |ordered: &mut BTreeMap<usize, PayloadAttempt>,
+         next_seq: &mut usize,
+         attempts: &mut Vec<PayloadAttempt>,
+         emitter: Option<&ScanProgressEmitter>,
+         endpoint_url: &str,
+         progress_state: Option<&Arc<Mutex<ScanProgress>>>| {
+            while let Some(attempt) = ordered.remove(next_seq) {
+                if let Some(emitter) = emitter {
+                    emit_attack_attempt(emitter, endpoint_url, *next_seq, &attempt);
+                }
+                if let Some(progress_state) = progress_state {
+                    bump_scan_progress(progress_state, 1);
+                    if let Ok(mut state) = progress_state.lock() {
+                        state.attacks_completed = state
+                            .attacks_completed
+                            .saturating_add(1)
+                            .min(state.attacks_total.max(1));
+                        state.sync_testcases_completed();
+                    }
+                }
+                attempts.push(attempt);
+                *next_seq += 1;
+            }
+        };
+
+    let mut execution_fallback: Option<Vec<PayloadAttempt>> = None;
+
     loop {
+        // Prefer draining streamed attempts over observing completion — otherwise a
+        // successful 1-probe run can finish the future before recv is polled and
+        // look like an empty batch (false INTERNAL failure + useless recoveries).
         tokio::select! {
+            biased;
+            item = rx.recv() => {
+                match item {
+                    Some((seq, attempt)) => {
+                        ordered.insert(seq, attempt);
+                        take_attempt(
+                            &mut ordered,
+                            &mut next_seq,
+                            &mut attempts,
+                            emitter,
+                            endpoint_url,
+                            progress_state,
+                        );
+                    }
+                    None => break,
+                }
+            }
             result = exec.as_mut() => {
                 match result {
-                    Ok(_) => break,
+                    Ok(execution) => {
+                        while let Ok((seq, attempt)) = rx.try_recv() {
+                            ordered.insert(seq, attempt);
+                        }
+                        if attempts.is_empty() && ordered.is_empty() && !execution.attempts.is_empty()
+                        {
+                            execution_fallback = Some(execution.attempts);
+                        }
+                        break;
+                    }
                     Err(err) => {
                         // Soft-fail safety net: keep already-streamed probes instead of
                         // discarding partial success and forcing a full recover re-attack.
-                        if attempts.is_empty() {
+                        if attempts.is_empty() && ordered.is_empty() {
                             return Err(CommandError::from(
                                 promptlab_core::PromptLabError::internal(err.to_string()),
                             ));
@@ -701,57 +759,43 @@ async fn collect_category_attempts(
                         if let Some(emitter) = emitter {
                             emitter.warn(format!(
                                 "Attack pool ended with error after {} successful probe(s): {err}",
-                                attempts.len()
+                                attempts.len() + ordered.len()
                             ));
                         }
                         break;
                     }
                 }
             }
-            item = rx.recv() => {
-                match item {
-                    Some((seq, attempt)) => {
-                        ordered.insert(seq, attempt);
-                        while let Some(attempt) = ordered.remove(&next_seq) {
-                            if let Some(emitter) = emitter {
-                                emit_attack_attempt(emitter, endpoint_url, next_seq, &attempt);
-                            }
-                            if let Some(progress_state) = progress_state {
-                                bump_scan_progress(progress_state, 1);
-                                if let Ok(mut state) = progress_state.lock() {
-                                    state.attacks_completed = state
-                                        .attacks_completed
-                                        .saturating_add(1)
-                                        .min(state.attacks_total.max(1));
-                                    state.sync_testcases_completed();
-                                }
-                            }
-                            attempts.push(attempt);
-                            next_seq += 1;
-                        }
-                    }
-                    None => break,
-                }
-            }
         }
     }
 
-    while let Some(attempt) = ordered.remove(&next_seq) {
-        if let Some(emitter) = emitter {
-            emit_attack_attempt(emitter, endpoint_url, next_seq, &attempt);
-        }
-        if let Some(progress_state) = progress_state {
-            bump_scan_progress(progress_state, 1);
-            if let Ok(mut state) = progress_state.lock() {
-                state.attacks_completed = state
-                    .attacks_completed
-                    .saturating_add(1)
-                    .min(state.attacks_total.max(1));
-                state.sync_testcases_completed();
+    while let Ok((seq, attempt)) = rx.try_recv() {
+        ordered.insert(seq, attempt);
+    }
+
+    take_attempt(
+        &mut ordered,
+        &mut next_seq,
+        &mut attempts,
+        emitter,
+        endpoint_url,
+        progress_state,
+    );
+
+    if attempts.is_empty() {
+        if let Some(fallback) = execution_fallback {
+            for (seq, attempt) in fallback.into_iter().enumerate() {
+                ordered.insert(seq, attempt);
             }
+            take_attempt(
+                &mut ordered,
+                &mut next_seq,
+                &mut attempts,
+                emitter,
+                endpoint_url,
+                progress_state,
+            );
         }
-        attempts.push(attempt);
-        next_seq += 1;
     }
 
     Ok(attempts)

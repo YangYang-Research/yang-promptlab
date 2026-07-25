@@ -4707,6 +4707,18 @@ a:hover {
 .wizard-execution-pipeline__description {
   line-height: 1.35;
 }
+.wizard-execution-pipeline--live {
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+.wizard-execution-pipeline--live .wizard-execution-pipeline__step {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 0.4rem 0.625rem;
+}
+.wizard-execution-pipeline--live .wizard-execution-pipeline__label {
+  white-space: nowrap;
+}
 .wizard-execution-pipeline__live {
   margin: 0.625rem 0 0;
 }

@@ -28,7 +28,7 @@ CREATE INDEX IF NOT EXISTS idx_targets_project_id ON targets(project_id);
 CREATE TABLE IF NOT EXISTS scans (
     id            TEXT PRIMARY KEY NOT NULL,
     project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    target_id     TEXT REFERENCES targets(id) ON DELETE SET NULL,
+    target_id     TEXT REFERENCES targets(id) ON DELETE CASCADE,
     name          TEXT NOT NULL,
     status        TEXT NOT NULL DEFAULT 'pending',
     playbook_json TEXT,

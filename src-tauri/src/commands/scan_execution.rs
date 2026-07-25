@@ -164,6 +164,7 @@ fn set_scan_phase(
     retry: Option<u32>,
 ) {
     if let Ok(mut state) = progress.lock() {
+        state.push_phase(phase);
         state.current_phase = Some(phase.into());
         if let Some(label) = test {
             state.current_test = Some(label.into());

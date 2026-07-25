@@ -145,6 +145,14 @@ impl TargetRepository for SqliteTargetRepository {
     }
 
     async fn delete(&self, id: &str) -> PromptLabResult<()> {
+        // Defense for DBs that still have ON DELETE SET NULL on scans.target_id:
+        // remove dependent scans first (findings/endpoints cascade from scans).
+        sqlx::query("DELETE FROM scans WHERE target_id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_storage()?;
+
         let result = sqlx::query("DELETE FROM targets WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
@@ -192,5 +200,51 @@ mod tests {
         assert_eq!(listed[0].id, target.id);
 
         targets.delete(&target.id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn deleting_target_removes_its_scans() {
+        use crate::models::CreateScan;
+        use crate::repositories::ScanRepository;
+
+        let db = test_database().await;
+        let projects = db.repositories().projects();
+        let targets = db.repositories().targets();
+        let scans = db.repositories().scans();
+
+        let project = projects
+            .create(CreateProject {
+                name: "proj".into(),
+                description: None,
+            })
+            .await
+            .unwrap();
+
+        let target = targets
+            .create(CreateTarget {
+                project_id: project.id.clone(),
+                name: "API".into(),
+                target_type: "llm".into(),
+                descriptor_json: Some(serde_json::json!({"url": "https://api.example.com"})),
+                profile_json: None,
+            })
+            .await
+            .unwrap();
+
+        let scan = scans
+            .create(CreateScan {
+                project_id: project.id.clone(),
+                target_id: Some(target.id.clone()),
+                name: "Scan (custom)".into(),
+                status: Some("completed".into()),
+                playbook_json: None,
+            })
+            .await
+            .unwrap();
+
+        targets.delete(&target.id).await.unwrap();
+
+        assert!(scans.get(&scan.id).await.is_err());
+        assert!(scans.list_by_project(&project.id).await.unwrap().is_empty());
     }
 }

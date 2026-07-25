@@ -201,14 +201,20 @@ export function ReviewAttackPlanStep({
   }
 
   function toggleCustomCategory(id: AttackCategoryId, enabled: boolean) {
-    const nextDisabled = new Set(disabledGraphNodes);
-    if (enabled) nextDisabled.delete(id);
-    else nextDisabled.add(id);
-    const custom = ALL_ATTACK_CATEGORY_IDS.filter((cat) => !nextDisabled.has(cat));
+    // Derive from the active selection — never from a partial disabledGraphNodes
+    // list (attackGraph omits N/A categories, which previously auto-enabled them).
+    const active = new Set(
+      customCategories.length > 0 ? customCategories : attackPlan.categories,
+    );
+    if (enabled) active.add(id);
+    else active.delete(id);
+    const customUi = planUiForCustomFromCategories(
+      ALL_ATTACK_CATEGORY_IDS.filter((cat) => active.has(cat)),
+    );
     void applyAdjust({
       profileId: "custom",
-      customCategories: custom,
-      disabledGraphNodes: [...nextDisabled],
+      customCategories: customUi.customCategories,
+      disabledGraphNodes: customUi.disabledGraphNodes,
     });
   }
 
@@ -216,9 +222,14 @@ export function ReviewAttackPlanStep({
     const next = new Set(disabledTests);
     if (enabled) next.delete(testId);
     else next.add(testId);
+    const promoting = profileId !== "custom";
+    const customUi = promoting
+      ? planUiForCustomFromCategories(attackPlan.categories)
+      : null;
     void applyAdjust({
-      profileId: profileId !== "custom" ? "custom" : profileId,
-      customCategories: attackPlan.categories,
+      profileId: promoting ? "custom" : profileId,
+      customCategories: customUi?.customCategories ?? customCategories,
+      disabledGraphNodes: customUi?.disabledGraphNodes ?? disabledGraphNodes,
       disabledTests: [...next],
     });
   }

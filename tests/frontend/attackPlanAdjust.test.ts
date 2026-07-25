@@ -85,7 +85,7 @@ describe("resolveCategoriesForAdjust", () => {
     ).toEqual(["prompt_injection", "jailbreak"]);
   });
 
-  it("derives custom categories from disabled graph nodes", () => {
+  it("derives custom categories from suggested minus disabled graph nodes", () => {
     expect(
       resolveCategoriesForAdjust(
         "custom",
@@ -97,5 +97,19 @@ describe("resolveCategoriesForAdjust", () => {
         },
       ),
     ).toEqual(["prompt_injection", "jailbreak", "system_prompt_extraction"]);
+  });
+
+  it("does not expand custom fallback to the full catalog", () => {
+    expect(
+      resolveCategoriesForAdjust(
+        "custom",
+        { customCategories: [], disabledGraphNodes: [] },
+        {
+          suggestedCategories: ["prompt_injection", "jailbreak"],
+          categories: [],
+          profileModes: [],
+        },
+      ),
+    ).toEqual(["prompt_injection", "jailbreak"]);
   });
 });

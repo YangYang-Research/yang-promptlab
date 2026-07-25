@@ -163,15 +163,27 @@ pub async fn target_delete_op(state: &AppState, id: String) -> CommandResult<()>
         .list_by_project(&target.project_id)
         .await
         .map_err(CommandError::from)?;
-    for scan in scans
-        .iter()
+    let target_scans: Vec<_> = scans
+        .into_iter()
         .filter(|scan| scan.target_id.as_deref() == Some(id.as_str()))
-    {
+        .collect();
+
+    for scan in &target_scans {
         let _ = state.jobs().request_cancel(&scan.id);
     }
 
+    // Existing DBs used ON DELETE SET NULL for scans.target_id — explicitly remove
+    // attack scans (and cascaded findings/results) so they do not linger orphaned.
+    for scan in &target_scans {
+        repos
+            .scans()
+            .delete(&scan.id)
+            .await
+            .map_err(CommandError::from)?;
+    }
+
     repos.targets().delete(&id).await.map_err(CommandError::from)?;
-    info!(%id, "target deleted");
+    info!(%id, deleted_scans = target_scans.len(), "target deleted");
     Ok(())
 }
 

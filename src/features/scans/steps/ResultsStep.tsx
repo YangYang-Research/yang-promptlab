@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Badge, RefreshButton, SeverityBadge, YazgBadge } from "@/shared/components";
+import { Badge, RefreshButton, SeverityBadge } from "@/shared/components";
 import { IconCheck } from "@/shared/components/Icons";
 import { resolveAttackGraphStates } from "@/features/scans/attackGraphProgress";
 import { getCategory, type AttackCategoryId } from "@/features/scans/attackProfiles";
@@ -235,7 +235,6 @@ export function ResultsStep({
       <section className="wizard-results__section">
         <div className="wizard-results__heading-row">
           <h3 className="wizard-results__heading">Findings summary</h3>
-          {scanFindings.length > 0 ? <YazgBadge /> : null}
         </div>
         {scanFindings.length === 0 ? (
           <p className="text-muted">

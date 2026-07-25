@@ -190,8 +190,7 @@ export function SubmitStep({
   return (
     <div className="wizard-step wizard-submit-review">
       <p className="wizard-submit-review__lead text-sm text-muted">
-        Review the attack graph below. Press <strong>Start Attack</strong> in the footer to launch,
-        or use <strong>Start Attack</strong> from the previous step.
+        Review the attack graph below. Press <strong>Start Attack</strong> in the footer to launch.
       </p>
 
       <section className="wizard-fingerprint-summary">

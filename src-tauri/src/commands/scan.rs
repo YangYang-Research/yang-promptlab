@@ -179,6 +179,7 @@ fn progress_to_dto(scan_id: &str, progress: &ScanProgress) -> ScanStatusDto {
         current_phase: progress.current_phase.clone(),
         current_attempt: progress.current_attempt,
         current_retry: progress.current_retry,
+        phase_trail: progress.phase_trail.clone(),
     }
 }
 
@@ -1034,6 +1035,7 @@ async fn scan_status_from_db(
         current_phase: None,
         current_attempt: None,
         current_retry: None,
+        phase_trail: Vec::new(),
     })
 }
 

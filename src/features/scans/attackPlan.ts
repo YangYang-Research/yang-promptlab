@@ -289,7 +289,13 @@ export function resolveCategoriesForAdjust(
   if (attackPlan.categories.length > 0) {
     return attackPlan.categories;
   }
-  return ALL_ATTACK_CATEGORY_IDS.filter((id) => !planUi.disabledGraphNodes.includes(id));
+  // Last resort: suggested (union of Quick/Security/Red) minus disabled.
+  // Never expand to the full catalog — that auto-selects N/A categories.
+  const pool =
+    attackPlan.suggestedCategories.length > 0
+      ? attackPlan.suggestedCategories
+      : ALL_ATTACK_CATEGORY_IDS;
+  return pool.filter((id) => !planUi.disabledGraphNodes.includes(id));
 }
 
 export function attackPlanToDto(plan: AttackPlanConfig): WizardAttackPlanDto {
@@ -339,21 +345,31 @@ export function attackPlanFromDto(dto: WizardAttackPlanDto): AttackPlanConfig {
   const mapCategories = (values: string[]) =>
     values.map(asCategoryId).filter((id): id is AttackCategoryId => id !== null);
 
+  const profileId = asProfileId(dto.profileId);
+  const categories = mapCategories(dto.categories);
+  // attackGraph only covers suggested nodes — for custom, rebuild the full
+  // disabled set so toggles cannot accidentally enable out-of-model categories.
+  const disabledFromGraph = dto.attackGraph
+    .filter((node) => !node.enabled)
+    .map((node) => asCategoryId(node.category))
+    .filter((id): id is AttackCategoryId => id !== null);
+  const disabledGraphNodes =
+    profileId === "custom"
+      ? ALL_ATTACK_CATEGORY_IDS.filter((id) => !categories.includes(id))
+      : disabledFromGraph;
+
   return recomputePlanPreview(
     normalizeAttackPlan({
-      profileId: asProfileId(dto.profileId),
+      profileId,
       recommendedProfileId: asProfileId(dto.recommendedProfileId ?? dto.profileId),
       suggestedCategories: mapCategories(dto.suggestedCategories ?? []),
       profileModes: (dto.profileModes ?? [])
         .map(profileModeFromDto)
         .filter((mode): mode is AttackProfileMode => mode !== null),
-      customCategories: mapCategories(dto.categories),
-      categories: mapCategories(dto.categories),
+      customCategories: categories,
+      categories,
       disabledTests: dto.disabledTests,
-      disabledGraphNodes: dto.attackGraph
-        .filter((node) => !node.enabled)
-        .map((node) => asCategoryId(node.category))
-        .filter((id): id is AttackCategoryId => id !== null),
+      disabledGraphNodes,
       capabilityGraph: dto.capabilityGraph,
       attackGraph: dto.attackGraph
         .map((node) => {
@@ -728,8 +744,15 @@ export function syncAttackPlanUiAfterAdjust(
   prev: AttackPlanUiState,
 ): AttackPlanUiState {
   const synced = attackPlanUiFromPlan(plan);
+  const customRepair =
+    synced.profileId === "custom"
+      ? planUiForCustomFromCategories(
+          synced.customCategories.length > 0 ? synced.customCategories : plan.categories,
+        )
+      : null;
   return {
     ...synced,
+    ...(customRepair ?? {}),
     expandedCategory: prev.expandedCategory,
     plannerSource: prev.plannerSource,
     suggestedPlanKey: prev.suggestedPlanKey,

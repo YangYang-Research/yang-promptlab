@@ -59,6 +59,28 @@ describe("attack graph progress", () => {
     expect(attackGraphStateLabel("active", status, "jailbreak")).toBe("Running");
   });
 
+  it("shows recovering label during sequential endpoint recovery", () => {
+    const status = {
+      scan_id: "scan-1",
+      status: "running",
+      progress_percent: 50,
+      completed: 2,
+      total: 4,
+      categories_completed: 0,
+      findings_count: 0,
+      current_endpoint: "https://api.example.com/v1/chat",
+      current_test: "Jailbreak",
+      current_phase: "recover",
+      started_at: null,
+      agent_mode: false,
+      current_attempt: 1,
+      current_retry: 1,
+    };
+
+    expect(attackGraphStateLabel("active", status, "jailbreak")).toBe("Recovering");
+    expect(attackGraphStateLabel("active", status, "jailbreak")).not.toBe("Running");
+  });
+
   it("marks all nodes done when every category completed successfully", () => {
     const states = resolveAttackGraphStates([...categories], {
       scan_id: "scan-1",

@@ -395,4 +395,6 @@ pub struct ScanStatusDto {
     pub current_phase: Option<String>,
     pub current_attempt: Option<u32>,
     pub current_retry: Option<u32>,
+    #[serde(default)]
+    pub phase_trail: Vec<String>,
 }
