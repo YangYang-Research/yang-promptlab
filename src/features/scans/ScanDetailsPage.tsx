@@ -285,15 +285,12 @@ export function ScanDetailsPage() {
     const openPath = resolveScanOpenPath(scan, status?.status);
     const detailsPath = `/scans/${scan.id}`;
 
-    if (openPath !== detailsPath) {
-      const openLabel =
-        scan.status === "draft"
-          ? "Continue Setup"
-          : isLiveScanStatus(effectiveStatus)
-            ? "View Scan Progress"
-            : isRetryableScanStatus(effectiveStatus)
-              ? "Retry Scan"
-              : "Open Scan";
+    if (openPath !== detailsPath && scan.status !== "draft") {
+      const openLabel = isLiveScanStatus(effectiveStatus)
+        ? "View Scan Progress"
+        : isRetryableScanStatus(effectiveStatus)
+          ? "Retry Scan"
+          : "Open Scan";
       items.push({
         id: "open",
         label: openLabel,
@@ -402,6 +399,8 @@ export function ScanDetailsPage() {
     isMonitorableAttackScan(scan) &&
     isLiveScanStatus(effectiveStatus);
 
+  const showContinueSetup = scan && scan.status === "draft";
+
   const showResumeScan =
     scan &&
     scan.targetId &&
@@ -424,6 +423,11 @@ export function ScanDetailsPage() {
         title={scan?.name ?? "Scan Details"}
         actions={
           <div className="page-actions">
+            {showContinueSetup && (
+              <Button variant="primary" onClick={openScanAction}>
+                Continue Setup
+              </Button>
+            )}
             {showResumeScan && (
               <Button
                 variant="primary"
@@ -450,7 +454,9 @@ export function ScanDetailsPage() {
             )}
             {showViewScan && (
               <Button
-                variant={showRetryScan || showResumeScan ? "secondary" : "primary"}
+                variant={
+                  showRetryScan || showResumeScan || showContinueSetup ? "secondary" : "primary"
+                }
                 onClick={() =>
                   navigate(
                     buildScanProgressUrl(scan!.projectId, scan!.id, scan!.targetId),

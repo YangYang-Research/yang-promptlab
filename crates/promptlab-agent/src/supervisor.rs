@@ -13,7 +13,7 @@ use crate::attack_execution::{
     AgenticAttackExecutionAgent, AttackExecutionLlms, AttackExecutionOutcome, AttackExecutionRequest,
     AttackExecutionTools,
 };
-use crate::attack_plan::AttackPlanAgentOutcome;
+use crate::attack_plan::{AttackPlanAgent, AttackPlanAgentOutcome};
 use crate::create_project::{CreateProjectTools, CreatedProject};
 use crate::error::AgentResult;
 use crate::generate_prompt::{GeneratePromptAgentOutcome, TechniquePromptContext};
@@ -253,24 +253,54 @@ impl YazgSupervisor {
 
     /// Wizard attack-plan step.
     /// Soft intent hint only — Yazg ReAct chooses the agent/action.
+    /// Recovers by calling AttackPlanAgent directly when ReAct finishes without a plan
+    /// (common misfire: memory of a prior plan causes an early finish).
     pub async fn react_plan(
         profile: &TargetProfile,
         llms: &ReactLlms<'_>,
         memory: Option<&dyn AgentMemoryStore>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
-        Self::handle(
-            "Scan wizard Attack Plan: generate an attack plan for the current verified target, \
-             then finish with a short summary for the UI.",
-            SupervisorIntent::AttackPlan,
-            Some(profile),
-            HashMap::new(),
-            llms,
-            memory,
-            memory_ctx,
-            None,
-        )
-        .await
+        let message = format!(
+            "Scan wizard Attack Plan: generate a FRESH attack plan for the verified target {}.\n\
+             You MUST call action \"attack_plan\" in this turn even if short-term or long-term memory \
+             mentions a prior plan — memory is historical context only, not a substitute for regenerating.\n\
+             After AttackPlanAgent succeeds, finish with a short summary for the UI.\n\
+             Do not finish early claiming a plan already exists.",
+            profile.full_url()
+        );
+        let goal = Self::build_goal(&message, SupervisorIntent::AttackPlan);
+        let request = ReactRequest::new(goal)
+            .with_profile(Some(profile))
+            .with_memory(memory, memory_ctx)
+            .with_max_steps(4);
+        let delegation = Self::react(request, llms).await?;
+        if matches!(delegation, YazgDelegation::Planned { .. }) {
+            return Ok(delegation);
+        }
+
+        // Soft ReAct often skips attack_plan when STM/LTM still shows a previous OK observation.
+        warn!(
+            endpoint = %profile.full_url(),
+            "Yazg ReAct missed AttackPlanAgent during Attack Plan; forcing AttackPlanAgent::run"
+        );
+        let outcome = AttackPlanAgent::run(profile, llms.plan).await?;
+        let mut events = vec![AgentEvent::info(
+            AgentId::Yazg,
+            "ReAct recovery: forced AttackPlanAgent after misrouted Attack Plan turn",
+        )];
+        events.extend(outcome.events.clone());
+        let plan_summary = format_plan_summary(&outcome.plan);
+        Ok(YazgDelegation::Planned {
+            turn: YazgTurn {
+                reply: format!("Attack plan generated.\n{plan_summary}"),
+                intent: SupervisorIntent::AttackPlan,
+                events,
+                verified: Some(true),
+                plan_summary: Some(plan_summary),
+            },
+            outcome,
+        })
     }
 
     /// Attack Factory: invent a novel technique probe.

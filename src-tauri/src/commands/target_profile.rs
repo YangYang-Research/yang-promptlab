@@ -705,7 +705,13 @@ pub async fn planner_generate_from_profile_op(
     );
     let llms = hosts.react_llms();
     let memory = SqliteAgentMemoryStore::new(state.repositories());
-    let memory_ctx = MemoryContext::new(format!("wizard-plan:{target_id}"))
+    // Fresh STM session per generate so prior AttackPlanAgent OK observations do not
+    // convince ReAct to skip regenerating. LTM remains target-scoped.
+    let session_nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let memory_ctx = MemoryContext::new(format!("wizard-plan:{target_id}:{session_nonce}"))
         .with_project(Some(target.project_id.clone()))
         .with_target(Some(target_id.clone()));
 
