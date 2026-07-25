@@ -139,7 +139,7 @@ fn update_scan_phase(
         return;
     };
     if let Ok(mut state) = progress.lock() {
-        state.push_phase(phase);
+        state.push_phase_with_category(phase, test);
         state.current_phase = Some(phase.into());
         if let Some(label) = test {
             state.current_test = Some(label.into());

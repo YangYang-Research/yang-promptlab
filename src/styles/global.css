@@ -4509,6 +4509,16 @@ a:hover {
   margin: 0;
   font-size: 1.25rem;
 }
+.wizard-panel__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.wizard-panel__title-row .wizard-panel__title {
+  flex: 1;
+  min-width: 0;
+}
 .wizard-panel__hint-row {
   display: flex;
   align-items: center;
@@ -4546,7 +4556,7 @@ a:hover {
   margin: 0;
 }
 .wizard-submit-review__url {
-  margin: 0.35rem 0 0.15rem;
+  margin: 0;
   word-break: break-all;
 }
 .wizard-submit-review__categories {

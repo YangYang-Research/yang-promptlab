@@ -55,6 +55,7 @@ import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatus
 import {
   buildScanProgressUrl,
   buildScanWizardUrl,
+  clearWizardSessionIfReferencesScan,
   isLiveScanStatus,
   isRetryableScanStatus,
   resolveScanOpenPath,
@@ -235,6 +236,7 @@ export function ScanDetailsPage() {
     setDeletePending(true);
     try {
       await deleteScan(scanId);
+      clearWizardSessionIfReferencesScan(scanId);
       await actions.refresh();
       notify("Scan deleted", "success");
       navigate("/scans");

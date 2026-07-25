@@ -32,13 +32,14 @@ import { NewScanChooserModal } from "@/features/scans/NewScanChooserModal";
 import {
   buildScanProgressUrl,
   buildScanWizardUrl,
+  clearWizardSession,
   peekWizardSession,
   wizardResumeInputFromSession,
 } from "@/features/scans/wizardState";
 import { targetDisplayType } from "@/features/scans/targetProfile";
 import { severityCountSeries } from "@/shared/stats";
 import { buildTargetScanContext, countAttackScans, formatTargetTimestamp } from "@/shared/targetScanContext";
-import { resolveTargetScanAction } from "@/shared/targetScanAction";
+import { isWizardSessionOrphaned, resolveTargetScanAction } from "@/shared/targetScanAction";
 import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
 import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
 import { useViewPreference } from "@/shared/hooks/useViewPreference";
@@ -110,7 +111,15 @@ export function ProjectDetailsPage() {
     };
   }, [projectTargets, projectScans]);
 
-  const wizardSession = useMemo(() => peekWizardSession(), []);
+  const wizardSession = useMemo(() => {
+    const session = peekWizardSession();
+    if (!session) return null;
+    const input = wizardResumeInputFromSession(session);
+    // Use full store scans so a draft belonging to another project is not treated as orphaned.
+    if (!isWizardSessionOrphaned(input, scans)) return session;
+    clearWizardSession();
+    return null;
+  }, [scans]);
 
   const recentFindings = useMemo(
     () =>

@@ -148,12 +148,19 @@ export async function hydrateWizardSessionForScanResume(
   // local/remote wizard state that used to set submittedScanId from draftScanId).
   if (scan.status === "draft") {
     next = { ...next, submittedScanId: null };
-  } else if (
-    ["running", "paused", "pending", "completed", "failed", "cancelled", "stopped"].includes(
-      scan.status,
-    )
-  ) {
+  } else if (["running", "paused", "pending"].includes(scan.status)) {
     next = { ...next, submittedScanId: scan.id };
+  } else if (
+    ["completed", "failed", "cancelled", "stopped"].includes(scan.status)
+  ) {
+    // Retry / replan (step 4): keep unsubmitted so Step 5 shows Attack review + Start Attack
+    // instead of the previous failed/completed run UI.
+    // Progress / results deep links (step 5/6): keep submitted for monitoring.
+    if (entryStep === 4) {
+      next = { ...next, submittedScanId: null };
+    } else {
+      next = { ...next, submittedScanId: scan.id };
+    }
   }
 
   return next;

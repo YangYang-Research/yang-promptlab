@@ -156,6 +156,7 @@ export function wizardResumeInputFromSession(session: ScanWizardSession): {
   currentStep: WizardStepId;
   profileVerified: boolean;
   attackPlanGenerated: boolean;
+  draftScanId: string | null;
   submittedScanId: string | null;
 } {
   return {
@@ -164,6 +165,7 @@ export function wizardResumeInputFromSession(session: ScanWizardSession): {
     currentStep: session.currentStep,
     profileVerified: session.targetProfile.verification.verified,
     attackPlanGenerated: session.attackPlan !== null,
+    draftScanId: session.draftScanId,
     submittedScanId: session.submittedScanId,
   };
 }
@@ -192,6 +194,15 @@ export function saveWizardSession(session: ScanWizardSession): void {
 export function clearWizardSession(): void {
   if (typeof window === "undefined") return;
   window.sessionStorage.removeItem(STORAGE_KEY);
+}
+
+/** Drop in-progress wizard state when its draft/submitted scan was deleted. */
+export function clearWizardSessionIfReferencesScan(scanId: string): void {
+  const session = peekWizardSession();
+  if (!session) return;
+  if (session.draftScanId === scanId || session.submittedScanId === scanId) {
+    clearWizardSession();
+  }
 }
 
 export function shouldPersistTarget(

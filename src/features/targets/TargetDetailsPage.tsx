@@ -27,6 +27,7 @@ import { targetDisplayType } from "@/features/scans/targetProfile";
 import {
   buildScanProgressUrl,
   buildScanWizardUrl,
+  clearWizardSession,
   peekWizardSession,
   wizardResumeInputFromSession,
 } from "@/features/scans/wizardState";
@@ -34,7 +35,7 @@ import {
   buildTargetScanContext,
   formatTargetTimestamp,
 } from "@/shared/targetScanContext";
-import { resolveTargetScanAction } from "@/shared/targetScanAction";
+import { isWizardSessionOrphaned, resolveTargetScanAction } from "@/shared/targetScanAction";
 import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
 import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
 import { useViewPreference } from "@/shared/hooks/useViewPreference";
@@ -123,7 +124,14 @@ export function TargetDetailsPage() {
     [target, scans],
   );
 
-  const wizardSession = useMemo(() => peekWizardSession(), []);
+  const wizardSession = useMemo(() => {
+    const session = peekWizardSession();
+    if (!session || !target) return session;
+    const input = wizardResumeInputFromSession(session);
+    if (!isWizardSessionOrphaned(input, scans)) return session;
+    clearWizardSession();
+    return null;
+  }, [scans, target]);
 
   const scanAction = useMemo(() => {
     if (!target) return null;
@@ -175,7 +183,7 @@ export function TargetDetailsPage() {
       );
       return;
     }
-    navigate(buildScanWizardUrl(target.projectId, target.id, { step: 3 }));
+    navigate(buildScanWizardUrl(target.projectId, target.id, { step: 2 }));
   }, [navigate, scanAction, target]);
 
   const startNewScan = useCallback(() => {

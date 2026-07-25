@@ -27,6 +27,7 @@ function wizardInput(overrides: Partial<WizardResumeInput> = {}): WizardResumeIn
     currentStep: 3,
     profileVerified: false,
     attackPlanGenerated: false,
+    draftScanId: null,
     submittedScanId: null,
     ...overrides,
   };
@@ -115,6 +116,22 @@ describe("resolveTargetScanAction", () => {
     );
 
     expect(action).toEqual({ kind: "setup", step: 4, scanId: undefined });
+  });
+
+  it("ignores orphaned wizard session after its draft scan was deleted", () => {
+    const action = resolveTargetScanAction(
+      "target-1",
+      "project-1",
+      [],
+      wizardInput({
+        currentStep: 5,
+        profileVerified: true,
+        attackPlanGenerated: true,
+        draftScanId: "deleted-draft",
+      }),
+    );
+
+    expect(action).toEqual({ kind: "setup", step: 2, scanId: undefined });
   });
 
   it("detects incomplete setup on step 3", () => {

@@ -164,7 +164,7 @@ fn set_scan_phase(
     retry: Option<u32>,
 ) {
     if let Ok(mut state) = progress.lock() {
-        state.push_phase(phase);
+        state.push_phase_with_category(phase, test);
         state.current_phase = Some(phase.into());
         if let Some(label) = test {
             state.current_test = Some(label.into());
@@ -1032,6 +1032,12 @@ impl AttackExecutionTools for SequentialCategoryTools<'_> {
     }
 
     async fn set_phase(&self, phase: &str, attempt: u32, retry: u32) {
+        // Host already recorded the real Generate stage (all categories). Per-category
+        // "generate" only binds precomputed payloads — do not re-append to phase_trail
+        // or the UI shows a misleading second Generate before the next category Attack.
+        if phase.eq_ignore_ascii_case("generate") {
+            return;
+        }
         let label = self.category.display_name();
         set_scan_phase(
             &self.ctx.progress,

@@ -61,6 +61,7 @@ describe("resolveExecutionTrail", () => {
       status({
         phase_trail: ["generate", "attack", "recover", "attack", "judge"],
         current_phase: "judge",
+        current_test: "Jailbreak",
       }),
     );
     expect(trail.map((step) => step.label)).toEqual([
@@ -68,7 +69,7 @@ describe("resolveExecutionTrail", () => {
       "Attack",
       "Recover",
       "Attack",
-      "Judge",
+      "Judge · Jailbreak",
     ]);
     expect(trail.map((step) => step.state)).toEqual([
       "done",
@@ -79,23 +80,47 @@ describe("resolveExecutionTrail", () => {
     ]);
   });
 
+  it("labels attack and judge stages with category names from the trail", () => {
+    const trail = resolveExecutionTrail(
+      status({
+        phase_trail: [
+          "generate",
+          "attack|Prompt Injection",
+          "judge|Prompt Injection",
+          "attack|Jailbreak",
+          "judge|Jailbreak",
+        ],
+        current_phase: "judge",
+        current_test: "Jailbreak",
+      }),
+    );
+    expect(trail.map((step) => step.label)).toEqual([
+      "Generate",
+      "Attack · Prompt Injection",
+      "Judge · Prompt Injection",
+      "Attack · Jailbreak",
+      "Judge · Jailbreak",
+    ]);
+  });
+
   it("appends current_phase when trail lags behind", () => {
     expect(
       resolvePhaseTrail(
         status({
-          phase_trail: ["generate", "attack"],
+          phase_trail: ["generate", "attack|Jailbreak"],
           current_phase: "recover",
         }),
       ),
-    ).toEqual(["generate", "attack", "recover"]);
+    ).toEqual(["generate", "attack|Jailbreak", "recover"]);
   });
 
   it("marks the whole trail done when scan completed", () => {
     const trail = resolveExecutionTrail(
       status({
         status: "completed",
-        phase_trail: ["generate", "attack", "judge"],
+        phase_trail: ["generate", "attack|Jailbreak", "judge|Jailbreak"],
         current_phase: "judge",
+        current_test: "Jailbreak",
       }),
     );
     expect(trail.every((step) => step.state === "done")).toBe(true);

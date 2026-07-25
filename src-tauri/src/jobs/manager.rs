@@ -95,16 +95,27 @@ impl ScanProgress {
     }
 
     /// Record a phase transition for the live Execution pipeline trail.
+    /// Attack/Judge entries may include a category label as `phase|Category Name`.
     pub fn push_phase(&mut self, phase: &str) {
+        self.push_phase_with_category(phase, None);
+    }
+
+    pub fn push_phase_with_category(&mut self, phase: &str, category: Option<&str>) {
         const MAX_TRAIL: usize = 64;
-        let normalized = phase.trim().to_ascii_lowercase();
-        if normalized.is_empty() {
+        let phase_key = phase.trim().to_ascii_lowercase();
+        if phase_key.is_empty() {
             return;
         }
-        if self.phase_trail.last().map(String::as_str) == Some(normalized.as_str()) {
+        let entry = match category.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(cat) if matches!(phase_key.as_str(), "attack" | "judge") => {
+                format!("{phase_key}|{cat}")
+            }
+            _ => phase_key,
+        };
+        if self.phase_trail.last().map(String::as_str) == Some(entry.as_str()) {
             return;
         }
-        self.phase_trail.push(normalized);
+        self.phase_trail.push(entry);
         if self.phase_trail.len() > MAX_TRAIL {
             let drop = self.phase_trail.len() - MAX_TRAIL;
             self.phase_trail.drain(0..drop);

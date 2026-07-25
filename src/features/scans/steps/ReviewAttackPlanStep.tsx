@@ -21,7 +21,6 @@ import {
   previewPlanForProfile,
   recomputePlanPreview,
   resolveCategoriesForAdjust,
-  resolvePlannerSummaryBadge,
   resolveActivePlannerRationales,
   syncAttackPlanUiAfterAdjust,
   type AttackPlanConfig,
@@ -91,11 +90,6 @@ export function ReviewAttackPlanStep({
   const activeRationales = useMemo(
     () => resolveActivePlannerRationales(attackPlan, activeCategories),
     [attackPlan, activeCategories],
-  );
-
-  const plannerBadge = useMemo(
-    () => resolvePlannerSummaryBadge(attackPlan, planUi),
-    [attackPlan, planUi],
   );
 
   useEffect(() => {
@@ -317,13 +311,6 @@ export function ReviewAttackPlanStep({
     );
   }
 
-  function plannerSummaryBadge() {
-    if (plannerBadge.label === "AI Planned") {
-      return <YazgBadge />;
-    }
-    return <Badge variant={plannerBadge.variant}>{plannerBadge.label}</Badge>;
-  }
-
   function profileModeMeta(id: AttackProfileId): string {
     if (id === "custom") return "Manual selection";
     const mode = getProfileMode(attackPlan, id);
@@ -336,7 +323,6 @@ export function ReviewAttackPlanStep({
       <section className="wizard-fingerprint-summary">
         <div className="wizard-planner-summary-header">
           <h4 className="wizard-endpoints__title">Planner summary</h4>
-          {plannerSummaryBadge()}
         </div>
         <dl className="wizard-attack-estimates">
           <div className="wizard-attack-estimate">

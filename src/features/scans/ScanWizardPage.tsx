@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import { mapProjects, mapTargets } from "@/app/store/mappers";
-import { Button, Card, PageHeader, Badge } from "@/shared/components";
+import { Button, Card, PageHeader, Badge, YazgBadge, IconAi } from "@/shared/components";
 import { getProject, getScanStatus, pauseScan, resumeScan, startScan, updateTargetDescriptor } from "@/shared/ipc";
 import { createWizardScan, loadWizardScan, saveWizardScan } from "@/shared/ipc/scanWizard";
 import { generateAttackPlanForTarget } from "@/shared/ipc/attackPlanner";
@@ -42,7 +42,7 @@ import {
   type TargetFormState,
 } from "./targetDescriptor";
 import { WizardStepper } from "./WizardStepper";
-import { attackPlanFromDto, attackPlanUiBaselineFromPlan, normalizeAttackPlan, payloadStrategyToDto } from "./attackPlan";
+import { attackPlanFromDto, attackPlanUiBaselineFromPlan, normalizeAttackPlan, payloadStrategyToDto, resolvePlannerSummaryBadge } from "./attackPlan";
 import {
   buildWizardStore,
   clearWizardSession,
@@ -302,6 +302,10 @@ export function ScanWizardPage() {
           // Authoritative: draft scans are never "submitted" (merge can reintroduce
           // a polluted submittedScanId from sessionStorage).
           if (loaded.scan.status === "draft" && merged.submittedScanId) {
+            merged = { ...merged, submittedScanId: null };
+          }
+          // Retry / replan deep link: Step 4 must not carry the prior failed run as submitted.
+          if (entryStep === 4 && merged.submittedScanId) {
             merged = { ...merged, submittedScanId: null };
           }
           const projectId = lockedProjectId || loaded.scan.project_id;
@@ -756,6 +760,10 @@ export function ScanWizardPage() {
   }, [session.currentStep, session.submittedScanId, submittedStatus, updateSession]);
 
   const stepDef = getWizardStep(session.currentStep);
+  const step4PlannerBadge = useMemo(() => {
+    if (session.currentStep !== 4 || !session.attackPlan) return null;
+    return resolvePlannerSummaryBadge(session.attackPlan, session.attackPlanUi);
+  }, [session.currentStep, session.attackPlan, session.attackPlanUi]);
   const activeScanId = session.submittedScanId ?? session.draftScanId;
   const targetEndpointUrl =
     fullProfileUrl(session.targetProfile) || store.savedTarget?.url || "";
@@ -1005,6 +1013,12 @@ export function ScanWizardPage() {
       return;
     }
 
+    // Entering Step 5 from earlier wizard steps is Attack review until Start Attack.
+    if (nextStep === 5 && session.currentStep < 5) {
+      updateSession({ currentStep: 5, submittedScanId: null });
+      return;
+    }
+
     updateSession({ currentStep: nextStep });
   }
 
@@ -1078,7 +1092,9 @@ export function ScanWizardPage() {
 
     if (session.currentStep === 4) {
       if (!canProceedFromStep(4, draft)) return;
-      updateSession({ currentStep: 5 });
+      // Always enter Step 5 as Attack review (not prior run monitor). Start Attack
+      // sets submittedScanId when the user launches.
+      updateSession({ currentStep: 5, submittedScanId: null });
       logWizardEvent({
         activityName: "wizard_step_advance",
         message: "Advanced to Attack review",
@@ -1663,7 +1679,16 @@ export function ScanWizardPage() {
           <p className="wizard-panel__step-label text-muted">
             Step {session.currentStep} of 6 · {stepDef.label}
           </p>
-          <h2 className="wizard-panel__title">{stepDef.title}</h2>
+          <div className="wizard-panel__title-row">
+            <h2 className="wizard-panel__title">{stepDef.title}</h2>
+            {step4PlannerBadge ? (
+              step4PlannerBadge.label === "AI Planned" ? (
+                <YazgBadge />
+              ) : (
+                <Badge variant={step4PlannerBadge.variant}>{step4PlannerBadge.label}</Badge>
+              )
+            ) : null}
+          </div>
           <div className="wizard-panel__hint-row">
             <p className="wizard-panel__hint text-muted">{stepDef.hint}</p>
             {session.currentStep === 4 &&
@@ -1683,7 +1708,10 @@ export function ScanWizardPage() {
                   void runAttackPlanner(store.savedTarget!.id, { replan: true });
                 }}
               >
-                {plannerGenerating && plannerReplanning ? "Re-planning…" : "Re-plan"}
+                <span className="btn__content">
+                  <IconAi className="btn__icon" aria-hidden />
+                  {plannerGenerating && plannerReplanning ? "Re-planning…" : "Re-plan"}
+                </span>
               </Button>
             ) : session.currentStep === 4 && plannerGenerating ? (
               <Badge variant="muted">{plannerReplanning ? "Re-planning…" : "Planning…"}</Badge>

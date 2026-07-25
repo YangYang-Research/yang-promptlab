@@ -47,6 +47,7 @@ export type WizardResumeInput = {
   currentStep: WizardStepId;
   profileVerified: boolean;
   attackPlanGenerated: boolean;
+  draftScanId: string | null;
   submittedScanId: string | null;
 };
 
@@ -90,6 +91,16 @@ export function wizardSessionMatchesTarget(
   return !session.selectedProjectId || session.selectedProjectId === projectId;
 }
 
+/** True when the session points at a scan id that no longer exists (e.g. deleted). */
+export function isWizardSessionOrphaned(
+  session: WizardResumeInput,
+  scans: ScanRun[],
+): boolean {
+  const referencedId = session.draftScanId ?? session.submittedScanId;
+  if (!referencedId) return false;
+  return !scans.some((scan) => scan.id === referencedId);
+}
+
 export function isWizardSetupIncomplete(
   session: WizardResumeInput,
   targetId: string,
@@ -113,6 +124,8 @@ export function resolveTargetScanAction(
   const context = buildTargetScanContext(targetId, scans);
   const latestAttack = latestAttackScan(targetId, scans);
   const running = runningAttackScan(targetId, scans);
+  const activeSession =
+    wizardSession && !isWizardSessionOrphaned(wizardSession, scans) ? wizardSession : null;
 
   if (running) {
     return { kind: "view_scan", scanId: running.id };
@@ -130,11 +143,11 @@ export function resolveTargetScanAction(
     return { kind: "retry", scanId: latestAttack.id, step: 4 };
   }
 
-  if (wizardSession && isWizardSetupIncomplete(wizardSession, targetId, projectId)) {
+  if (activeSession && isWizardSetupIncomplete(activeSession, targetId, projectId)) {
     const draft = findDraftScan(targetId, projectId, scans);
     return {
       kind: "setup",
-      step: inferWizardResumeStep(wizardSession),
+      step: inferWizardResumeStep(activeSession),
       scanId: draft?.id,
     };
   }
@@ -143,9 +156,9 @@ export function resolveTargetScanAction(
   return {
     kind: "setup",
     step:
-      wizardSession && wizardSessionMatchesTarget(wizardSession, targetId, projectId)
-        ? inferWizardResumeStep(wizardSession)
-        : 3,
+      activeSession && wizardSessionMatchesTarget(activeSession, targetId, projectId)
+        ? inferWizardResumeStep(activeSession)
+        : 2,
     scanId: draft?.id,
   };
 }

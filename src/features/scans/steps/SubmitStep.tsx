@@ -8,7 +8,7 @@ import {
   type AttackPlanConfig,
 } from "@/features/scans/attackPlan";
 import { formatPayloadStrategySummary } from "@/features/scans/payloadStrategy";
-import { ATTACK_PROFILES, getCategory } from "@/features/scans/attackProfiles";
+import { ATTACK_PROFILES } from "@/features/scans/attackProfiles";
 import type { TargetProfileFormState } from "@/features/scans/targetProfile";
 import { fullProfileUrl, PROVIDER_OPTIONS } from "@/features/scans/targetProfile";
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
@@ -194,22 +194,17 @@ export function SubmitStep({
       </p>
 
       <section className="wizard-fingerprint-summary">
-        <h4 className="wizard-endpoints__title">Target</h4>
+        <div className="wizard-planner-summary-header">
+          <h4 className="wizard-endpoints__title">Target</h4>
+          <Badge variant="info">{providerLabel}</Badge>
+        </div>
         <p className="wizard-submit-review__url mono text-sm">{targetUrl}</p>
-        <p className="text-sm text-muted">{providerLabel}</p>
       </section>
 
       <section className="wizard-fingerprint-summary">
         <div className="wizard-planner-summary-header">
           <h4 className="wizard-endpoints__title">Attack plan</h4>
           <Badge variant="info">{profileLabel}</Badge>
-        </div>
-        <div className="tag-list wizard-submit-review__categories">
-          {attackPlan.categories.map((category) => (
-            <span key={category} className="chip">
-              {getCategory(category).label}
-            </span>
-          ))}
         </div>
         <p className="wizard-submit-review__plan-meta text-sm text-muted">
           {executionLabel} · {formatPayloadStrategySummary(attackPlan.payloadStrategy)}

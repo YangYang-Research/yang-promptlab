@@ -142,6 +142,27 @@ export function phaseLabel(phase: string): string {
   return PHASE_META[key]?.label ?? key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** Trail entries may be `attack` or `attack|Prompt Injection`. */
+export function parsePhaseTrailEntry(raw: string): { phase: string; category: string | null } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { phase: "", category: null };
+  const sep = trimmed.indexOf("|");
+  if (sep < 0) {
+    return { phase: trimmed.toLowerCase(), category: null };
+  }
+  const phase = trimmed.slice(0, sep).trim().toLowerCase();
+  const category = trimmed.slice(sep + 1).trim() || null;
+  return { phase, category };
+}
+
+export function phaseTrailStepLabel(phase: string, category: string | null): string {
+  const base = phaseLabel(phase);
+  if (category && (phase === "attack" || phase === "judge")) {
+    return `${base} · ${category}`;
+  }
+  return base;
+}
+
 function normalizePhase(phase: string | null | undefined): string | null {
   if (!phase) return null;
   const value = phase.trim().toLowerCase();
@@ -151,11 +172,30 @@ function normalizePhase(phase: string | null | undefined): string | null {
 /** Merge backend trail with current_phase (covers poll gaps / older builds). */
 export function resolvePhaseTrail(status: ScanStatusDto | null | undefined): string[] {
   if (!status) return [];
-  const trail = [...(status.phase_trail ?? [])]
-    .map((phase) => phase.trim().toLowerCase())
-    .filter(Boolean);
+  const trail = [...(status.phase_trail ?? [])].map((phase) => phase.trim()).filter(Boolean);
   const current = normalizePhase(status.current_phase);
-  if (current && trail[trail.length - 1] !== current) {
+  if (!current) return trail;
+
+  const last = trail.length > 0 ? parsePhaseTrailEntry(trail[trail.length - 1]) : null;
+  if (last?.phase === current) {
+    // Enrich a plain attack/judge entry with current category when trail lagged.
+    if (
+      !last.category &&
+      (current === "attack" || current === "judge") &&
+      status.current_test?.trim()
+    ) {
+      const enriched = `${current}|${status.current_test.trim()}`;
+      return [...trail.slice(0, -1), enriched];
+    }
+    return trail;
+  }
+
+  if (
+    (current === "attack" || current === "judge") &&
+    status.current_test?.trim()
+  ) {
+    trail.push(`${current}|${status.current_test.trim()}`);
+  } else {
     trail.push(current);
   }
   return trail;
@@ -163,7 +203,7 @@ export function resolvePhaseTrail(status: ScanStatusDto | null | undefined): str
 
 /**
  * Live pipeline: only stages that have actually run, in order.
- * Example: Generate → Attack → Recover → Attack → Judge …
+ * Example: Generate → Attack · Jailbreak → Recover → Attack · Jailbreak → Judge · Jailbreak
  */
 export function resolveExecutionTrail(
   status: ScanStatusDto | null | undefined,
@@ -177,7 +217,8 @@ export function resolveExecutionTrail(
   );
   const lastIndex = phases.length - 1;
 
-  return phases.map((phase, index) => {
+  return phases.map((raw, index) => {
+    const { phase, category } = parsePhaseTrailEntry(raw);
     let state: ExecutionStepState = "done";
     if (!terminal && index === lastIndex) {
       state = failed ? "failed" : "active";
@@ -185,9 +226,9 @@ export function resolveExecutionTrail(
       state = "failed";
     }
     return {
-      id: `${phase}-${index}`,
+      id: `${raw}-${index}`,
       phase,
-      label: phaseLabel(phase),
+      label: phaseTrailStepLabel(phase, category),
       state,
     };
   });

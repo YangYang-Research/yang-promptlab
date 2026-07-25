@@ -27,7 +27,7 @@ import { pauseScan, resumeScan, stopScan, deleteScan } from "@/shared/ipc";
 import { toAppError } from "@/shared/errors/AppError";
 import { useToast } from "@/shared/notifications";
 import { formatDurationMs, formatTimestamp } from "@/features/scans/scanDetailsHelpers";
-import { isLiveScanStatus, isRetryableScanStatus, resolveScanNavigationStatus, resolveScanOpenPath } from "@/features/scans/wizardState";
+import { isLiveScanStatus, isRetryableScanStatus, resolveScanNavigationStatus, resolveScanOpenPath, clearWizardSessionIfReferencesScan } from "@/features/scans/wizardState";
 import type { ScanRun } from "@/shared/types";
 
 import { NewScanChooserModal } from "./NewScanChooserModal";
@@ -160,6 +160,7 @@ export function ScansPage() {
       setDeletingScanId(scan.id);
       try {
         await deleteScan(scan.id);
+        clearWizardSessionIfReferencesScan(scan.id);
         await actions.refresh();
         notify("Scan deleted", "success");
       } catch (err) {

@@ -1,13 +1,16 @@
 import { useMemo } from "react";
 
-import type { AttackPlanConfig } from "@/features/scans/attackPlan";
+import {
+  formatExecutionStrategySummary,
+  type AttackPlanConfig,
+} from "@/features/scans/attackPlan";
 import {
   executionPipelineLiveDetail,
-  executionStrategyTitle,
   phaseLabel,
   resolveExecutionTrail,
   type ExecutionStepState,
 } from "@/features/scans/executionStrategyPipeline";
+import { Badge } from "@/shared/components";
 import type { ScanStatusDto } from "@/shared/ipc";
 
 type ExecutionStrategyPipelineProps = {
@@ -36,7 +39,7 @@ export function ExecutionStrategyPipeline({
     <section className="wizard-fingerprint-summary">
       <div className="wizard-planner-summary-header">
         <h4 className="wizard-endpoints__title">Execution pipeline</h4>
-        <span className="text-sm text-muted">{executionStrategyTitle(attackPlan)}</span>
+        <Badge variant="info">{formatExecutionStrategySummary(attackPlan)}</Badge>
       </div>
 
       {showLiveTrail ? (
@@ -70,7 +73,7 @@ export function ExecutionStrategyPipeline({
         </p>
       ) : (
         <p className="text-sm text-muted">
-          Stages appear as the attack runs — e.g. Generate → Attack → Recover → Attack → Judge.
+          Stages appear as the attack runs — e.g. Generate → Attack · Jailbreak → Judge · Jailbreak.
         </p>
       )}
 

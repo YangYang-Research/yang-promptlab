@@ -56,6 +56,18 @@ describe("applyWizardEntryStep", () => {
     expect(next.attackPlan).toBeNull();
   });
 
+  it("clears submittedScanId when entering step 4 for retry", () => {
+    const session = createInitialSession("project-1");
+    session.currentStep = 5;
+    session.draftScanId = "failed-scan";
+    session.submittedScanId = "failed-scan";
+
+    const next = applyWizardEntryStep(session, 4);
+    expect(next.currentStep).toBe(4);
+    expect(next.submittedScanId).toBeNull();
+    expect(next.draftScanId).toBe("failed-scan");
+  });
+
   it("does not promote draftScanId to submittedScanId when resuming step 5", () => {
     const session = createInitialSession("project-1");
     session.currentStep = 5;

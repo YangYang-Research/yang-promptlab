@@ -13,7 +13,6 @@ import {
   VARIANTS_PER_TEST_MIN,
   type PayloadStrategyConfig,
 } from "../payloadStrategy";
-import { YazgBadge } from "@/shared/components";
 import { WizardRangeSlider } from "./WizardRangeSlider";
 
 type PayloadStrategySectionProps = {
@@ -36,7 +35,6 @@ export function PayloadStrategySection({
     <section className="wizard-fingerprint-summary">
       <div className="wizard-attack-categories__header">
         <h4 className="wizard-endpoints__title">Payload strategy</h4>
-        {strategy.enableResponseAdaptation ? <YazgBadge /> : null}
       </div>
       <p className="text-muted text-sm">
         Configures Step 5 generation and attack expansion. Budget = payloads per
