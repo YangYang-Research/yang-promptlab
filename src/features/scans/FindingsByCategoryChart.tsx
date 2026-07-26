@@ -57,36 +57,19 @@ export function buildFindingsByCategory(findings: Finding[]): CategoryBar[] {
 
 type FindingsByCategoryChartProps = {
   data: CategoryBar[];
-  size?: number;
 };
 
-function polarPoint(cx: number, cy: number, r: number, angleRad: number) {
-  return {
-    x: cx + r * Math.cos(angleRad),
-    y: cy + r * Math.sin(angleRad),
-  };
+const CHART_W = 360;
+const CHART_H = 210;
+const PAD = { top: 24, right: 12, bottom: 54, left: 28 };
+
+function shortLabel(label: string): string {
+  const first = label.split(/\s+/)[0] ?? label;
+  if (first.length <= 10) return first;
+  return `${first.slice(0, 9)}…`;
 }
 
-/** Equal-angle wedge; radius scales with value (polar area). */
-function polarAreaPath(
-  cx: number,
-  cy: number,
-  r: number,
-  startAngle: number,
-  endAngle: number,
-): string {
-  const start = polarPoint(cx, cy, r, startAngle);
-  const end = polarPoint(cx, cy, r, endAngle);
-  const largeArc = endAngle - startAngle > Math.PI ? 1 : 0;
-  return [
-    `M ${cx} ${cy}`,
-    `L ${start.x} ${start.y}`,
-    `A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y}`,
-    "Z",
-  ].join(" ");
-}
-
-export function FindingsByCategoryChart({ data, size = 200 }: FindingsByCategoryChartProps) {
+export function FindingsByCategoryChart({ data }: FindingsByCategoryChartProps) {
   const bars = data.filter((item) => item.count > 0);
   const total = bars.reduce((sum, item) => sum + item.count, 0);
   const max = bars.reduce((peak, item) => Math.max(peak, item.count), 0);
@@ -95,97 +78,94 @@ export function FindingsByCategoryChart({ data, size = 200 }: FindingsByCategory
     return <p className="text-muted text-sm">No findings by attack category yet.</p>;
   }
 
-  const cx = size / 2;
-  const cy = size / 2;
-  const maxR = size * 0.38;
-  const slice = (Math.PI * 2) / bars.length;
-  const startOffset = -Math.PI / 2;
-  const guideLevels = [0.35, 0.65, 1];
+  const plotW = CHART_W - PAD.left - PAD.right;
+  const plotH = CHART_H - PAD.top - PAD.bottom;
+  const gap = bars.length > 6 ? 6 : 10;
+  const barW = Math.min(40, (plotW - gap * (bars.length - 1)) / bars.length);
+  const yMax = Math.max(1, Math.ceil(max * 1.15));
+  const ticks = [0, Math.round(yMax / 2), yMax];
+  const groupOffset = (plotW - bars.length * barW - (bars.length - 1) * gap) / 2;
 
   return (
-    <div className="category-polar" role="img" aria-label="Findings by attack category polar area chart">
-      <div className="category-polar__chart" style={{ width: size, height: size }}>
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-          <defs>
-            {bars.map((item) => (
-              <radialGradient key={`pg-${item.id}`} id={`polar-grad-${item.id}`} cx="50%" cy="50%" r="70%">
-                <stop offset="0%" stopColor={item.color} stopOpacity="0.35" />
-                <stop offset="55%" stopColor={item.color} stopOpacity="0.78" />
-                <stop offset="100%" stopColor={item.color} stopOpacity="0.95" />
-              </radialGradient>
-            ))}
-          </defs>
-
-          {guideLevels.map((level) => (
-            <circle
-              key={level}
-              className="category-polar__guide"
-              cx={cx}
-              cy={cy}
-              r={maxR * level}
-              fill="none"
-            />
+    <div className="category-columns" role="img" aria-label="Findings by attack category">
+      <svg
+        className="category-columns__svg"
+        viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+        preserveAspectRatio="xMidYMid meet"
+      >
+        <defs>
+          {bars.map((item) => (
+            <linearGradient key={`g-${item.id}`} id={`col-grad-${item.id}`} x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stopColor={item.color} stopOpacity="0.55" />
+              <stop offset="100%" stopColor={item.color} stopOpacity="1" />
+            </linearGradient>
           ))}
+        </defs>
 
-          {bars.map((_, index) => {
-            const angle = startOffset + index * slice;
-            const tip = polarPoint(cx, cy, maxR, angle);
-            return (
-              <line
-                key={`spoke-${index}`}
-                className="category-polar__spoke"
-                x1={cx}
-                y1={cy}
-                x2={tip.x}
-                y2={tip.y}
-              />
-            );
-          })}
-
-          {bars.map((item, index) => {
-            const r = Math.max((item.count / max) * maxR, maxR * 0.12);
-            const a0 = startOffset + index * slice;
-            const a1 = a0 + slice;
-            return (
-              <path
-                key={item.id}
-                className="category-polar__slice"
-                d={polarAreaPath(cx, cy, r, a0, a1)}
-                fill={`url(#polar-grad-${item.id})`}
-                stroke={item.color}
-                style={{ animationDelay: `${index * 55}ms` }}
-              >
-                <title>{`${item.label}: ${item.count}`}</title>
-              </path>
-            );
-          })}
-
-          <circle className="category-polar__hub" cx={cx} cy={cy} r={size * 0.11} />
-          <text x={cx} y={cy - 2} textAnchor="middle" className="category-polar__total">
-            {total}
-          </text>
-          <text x={cx} y={cy + 11} textAnchor="middle" className="category-polar__total-label">
-            total
-          </text>
-        </svg>
-      </div>
-
-      <ul className="category-polar__legend">
-        {bars.map((item) => {
-          const share = Math.round((item.count / total) * 100);
+        {ticks.map((tick) => {
+          const y = PAD.top + plotH - (tick / yMax) * plotH;
           return (
-            <li key={item.id} className="category-polar__legend-item">
-              <span className="category-polar__swatch" style={{ background: item.color }} aria-hidden />
-              <span className="category-polar__legend-label" title={item.label}>
-                {item.label}
-              </span>
-              <span className="category-polar__legend-meta">
-                <strong>{item.count}</strong>
-                <span>{share}%</span>
-              </span>
-            </li>
+            <g key={tick}>
+              <line
+                className="category-columns__grid"
+                x1={PAD.left}
+                x2={CHART_W - PAD.right}
+                y1={y}
+                y2={y}
+              />
+              <text className="category-columns__tick" x={PAD.left - 6} y={y + 3} textAnchor="end">
+                {tick}
+              </text>
+            </g>
           );
         })}
+
+        {bars.map((item, index) => {
+          // Keep short columns visible when one category dominates.
+          const h = Math.max((item.count / yMax) * plotH, 8);
+          const x = PAD.left + groupOffset + index * (barW + gap);
+          const y = PAD.top + plotH - h;
+          return (
+            <g
+              key={item.id}
+              className="category-columns__bar-group"
+              style={{ animationDelay: `${index * 55}ms` }}
+            >
+              <title>{`${item.label}: ${item.count}`}</title>
+              <rect
+                className="category-columns__bar"
+                x={x}
+                y={y}
+                width={barW}
+                height={h}
+                rx={5}
+                ry={5}
+                fill={`url(#col-grad-${item.id})`}
+              />
+              <text className="category-columns__value" x={x + barW / 2} y={y - 6} textAnchor="middle">
+                {item.count}
+              </text>
+              <text
+                className="category-columns__axis-label"
+                x={x + barW / 2}
+                y={CHART_H - 28}
+                textAnchor="middle"
+              >
+                {shortLabel(item.label)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+
+      <ul className="category-columns__legend">
+        {bars.map((item) => (
+          <li key={item.id} className="category-columns__legend-item">
+            <span className="category-columns__swatch" style={{ background: item.color }} aria-hidden />
+            <span className="category-columns__legend-label">{item.label}</span>
+            <span className="category-columns__legend-count">{item.count}</span>
+          </li>
+        ))}
       </ul>
     </div>
   );

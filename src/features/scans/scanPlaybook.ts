@@ -59,22 +59,49 @@ export type SelectedTestGroup = {
   tests: { id: string; name: string }[];
 };
 
+/** Category groups for Attack Plan UI: all sub-tests with enabled flag + counts. */
+export type PlanCategoryGroup = {
+  categoryId: string;
+  label: string;
+  enabledCount: number;
+  totalCount: number;
+  tests: { id: string; name: string; enabled: boolean }[];
+};
+
 export function listSelectedTestsByCategory(
   categories: string[],
   disabledTests: string[],
 ): SelectedTestGroup[] {
+  return listPlanCategoryGroups(categories, disabledTests).map((group) => ({
+    categoryId: group.categoryId,
+    label: group.label,
+    tests: group.tests
+      .filter((test) => test.enabled)
+      .map((test) => ({ id: test.id, name: test.name })),
+  }));
+}
+
+export function listPlanCategoryGroups(
+  categories: string[],
+  disabledTests: string[],
+): PlanCategoryGroup[] {
   const disabled = new Set(disabledTests);
-  const groups: SelectedTestGroup[] = [];
+  const groups: PlanCategoryGroup[] = [];
   for (const categoryId of categories) {
     const category = ATTACK_CATALOG.find((item) => item.id === categoryId);
     if (!category) continue;
-    const tests = category.tests
-      .filter((test) => !disabled.has(test.id))
-      .map((test) => ({ id: test.id, name: test.name }));
-    if (tests.length === 0) continue;
+    const tests = category.tests.map((test) => ({
+      id: test.id,
+      name: test.name,
+      enabled: !disabled.has(test.id),
+    }));
+    const enabledCount = tests.filter((test) => test.enabled).length;
+    if (enabledCount === 0) continue;
     groups.push({
       categoryId,
       label: category.label,
+      enabledCount,
+      totalCount: tests.length,
       tests,
     });
   }

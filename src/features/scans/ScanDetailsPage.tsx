@@ -15,6 +15,7 @@ import {
   IconPlay,
   IconStop,
   IconTrash,
+  IconCheck,
   PageHeader,
   Pagination,
   ProgressBar,
@@ -46,7 +47,7 @@ import {
 import { formatPayloadGenerationStrategy } from "@/features/scans/payloadStrategy";
 import {
   isAttackScanName,
-  listSelectedTestsByCategory,
+  listPlanCategoryGroups,
   parseAttackPlaybook,
   profileLabel,
 } from "@/features/scans/scanPlaybook";
@@ -163,9 +164,15 @@ export function ScanDetailsPage() {
     : null;
   const effectiveStatus = status?.status ?? scan?.status ?? "pending";
 
-  const selectedTestGroups = playbook
-    ? listSelectedTestsByCategory(playbook.categories, playbook.disabledTests)
-    : [];
+  const [expandedPlanCategory, setExpandedPlanCategory] = useState<string | null>(null);
+
+  const planCategoryGroups = useMemo(
+    () =>
+      playbook
+        ? listPlanCategoryGroups(playbook.categories, playbook.disabledTests)
+        : [],
+    [playbook],
+  );
 
   const reconstructedPlan = useMemo(
     () => attackPlanFromExecutionPlaybook(detail?.playbook),
@@ -611,22 +618,58 @@ export function ScanDetailsPage() {
               ) : null}
             </div>
 
-            {selectedTestGroups.length > 0 ? (
+            {planCategoryGroups.length > 0 ? (
               <div className="scan-plan__block">
                 <h3 className="scan-plan__block-title">Attack Category</h3>
-                <div className="scan-plan__groups">
-                  {selectedTestGroups.map((group) => (
-                    <div key={group.categoryId} className="scan-plan__group">
-                      <h4 className="scan-plan__group-title">{group.label}</h4>
-                      <ul className="scan-plan__tests">
-                        {group.tests.map((test) => (
-                          <li key={test.id} className="scan-plan__test">
-                            <span className="scan-plan__test-name">{test.name}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
+                <div className="scan-plan__category-list">
+                  {planCategoryGroups.map((group) => {
+                    const expanded = expandedPlanCategory === group.categoryId;
+                    return (
+                      <div
+                        key={group.categoryId}
+                        className={`scan-plan__category${expanded ? " scan-plan__category--open" : ""}`}
+                      >
+                        <button
+                          type="button"
+                          className="scan-plan__category-toggle"
+                          aria-expanded={expanded}
+                          onClick={() =>
+                            setExpandedPlanCategory(expanded ? null : group.categoryId)
+                          }
+                        >
+                          <span className="scan-plan__category-name">{group.label}</span>
+                          <span className="scan-plan__category-count">
+                            {group.enabledCount}/{group.totalCount} tests
+                          </span>
+                          <span className="scan-plan__category-chevron" aria-hidden>
+                            {expanded ? "▾" : "▸"}
+                          </span>
+                        </button>
+                        {expanded ? (
+                          <ul className="scan-plan__test-checklist">
+                            {group.tests.map((test) => (
+                              <li
+                                key={test.id}
+                                className={`scan-plan__test-check${
+                                  test.enabled ? "" : " scan-plan__test-check--off"
+                                }`}
+                              >
+                                <span
+                                  className={`scan-plan__test-mark${
+                                    test.enabled ? " scan-plan__test-mark--on" : ""
+                                  }`}
+                                  aria-hidden
+                                >
+                                  {test.enabled ? <IconCheck /> : null}
+                                </span>
+                                <span className="scan-plan__test-name">{test.name}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ) : null}

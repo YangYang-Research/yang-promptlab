@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import {
   buildScanRetryUrl,
   buildScanStartAttackUrl,
 } from "@/features/scans/wizardState";
 import { Badge, Button, YazgBadge } from "@/shared/components";
+import { IconAi } from "@/shared/components/Icons";
 import {
   generateScanRecommendations,
   type AttackRecommendationDto,
@@ -56,42 +58,50 @@ export function ScanRecommendationsPanel({
   const [recommendations, setRecommendations] = useState<AttackRecommendationDto[]>([]);
   const [overview, setOverview] = useState<string | null>(null);
   const [source, setSource] = useState<"ai" | "fallback" | null>(null);
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fetchedRef = useRef<string | null>(null);
+  const requestIdRef = useRef(0);
+  const categoriesKey = attackCategories.join("|");
 
-  useEffect(() => {
+  const load = (force: boolean) => {
     if (!enabled || !scanId) return;
-    if (fetchedRef.current === scanId) return;
-
-    let cancelled = false;
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
 
-    void generateScanRecommendations(scanId, attackCategories)
+    void generateScanRecommendations(scanId, attackCategories, force)
       .then((response) => {
-        if (cancelled) return;
+        if (requestId !== requestIdRef.current) return;
         fetchedRef.current = scanId;
         setRecommendations(response.recommendations);
         setOverview(response.overview?.trim() || null);
         setSource(response.source);
+        setGeneratedAt(response.generated_at?.trim() || null);
       })
       .catch((err) => {
-        if (cancelled) return;
-        fetchedRef.current = null;
+        if (requestId !== requestIdRef.current) return;
+        if (!force) fetchedRef.current = null;
         setRecommendations([]);
         setOverview(null);
         setSource(null);
+        setGeneratedAt(null);
         setError(err instanceof Error ? err.message : "Failed to load recommendations");
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (requestId === requestIdRef.current) setLoading(false);
       });
+  };
 
+  useEffect(() => {
+    if (!enabled || !scanId) return;
+    if (fetchedRef.current === scanId) return;
+    load(false);
     return () => {
-      cancelled = true;
+      requestIdRef.current += 1;
     };
-  }, [scanId, enabled, attackCategories.join("|")]);
+  }, [scanId, enabled, categoriesKey]);
 
   function handleRetryScan() {
     if (onRetryScan) {
@@ -156,7 +166,7 @@ export function ScanRecommendationsPanel({
               Yazg is generating recommendations from findings…
             </p>
           </div>
-        ) : error ? (
+        ) : error && empty ? (
           <p className="scan-rec__status text-danger text-sm">{error}</p>
         ) : empty ? (
           <p className="scan-rec__status text-muted text-sm">
@@ -164,9 +174,8 @@ export function ScanRecommendationsPanel({
           </p>
         ) : (
           <>
-            {overview ? (
-              <p className="scan-rec__overview">{overview}</p>
-            ) : null}
+            {error ? <p className="scan-rec__status text-danger text-sm">{error}</p> : null}
+            {overview ? <p className="scan-rec__overview">{overview}</p> : null}
 
             <ol className="scan-rec__list">
               {recommendations.map((item, index) => (
@@ -187,6 +196,29 @@ export function ScanRecommendationsPanel({
                 </li>
               ))}
             </ol>
+
+            <div className="project-summary__footer">
+              {generatedAt ? (
+                <p className="project-summary__generated">
+                  Generated {formatTimestamp(generatedAt)}
+                </p>
+              ) : (
+                <span />
+              )}
+              <Button
+                variant="primary"
+                size="sm"
+                type="button"
+                className="project-summary__action"
+                onClick={() => load(true)}
+                disabled={loading}
+              >
+                <span className="btn__content">
+                  <IconAi className="btn__icon" aria-hidden />
+                  {loading ? "Generating…" : "Recommendations"}
+                </span>
+              </Button>
+            </div>
           </>
         )}
       </div>

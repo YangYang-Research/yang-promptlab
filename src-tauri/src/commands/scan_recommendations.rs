@@ -24,6 +24,9 @@ pub struct ScanRecommendationsRequest {
     pub scan_id: String,
     #[serde(default)]
     pub attack_categories: Vec<String>,
+    /// When true, regenerate and overwrite any cached recommendations in the scan playbook.
+    #[serde(default)]
+    pub force: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +44,8 @@ struct StoredRecommendations {
     overview: String,
     source: String,
     recommendations: Vec<AttackRecommendationDto>,
+    #[serde(default)]
+    generated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -48,6 +53,7 @@ pub struct ScanRecommendationsResponse {
     pub source: String,
     pub overview: String,
     pub recommendations: Vec<AttackRecommendationDto>,
+    pub generated_at: String,
 }
 
 pub async fn scan_recommendations_generate_op(
@@ -61,30 +67,53 @@ pub async fn scan_recommendations_generate_op(
         .await
         .map_err(crate::error::CommandError::from)?;
 
-    if let Some(cached) = load_stored_recommendations(scan.playbook_json.as_deref()) {
-        let mut cache_summary = build_attack_results_summary(&scan.status, &[], &[]);
-        cache_summary.scan_name = Some(scan.name.clone());
-        let ensured = ensure_failed_scan_action_recommendation(
-            &cache_summary,
-            AttackRecommendationsBundle {
-                overview: cached.overview.clone(),
-                recommendations: cached
-                    .recommendations
-                    .iter()
-                    .map(|r| AttackRecommendation {
-                        title: r.title.clone(),
-                        description: r.description.clone(),
-                        priority: r.priority.clone(),
-                        action: r.action.clone(),
-                    })
-                    .collect(),
-            },
-        );
-        return Ok(ScanRecommendationsResponse {
-            source: cached.source,
-            overview: ensured.overview,
-            recommendations: ensured.recommendations.into_iter().map(Into::into).collect(),
-        });
+    if !request.force {
+        if let Some(mut cached) = load_stored_recommendations(scan.playbook_json.as_deref()) {
+            if cached.generated_at.trim().is_empty() {
+                cached.generated_at = scan
+                    .updated_at
+                    .format(&time::format_description::well_known::Rfc3339)
+                    .unwrap_or_else(|_| scan.updated_at.to_string());
+                let backfill = ScanRecommendationsResponse {
+                    source: cached.source.clone(),
+                    overview: cached.overview.clone(),
+                    recommendations: cached.recommendations.clone(),
+                    generated_at: cached.generated_at.clone(),
+                };
+                if let Err(err) = persist_recommendations(&repos, &request.scan_id, &backfill).await
+                {
+                    warn!(
+                        scan_id = %request.scan_id,
+                        error = %err,
+                        "failed to backfill recommendations generated_at"
+                    );
+                }
+            }
+            let mut cache_summary = build_attack_results_summary(&scan.status, &[], &[]);
+            cache_summary.scan_name = Some(scan.name.clone());
+            let ensured = ensure_failed_scan_action_recommendation(
+                &cache_summary,
+                AttackRecommendationsBundle {
+                    overview: cached.overview.clone(),
+                    recommendations: cached
+                        .recommendations
+                        .iter()
+                        .map(|r| AttackRecommendation {
+                            title: r.title.clone(),
+                            description: r.description.clone(),
+                            priority: r.priority.clone(),
+                            action: r.action.clone(),
+                        })
+                        .collect(),
+                },
+            );
+            return Ok(ScanRecommendationsResponse {
+                source: cached.source,
+                overview: ensured.overview,
+                recommendations: ensured.recommendations.into_iter().map(Into::into).collect(),
+                generated_at: cached.generated_at,
+            });
+        }
     }
 
     let findings = repos
@@ -177,6 +206,10 @@ pub async fn scan_recommendations_generate_op(
         ),
     };
 
+    let generated_at = time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| "unknown".into());
+
     let response = ScanRecommendationsResponse {
         source: source.into(),
         overview: bundle.overview,
@@ -185,6 +218,7 @@ pub async fn scan_recommendations_generate_op(
             .into_iter()
             .map(Into::into)
             .collect(),
+        generated_at,
     };
 
     if let Err(err) = persist_recommendations(&repos, &request.scan_id, &response).await {
@@ -222,6 +256,7 @@ async fn persist_recommendations(
         overview: response.overview.clone(),
         source: response.source.clone(),
         recommendations: response.recommendations.clone(),
+        generated_at: response.generated_at.clone(),
     };
     playbook[PLAYBOOK_RECOMMENDATIONS_KEY] =
         serde_json::to_value(stored).map_err(|e| e.to_string())?;
