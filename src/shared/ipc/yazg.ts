@@ -8,7 +8,8 @@ export type YazgIntent =
   | "attack_plan"
   | "plan"
   | "generate_prompt"
-  | "create_project";
+  | "create_project"
+  | "list_workspace";
 
 export type YazgAgentEventDto = {
   agent: string;

@@ -4,9 +4,13 @@ use std::collections::HashMap;
 
 use promptlab_agent::{
     AgentEvent, CreateProjectTools, CreatedProject, MemoryContext, SupervisorIntent,
-    YazgDelegation, YazgSupervisor, YazgTurn,
+    WorkspaceFindingSummary, WorkspaceInventory, WorkspaceProjectSummary, WorkspaceScanSummary,
+    WorkspaceTargetSummary, WorkspaceTools, WorkspaceTotals, YazgDelegation, YazgSupervisor,
+    YazgTurn,
 };
-use promptlab_storage::TargetRepository;
+use promptlab_storage::{
+    FindingRepository, ProjectRepository, ScanRepository, TargetRepository,
+};
 use promptlab_target_profile::TargetProfile;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -29,7 +33,7 @@ pub struct YazgChatRequest {
     pub session_id: Option<String>,
     /// Soft hint only — Yazg ReAct still chooses the action.
     /// `auto` | `chat` | `analyze_endpoint` | `verify` | `attack_plan` | `plan` |
-    /// `generate_prompt` | `recommend` | `summary`
+    /// `generate_prompt` | `recommend` | `summary` | `list_workspace`
     #[serde(default)]
     pub intent: Option<String>,
 }
@@ -87,6 +91,103 @@ impl CreateProjectTools for HostCreateProjectTools<'_> {
     }
 }
 
+struct HostWorkspaceTools<'a> {
+    state: &'a AppState,
+}
+
+const MAX_LISTED_FINDINGS: usize = 40;
+
+#[async_trait]
+impl WorkspaceTools for HostWorkspaceTools<'_> {
+    async fn list_workspace(&self) -> Result<WorkspaceInventory, String> {
+        let repos = self.state.repositories();
+
+        let projects = repos
+            .projects()
+            .list()
+            .await
+            .map_err(|err| err.to_string())?;
+        let targets = repos
+            .targets()
+            .list_all()
+            .await
+            .map_err(|err| err.to_string())?;
+
+        let mut scans = Vec::new();
+        let mut findings = Vec::new();
+        for project in &projects {
+            let project_scans = repos
+                .scans()
+                .list_by_project(&project.id)
+                .await
+                .map_err(|err| err.to_string())?;
+            scans.extend(project_scans);
+
+            let project_findings = repos
+                .findings()
+                .list_by_project(&project.id)
+                .await
+                .map_err(|err| err.to_string())?;
+            findings.extend(project_findings);
+        }
+
+        // Newest findings first when truncating the listed set.
+        findings.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        let findings_total = findings.len();
+        let findings_truncated = findings_total.saturating_sub(MAX_LISTED_FINDINGS);
+        findings.truncate(MAX_LISTED_FINDINGS);
+
+        Ok(WorkspaceInventory {
+            totals: WorkspaceTotals {
+                projects: projects.len(),
+                targets: targets.len(),
+                scans: scans.len(),
+                findings: findings_total,
+                findings_truncated,
+            },
+            projects: projects
+                .into_iter()
+                .map(|project| WorkspaceProjectSummary {
+                    id: project.id,
+                    name: project.name,
+                    description: project.description,
+                })
+                .collect(),
+            targets: targets
+                .into_iter()
+                .map(|target| WorkspaceTargetSummary {
+                    id: target.id,
+                    project_id: target.project_id,
+                    name: target.name,
+                    target_type: target.target_type,
+                })
+                .collect(),
+            scans: scans
+                .into_iter()
+                .map(|scan| WorkspaceScanSummary {
+                    id: scan.id,
+                    project_id: scan.project_id,
+                    name: scan.name,
+                    status: scan.status,
+                    target_id: scan.target_id,
+                })
+                .collect(),
+            findings: findings
+                .into_iter()
+                .map(|finding| WorkspaceFindingSummary {
+                    id: finding.id,
+                    project_id: finding.project_id,
+                    scan_id: finding.scan_id,
+                    title: finding.title,
+                    severity: finding.severity,
+                    status: finding.status,
+                    category: finding.category,
+                })
+                .collect(),
+        })
+    }
+}
+
 fn profile_from_json(raw: &str) -> CommandResult<TargetProfile> {
     if raw.trim().is_empty() || raw == "{}" {
         return Ok(TargetProfile::default());
@@ -129,6 +230,7 @@ fn turn_to_response(
             SupervisorIntent::Judge => "judge".into(),
             SupervisorIntent::ExecuteAttack => "execute_attack".into(),
             SupervisorIntent::CreateProject => "create_project".into(),
+            SupervisorIntent::ListWorkspace => "list_workspace".into(),
         },
         events: turn.events.into_iter().map(event_dto).collect(),
         verified: turn.verified,
@@ -187,6 +289,7 @@ pub async fn yazg_chat_op(
     let llms = hosts.react_llms();
     let memory = SqliteAgentMemoryStore::new(state.repositories());
     let project_tools = HostCreateProjectTools { state };
+    let workspace_tools = HostWorkspaceTools { state };
     let session_id = request
         .session_id
         .as_deref()
@@ -208,6 +311,7 @@ pub async fn yazg_chat_op(
         Some(&memory),
         memory_ctx,
         Some(&project_tools),
+        Some(&workspace_tools),
     )
     .await
     .map_err(map_agent_err)?;

@@ -18,6 +18,7 @@ use crate::create_project::{CreateProjectTools, CreatedProject};
 use crate::error::AgentResult;
 use crate::generate_prompt::{GeneratePromptAgentOutcome, TechniquePromptContext};
 use crate::judge_coordinator::JudgeCoordinatorAgentOutcome;
+use crate::list_workspace::WorkspaceTools;
 use crate::memory::{AgentMemoryStore, MemoryContext};
 use crate::react::{run_react, ReactActionKind, ReactArtifacts, ReactLlms, ReactRequest};
 use crate::recommend::{RecommendAgent, RecommendAgentOutcome};
@@ -42,6 +43,7 @@ pub enum SupervisorIntent {
     Judge,
     ExecuteAttack,
     CreateProject,
+    ListWorkspace,
 }
 
 impl SupervisorIntent {
@@ -69,6 +71,11 @@ impl SupervisorIntent {
             "create_project" | "create-project" | "new_project" | "add_project" => {
                 Self::CreateProject
             }
+            "list_workspace"
+            | "list-workspace"
+            | "workspace"
+            | "inventory"
+            | "list_projects" => Self::ListWorkspace,
             "chat" | "help" => Self::Chat,
             "auto" | "" => Self::Auto,
             _ => Self::Auto,
@@ -156,6 +163,10 @@ impl YazgSupervisor {
                 "User preference hint: create a workspace project via create_project \
                  (include JSON name; target is NOT required)."
             }
+            SupervisorIntent::ListWorkspace => {
+                "User preference hint: call list_workspace to read projects/targets/scans/findings \
+                 from the local DB, then finish with a factual inventory. Do not invent rows."
+            }
             SupervisorIntent::ExecuteAttack => {
                 "User preference hint: agentic scan execution via AgenticAttackExecutionAgent may be appropriate."
             }
@@ -188,13 +199,15 @@ impl YazgSupervisor {
         memory: Option<&dyn AgentMemoryStore>,
         memory_ctx: MemoryContext,
         project_tools: Option<&dyn CreateProjectTools>,
+        workspace_tools: Option<&dyn WorkspaceTools>,
     ) -> AgentResult<YazgDelegation> {
         let goal = Self::build_goal(message, intent_hint);
         let request = ReactRequest::new(goal)
             .with_profile(profile)
             .with_auth(auth_headers)
             .with_memory(memory, memory_ctx)
-            .with_project_tools(project_tools);
+            .with_project_tools(project_tools)
+            .with_workspace_tools(workspace_tools);
         Self::react(request, llms).await
     }
 
@@ -573,9 +586,12 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
         Some(ReactActionKind::Summary) => SupervisorIntent::Summary,
         Some(ReactActionKind::Judge) => SupervisorIntent::Judge,
         Some(ReactActionKind::CreateProject) => SupervisorIntent::CreateProject,
+        Some(ReactActionKind::ListWorkspace) => SupervisorIntent::ListWorkspace,
         Some(ReactActionKind::Finish) | None => {
             if artifacts.created_project.is_some() {
                 SupervisorIntent::CreateProject
+            } else if artifacts.workspace_inventory.is_some() {
+                SupervisorIntent::ListWorkspace
             } else if artifacts.judge.is_some() {
                 SupervisorIntent::Judge
             } else if artifacts.summary.is_some() {
@@ -810,6 +826,14 @@ mod tests {
         assert_eq!(
             SupervisorIntent::parse("new_project"),
             SupervisorIntent::CreateProject
+        );
+        assert_eq!(
+            SupervisorIntent::parse("list_workspace"),
+            SupervisorIntent::ListWorkspace
+        );
+        assert_eq!(
+            SupervisorIntent::parse("inventory"),
+            SupervisorIntent::ListWorkspace
         );
     }
 

@@ -20,6 +20,7 @@ pub enum AgentId {
     SequentialAttackExecution,
     Reflection,
     CreateProject,
+    ListWorkspace,
 }
 
 impl AgentId {
@@ -39,6 +40,7 @@ impl AgentId {
             Self::SequentialAttackExecution => "sequential_attack_execution",
             Self::Reflection => "reflection",
             Self::CreateProject => "create_project",
+            Self::ListWorkspace => "list_workspace",
         }
     }
 
@@ -58,6 +60,7 @@ impl AgentId {
             Self::SequentialAttackExecution => "SequentialAttackExecutionAgent",
             Self::Reflection => "ReflectionAgent",
             Self::CreateProject => "CreateProjectTool",
+            Self::ListWorkspace => "ListWorkspaceTool",
         }
     }
 }

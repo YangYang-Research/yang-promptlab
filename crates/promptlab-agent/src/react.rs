@@ -17,6 +17,7 @@ use crate::generate_prompt::{
     GeneratePromptAgent, GeneratePromptAgentOutcome, TechniquePromptContext,
 };
 use crate::judge_coordinator::{JudgeCoordinatorAgent, JudgeCoordinatorAgentOutcome};
+use crate::list_workspace::{WorkspaceInventory, WorkspaceTools};
 use crate::memory::{
     load_memory_prompt_block, remember_ltm, remember_stm, AgentMemoryStore, LtmWrite,
     MemoryContext, MemoryScopeType, StmRole, StmWrite,
@@ -38,6 +39,7 @@ pub enum ReactActionKind {
     Summary,
     Judge,
     CreateProject,
+    ListWorkspace,
     Finish,
 }
 
@@ -51,6 +53,7 @@ pub struct ReactArtifacts {
     pub summary: Option<SummaryAgentOutcome>,
     pub judge: Option<JudgeCoordinatorAgentOutcome>,
     pub created_project: Option<CreatedProject>,
+    pub workspace_inventory: Option<WorkspaceInventory>,
     pub final_reply: String,
     pub last_action: Option<ReactActionKind>,
 }
@@ -84,6 +87,8 @@ pub struct ReactRequest<'a> {
     pub judge_engine: Option<&'a JudgeEngine>,
     /// Host project creation tool (assistant chat CRUD).
     pub project_tools: Option<&'a dyn CreateProjectTools>,
+    /// Host workspace inventory tool (projects / targets / scans / findings).
+    pub workspace_tools: Option<&'a dyn WorkspaceTools>,
     /// Optional host memory store (STM/LTM).
     pub memory: Option<&'a dyn AgentMemoryStore>,
     /// Session / entity scope for memory ops.
@@ -104,6 +109,7 @@ impl<'a> ReactRequest<'a> {
             judge_request: None,
             judge_engine: None,
             project_tools: None,
+            workspace_tools: None,
             memory: None,
             memory_ctx: MemoryContext::default(),
             max_steps: DEFAULT_MAX_STEPS,
@@ -152,6 +158,11 @@ impl<'a> ReactRequest<'a> {
 
     pub fn with_project_tools(mut self, tools: Option<&'a dyn CreateProjectTools>) -> Self {
         self.project_tools = tools;
+        self
+    }
+
+    pub fn with_workspace_tools(mut self, tools: Option<&'a dyn WorkspaceTools>) -> Self {
+        self.workspace_tools = tools;
         self
     }
 
@@ -227,11 +238,14 @@ pub async fn run_react(
          1) Read and analyze the user prompt.\n\
          2) Use short-term / long-term memory for facts already known about this workspace.\n\
          3) Call a specialist tool only when needed for fresh work \
-         (analyze_endpoint, attack_plan, generate_prompt, recommend, summary, judge, create_project).\n\
+         (analyze_endpoint, attack_plan, generate_prompt, recommend, summary, judge, \
+         create_project, list_workspace).\n\
          4) When you have enough to answer, finish with a concise reply.\n\
          Do not invent tool results. Prefer finish for general app questions.\n\
          For create_project: include JSON fields name (required) and optional description; \
-         do not ask for a scan target — projects do not need a target.\n\n",
+         do not ask for a scan target — projects do not need a target.\n\
+         For questions about existing projects/targets/scans/findings, call list_workspace \
+         first — do not invent DB inventory.\n\n",
     );
     transcript.push_str(&format!("User prompt:\n{}\n\n", request.goal.trim()));
     if !memory_block.is_empty() {
@@ -319,8 +333,9 @@ pub async fn run_react(
                     "\nObservation: INVALID supervisor response ({err}).\n\
                      Raw preview: {}\n\
                      Respond again with ONE JSON object only, no markdown, no extra text.\n\
-                     Required shape: {{\"thought\":\"...\",\"action\":\"analyze_endpoint|attack_plan|generate_prompt|recommend|summary|judge|create_project|finish\"}}\n\
-                     For attack planning use action \"attack_plan\".\n",
+                     Required shape: {{\"thought\":\"...\",\"action\":\"analyze_endpoint|attack_plan|generate_prompt|recommend|summary|judge|create_project|list_workspace|finish\"}}\n\
+                     For attack planning use action \"attack_plan\".\n\
+                     For workspace/DB inventory use action \"list_workspace\".\n",
                     truncate(&raw, 240)
                 ));
                 continue;
@@ -363,7 +378,7 @@ pub async fn run_react(
                     "\n--- Attempt ---\nThought: {thought}\nAction: {}\n\
                      Observation: INVALID action ({message}).\n\
                      Choose one of: analyze_endpoint, attack_plan, generate_prompt, recommend, \
-                     summary, judge, create_project, finish.\n\
+                     summary, judge, create_project, list_workspace, finish.\n\
                      Reply with one JSON object only.\n",
                     parsed.action
                 ));
@@ -389,10 +404,17 @@ pub async fn run_react(
 
         match action {
             ReactActionKind::Finish => {
-                let reply = parsed
+                let mut reply = parsed
                     .reply
                     .filter(|r| !r.trim().is_empty())
                     .unwrap_or_else(|| thought.clone());
+                // Models often finish after list_workspace with a vague next-step suggestion.
+                // Prefer the concrete DB inventory Observation for the user-visible reply.
+                if let Some(inventory) = artifacts.workspace_inventory.as_ref() {
+                    if !inventory.reply_covers_inventory(&reply) {
+                        reply = inventory.to_user_reply();
+                    }
+                }
                 artifacts.final_reply = reply.clone();
                 log_tool_call(
                     AgentId::Yazg,
@@ -513,12 +535,30 @@ pub async fn run_react(
                 push_observation(&mut transcript, &mut artifacts, &observation);
                 remember_observation(&request, AgentId::CreateProject, &observation).await;
             }
+            ReactActionKind::ListWorkspace => {
+                log_tool_call(
+                    AgentId::Yazg,
+                    "list_workspace",
+                    "reading workspace inventory from DB",
+                    request.log_ctx(),
+                );
+                let observation = execute_list_workspace(&request, &mut artifacts).await?;
+                push_observation(&mut transcript, &mut artifacts, &observation);
+                remember_observation(&request, AgentId::ListWorkspace, &observation).await;
+                transcript.push_str(
+                    "\nContinue ReAct: list_workspace already succeeded. \
+                     You MUST call finish next. Put the full inventory from the Observation \
+                     into JSON \"reply\". Do NOT call list_workspace again. Do NOT invent rows.\n\
+                     Reply with one JSON object only.\n",
+                );
+                continue;
+            }
         }
 
         transcript.push_str(
             "\nContinue ReAct: choose the next action JSON \
              (analyze_endpoint, attack_plan, generate_prompt, recommend, summary, judge, \
-             create_project, or finish).\n\
+             create_project, list_workspace, or finish).\n\
              Reply with one JSON object only.\n",
         );
     }
@@ -527,7 +567,13 @@ pub async fn run_react(
         AgentId::Yazg,
         "ReAct reached max steps without finish",
     ));
-    if artifacts.final_reply.trim().is_empty() {
+    if let Some(inventory) = artifacts.workspace_inventory.as_ref() {
+        if artifacts.final_reply.trim().is_empty()
+            || !inventory.reply_covers_inventory(&artifacts.final_reply)
+        {
+            artifacts.final_reply = inventory.to_user_reply();
+        }
+    } else if artifacts.final_reply.trim().is_empty() {
         artifacts.final_reply = summarize_partial(&artifacts);
     }
     persist_react_ltm(&request, &artifacts).await;
@@ -791,7 +837,11 @@ fn format_context(
     out.push_str(
         "- create_project_ready: true\n\
          - note: create_project only needs a project name (+ optional description). \
-         Do NOT require a scan target or analyze_endpoint for project creation.\n",
+         Do NOT require a scan target or analyze_endpoint for project creation.\n\
+         - list_workspace_ready: true\n\
+         - note: list_workspace reads projects/targets/scans/findings from the local DB. \
+         Call it once when the user asks what exists in the workspace, then finish with the \
+         Observation inventory in reply. Do not invent inventory and do not call it twice.\n",
     );
     out
 }
@@ -819,6 +869,12 @@ fn parse_action_kind(raw: &str) -> AgentResult<ReactActionKind> {
         "create_project" | "createproject" | "new_project" | "add_project" => {
             Ok(ReactActionKind::CreateProject)
         }
+        "list_workspace"
+        | "list-workspace"
+        | "workspace"
+        | "list_projects"
+        | "inventory"
+        | "db_inventory" => Ok(ReactActionKind::ListWorkspace),
         "finish" | "done" | "respond" | "final" => Ok(ReactActionKind::Finish),
         other => Err(AgentError::Supervisor(format!(
             "unknown ReAct action '{other}'"
@@ -1145,7 +1201,57 @@ async fn execute_create_project(
     }
 }
 
+async fn execute_list_workspace(
+    request: &ReactRequest<'_>,
+    artifacts: &mut ReactArtifacts,
+) -> AgentResult<String> {
+    if let Some(existing) = artifacts.workspace_inventory.as_ref() {
+        return Ok(format!(
+            "{}\n(note: reused previous ListWorkspaceTool Observation — do not call again; finish with this inventory)",
+            existing.to_observation()
+        ));
+    }
+
+    let Some(tools) = request.workspace_tools else {
+        return Ok(
+            "ListWorkspaceTool FAILED — workspace tools unavailable in this context".into(),
+        );
+    };
+
+    artifacts.events.push(AgentEvent::info(
+        AgentId::Yazg,
+        "Acting: ListWorkspaceTool",
+    ));
+
+    match tools.list_workspace().await {
+        Ok(inventory) => {
+            let msg = inventory.to_observation();
+            artifacts.events.push(AgentEvent::completed(
+                AgentId::ListWorkspace,
+                format!(
+                    "Listed workspace: {} projects, {} targets, {} scans, {} findings",
+                    inventory.totals.projects,
+                    inventory.totals.targets,
+                    inventory.totals.scans,
+                    inventory.totals.findings
+                ),
+            ));
+            artifacts.workspace_inventory = Some(inventory);
+            Ok(msg)
+        }
+        Err(err) => {
+            artifacts
+                .events
+                .push(AgentEvent::failed(AgentId::ListWorkspace, err.clone()));
+            Ok(format!("ListWorkspaceTool FAILED — {err}"))
+        }
+    }
+}
+
 fn summarize_partial(artifacts: &ReactArtifacts) -> String {
+    if let Some(inventory) = &artifacts.workspace_inventory {
+        return inventory.to_user_reply();
+    }
     if let Some(project) = &artifacts.created_project {
         return format!(
             "Reached step limit after creating project '{}' (id={}).",
@@ -1254,6 +1360,14 @@ mod tests {
         assert_eq!(
             parse_action_kind("new_project").unwrap(),
             ReactActionKind::CreateProject
+        );
+        assert_eq!(
+            parse_action_kind("list_workspace").unwrap(),
+            ReactActionKind::ListWorkspace
+        );
+        assert_eq!(
+            parse_action_kind("inventory").unwrap(),
+            ReactActionKind::ListWorkspace
         );
         assert_eq!(
             parse_action_kind("generate_prompt").unwrap(),

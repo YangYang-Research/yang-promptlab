@@ -9,6 +9,7 @@
 //! ├── RecommendAgent        — post-scan remediation recommendations
 //! ├── SummaryAgent          — project / scan posture summaries
 //! ├── CreateProjectTool     — create a workspace project (host SQLite)
+//! ├── ListWorkspaceTool     — list projects/targets/scans/findings from DB
 //! ├── JudgeCoordinatorAgent — consensus judging via role workers
 //! │   ├── JudgeWorker
 //! │   ├── ClassifierWorker
@@ -28,6 +29,7 @@ pub mod error;
 pub mod generate_prompt;
 pub mod judge_coordinator;
 pub mod judge_workers;
+pub mod list_workspace;
 pub mod memory;
 pub mod recommend;
 pub mod react;
@@ -59,6 +61,10 @@ pub use generate_prompt::{
 pub use judge_coordinator::{JudgeCoordinatorAgent, JudgeCoordinatorAgentOutcome};
 pub use judge_workers::{
     AttackerWorker, ClassifierWorker, JudgeWorker, JudgeWorkerOutcome,
+};
+pub use list_workspace::{
+    WorkspaceFindingSummary, WorkspaceInventory, WorkspaceProjectSummary, WorkspaceScanSummary,
+    WorkspaceTargetSummary, WorkspaceTools, WorkspaceTotals,
 };
 pub use memory::{
     AgentMemoryStore, LtmEntry, LtmWrite, MemoryContext, MemoryScopeType, StmEntry, StmRole,

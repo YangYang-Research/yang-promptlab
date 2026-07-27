@@ -9911,7 +9911,7 @@ a:hover {
   grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
   gap: 1.25rem;
   align-items: stretch;
-  min-height: 28rem;
+  min-height: min(72vh, 44rem);
 }
 
 .yazg-chat-page__sidebar {
@@ -9970,7 +9970,7 @@ a:hover {
   flex-direction: column;
   gap: 0.5rem;
   overflow: auto;
-  max-height: min(28rem, 55vh);
+  max-height: min(44rem, 70vh);
 }
 
 .yazg-chat-page__history-item {
@@ -10102,7 +10102,7 @@ a:hover {
 .yazg-chat-page__thread {
   display: flex;
   flex-direction: column;
-  min-height: 28rem;
+  min-height: min(72vh, 44rem);
   padding-bottom: 0.75rem;
 }
 
@@ -10113,12 +10113,12 @@ a:hover {
   flex-direction: column;
   gap: 0.85rem;
   padding: 0.25rem 0 1rem;
-  max-height: min(60vh, 32rem);
+  max-height: min(58vh, 36rem);
 }
 
 .yazg-chat-page__empty {
   flex: 1;
-  min-height: 12rem;
+  min-height: 18rem;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -10334,8 +10334,8 @@ a:hover {
 .yazg-chat-page__input {
   width: 100%;
   resize: none;
-  min-height: 1.5rem;
-  max-height: 8rem;
+  min-height: 4.5rem;
+  max-height: 12rem;
   padding: 0.35rem 0.15rem;
   border: none;
   border-radius: 0;
