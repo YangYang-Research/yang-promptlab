@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveActivity } from "@/shared/dashboardDerived";
+import { deriveActivity, deriveAttackRuns } from "@/shared/dashboardDerived";
 import type { Finding, Project, ScanRun, Target } from "@/shared/types";
 import { severityCountSeries } from "@/shared/stats";
 
@@ -11,6 +11,7 @@ function finding(id: string, discoveredAt: string): Finding {
     projectId: "proj-1",
     targetId: "target-1",
     targetName: "API",
+    targetUrl: "https://example.com",
     title: `Finding ${id}`,
     description: "",
     severity: "high",
@@ -19,6 +20,7 @@ function finding(id: string, discoveredAt: string): Finding {
     confidence: 0.9,
     verdict: "vulnerable",
     discoveredAt,
+    evidence: null,
   };
 }
 
@@ -52,6 +54,61 @@ function target(partial: Partial<Target> & Pick<Target, "id">): Target {
     authKind: "none",
   };
 }
+
+describe("deriveAttackRuns", () => {
+  it("includes Agent Scan names that are running", () => {
+    const runs = deriveAttackRuns(
+      [
+        scan({ id: "agent-1", status: "running", name: "Agent Scan (deep)" }),
+        scan({ id: "done-1", status: "completed", name: "Agent Scan (quick)" }),
+      ],
+      [target({ id: "target-1", name: "Chat API" })],
+      new Map(),
+    );
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.id).toBe("agent-1");
+    expect(runs[0]?.targetName).toBe("Chat API");
+    expect(runs[0]?.status).toBe("running");
+  });
+
+  it("prefers live status when store status is stale", () => {
+    const runs = deriveAttackRuns(
+      [scan({ id: "scan-1", status: "pending", name: "Scan (standard)" })],
+      [target({ id: "target-1" })],
+      new Map([
+        [
+          "scan-1",
+          {
+            scan_id: "scan-1",
+            status: "running",
+            progress_percent: 40,
+            completed: 4,
+            total: 10,
+            attacks_completed: 1,
+            attacks_total: 3,
+            testcases_completed: 4,
+            testcases_total: 10,
+            findings_count: 2,
+            current_endpoint: null,
+            current_test: null,
+            started_at: null,
+            agent_mode: false,
+            current_phase: null,
+            current_attempt: null,
+            current_retry: null,
+            phase_trail: [],
+          },
+        ],
+      ]),
+    );
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.status).toBe("running");
+    expect(runs[0]?.payloadsRun).toBe(4);
+    expect(runs[0]?.payloadsTotal).toBe(10);
+  });
+});
 
 describe("deriveActivity", () => {
   it("sorts activity newest first using real timestamps", () => {
@@ -95,6 +152,18 @@ describe("deriveActivity", () => {
     expect(activity).toHaveLength(1);
     expect(activity[0]?.timestamp).toBe("2026-07-06T09:30:00.000Z");
     expect(activity[0]?.message).toContain("running");
+  });
+
+  it("includes Agent Scan activity", () => {
+    const activity = deriveActivity(
+      [],
+      [scan({ id: "agent-run", status: "running", name: "Agent Scan (deep)" })],
+      [],
+      [],
+    );
+
+    expect(activity).toHaveLength(1);
+    expect(activity[0]?.message).toContain("Agent Scan (deep)");
   });
 });
 

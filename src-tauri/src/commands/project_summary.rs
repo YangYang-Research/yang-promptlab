@@ -63,6 +63,9 @@ pub struct ProjectSummaryResponse {
     pub target_count: usize,
     pub scan_count: usize,
     pub finding_count: usize,
+    /// Hash of project posture inputs; used to invalidate stale cached summaries.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub input_fingerprint: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -220,39 +223,46 @@ pub async fn project_summary_generate_op(
         .collect();
     let failed_scans = collect_retryable_failed_scans(&attack_scans, &targets);
 
-    // Cached summary is only returned when the project still has targets.
-    // Re-attach retry actions from live scan state so failed scans get CTAs.
-    if !request.force {
-        if let Some(mut cached) = load_stored_summary(project.summary_json.as_deref()) {
-            let ensured = attach_retry_actions(
-                SummaryBundle {
-                    overview: cached.overview.clone(),
-                    highlights: cached.highlights.clone(),
-                    actions: cached
-                        .actions
-                        .iter()
-                        .map(|a| SummaryAction {
-                            title: a.title.clone(),
-                            description: a.description.clone(),
-                            action: a.action.clone(),
-                        })
-                        .collect(),
-                },
-                &failed_scans,
-            );
-            cached.overview = ensured.overview;
-            cached.highlights = ensured.highlights;
-            cached.failed_scans = failed_scans.clone();
-            cached.actions = actions_to_dto(&failed_scans);
-            return Ok(cached);
-        }
-    }
-
     let findings = repos
         .findings()
         .list_by_project(project_id)
         .await
         .map_err(CommandError::from)?;
+
+    let input_fingerprint =
+        project_summary_fingerprint(&project, &targets, &attack_scans, &findings);
+
+    // Cached summary is only returned when posture inputs are unchanged.
+    // Re-attach retry actions from live scan state so failed scans get CTAs.
+    if !request.force {
+        if let Some(mut cached) = load_stored_summary(project.summary_json.as_deref()) {
+            if !cached.input_fingerprint.is_empty()
+                && cached.input_fingerprint == input_fingerprint
+            {
+                let ensured = attach_retry_actions(
+                    SummaryBundle {
+                        overview: cached.overview.clone(),
+                        highlights: cached.highlights.clone(),
+                        actions: cached
+                            .actions
+                            .iter()
+                            .map(|a| SummaryAction {
+                                title: a.title.clone(),
+                                description: a.description.clone(),
+                                action: a.action.clone(),
+                            })
+                            .collect(),
+                    },
+                    &failed_scans,
+                );
+                cached.overview = ensured.overview;
+                cached.highlights = ensured.highlights;
+                cached.failed_scans = failed_scans.clone();
+                cached.actions = actions_to_dto(&failed_scans);
+                return Ok(cached);
+            }
+        }
+    }
 
     let mut severity_counts = serde_json::Map::new();
     for finding in &findings {
@@ -472,6 +482,7 @@ pub async fn project_summary_generate_op(
         target_count: input.target_count,
         scan_count: input.scan_count,
         finding_count: input.finding_count,
+        input_fingerprint,
     };
 
     if let Err(err) = persist_summary(&repos, project_id, &response).await {
@@ -654,6 +665,83 @@ async fn persist_summary(
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+fn project_summary_fingerprint(
+    project: &promptlab_storage::Project,
+    targets: &[promptlab_storage::Target],
+    attack_scans: &[&promptlab_storage::Scan],
+    findings: &[promptlab_storage::Finding],
+) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    project.name.hash(&mut hasher);
+    project
+        .description
+        .as_deref()
+        .unwrap_or("")
+        .hash(&mut hasher);
+
+    let mut target_keys: Vec<_> = targets
+        .iter()
+        .map(|t| {
+            (
+                t.id.as_str(),
+                t.name.as_str(),
+                t.target_type.as_str(),
+                extract_url(&t.descriptor_json),
+            )
+        })
+        .collect();
+    target_keys.sort_unstable();
+    for (id, name, target_type, url) in target_keys {
+        id.hash(&mut hasher);
+        name.hash(&mut hasher);
+        target_type.hash(&mut hasher);
+        url.hash(&mut hasher);
+    }
+
+    let mut scan_keys: Vec<_> = attack_scans
+        .iter()
+        .map(|s| {
+            (
+                s.id.as_str(),
+                s.status.to_ascii_lowercase(),
+                s.target_id.as_deref().unwrap_or(""),
+            )
+        })
+        .collect();
+    scan_keys.sort_unstable();
+    for (id, status, target_id) in scan_keys {
+        id.hash(&mut hasher);
+        status.hash(&mut hasher);
+        target_id.hash(&mut hasher);
+    }
+
+    let mut finding_keys: Vec<_> = findings
+        .iter()
+        .map(|f| {
+            (
+                f.id.as_str(),
+                f.severity.to_ascii_lowercase(),
+                f.category.as_deref().unwrap_or(""),
+                f.title.as_str(),
+                f.scan_id.as_str(),
+            )
+        })
+        .collect();
+    finding_keys.sort_unstable();
+    for (id, severity, category, title, scan_id) in finding_keys {
+        id.hash(&mut hasher);
+        severity.hash(&mut hasher);
+        category.hash(&mut hasher);
+        title.hash(&mut hasher);
+        scan_id.hash(&mut hasher);
+    }
+
+    format!("{:016x}", hasher.finish())
 }
 
 fn load_stored_summary(raw: Option<&str>) -> Option<ProjectSummaryResponse> {

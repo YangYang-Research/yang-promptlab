@@ -778,6 +778,14 @@ export function ScanDetailsPage() {
               variant="details"
               projectId={scan?.projectId}
               targetId={scan?.targetId}
+              revision={
+                effectiveStatus === "running" || effectiveStatus === "paused"
+                  ? effectiveStatus
+                  : `${effectiveStatus}|${scanFindings
+                      .map((f) => `${f.id}:${f.severity}:${f.title}`)
+                      .sort()
+                      .join(",")}`
+              }
             />
           </Card>
         </section>

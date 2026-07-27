@@ -11,7 +11,7 @@ import type {
 const RUNNING_STATUSES = new Set(["running", "paused", "pending"]);
 
 function isAttackScan(scan: ScanRun): boolean {
-  return scan.name.startsWith("Scan (");
+  return scan.name.startsWith("Scan (") || scan.name.startsWith("Agent Scan (");
 }
 
 function targetName(targets: Target[], targetId: string | null): string {
@@ -25,9 +25,12 @@ export function deriveAttackRuns(
   liveStatus: Map<string, ScanStatusDto>,
 ): AttackRun[] {
   return scans
-    .filter((scan) => isAttackScan(scan) && RUNNING_STATUSES.has(scan.status))
+    .filter(isAttackScan)
     .map((scan) => {
       const live = liveStatus.get(scan.id);
+      const effectiveStatus = live?.status ?? scan.status;
+      if (!RUNNING_STATUSES.has(effectiveStatus)) return null;
+
       const total = live?.total ?? 0;
       const completed = live?.completed ?? 0;
       return {
@@ -35,14 +38,15 @@ export function deriveAttackRuns(
         targetId: scan.targetId ?? "",
         targetName: targetName(targets, scan.targetId),
         category: "prompt_injection",
-        status: scan.status,
+        status: effectiveStatus as AttackRun["status"],
         payloadsTotal: total > 0 ? total : 100,
         payloadsRun: completed,
         findingsCount: live?.findings_count ?? 0,
         startedAt: scan.startedAt ?? scan.createdAt,
         completedAt: scan.completedAt,
-      };
-    });
+      } satisfies AttackRun;
+    })
+    .filter((run): run is AttackRun => run !== null);
 }
 
 export function deriveActivity(

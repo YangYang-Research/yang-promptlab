@@ -46,6 +46,9 @@ struct StoredRecommendations {
     recommendations: Vec<AttackRecommendationDto>,
     #[serde(default)]
     generated_at: String,
+    /// Hash of scan status + findings + categories; invalidates stale cache.
+    #[serde(default)]
+    input_fingerprint: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,60 +70,69 @@ pub async fn scan_recommendations_generate_op(
         .await
         .map_err(crate::error::CommandError::from)?;
 
-    if !request.force {
-        if let Some(mut cached) = load_stored_recommendations(scan.playbook_json.as_deref()) {
-            if cached.generated_at.trim().is_empty() {
-                cached.generated_at = scan
-                    .updated_at
-                    .format(&time::format_description::well_known::Rfc3339)
-                    .unwrap_or_else(|_| scan.updated_at.to_string());
-                let backfill = ScanRecommendationsResponse {
-                    source: cached.source.clone(),
-                    overview: cached.overview.clone(),
-                    recommendations: cached.recommendations.clone(),
-                    generated_at: cached.generated_at.clone(),
-                };
-                if let Err(err) = persist_recommendations(&repos, &request.scan_id, &backfill).await
-                {
-                    warn!(
-                        scan_id = %request.scan_id,
-                        error = %err,
-                        "failed to backfill recommendations generated_at"
-                    );
-                }
-            }
-            let mut cache_summary = build_attack_results_summary(&scan.status, &[], &[]);
-            cache_summary.scan_name = Some(scan.name.clone());
-            let ensured = ensure_failed_scan_action_recommendation(
-                &cache_summary,
-                AttackRecommendationsBundle {
-                    overview: cached.overview.clone(),
-                    recommendations: cached
-                        .recommendations
-                        .iter()
-                        .map(|r| AttackRecommendation {
-                            title: r.title.clone(),
-                            description: r.description.clone(),
-                            priority: r.priority.clone(),
-                            action: r.action.clone(),
-                        })
-                        .collect(),
-                },
-            );
-            return Ok(ScanRecommendationsResponse {
-                source: cached.source,
-                overview: ensured.overview,
-                recommendations: ensured.recommendations.into_iter().map(Into::into).collect(),
-                generated_at: cached.generated_at,
-            });
-        }
-    }
-
     let findings = repos
         .findings()
         .list_by_scan(&request.scan_id)
         .await
         .map_err(crate::error::CommandError::from)?;
+
+    let input_fingerprint =
+        scan_recommendations_fingerprint(&scan, &request.attack_categories, &findings);
+
+    if !request.force {
+        if let Some(mut cached) = load_stored_recommendations(scan.playbook_json.as_deref()) {
+            if !cached.input_fingerprint.is_empty()
+                && cached.input_fingerprint == input_fingerprint
+            {
+                if cached.generated_at.trim().is_empty() {
+                    cached.generated_at = scan
+                        .updated_at
+                        .format(&time::format_description::well_known::Rfc3339)
+                        .unwrap_or_else(|_| scan.updated_at.to_string());
+                    let backfill = ScanRecommendationsResponse {
+                        source: cached.source.clone(),
+                        overview: cached.overview.clone(),
+                        recommendations: cached.recommendations.clone(),
+                        generated_at: cached.generated_at.clone(),
+                    };
+                    if let Err(err) =
+                        persist_recommendations(&repos, &request.scan_id, &backfill, &input_fingerprint)
+                            .await
+                    {
+                        warn!(
+                            scan_id = %request.scan_id,
+                            error = %err,
+                            "failed to backfill recommendations generated_at"
+                        );
+                    }
+                }
+                let mut cache_summary = build_attack_results_summary(&scan.status, &[], &[]);
+                cache_summary.scan_name = Some(scan.name.clone());
+                let ensured = ensure_failed_scan_action_recommendation(
+                    &cache_summary,
+                    AttackRecommendationsBundle {
+                        overview: cached.overview.clone(),
+                        recommendations: cached
+                            .recommendations
+                            .iter()
+                            .map(|r| AttackRecommendation {
+                                title: r.title.clone(),
+                                description: r.description.clone(),
+                                priority: r.priority.clone(),
+                                action: r.action.clone(),
+                            })
+                            .collect(),
+                    },
+                );
+                return Ok(ScanRecommendationsResponse {
+                    source: cached.source,
+                    overview: ensured.overview,
+                    recommendations: ensured.recommendations.into_iter().map(Into::into).collect(),
+                    generated_at: cached.generated_at,
+                });
+            }
+        }
+    }
 
     let summary_inputs: Vec<FindingSummaryInput> =
         findings.iter().map(finding_to_summary).collect();
@@ -221,7 +233,9 @@ pub async fn scan_recommendations_generate_op(
         generated_at,
     };
 
-    if let Err(err) = persist_recommendations(&repos, &request.scan_id, &response).await {
+    if let Err(err) =
+        persist_recommendations(&repos, &request.scan_id, &response, &input_fingerprint).await
+    {
         warn!(
             scan_id = %request.scan_id,
             error = %err,
@@ -236,6 +250,7 @@ async fn persist_recommendations(
     repos: &promptlab_storage::Repositories,
     scan_id: &str,
     response: &ScanRecommendationsResponse,
+    input_fingerprint: &str,
 ) -> Result<(), String> {
     let scan = repos
         .scans()
@@ -257,6 +272,7 @@ async fn persist_recommendations(
         source: response.source.clone(),
         recommendations: response.recommendations.clone(),
         generated_at: response.generated_at.clone(),
+        input_fingerprint: input_fingerprint.to_string(),
     };
     playbook[PLAYBOOK_RECOMMENDATIONS_KEY] =
         serde_json::to_value(stored).map_err(|e| e.to_string())?;
@@ -274,6 +290,48 @@ async fn persist_recommendations(
         .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+fn scan_recommendations_fingerprint(
+    scan: &promptlab_storage::Scan,
+    attack_categories: &[String],
+    findings: &[Finding],
+) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    scan.id.hash(&mut hasher);
+    scan.status.to_ascii_lowercase().hash(&mut hasher);
+    scan.name.hash(&mut hasher);
+    scan.target_id.as_deref().unwrap_or("").hash(&mut hasher);
+
+    let mut categories: Vec<&str> = attack_categories.iter().map(String::as_str).collect();
+    categories.sort_unstable();
+    for category in categories {
+        category.hash(&mut hasher);
+    }
+
+    let mut finding_keys: Vec<_> = findings
+        .iter()
+        .map(|f| {
+            (
+                f.id.as_str(),
+                f.severity.to_ascii_lowercase(),
+                f.category.as_deref().unwrap_or(""),
+                f.title.as_str(),
+            )
+        })
+        .collect();
+    finding_keys.sort_unstable();
+    for (id, severity, category, title) in finding_keys {
+        id.hash(&mut hasher);
+        severity.hash(&mut hasher);
+        category.hash(&mut hasher);
+        title.hash(&mut hasher);
+    }
+
+    format!("{:016x}", hasher.finish())
 }
 
 fn load_stored_recommendations(playbook_json: Option<&str>) -> Option<StoredRecommendations> {

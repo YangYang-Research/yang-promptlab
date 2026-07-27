@@ -13,7 +13,7 @@ const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"]
 const SCANNING_STATUSES = new Set(["running", "paused", "pending"]);
 
 function isAttackScan(scan: ScanRun): boolean {
-  return scan.name.startsWith("Scan (");
+  return scan.name.startsWith("Scan (") || scan.name.startsWith("Agent Scan (");
 }
 
 function latestScanPerTarget(scans: ScanRun[]): Map<string, ScanRun> {

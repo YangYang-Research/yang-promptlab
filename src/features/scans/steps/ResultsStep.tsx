@@ -168,6 +168,14 @@ export function ResultsStep({
           targetId={scan?.targetId}
           onRetryScan={onRetryScan}
           onStartAttack={onStartAttack}
+          revision={
+            status.status === "running" || status.status === "paused"
+              ? status.status
+              : `${status.status}|${scanFindings
+                  .map((f) => `${f.id}:${f.severity}:${f.title}`)
+                  .sort()
+                  .join(",")}`
+          }
         />
       </section>
 

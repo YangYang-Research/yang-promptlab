@@ -40,7 +40,7 @@ export function parseAttackPlaybook(playbook: unknown): AttackScanPlaybook | nul
 }
 
 export function isAttackScanName(name: string): boolean {
-  return name.startsWith("Scan (");
+  return name.startsWith("Scan (") || name.startsWith("Agent Scan (");
 }
 
 export function profileLabel(profileId: string): string {

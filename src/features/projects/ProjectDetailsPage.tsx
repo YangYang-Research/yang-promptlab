@@ -480,6 +480,23 @@ export function ProjectDetailsPage() {
           <ProjectSummaryPanel
             projectId={projectId}
             enabled={projectTargets.length > 0}
+            revision={[
+              projectTargets
+                .map((t) => `${t.id}:${t.name}:${t.type}`)
+                .sort()
+                .join(","),
+              projectScans
+                .map((s) => `${s.id}:${s.status}:${s.targetId ?? ""}`)
+                .sort()
+                .join(","),
+              // While scans are live, ignore per-finding churn; regenerate on completion.
+              projectScans.some((s) => s.status === "running" || s.status === "paused")
+                ? "live"
+                : projectFindings
+                    .map((f) => `${f.id}:${f.severity}:${f.title}`)
+                    .sort()
+                    .join(","),
+            ].join("|")}
           />
         </Card>
       </section>

@@ -167,18 +167,15 @@ export function DashboardPage() {
             <h3 className="card__title">Active Jobs</h3>
             <Link to="/scans" className="link">View all</Link>
           </div>
-          {attackRuns
-            .filter((a) => a.status === "running")
-            .map((a) => (
-              <ProgressBar
-                key={a.id}
-                label={`${a.category.replace(/_/g, " ")} - ${a.targetName}`}
-                value={a.payloadsRun}
-                max={a.payloadsTotal}
-              />
-            ))}
-          {stats.runningScans === 0 &&
-            attackRuns.every((a) => a.status !== "running") && (
+          {attackRuns.map((a) => (
+            <ProgressBar
+              key={a.id}
+              label={`${a.status} · ${a.targetName}`}
+              value={a.payloadsRun}
+              max={a.payloadsTotal}
+            />
+          ))}
+          {attackRuns.length === 0 && (
             <p className="text-muted">No active scans. Start a scan from a target or project.</p>
           )}
         </Card>

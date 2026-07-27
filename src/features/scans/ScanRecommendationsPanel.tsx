@@ -41,6 +41,11 @@ type ScanRecommendationsPanelProps = {
   /** In-wizard overrides (avoid full navigation). */
   onRetryScan?: () => void;
   onStartAttack?: () => void;
+  /**
+   * When scan status / findings change, remount reload so the backend can
+   * regenerate if its fingerprint is stale.
+   */
+  revision?: string;
 };
 
 export function ScanRecommendationsPanel({
@@ -53,6 +58,7 @@ export function ScanRecommendationsPanel({
   targetId,
   onRetryScan,
   onStartAttack,
+  revision = "",
 }: ScanRecommendationsPanelProps) {
   const navigate = useNavigate();
   const [recommendations, setRecommendations] = useState<AttackRecommendationDto[]>([]);
@@ -68,13 +74,14 @@ export function ScanRecommendationsPanel({
   const load = (force: boolean) => {
     if (!enabled || !scanId) return;
     const requestId = ++requestIdRef.current;
+    const fetchKey = `${scanId}:${categoriesKey}:${revision}`;
     setLoading(true);
     setError(null);
 
     void generateScanRecommendations(scanId, attackCategories, force)
       .then((response) => {
         if (requestId !== requestIdRef.current) return;
-        fetchedRef.current = scanId;
+        fetchedRef.current = fetchKey;
         setRecommendations(response.recommendations);
         setOverview(response.overview?.trim() || null);
         setSource(response.source);
@@ -96,12 +103,21 @@ export function ScanRecommendationsPanel({
 
   useEffect(() => {
     if (!enabled || !scanId) return;
-    if (fetchedRef.current === scanId) return;
-    load(false);
+    const fetchKey = `${scanId}:${categoriesKey}:${revision}`;
+    if (fetchedRef.current === fetchKey) return;
+
+    // Debounce finding/status-driven reloads while a scan is still producing results.
+    const delayMs = fetchedRef.current?.startsWith(`${scanId}:`) ? 1500 : 0;
+    const timer = window.setTimeout(() => {
+      if (fetchedRef.current === fetchKey) return;
+      load(false);
+    }, delayMs);
+
     return () => {
+      window.clearTimeout(timer);
       requestIdRef.current += 1;
     };
-  }, [scanId, enabled, categoriesKey]);
+  }, [scanId, enabled, categoriesKey, revision]);
 
   function handleRetryScan() {
     if (onRetryScan) {

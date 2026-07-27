@@ -16,6 +16,11 @@ type ProjectSummaryPanelProps = {
   projectId: string;
   /** Summary generation requires at least one target. */
   enabled?: boolean;
+  /**
+   * When posture inputs change (targets / scans / findings), remount reload
+   * so the backend can regenerate if its fingerprint is stale.
+   */
+  revision?: string;
 };
 
 function isRetryAction(item: ProjectSummaryActionDto): boolean {
@@ -139,6 +144,7 @@ function linkifyHighlight(
 export function ProjectSummaryPanel({
   projectId,
   enabled = true,
+  revision = "",
 }: ProjectSummaryPanelProps) {
   const navigate = useNavigate();
   const [summary, setSummary] = useState<ProjectSummaryResponse | null>(null);
@@ -150,13 +156,14 @@ export function ProjectSummaryPanel({
   const load = (force: boolean) => {
     if (!enabled) return;
     const requestId = ++requestIdRef.current;
+    const fetchKey = `${projectId}:${revision}`;
     setLoading(true);
     setError(null);
 
     void generateProjectSummary(projectId, force)
       .then((response) => {
         if (requestId !== requestIdRef.current) return;
-        fetchedRef.current = projectId;
+        fetchedRef.current = fetchKey;
         setSummary(response);
       })
       .catch((err) => {
@@ -179,12 +186,21 @@ export function ProjectSummaryPanel({
       return;
     }
     if (!projectId) return;
-    if (fetchedRef.current === projectId) return;
-    load(false);
+    const fetchKey = `${projectId}:${revision}`;
+    if (fetchedRef.current === fetchKey) return;
+
+    // Debounce posture-driven reloads so live scan finding ticks coalesce.
+    const delayMs = fetchedRef.current?.startsWith(`${projectId}:`) ? 1500 : 0;
+    const timer = window.setTimeout(() => {
+      if (fetchedRef.current === fetchKey) return;
+      load(false);
+    }, delayMs);
+
     return () => {
+      window.clearTimeout(timer);
       requestIdRef.current += 1;
     };
-  }, [projectId, enabled]);
+  }, [projectId, enabled, revision]);
 
   const empty = !summary;
   const failedScans = summary?.failed_scans ?? [];
