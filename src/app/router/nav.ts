@@ -16,7 +16,6 @@ export const navItems: NavItem[] = [
   { id: "yazg", label: "Yazg", path: "/yazg", icon: "yazg", section: "assistant" },
   { id: "runtime", label: "AI Runtime", path: "/runtime", icon: "runtime", section: "ai" },
   { id: "models", label: "Models", path: "/models", icon: "models", section: "ai" },
-  { id: "plugins", label: "Plugins", path: "/plugins", icon: "plugins", section: "advanced" },
   {
     id: "attack-categories",
     label: "Attack Factory",
@@ -36,6 +35,7 @@ export const navItems: NavItem[] = [
 
 export const routeTitles: Record<string, string> = {
   ...Object.fromEntries(navItems.map((item) => [item.path, item.label])),
+  "/plugins": "Plugins",
   "/scans/new": "New Scan",
   "/scans/:scanId": "Scan Details",
   "/projects/:projectId": "Project Details",

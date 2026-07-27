@@ -5115,47 +5115,51 @@ a:hover {
   letter-spacing: -0.01em;
   color: var(--text-subtle);
 }
-.finding-detail__indicators-table-wrap {
-  overflow: auto;
+.finding-detail__indicators-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.625rem 1rem;
+}
+.finding-detail__indicator {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  min-width: 0;
+  padding: 0.625rem 0.75rem;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-}
-.finding-detail__indicators-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.8125rem;
-  line-height: 1.45;
-}
-.finding-detail__indicators-table th,
-.finding-detail__indicators-table td {
-  padding: 0.55rem 0.75rem;
-  text-align: left;
-  vertical-align: top;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.finding-detail__indicators-table th {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-subtle);
   background: color-mix(in srgb, var(--bg) 55%, var(--bg-elevated));
-  white-space: nowrap;
 }
-.finding-detail__indicators-table tbody tr:last-child th,
-.finding-detail__indicators-table tbody tr:last-child td {
-  border-bottom: none;
-}
-.finding-detail__indicators-table tbody tr:hover td {
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-}
-.finding-detail__indicators-col-index {
-  width: 2.5rem;
+.finding-detail__indicator-index {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
 }
-.finding-detail__indicators-col-role {
-  width: 7.5rem;
-  white-space: nowrap;
-  font-weight: 500;
+.finding-detail__indicator-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.finding-detail__indicator-role {
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-subtle);
+}
+.finding-detail__indicator-text {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 720px) {
+  .finding-detail__indicators-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .finding-detail__code {
   margin: 0;

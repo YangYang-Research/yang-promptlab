@@ -356,27 +356,20 @@ function IndicatorsTable({ rows }: { rows: IndicatorRow[] }) {
   return (
     <div className="finding-detail__indicators-wrap">
       <h5 className="finding-detail__indicators-title">Indicators</h5>
-      <div className="finding-detail__indicators-table-wrap">
-        <table className="finding-detail__indicators-table">
-          <thead>
-            <tr>
-              <th scope="col" className="finding-detail__indicators-col-index">
-                #
-              </th>
-              {showRole && <th scope="col">Role</th>}
-              <th scope="col">Indicator</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id}>
-                <td className="finding-detail__indicators-col-index mono">{row.index}</td>
-                {showRole && <td className="finding-detail__indicators-col-role">{row.role ?? "—"}</td>}
-                <td>{row.indicator}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="finding-detail__indicators-grid" role="list">
+        {rows.map((row) => (
+          <div key={row.id} className="finding-detail__indicator" role="listitem">
+            <span className="finding-detail__indicator-index mono" aria-hidden="true">
+              {String(row.index).padStart(2, "0")}
+            </span>
+            <div className="finding-detail__indicator-body">
+              {showRole ? (
+                <span className="finding-detail__indicator-role">{row.role ?? "—"}</span>
+              ) : null}
+              <p className="finding-detail__indicator-text">{row.indicator}</p>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

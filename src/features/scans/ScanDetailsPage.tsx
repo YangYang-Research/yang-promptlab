@@ -294,12 +294,14 @@ export function ScanDetailsPage() {
     const openPath = resolveScanOpenPath(scan, status?.status);
     const detailsPath = `/scans/${scan.id}`;
 
-    if (openPath !== detailsPath && scan.status !== "draft") {
+    if (
+      openPath !== detailsPath &&
+      scan.status !== "draft" &&
+      !isRetryableScanStatus(effectiveStatus)
+    ) {
       const openLabel = isLiveScanStatus(effectiveStatus)
         ? "View Scan Progress"
-        : isRetryableScanStatus(effectiveStatus)
-          ? "Retry Scan"
-          : "Open Scan";
+        : "Open Scan";
       items.push({
         id: "open",
         label: openLabel,
