@@ -545,13 +545,41 @@ pub async fn run_react(
                 let observation = execute_list_workspace(&request, &mut artifacts).await?;
                 push_observation(&mut transcript, &mut artifacts, &observation);
                 remember_observation(&request, AgentId::ListWorkspace, &observation).await;
-                transcript.push_str(
-                    "\nContinue ReAct: list_workspace already succeeded. \
-                     You MUST call finish next. Put the full inventory from the Observation \
-                     into JSON \"reply\". Do NOT call list_workspace again. Do NOT invent rows.\n\
-                     Reply with one JSON object only.\n",
+                // Finish immediately with the DB inventory. Asking the model to echo the
+                // full inventory inside JSON "reply" routinely breaks brace extraction
+                // (nested JSON-in-string) and leaves the chat stuck on "Yazg is working…".
+                let reply = artifacts
+                    .workspace_inventory
+                    .as_ref()
+                    .map(|inventory| inventory.to_user_reply())
+                    .filter(|text| !text.trim().is_empty())
+                    .unwrap_or_else(|| observation.clone());
+                artifacts.final_reply = reply.clone();
+                log_tool_call(
+                    AgentId::Yazg,
+                    "finish",
+                    truncate(&reply, 400),
+                    request.log_ctx(),
                 );
-                continue;
+                remember_stm(
+                    request.memory,
+                    &request.memory_ctx,
+                    StmWrite {
+                        agent_id: AgentId::Yazg,
+                        role: StmRole::Assistant,
+                        memory_key: Some("reply".into()),
+                        content: reply,
+                        content_json: None,
+                        importance: 0.6,
+                    },
+                )
+                .await;
+                persist_react_ltm(&request, &artifacts).await;
+                artifacts.events.push(AgentEvent::completed(
+                    AgentId::Yazg,
+                    "ReAct finished",
+                ));
+                return Ok(artifacts);
             }
         }
 
@@ -840,8 +868,8 @@ fn format_context(
          Do NOT require a scan target or analyze_endpoint for project creation.\n\
          - list_workspace_ready: true\n\
          - note: list_workspace reads projects/targets/scans/findings from the local DB. \
-         Call it once when the user asks what exists in the workspace, then finish with the \
-         Observation inventory in reply. Do not invent inventory and do not call it twice.\n",
+         Call it once when the user asks what exists in the workspace. The tool returns the \
+         inventory as the final reply — do not invent rows and do not call it twice.\n",
     );
     out
 }
@@ -911,13 +939,26 @@ fn strip_markdown_fences(raw: &str) -> String {
 fn extract_json_object(raw: &str) -> Option<&str> {
     let start = raw.find('{')?;
     let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
     for (idx, ch) in raw[start..].char_indices() {
+        if in_string {
+            if escape {
+                escape = false;
+            } else if ch == '\\' {
+                escape = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
         match ch {
+            '"' => in_string = true,
             '{' => depth += 1,
             '}' => {
                 depth -= 1;
                 if depth == 0 {
-                    return Some(&raw[start..start + idx + 1]);
+                    return Some(&raw[start..start + idx + ch.len_utf8()]);
                 }
             }
             _ => {}
@@ -1328,6 +1369,14 @@ mod tests {
         let raw = "```json\n{\"thought\":\"Re-plan\",\"action\":\"attack_plan\"}\n```";
         let step = parse_react_step(raw).expect("parse fenced");
         assert_eq!(step.action, "attack_plan");
+    }
+
+    #[test]
+    fn parses_react_json_with_nested_json_string_reply() {
+        let raw = r#"{"thought":"done","action":"finish","reply":"{\n  \"projects\": [\n    {\"id\": \"1\", \"name\": \"AI\"}\n  ]\n}"}"#;
+        let step = parse_react_step(raw).expect("parse nested reply string");
+        assert_eq!(step.action, "finish");
+        assert!(step.reply.unwrap().contains("projects"));
     }
 
     #[test]

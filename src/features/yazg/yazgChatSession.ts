@@ -282,6 +282,37 @@ export function deleteYazgChatThread(threadId: string) {
   });
 }
 
+function appendYazgMessage(
+  threadId: string,
+  message: Omit<ChatMessage, "id" | "role" | "at"> & { text: string },
+) {
+  const now = Date.now();
+  const yazgMessage: ChatMessage = {
+    id: newId(),
+    role: "yazg",
+    text: message.text,
+    events: message.events,
+    intent: message.intent,
+    at: now,
+  };
+  // Apply reply + clear busy in one snapshot so the UI never sticks on "working…".
+  setState({
+    busy: false,
+    pendingThreadId: null,
+    store: {
+      ...state.store,
+      threads: state.store.threads.map((thread) => {
+        if (thread.id !== threadId) return thread;
+        return {
+          ...thread,
+          updatedAt: now,
+          messages: [...thread.messages, yazgMessage],
+        };
+      }),
+    },
+  });
+}
+
 /**
  * Send a user message. The IPC call keeps running even if the chat page unmounts;
  * results are written into the module store when they complete.
@@ -353,21 +384,13 @@ export async function sendYazgChatMessage(options: {
       intent: options.intent ?? "auto",
     });
 
-    updateThread(threadId, (thread) => ({
-      ...thread,
-      updatedAt: Date.now(),
-      messages: [
-        ...thread.messages,
-        {
-          id: newId(),
-          role: "yazg",
-          text: response.reply,
-          events: response.events,
-          intent: response.intent,
-          at: Date.now(),
-        },
-      ],
-    }));
+    appendYazgMessage(threadId, {
+      text: response.reply?.trim()
+        ? response.reply
+        : "Yazg finished without a reply. Try asking again.",
+      events: response.events,
+      intent: response.intent,
+    });
 
     if (response.createdProject) {
       hostHooks.refresh?.();
@@ -389,20 +412,10 @@ export async function sendYazgChatMessage(options: {
   } catch (err) {
     const messageText = toAppError(err).message;
     hostHooks.notify?.(messageText, "error");
-    updateThread(threadId, (thread) => ({
-      ...thread,
-      updatedAt: Date.now(),
-      messages: [
-        ...thread.messages,
-        {
-          id: newId(),
-          role: "yazg",
-          text: `I could not complete that request.\n\n${messageText}`,
-          events: [{ agent: "yazg", kind: "failed", message: messageText }],
-          at: Date.now(),
-        },
-      ],
-    }));
+    appendYazgMessage(threadId, {
+      text: `I could not complete that request.\n\n${messageText}`,
+      events: [{ agent: "yazg", kind: "failed", message: messageText }],
+    });
     if (isFirstUserTurn) {
       void generateConversationTitle(trimmed, null).then((title) => {
         updateThread(threadId, (thread) => ({
@@ -413,10 +426,13 @@ export async function sendYazgChatMessage(options: {
       });
     }
   } finally {
-    setState({
-      ...state,
-      busy: false,
-      pendingThreadId: null,
-    });
+    // Safety net if try/catch returned before appendYazgMessage (should be rare).
+    if (state.busy && state.pendingThreadId === threadId) {
+      setState({
+        ...state,
+        busy: false,
+        pendingThreadId: null,
+      });
+    }
   }
 }
