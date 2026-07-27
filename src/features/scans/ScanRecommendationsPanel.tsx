@@ -231,7 +231,7 @@ export function ScanRecommendationsPanel({
               >
                 <span className="btn__content">
                   <IconAi className="btn__icon" aria-hidden />
-                  {loading ? "Generating…" : "Recommendations"}
+                  {loading ? "Re-recommending…" : "Re-recommend"}
                 </span>
               </Button>
             </div>

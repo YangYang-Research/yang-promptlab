@@ -341,7 +341,7 @@ export function ProjectSummaryPanel({
             >
               <span className="btn__content">
                 <IconAi className="btn__icon" aria-hidden />
-                {loading ? "Summarizing…" : "Summary"}
+                {loading ? "Re-summarizing…" : "Re-summarize"}
               </span>
             </Button>
           </div>
