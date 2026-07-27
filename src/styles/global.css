@@ -1506,6 +1506,17 @@ a:hover {
     0 4px 14px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
+/* Same pulse as Re-plan / attack-planning IconAi — applied to the whole badge */
+.yazg-badge--pulsing {
+  animation: wizard-attack-planning-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yazg-badge--pulsing {
+    animation: none;
+  }
+}
+
 .yazg-badge__icon {
   width: 0.95rem;
   height: 0.95rem;

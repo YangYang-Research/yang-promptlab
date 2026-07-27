@@ -217,7 +217,7 @@ export function ProjectSummaryPanel({
     summary?.highlights.findIndex((h) => looksLikeRetryHighlight(h)) ?? -1;
   const sourceBadge =
     summary?.source === "ai" ? (
-      <YazgBadge />
+      <YazgBadge pulsing={loading} />
     ) : summary?.source === "fallback" ? (
       <Badge variant="muted">Rule-based guidance</Badge>
     ) : null;

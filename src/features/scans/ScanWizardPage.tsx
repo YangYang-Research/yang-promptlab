@@ -1683,7 +1683,7 @@ export function ScanWizardPage() {
             <h2 className="wizard-panel__title">{stepDef.title}</h2>
             {step4PlannerBadge ? (
               step4PlannerBadge.label === "AI Planned" ? (
-                <YazgBadge />
+                <YazgBadge pulsing={plannerGenerating && plannerReplanning} />
               ) : (
                 <Badge variant={step4PlannerBadge.variant}>{step4PlannerBadge.label}</Badge>
               )

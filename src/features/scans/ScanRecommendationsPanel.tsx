@@ -157,7 +157,7 @@ export function ScanRecommendationsPanel({
   const empty = recommendations.length === 0 && !overview;
   const sourceBadge =
     source === "ai" ? (
-      <YazgBadge />
+      <YazgBadge pulsing={loading} />
     ) : source === "fallback" ? (
       <Badge variant="muted">Rule-based guidance</Badge>
     ) : null;

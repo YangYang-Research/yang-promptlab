@@ -297,7 +297,7 @@ export function FindingDetailsPage() {
           <div className="detail-section__header">
             <h2 className="detail-section__title">Judging Analysis</h2>
             <div className="detail-section__header-actions">
-              <YazgBadge />
+              <YazgBadge pulsing={busy === "rejudge"} />
             </div>
           </div>
           <FindingDetailPanel finding={finding} embedded mode="judge" />
