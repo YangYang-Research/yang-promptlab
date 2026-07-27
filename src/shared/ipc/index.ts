@@ -33,6 +33,7 @@ export {
   listFindingsAll,
   importFindingsSarif,
   updateFindingStatus,
+  rejudgeFinding,
   deleteFinding,
   generateReport,
   listReports,

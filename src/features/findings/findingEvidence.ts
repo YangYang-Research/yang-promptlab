@@ -66,6 +66,8 @@ export type ParsedFindingEvidence = {
   judgeScoreBreakdown: JudgeScoreBreakdown | null;
   /** Aggregate judge confidence as 0–100 score points. */
   judgeScore: number | null;
+  /** ISO / RFC3339 timestamp from the last judge run, when present. */
+  judgedAt: string | null;
   confidence: number | null;
   verdict: string | null;
   raw: unknown;
@@ -74,10 +76,10 @@ export type ParsedFindingEvidence = {
 const ROLE_ORDER: JudgeRoleKey[] = ["judge", "classifier", "attacker", "other"];
 
 const ROLE_LABELS: Record<JudgeRoleKey, string> = {
-  judge: "Yazg Judge",
-  classifier: "Yazg Classifier",
-  attacker: "Yazg Attacker",
-  other: "Yazg Evaluator",
+  judge: "JudgeWorker",
+  classifier: "ClassifierWorker",
+  attacker: "AttackerWorker",
+  other: "Evaluator",
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -393,6 +395,7 @@ export function parseFindingEvidence(
     judgeConsensus: parseJudgeConsensus(judge),
     judgeScoreBreakdown: scoreBreakdown,
     judgeScore,
+    judgedAt: asString(judge?.judged_at) ?? asString(judge?.judgedAt),
     confidence,
     verdict: asString(obj?.verdict) ?? asString(judge?.verdict),
     raw,

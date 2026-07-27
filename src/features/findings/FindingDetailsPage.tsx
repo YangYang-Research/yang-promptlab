@@ -2,9 +2,11 @@ import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
+import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import {
   ActionsDropdown,
   Badge,
+  Button,
   Card,
   EmptyState,
   FindingStatusBadge,
@@ -16,12 +18,15 @@ import {
   YazgBadge,
   type ActionsDropdownItem,
 } from "@/shared/components";
+import { IconAi } from "@/shared/components/Icons";
+import { rejudgeFinding } from "@/shared/ipc";
 import { useToast } from "@/shared/notifications";
 import type { Finding } from "@/shared/types";
 
 import { FindingDetailPanel } from "./FindingDetailPanel";
 import { UpdateFindingStatusModal } from "./UpdateFindingStatusModal";
 import { complianceRefsFor } from "./complianceRefs";
+import { parseFindingEvidence } from "./findingEvidence";
 
 export function FindingDetailsPage() {
   const { findingId = "" } = useParams();
@@ -29,11 +34,15 @@ export function FindingDetailsPage() {
   const { findings, projects, scans, loading, actions } = useAppStore();
   const { notify } = useToast();
   const [statusModalOpen, setStatusModalOpen] = useState(false);
-  const [busy, setBusy] = useState<"status" | "delete" | null>(null);
+  const [busy, setBusy] = useState<"status" | "delete" | "rejudge" | null>(null);
 
   const finding = findings.find((item) => item.id === findingId);
   const project = projects.find((item) => item.id === finding?.projectId);
   const scan = scans.find((item) => item.id === finding?.scanId);
+  const judgedAt = useMemo(
+    () => (finding ? parseFindingEvidence(finding).judgedAt : null),
+    [finding],
+  );
 
   const handleUpdateStatus = useCallback(
     async (status: Finding["status"]) => {
@@ -69,6 +78,20 @@ export function FindingDetailsPage() {
       setBusy(null);
     }
   }, [actions, finding, navigate, notify]);
+
+  const handleRejudge = useCallback(async () => {
+    if (!finding) return;
+    setBusy("rejudge");
+    try {
+      await rejudgeFinding(finding.id);
+      await actions.refresh();
+      notify("Finding re-judged", "success");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Failed to re-judge finding", "error");
+    } finally {
+      setBusy(null);
+    }
+  }, [actions, finding, notify]);
 
   const actionItems = useMemo((): ActionsDropdownItem[] => {
     if (!finding) return [];
@@ -269,15 +292,37 @@ export function FindingDetailsPage() {
         </Card>
       </section>
 
-      <section className="finding-details__judge" aria-label="Judge analysis">
+      <section className="finding-details__judge" aria-label="Judging Analysis">
         <Card className="detail-section finding-details__panel">
           <div className="detail-section__header">
-            <h2 className="detail-section__title">Judge analysis</h2>
+            <h2 className="detail-section__title">Judging Analysis</h2>
             <div className="detail-section__header-actions">
               <YazgBadge />
             </div>
           </div>
           <FindingDetailPanel finding={finding} embedded mode="judge" />
+          <div className="project-summary__footer finding-details__judge-footer">
+            {judgedAt || finding.discoveredAt ? (
+              <p className="project-summary__generated">
+                Generated {formatTimestamp(judgedAt ?? finding.discoveredAt)}
+              </p>
+            ) : (
+              <span />
+            )}
+            <Button
+              variant="primary"
+              size="sm"
+              type="button"
+              className="project-summary__action"
+              onClick={() => void handleRejudge()}
+              disabled={busy !== null}
+            >
+              <span className="btn__content">
+                <IconAi className="btn__icon" aria-hidden />
+                {busy === "rejudge" ? "Re-judging…" : "Re-judge"}
+              </span>
+            </Button>
+          </div>
         </Card>
       </section>
     </div>

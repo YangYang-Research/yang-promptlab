@@ -208,6 +208,9 @@ export const importFindingsSarif = (path: string, projectId?: string | null) =>
 export const updateFindingStatus = (id: string, status: string) =>
   invokeCommand<FindingDto>("finding_update", { id, status });
 
+export const rejudgeFinding = (id: string) =>
+  invokeCommand<FindingDto>("finding_rejudge", { id });
+
 export const deleteFinding = (id: string) =>
   invokeCommand<void>("finding_delete", { id });
 

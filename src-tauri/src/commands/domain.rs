@@ -4,6 +4,8 @@
 //! function that takes `&AppState`, so the same logic is exercised by the
 //! integration tests without a Tauri runtime.
 
+use std::sync::Arc;
+
 use promptlab_auth::{
     resolve_descriptor_for_wizard, sanitize_target_descriptor, SecretStore,
 };
@@ -443,6 +445,203 @@ pub async fn finding_update_op(
     Ok(FindingDto::from(finding))
 }
 
+fn evidence_string(obj: &serde_json::Map<String, serde_json::Value>, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Some(value) = obj.get(*key).and_then(|v| v.as_str()).map(str::trim) {
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn judge_request_from_finding(
+    finding: &promptlab_storage::Finding,
+    evidence: &serde_json::Value,
+) -> CommandResult<promptlab_judge::JudgeRequest> {
+    let obj = evidence.as_object().ok_or_else(|| {
+        CommandError::from(PromptLabError::invalid_input(
+            "Finding has no structured evidence to re-judge",
+        ))
+    })?;
+
+    let request = obj.get("request").and_then(|v| v.as_object());
+    let response = obj.get("response").and_then(|v| v.as_object());
+
+    let payload = evidence_string(obj, &["payload"])
+        .or_else(|| request.and_then(|r| evidence_string(r, &["body"])))
+        .ok_or_else(|| {
+            CommandError::from(PromptLabError::invalid_input(
+                "Finding evidence is missing a payload to re-judge",
+            ))
+        })?;
+
+    let probe_id = evidence_string(obj, &["payload_id", "payloadId"])
+        .unwrap_or_else(|| finding.id.clone());
+
+    let response_text = response
+        .and_then(|r| r.get("normalized"))
+        .and_then(|n| {
+            serde_json::from_value::<promptlab_harness::NormalizedResponse>(n.clone())
+                .ok()
+                .map(|normalized| normalized.judge_text())
+        })
+        .or_else(|| response.and_then(|r| evidence_string(r, &["body"])))
+        .or_else(|| evidence_string(obj, &["response_excerpt", "responseExcerpt"]))
+        .ok_or_else(|| {
+            CommandError::from(PromptLabError::invalid_input(
+                "Finding evidence is missing a response to re-judge",
+            ))
+        })?;
+
+    let attack_category = finding
+        .category
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "general".into());
+
+    let mut context = serde_json::json!({
+        "finding_id": finding.id,
+        "scan_id": finding.scan_id,
+        "project_id": finding.project_id,
+    });
+    if let Some(response) = response {
+        if let Some(status) = response.get("status") {
+            context["status_code"] = status.clone();
+        }
+        if let Some(body) = response.get("body") {
+            context["raw_response"] = body.clone();
+        }
+    }
+
+    Ok(promptlab_judge::JudgeRequest {
+        probe_id,
+        attack_category,
+        payload,
+        response_text,
+        context,
+    })
+}
+
+fn merge_rejudge_evidence(
+    existing: Option<&str>,
+    verdict: &promptlab_judge::JudgeVerdict,
+) -> CommandResult<serde_json::Value> {
+    let mut judge_json = serde_json::to_value(verdict).map_err(|err| {
+        CommandError::from(PromptLabError::internal(format!(
+            "Failed to serialize judge verdict: {err}"
+        )))
+    })?;
+
+    if let Some(obj) = judge_json.as_object_mut() {
+        let judged_at = verdict
+            .judged_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| verdict.judged_at.to_string());
+        obj.insert("judged_at".into(), serde_json::json!(judged_at));
+    }
+
+    let mut evidence = existing
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    let obj = evidence.as_object_mut().ok_or_else(|| {
+        CommandError::from(PromptLabError::invalid_input(
+            "Finding evidence_json must be a JSON object",
+        ))
+    })?;
+
+    obj.insert("judge".into(), judge_json);
+    obj.insert(
+        "confidence".into(),
+        serde_json::json!(verdict.confidence),
+    );
+    obj.insert("verdict".into(), serde_json::json!(verdict.verdict));
+    obj.insert("explanation".into(), serde_json::json!(verdict.summary));
+    obj.insert(
+        "indicators".into(),
+        serde_json::json!(verdict.evidence.clone()),
+    );
+
+    Ok(evidence)
+}
+
+fn judge_severity_label(severity: promptlab_judge::Severity) -> &'static str {
+    match severity {
+        promptlab_judge::Severity::Info => "info",
+        promptlab_judge::Severity::Low => "low",
+        promptlab_judge::Severity::Medium => "medium",
+        promptlab_judge::Severity::High => "high",
+        promptlab_judge::Severity::Critical => "critical",
+    }
+}
+
+#[instrument(skip(state), fields(id = %id))]
+pub async fn finding_rejudge_op(state: &AppState, id: String) -> CommandResult<FindingDto> {
+    let repos = state.repositories();
+    let finding = repos
+        .findings()
+        .get(&id)
+        .await
+        .map_err(CommandError::from)?;
+
+    let evidence_value = finding
+        .evidence_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    let judge_request = judge_request_from_finding(&finding, &evidence_value)?;
+
+    let judge = crate::commands::attack::build_judge_for_category(
+        state.data_dir(),
+        Arc::clone(state.inference_manager()),
+        Arc::clone(state.model_manager()),
+        state.model_provider().clone(),
+        Arc::clone(state.runtime_manager()),
+        &repos,
+    )
+    .await?;
+
+    let outcome = promptlab_agent::JudgeCoordinatorAgent::run(&judge_request, &judge)
+        .await
+        .map_err(|err| {
+            CommandError::from(PromptLabError::internal(format!(
+                "Re-judge failed: {err}"
+            )))
+        })?;
+
+    let verdict = outcome.verdict;
+    let evidence_json = merge_rejudge_evidence(finding.evidence_json.as_deref(), &verdict)?;
+    let severity = verdict
+        .severity
+        .map(judge_severity_label)
+        .map(str::to_string);
+
+    let updated = repos
+        .findings()
+        .update(
+            &id,
+            UpdateFinding {
+                description: Some(verdict.summary.clone()),
+                severity,
+                evidence_json: Some(evidence_json),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(CommandError::from)?;
+
+    info!(
+        %id,
+        verdict = %verdict.verdict,
+        confidence = verdict.confidence,
+        "finding re-judged"
+    );
+    Ok(FindingDto::from(updated))
+}
+
 #[instrument(skip(state), fields(id = %id))]
 pub async fn finding_delete_op(state: &AppState, id: String) -> CommandResult<()> {
     state
@@ -745,6 +944,14 @@ pub async fn finding_update(
     status: String,
 ) -> CommandResult<FindingDto> {
     finding_update_op(state.inner(), id, status).await
+}
+
+#[tauri::command]
+pub async fn finding_rejudge(
+    state: State<'_, AppState>,
+    id: String,
+) -> CommandResult<FindingDto> {
+    finding_rejudge_op(state.inner(), id).await
 }
 
 #[tauri::command]

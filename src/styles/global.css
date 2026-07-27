@@ -3357,7 +3357,7 @@ a:hover {
 
 .troubleshooting-logs__filters {
   display: grid;
-  grid-template-columns: minmax(220px, 1.4fr) minmax(160px, 1fr) minmax(180px, 1fr);
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.75rem;
   align-items: end;
   margin-bottom: 0.75rem;
@@ -3520,10 +3520,77 @@ a:hover {
   }
 }
 
-.registry-diagnostics {
+.database-diagnostics {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  min-width: 0;
+}
+
+.database-diagnostics__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.database-diagnostics__lead {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.database-diagnostics__header .badge {
+  flex: 0 0 auto;
+}
+
+.database-diagnostics__meta {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.database-diagnostics__row {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+  min-width: 0;
+}
+
+.database-diagnostics__row dt {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.database-diagnostics__row dd {
+  margin: 0;
+  font-size: 0.8125rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.settings-grid--diagnostics > .card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.troubleshooting-logs {
+  min-width: 0;
+}
+
+.troubleshooting-logs__filters > * {
+  min-width: 0;
+}
+
+.troubleshooting-logs__field .select {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .hf-catalog {
@@ -8204,6 +8271,12 @@ a:hover {
   outline: 2px solid var(--accent, #6ea8fe);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+.finding-details__judge-footer {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .detail-section__header {

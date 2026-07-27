@@ -180,7 +180,7 @@ function JudgeAnalysisSection({
     >
       {showTitle && (
         <div className="finding-detail__block-header finding-detail__judge-header">
-          <h4>Judge analysis</h4>
+          <h4>Judging Analysis</h4>
         </div>
       )}
 

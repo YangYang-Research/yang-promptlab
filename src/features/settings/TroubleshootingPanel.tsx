@@ -4,18 +4,19 @@ import { Button, Card, RefreshButton, SearchInput, Select } from "@/shared/compo
 import { toAppError } from "@/shared/errors";
 import { shortenPromptLabPath } from "@/shared/utils/format";
 import {
+  getDbHealth,
   getEnvironment,
   getRecentLogEvents,
   listLogFiles,
   openLogsFolder,
   tailLogFile,
+  type DbHealthDto,
   type EnvironmentStatusDto,
   type LogFileInfoDto,
   type OcsfEventDto,
 } from "@/shared/ipc/environment";
-import { getModelsRegistryDiagnostics, type ModelRegistryDiagnosticsDto } from "@/shared/ipc/models";
 
-import { RegistryDiagnosticsPanel } from "./RegistryDiagnosticsPanel";
+import { DatabaseDiagnosticsPanel } from "./DatabaseDiagnosticsPanel";
 
 type TroubleshootingPanelProps = {
   backendConnected: boolean;
@@ -38,7 +39,7 @@ function parseLogLines(content: string): OcsfEventDto[] {
 
 export function TroubleshootingPanel({ backendConnected }: TroubleshootingPanelProps) {
   const [environment, setEnvironment] = useState<EnvironmentStatusDto | null>(null);
-  const [diagnostics, setDiagnostics] = useState<ModelRegistryDiagnosticsDto | null>(null);
+  const [dbHealth, setDbHealth] = useState<DbHealthDto | null>(null);
   const [logFiles, setLogFiles] = useState<LogFileInfoDto[]>([]);
   const [selectedLog, setSelectedLog] = useState("app.log");
   const [logContent, setLogContent] = useState("");
@@ -54,14 +55,14 @@ export function TroubleshootingPanel({ backendConnected }: TroubleshootingPanelP
     setLoading(true);
     setError(null);
     try {
-      const [env, registry, files, events] = await Promise.all([
+      const [env, health, files, events] = await Promise.all([
         getEnvironment(),
-        getModelsRegistryDiagnostics(),
+        getDbHealth(),
         listLogFiles(),
         getRecentLogEvents(300),
       ]);
       setEnvironment(env);
-      setDiagnostics(registry);
+      setDbHealth(health);
       setLogFiles(files);
       setRecentEvents(events);
       if (selectedLog) {
@@ -131,7 +132,7 @@ export function TroubleshootingPanel({ backendConnected }: TroubleshootingPanelP
           <header className="settings-section__header">
             <h2 className="settings-section__title">Health summary</h2>
             <p className="settings-section__lead">
-              Recent high-severity events and model registry validation at startup.
+              Recent high-severity events and local database connectivity.
             </p>
           </header>
           <div className="settings-section__body">
@@ -152,8 +153,10 @@ export function TroubleshootingPanel({ backendConnected }: TroubleshootingPanelP
               </Card>
 
               <Card>
-                <h3 className="card__title">Registry diagnostics</h3>
-                {diagnostics ? <RegistryDiagnosticsPanel diagnostics={diagnostics} /> : null}
+                <h3 className="card__title">Database diagnostics</h3>
+                {dbHealth ? (
+                  <DatabaseDiagnosticsPanel health={dbHealth} root={environment?.root} />
+                ) : null}
               </Card>
             </div>
           </div>

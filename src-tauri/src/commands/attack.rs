@@ -318,7 +318,7 @@ pub fn category_id(category: AttackCategory) -> &'static str {
 }
 
 /// Build judge engine while briefly holding inference/runtime locks (released before HTTP-heavy work).
-async fn build_judge_for_category(
+pub(crate) async fn build_judge_for_category(
     data_dir: &std::path::Path,
     inference_manager: Arc<AsyncMutex<InferenceRuntimeManager>>,
     model_manager: Arc<AsyncMutex<promptlab_models::LocalModelManager>>,

@@ -55,8 +55,16 @@ export type OcsfEventDto = {
   attributes: Record<string, unknown>;
 };
 
+export type DbHealthDto = {
+  connected: boolean;
+  path: string;
+  sizeBytes: number;
+};
+
 export const getEnvironment = () =>
   invokeCommand<EnvironmentStatusDto>("environment_get");
+
+export const getDbHealth = () => invokeCommand<DbHealthDto>("db_health");
 
 export const openRootDirectory = () => invokeCommand<void>("environment_open_root");
 

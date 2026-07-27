@@ -62,17 +62,24 @@ pub fn app_info() -> CommandResult<AppInfoResponse> {
 }
 
 /// Database connectivity check — proves the database is reachable from a command
-/// via the shared [`AppState`]/repository manager.
+/// via the shared [`AppState`] repository manager.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DbHealthResponse {
     pub connected: bool,
-    pub project_count: usize,
+    pub path: String,
+    pub size_bytes: u64,
 }
 
 #[tauri::command]
 pub async fn db_health(state: State<'_, AppState>) -> CommandResult<DbHealthResponse> {
+    let path = state.environment().database_path();
+    let size_bytes = std::fs::metadata(&path)
+        .map(|meta| meta.len())
+        .unwrap_or(0);
+
     // Exercise the repository manager against the live pool.
-    let projects = state
+    let _projects = state
         .repositories()
         .projects()
         .list()
@@ -81,6 +88,7 @@ pub async fn db_health(state: State<'_, AppState>) -> CommandResult<DbHealthResp
 
     Ok(DbHealthResponse {
         connected: !state.database().is_closed(),
-        project_count: projects.len(),
+        path: path.display().to_string(),
+        size_bytes,
     })
 }

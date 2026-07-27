@@ -250,6 +250,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::domain::finding_list_all,
             commands::domain::finding_import_sarif,
             commands::domain::finding_update,
+            commands::domain::finding_rejudge,
             commands::domain::finding_delete,
             commands::domain::report_generate,
             commands::domain::report_list,
