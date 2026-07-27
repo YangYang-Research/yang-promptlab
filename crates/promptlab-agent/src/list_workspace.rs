@@ -47,6 +47,9 @@ pub struct WorkspaceProjectSummary {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Total findings for this project (accurate even when the findings list is truncated).
+    #[serde(default)]
+    pub findings_count: usize,
 }
 
 /// Totals for the inventory snapshot.
@@ -159,7 +162,22 @@ impl WorkspaceInventory {
 
     /// User-facing final reply after a successful list_workspace Observation.
     pub fn to_user_reply(&self) -> String {
+        self.to_user_reply_for_goal("")
+    }
+
+    /// Prefer a project-scoped finding count when the goal names a project.
+    pub fn to_user_reply_for_goal(&self, goal: &str) -> String {
         let mut lines = Vec::new();
+        if let Some((project, count)) = self.project_finding_hit(goal) {
+            lines.push(format!(
+                "Project **{}** has **{}** finding{}.",
+                project.name,
+                count,
+                if count == 1 { "" } else { "s" }
+            ));
+            lines.push(String::new());
+        }
+
         lines.push(format!(
             "Workspace inventory from the local database:\n- Projects: {}\n- Targets: {}\n- Scans: {}\n- Findings: {}{}",
             self.totals.projects,
@@ -172,6 +190,22 @@ impl WorkspaceInventory {
                 String::new()
             }
         ));
+
+        lines.push(String::new());
+        lines.push("Findings by project:".into());
+        if self.projects.is_empty() {
+            lines.push("- (none)".into());
+        } else {
+            for project in &self.projects {
+                let count = project.findings_count;
+                lines.push(format!(
+                    "- {}: {} finding{}",
+                    project.name,
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ));
+            }
+        }
 
         lines.push(String::new());
         lines.push("Projects:".into());
@@ -215,14 +249,52 @@ impl WorkspaceInventory {
             lines.push("- (none)".into());
         } else {
             for finding in &self.findings {
+                let project_label = self
+                    .projects
+                    .iter()
+                    .find(|project| project.id == finding.project_id)
+                    .map(|project| project.name.as_str())
+                    .unwrap_or(finding.project_id.as_str());
                 lines.push(format!(
-                    "- [{}] {} (`{}`, status={})",
-                    finding.severity, finding.title, finding.id, finding.status
+                    "- [{}] {} (`{}`, project={}, status={})",
+                    finding.severity, finding.title, finding.id, project_label, finding.status
                 ));
             }
         }
 
         lines.join("\n")
+    }
+
+    /// Match a project named in the user goal and return its finding count (from listed rows).
+    fn project_finding_hit(&self, goal: &str) -> Option<(&WorkspaceProjectSummary, usize)> {
+        if goal.trim().is_empty() || self.projects.is_empty() {
+            return None;
+        }
+        let g = goal.to_lowercase();
+        let mut ranked: Vec<(&WorkspaceProjectSummary, usize)> = self
+            .projects
+            .iter()
+            .filter(|project| {
+                let name = project.name.trim();
+                !name.is_empty() && g.contains(&name.to_lowercase())
+            })
+            .map(|project| {
+                (
+                    project,
+                    if project.findings_count > 0 {
+                        project.findings_count
+                    } else {
+                        self.findings
+                            .iter()
+                            .filter(|finding| finding.project_id == project.id)
+                            .count()
+                    },
+                )
+            })
+            .collect();
+        // Prefer longer name matches ("AI Lab" over "AI").
+        ranked.sort_by(|a, b| b.0.name.len().cmp(&a.0.name.len()));
+        ranked.into_iter().next()
     }
 
     /// True when a finish reply already presents this inventory (avoid clobbering good LLM text).
@@ -265,6 +337,7 @@ mod tests {
                 id: "p1".into(),
                 name: "AI".into(),
                 description: None,
+                findings_count: 0,
             }],
             targets: vec![WorkspaceTargetSummary {
                 id: "t1".into(),
@@ -288,5 +361,33 @@ mod tests {
         assert!(inventory.reply_covers_inventory(&inventory.to_user_reply()));
         assert!(inventory.to_user_reply().contains("AI"));
         assert!(inventory.to_user_reply().contains("demo"));
+    }
+
+    #[test]
+    fn project_scoped_reply_leads_with_finding_count() {
+        let inventory = WorkspaceInventory {
+            projects: vec![WorkspaceProjectSummary {
+                id: "p1".into(),
+                name: "AI".into(),
+                description: None,
+                findings_count: 36,
+            }],
+            targets: Vec::new(),
+            scans: Vec::new(),
+            findings: Vec::new(),
+            totals: WorkspaceTotals {
+                projects: 1,
+                targets: 0,
+                scans: 0,
+                findings: 36,
+                findings_truncated: 0,
+            },
+        };
+        let reply = inventory
+            .to_user_reply_for_goal("cho tôi số lỗ hổng của project AI");
+        assert!(
+            reply.starts_with("Project **AI** has **36** findings."),
+            "reply={reply}"
+        );
     }
 }

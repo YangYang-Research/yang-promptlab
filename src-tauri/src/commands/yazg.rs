@@ -115,6 +115,8 @@ impl WorkspaceTools for HostWorkspaceTools<'_> {
 
         let mut scans = Vec::new();
         let mut findings = Vec::new();
+        let mut findings_by_project: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         for project in &projects {
             let project_scans = repos
                 .scans()
@@ -128,6 +130,7 @@ impl WorkspaceTools for HostWorkspaceTools<'_> {
                 .list_by_project(&project.id)
                 .await
                 .map_err(|err| err.to_string())?;
+            findings_by_project.insert(project.id.clone(), project_findings.len());
             findings.extend(project_findings);
         }
 
@@ -148,6 +151,10 @@ impl WorkspaceTools for HostWorkspaceTools<'_> {
             projects: projects
                 .into_iter()
                 .map(|project| WorkspaceProjectSummary {
+                    findings_count: findings_by_project
+                        .get(&project.id)
+                        .copied()
+                        .unwrap_or(0),
                     id: project.id,
                     name: project.name,
                     description: project.description,

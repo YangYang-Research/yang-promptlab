@@ -165,7 +165,8 @@ impl YazgSupervisor {
             }
             SupervisorIntent::ListWorkspace => {
                 "User preference hint: call list_workspace to read projects/targets/scans/findings \
-                 from the local DB, then finish with a factual inventory. Do not invent rows."
+                 from the local DB (including finding counts for a named project). \
+                 Do not call analyze_endpoint. Do not invent rows."
             }
             SupervisorIntent::ExecuteAttack => {
                 "User preference hint: agentic scan execution via AgenticAttackExecutionAgent may be appropriate."

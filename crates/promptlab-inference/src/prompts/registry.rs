@@ -123,9 +123,10 @@ Rules:
 - Prefer summary when summary_ready=true and the goal is project/scan summary.
 - Prefer judge when judge_ready=true and the goal is scoring an attack probe response.
 - Prefer create_project when the user asks to create / add a new project. Extract the project name into "name". Do NOT ask for a scan target and do NOT call analyze_endpoint for project creation.
-- Prefer list_workspace when the user asks what projects/targets/scans/findings exist, for a DB inventory, or to list workspace contents. Call list_workspace once, then finish with a reply that includes the Observation inventory. Never invent rows. Do not call list_workspace repeatedly.
+- Prefer list_workspace when the user asks what projects/targets/scans/findings exist, for a DB inventory, finding/vulnerability counts (including Vietnamese like \"số lỗ hổng\" / \"bao nhiêu\"), or anything about existing scan results in a named project. Call list_workspace once — it returns the inventory as the final reply. Never invent rows. Do not call list_workspace repeatedly.
+- Do NOT call analyze_endpoint for finding counts, vulnerability totals, or project inventory questions. analyze_endpoint only verifies a live bound scan target (or wizard capability probe).
 - recommend, summary, judge, create_project, and list_workspace do NOT require a live scan target — completed results/context (or just a name / DB read) are enough.
-- Only ask the user to select a target when the goal needs analyze_endpoint or attack_plan and target is missing AND capability_probe_ready=false.
+- Only ask the user to select a target when the goal needs analyze_endpoint or attack_plan and target is missing AND capability_probe_ready=false. If analyze_endpoint already failed with no target, finish or call list_workspace — never retry analyze_endpoint in a loop.
 - If a technique is missing and the goal is Attack Factory / needs generate_prompt, finish and ask for a technique. Do NOT do this for Verification / endpoint analysis goals.
 - If attack results are missing and the goal needs recommend, finish and say scan results are required.
 - If summary context is missing and the goal needs summary, finish and say summary input is required.

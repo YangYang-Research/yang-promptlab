@@ -228,6 +228,17 @@ pub async fn run_react(
     )
     .await;
 
+    // DB inventory / finding-count questions must not go through analyze_endpoint.
+    // Small models misroute "how many vulns in project X" → analyze_endpoint and loop.
+    if looks_like_workspace_inventory_goal(&request.goal) && request.workspace_tools.is_some() {
+        info!("Yazg ReAct fast-path: list_workspace for inventory/findings question");
+        artifacts.events.push(AgentEvent::info(
+            AgentId::Yazg,
+            "Fast-path: list_workspace (findings/inventory question)",
+        ));
+        return finish_via_list_workspace(&request, &mut artifacts).await;
+    }
+
     let memory_block =
         load_memory_prompt_block(request.memory, &request.memory_ctx, AgentId::Yazg, None).await;
 
@@ -244,8 +255,9 @@ pub async fn run_react(
          Do not invent tool results. Prefer finish for general app questions.\n\
          For create_project: include JSON fields name (required) and optional description; \
          do not ask for a scan target — projects do not need a target.\n\
-         For questions about existing projects/targets/scans/findings, call list_workspace \
-         first — do not invent DB inventory.\n\n",
+         For questions about existing projects/targets/scans/findings/vulnerabilities \
+         (counts, inventory, \"how many\", \"số lỗ hổng\"), call list_workspace — \
+         NEVER analyze_endpoint. analyze_endpoint only verifies a live bound scan target.\n\n",
     );
     transcript.push_str(&format!("User prompt:\n{}\n\n", request.goal.trim()));
     if !memory_block.is_empty() {
@@ -453,6 +465,25 @@ pub async fn run_react(
                     execute_analyze(&request, llms.analyze, &mut artifacts).await?;
                 push_observation(&mut transcript, &mut artifacts, &observation);
                 remember_observation(&request, AgentId::AnalyzeEndpoint, &observation).await;
+                if observation.contains("no target selected") {
+                    if looks_like_workspace_inventory_goal(&request.goal)
+                        && request.workspace_tools.is_some()
+                    {
+                        artifacts.events.push(AgentEvent::info(
+                            AgentId::Yazg,
+                            "Recovered: redirected to list_workspace after analyze_endpoint without target",
+                        ));
+                        return finish_via_list_workspace(&request, &mut artifacts).await;
+                    }
+                    transcript.push_str(
+                        "\nContinue ReAct: analyze_endpoint FAILED — no bound target. \
+                         Do NOT call analyze_endpoint again. \
+                         If the user asked about existing DB findings/vulnerabilities/projects, \
+                         call list_workspace. Otherwise finish and ask them to select a target.\n\
+                         Reply with one JSON object only.\n",
+                    );
+                    continue;
+                }
             }
             ReactActionKind::AttackPlan => {
                 log_tool_call(
@@ -542,44 +573,7 @@ pub async fn run_react(
                     "reading workspace inventory from DB",
                     request.log_ctx(),
                 );
-                let observation = execute_list_workspace(&request, &mut artifacts).await?;
-                push_observation(&mut transcript, &mut artifacts, &observation);
-                remember_observation(&request, AgentId::ListWorkspace, &observation).await;
-                // Finish immediately with the DB inventory. Asking the model to echo the
-                // full inventory inside JSON "reply" routinely breaks brace extraction
-                // (nested JSON-in-string) and leaves the chat stuck on "Yazg is working…".
-                let reply = artifacts
-                    .workspace_inventory
-                    .as_ref()
-                    .map(|inventory| inventory.to_user_reply())
-                    .filter(|text| !text.trim().is_empty())
-                    .unwrap_or_else(|| observation.clone());
-                artifacts.final_reply = reply.clone();
-                log_tool_call(
-                    AgentId::Yazg,
-                    "finish",
-                    truncate(&reply, 400),
-                    request.log_ctx(),
-                );
-                remember_stm(
-                    request.memory,
-                    &request.memory_ctx,
-                    StmWrite {
-                        agent_id: AgentId::Yazg,
-                        role: StmRole::Assistant,
-                        memory_key: Some("reply".into()),
-                        content: reply,
-                        content_json: None,
-                        importance: 0.6,
-                    },
-                )
-                .await;
-                persist_react_ltm(&request, &artifacts).await;
-                artifacts.events.push(AgentEvent::completed(
-                    AgentId::Yazg,
-                    "ReAct finished",
-                ));
-                return Ok(artifacts);
+                return finish_via_list_workspace(&request, &mut artifacts).await;
             }
         }
 
@@ -868,8 +862,11 @@ fn format_context(
          Do NOT require a scan target or analyze_endpoint for project creation.\n\
          - list_workspace_ready: true\n\
          - note: list_workspace reads projects/targets/scans/findings from the local DB. \
-         Call it once when the user asks what exists in the workspace. The tool returns the \
-         inventory as the final reply — do not invent rows and do not call it twice.\n",
+         Use it for inventory AND for finding/vulnerability counts per project \
+         (e.g. \"how many vulns in project AI\", \"số lỗ hổng\"). \
+         NEVER use analyze_endpoint for those questions — that tool only verifies a live bound target. \
+         Call list_workspace once; it returns the inventory as the final reply. \
+         Do not invent rows and do not call it twice.\n",
     );
     out
 }
@@ -1289,6 +1286,114 @@ async fn execute_list_workspace(
     }
 }
 
+/// Run list_workspace and finish immediately with a user-facing inventory reply.
+async fn finish_via_list_workspace(
+    request: &ReactRequest<'_>,
+    artifacts: &mut ReactArtifacts,
+) -> AgentResult<ReactArtifacts> {
+    let observation = execute_list_workspace(request, artifacts).await?;
+    artifacts.events.push(AgentEvent::react(
+        AgentId::Yazg,
+        format!("Observation: {}", truncate(&observation, 240)),
+    ));
+    remember_observation(request, AgentId::ListWorkspace, &observation).await;
+
+    let reply = artifacts
+        .workspace_inventory
+        .as_ref()
+        .map(|inventory| inventory.to_user_reply_for_goal(&request.goal))
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or_else(|| observation.clone());
+    artifacts.final_reply = reply.clone();
+    artifacts.last_action = Some(ReactActionKind::ListWorkspace);
+    log_tool_call(
+        AgentId::Yazg,
+        "finish",
+        truncate(&reply, 400),
+        request.log_ctx(),
+    );
+    remember_stm(
+        request.memory,
+        &request.memory_ctx,
+        StmWrite {
+            agent_id: AgentId::Yazg,
+            role: StmRole::Assistant,
+            memory_key: Some("reply".into()),
+            content: reply,
+            content_json: None,
+            importance: 0.6,
+        },
+    )
+    .await;
+    persist_react_ltm(request, artifacts).await;
+    artifacts
+        .events
+        .push(AgentEvent::completed(AgentId::Yazg, "ReAct finished"));
+    Ok(std::mem::take(artifacts))
+}
+
+/// True when the user is asking for DB inventory / finding counts — not live endpoint analysis.
+fn looks_like_workspace_inventory_goal(goal: &str) -> bool {
+    let g = goal.to_lowercase();
+    if g.contains("analyze_endpoint")
+        || g.contains("capability_probe")
+        || g.contains("verify endpoint")
+        || g.contains("verification / endpoint")
+    {
+        return false;
+    }
+
+    const INVENTORY: &[&str] = &[
+        "list_workspace",
+        "inventory",
+        "what projects",
+        "what targets",
+        "what scans",
+        "what findings",
+        "list project",
+        "list target",
+        "list scan",
+        "list finding",
+        "list everything",
+        "existing project",
+        "trong database",
+        "trong db",
+        "in my workspace",
+        "in the workspace",
+    ];
+    if INVENTORY.iter().any(|k| g.contains(k)) {
+        // Creating a project is not an inventory read.
+        if g.contains("create_project")
+            || g.contains("create a project")
+            || g.contains("create a workspace project")
+            || g.contains("new project")
+            || g.contains("add a project")
+        {
+            return false;
+        }
+        return true;
+    }
+
+    let findingish = g.contains("finding")
+        || g.contains("vulnerab")
+        || g.contains("lỗ hổng")
+        || g.contains("lo hong")
+        || g.contains("lỗ-hổng");
+    let countish = g.contains("how many")
+        || g.contains("number of")
+        || g.contains("count")
+        || g.contains("bao nhiêu")
+        || g.contains("tổng")
+        || g.contains("số ")
+        || g.contains("so ")
+        || g.starts_with("số")
+        || g.contains(" cho tôi số")
+        || g.contains("cho tôi số");
+    let projectish = g.contains("project") || g.contains("dự án") || g.contains("du an");
+
+    (findingish && countish) || (findingish && projectish) || (countish && projectish && findingish)
+}
+
 fn summarize_partial(artifacts: &ReactArtifacts) -> String {
     if let Some(inventory) = &artifacts.workspace_inventory {
         return inventory.to_user_reply();
@@ -1422,5 +1527,21 @@ mod tests {
             parse_action_kind("generate_prompt").unwrap(),
             ReactActionKind::GeneratePrompt
         );
+    }
+
+    #[test]
+    fn detects_finding_count_questions_as_workspace_inventory() {
+        assert!(looks_like_workspace_inventory_goal(
+            "cho tôi số lỗ hổng của project AI"
+        ));
+        assert!(looks_like_workspace_inventory_goal(
+            "How many findings in project AI?"
+        ));
+        assert!(looks_like_workspace_inventory_goal(
+            "list everything in my workspace"
+        ));
+        assert!(!looks_like_workspace_inventory_goal(
+            "Scan wizard Verification / endpoint analysis: call analyze_endpoint"
+        ));
     }
 }
