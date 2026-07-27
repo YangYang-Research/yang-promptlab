@@ -15,7 +15,7 @@ use tauri::State;
 use crate::agent_memory::SqliteAgentMemoryStore;
 use crate::commands::projects::project_create_op;
 use crate::error::{CommandError, CommandResult};
-use crate::inference_host::{gateway_complete, is_inference_ready, YazgHostLlms};
+use crate::inference_host::{gateway_complete_as, is_inference_ready, YazgHostLlms};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -334,12 +334,13 @@ pub async fn yazg_generate_chat_title_op(
     let inference = state.inference_manager().lock().await;
     let manager = state.model_manager().lock().await;
     let mut runtime_mgr = state.runtime_manager().lock().await;
-    match gateway_complete(
+    match gateway_complete_as(
         state.data_dir(),
         &inference,
         &manager,
         state.model_provider().clone(),
         &mut runtime_mgr,
+        "yazg",
         None,
         &prompt,
         32,

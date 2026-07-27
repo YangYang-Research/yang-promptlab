@@ -162,6 +162,44 @@ pub async fn gateway_complete(
         .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 
+pub async fn gateway_complete_as(
+    data_dir: &Path,
+    inference: &InferenceRuntimeManager,
+    model_manager: &LocalModelManager,
+    model_provider: SharedModelProvider,
+    runtime_manager: &mut RuntimeManager,
+    agent_id: &str,
+    system: Option<&str>,
+    prompt: &str,
+    max_tokens: u32,
+    temperature: f32,
+) -> CommandResult<String> {
+    let data_dir = data_dir.to_path_buf();
+    let system_owned = system.map(str::to_string);
+    let prompt = prompt.to_string();
+    let agent_id = agent_id.to_string();
+    promptlab_inference::with_agent(&agent_id, || async {
+        let mut session = open_gateway_session(
+            &data_dir,
+            inference,
+            model_manager,
+            model_provider,
+            runtime_manager,
+        )
+        .await?;
+        session
+            .complete(CompleteRequest {
+                prompt,
+                system: system_owned,
+                max_tokens: Some(max_tokens),
+                temperature: Some(temperature),
+            })
+            .await
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
+    })
+    .await
+}
+
 /// Wizard attack-plan LLM — higher token budget and JSON-focused system prompt.
 pub struct HostWizardPlannerLlm {
     data_dir: PathBuf,
@@ -195,12 +233,13 @@ impl PlannerLlm for HostWizardPlannerLlm {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete(
+        gateway_complete_as(
             &self.data_dir,
             &inference,
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
+            "attack_plan",
             Some(PromptRegistry::wizard_profile_system()),
             prompt,
             8192,
@@ -244,12 +283,13 @@ impl PlannerLlm for HostEndpointVerifyLlm {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete(
+        gateway_complete_as(
             &self.data_dir,
             &inference,
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
+            "analyze_endpoint",
             Some(PromptRegistry::endpoint_verify_system()),
             prompt,
             1024,
@@ -293,12 +333,13 @@ impl PlannerLlm for HostYazgReactLlm {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete(
+        gateway_complete_as(
             &self.data_dir,
             &inference,
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
+            "yazg",
             Some(PromptRegistry::yazg_react_system()),
             prompt,
             1024,
@@ -342,12 +383,13 @@ impl PlannerLlm for HostGeneratePromptLlm {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete(
+        gateway_complete_as(
             &self.data_dir,
             &inference,
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
+            "generate_prompt",
             Some(PromptRegistry::attack_catalog_prompt_system()),
             prompt,
             1024,
@@ -391,12 +433,13 @@ impl PlannerLlm for HostAttackRecommendLlm {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete(
+        gateway_complete_as(
             &self.data_dir,
             &inference,
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
+            "recommend",
             Some(PromptRegistry::attack_results_recommend_system()),
             prompt,
             2048,
@@ -440,12 +483,13 @@ impl PlannerLlm for HostProjectSummaryLlm {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete(
+        gateway_complete_as(
             &self.data_dir,
             &inference,
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
+            "summary",
             Some(PromptRegistry::project_summary_system()),
             prompt,
             2048,
@@ -489,12 +533,13 @@ impl PlannerLlm for HostScanSummaryLlm {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete(
+        gateway_complete_as(
             &self.data_dir,
             &inference,
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
+            "summary",
             Some(PromptRegistry::scan_summary_system()),
             prompt,
             2048,
@@ -690,12 +735,13 @@ impl GeneratorLlm for HostGeneratorLlm {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete(
+        gateway_complete_as(
             &self.data_dir,
             &inference,
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
+            "generate_prompt",
             Some(PromptRegistry::generator_system()),
             prompt,
             1536,

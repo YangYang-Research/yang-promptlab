@@ -21,9 +21,9 @@ type WeightDraft = Record<WeightKey, number>;
 type PresetProfileId = "balanced" | "judgeBiased" | "consensusBiased";
 
 const ROLE_FIELDS: Array<{ key: WeightKey; label: string; hint: string }> = [
-  { key: "judge", label: "Judge", hint: "Primary vulnerability verdict" },
-  { key: "classifier", label: "Classifier", hint: "Category / severity labeling" },
-  { key: "attacker", label: "Attacker", hint: "Adversarial confirmation" },
+  { key: "judge", label: "JudgeWorker", hint: "Primary vulnerability verdict" },
+  { key: "classifier", label: "ClassifierWorker", hint: "Category / severity labeling" },
+  { key: "attacker", label: "AttackerWorker", hint: "Adversarial confirmation" },
   { key: "defaultLlm", label: "Other / no role", hint: "Fallback when role is missing" },
 ];
 const PRESET_PROFILES: Array<{
@@ -35,19 +35,19 @@ const PRESET_PROFILES: Array<{
   {
     id: "balanced",
     label: "Balanced",
-    hint: "Equal priority for Judge/Classifier/Attacker",
+    hint: "Equal priority for JudgeWorker / ClassifierWorker / AttackerWorker",
     values: { judge: 0.75, classifier: 0.75, attacker: 0.75, defaultLlm: 0.65 },
   },
   {
     id: "judgeBiased",
     label: "Judge-biased",
-    hint: "Prefer Judge verdict over other evaluators",
+    hint: "Prefer JudgeWorker verdict over other workers",
     values: { judge: 0.95, classifier: 0.75, attacker: 0.65, defaultLlm: 0.6 },
   },
   {
     id: "consensusBiased",
     label: "Consensus-biased",
-    hint: "Keep evaluators closer to reduce role bias",
+    hint: "Keep workers closer to reduce role bias",
     values: { judge: 0.85, classifier: 0.8, attacker: 0.75, defaultLlm: 0.65 },
   },
 ];
@@ -155,7 +155,7 @@ export function JudgeRoleWeightsPanel({ disabled = false }: { disabled?: boolean
           const next = toDraft(weights);
           setDraft(next);
           setSaved(next);
-          toast.notify("Judge role weights saved", "success");
+          toast.notify("Judge worker weights saved", "success");
         } catch (err) {
           toast.notify(toAppError(err).message, "error");
         } finally {
@@ -201,7 +201,7 @@ export function JudgeRoleWeightsPanel({ disabled = false }: { disabled?: boolean
               );
             })}
           </div>
-          <div className="settings-judge-weights" role="group" aria-label="Judge role weights">
+          <div className="settings-judge-weights" role="group" aria-label="Judge worker weights">
             {ROLE_FIELDS.map((field) => (
               <WeightSlider
                 key={field.key}

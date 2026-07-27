@@ -332,6 +332,21 @@ pub async fn runtime_traffic_stats(
 }
 
 #[tauri::command]
+pub async fn runtime_token_usage(
+    state: State<'_, AppState>,
+) -> CommandResult<promptlab_inference::TokenUsageSnapshot> {
+    Ok(crate::token_usage_persist::usage_snapshot(state.data_dir()))
+}
+
+#[tauri::command]
+pub async fn runtime_token_usage_reset(
+    state: State<'_, AppState>,
+) -> CommandResult<promptlab_inference::TokenUsageSnapshot> {
+    crate::token_usage_persist::reset_usage(state.data_dir())
+        .map_err(CommandError::invalid_input)
+}
+
+#[tauri::command]
 pub async fn runtime_benchmark(state: State<'_, AppState>) -> CommandResult<RuntimeBenchmarkResult> {
     let mut manager = state.runtime_manager().lock().await;
     manager

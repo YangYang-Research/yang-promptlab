@@ -234,9 +234,15 @@ impl RemoteProviderAdapter {
             .await
             .map_err(|e| InferenceError::Provider(e.to_string()))?;
 
-        extract_openai_chat_content(&value).ok_or_else(|| {
+        let content = extract_openai_chat_content(&value).ok_or_else(|| {
             InferenceError::Provider("remote llm returned empty content".into())
-        })
+        })?;
+        record_provider_usage(
+            parse_openai_usage(&value),
+            &messages_prompt_estimate(&messages),
+            &content,
+        );
+        Ok(content)
     }
 
     async fn probe_openai_compatible_connectivity(&self) -> InferenceResult<bool> {
@@ -320,11 +326,13 @@ impl RemoteProviderAdapter {
             .await
             .map_err(|e| InferenceError::Provider(e.to_string()))?;
 
-        value
+        let content = value
             .pointer("/content/0/text")
             .and_then(|v| v.as_str())
             .map(str::to_string)
-            .ok_or_else(|| InferenceError::Provider("anthropic returned empty content".into()))
+            .ok_or_else(|| InferenceError::Provider("anthropic returned empty content".into()))?;
+        record_provider_usage(parse_anthropic_usage(&value), &format!("{system}\n{prompt}"), &content);
+        Ok(content)
     }
 
     async fn complete_gemini(
@@ -369,11 +377,13 @@ impl RemoteProviderAdapter {
             .await
             .map_err(|e| InferenceError::Provider(e.to_string()))?;
 
-        value
+        let content = value
             .pointer("/candidates/0/content/parts/0/text")
             .and_then(|v| v.as_str())
             .map(str::to_string)
-            .ok_or_else(|| InferenceError::Provider("gemini returned empty content".into()))
+            .ok_or_else(|| InferenceError::Provider("gemini returned empty content".into()))?;
+        record_provider_usage(parse_gemini_usage(&value), prompt, &content);
+        Ok(content)
     }
 
     async fn complete_bedrock(
@@ -455,12 +465,66 @@ impl RemoteProviderAdapter {
             .await
             .map_err(|e| InferenceError::Provider(e.to_string()))?;
 
-        value
+        let content = value
             .pointer("/output/message/content/0/text")
             .and_then(|v| v.as_str())
             .map(str::to_string)
-            .ok_or_else(|| InferenceError::Provider("bedrock returned empty content".into()))
+            .ok_or_else(|| InferenceError::Provider("bedrock returned empty content".into()))?;
+        record_provider_usage(parse_bedrock_usage(&value), prompt, &content);
+        Ok(content)
     }
+}
+
+fn messages_prompt_estimate(messages: &[serde_json::Value]) -> String {
+    messages
+        .iter()
+        .filter_map(|message| message.get("content").and_then(|v| v.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn record_provider_usage(parsed: Option<(u64, u64)>, prompt_text: &str, output_text: &str) {
+    let (input, output) = match parsed {
+        Some(pair) => pair,
+        None => (
+            crate::token_usage::estimate_tokens(prompt_text),
+            crate::token_usage::estimate_tokens(output_text),
+        ),
+    };
+    crate::token_usage::record_completion(input, output);
+}
+
+fn json_u64(value: &serde_json::Value, key: &str) -> Option<u64> {
+    value.get(key).and_then(|v| v.as_u64())
+}
+
+fn parse_openai_usage(value: &serde_json::Value) -> Option<(u64, u64)> {
+    let usage = value.get("usage")?;
+    let input = json_u64(usage, "prompt_tokens").or_else(|| json_u64(usage, "input_tokens"))?;
+    let output =
+        json_u64(usage, "completion_tokens").or_else(|| json_u64(usage, "output_tokens"))?;
+    Some((input, output))
+}
+
+fn parse_anthropic_usage(value: &serde_json::Value) -> Option<(u64, u64)> {
+    let usage = value.get("usage")?;
+    Some((json_u64(usage, "input_tokens")?, json_u64(usage, "output_tokens")?))
+}
+
+fn parse_gemini_usage(value: &serde_json::Value) -> Option<(u64, u64)> {
+    let meta = value.get("usageMetadata")?;
+    let input = json_u64(meta, "promptTokenCount")?;
+    let output = json_u64(meta, "candidatesTokenCount").unwrap_or_else(|| {
+        json_u64(meta, "totalTokenCount")
+            .unwrap_or(input)
+            .saturating_sub(input)
+    });
+    Some((input, output))
+}
+
+fn parse_bedrock_usage(value: &serde_json::Value) -> Option<(u64, u64)> {
+    let usage = value.get("usage")?;
+    Some((json_u64(usage, "inputTokens")?, json_u64(usage, "outputTokens")?))
 }
 
 fn push_non_empty_text(out: &mut String, text: &str) {

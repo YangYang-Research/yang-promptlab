@@ -25,6 +25,7 @@ pub mod scan_console_log;
 pub mod scan_playbook;
 pub mod state;
 pub mod traffic_persist;
+pub mod token_usage_persist;
 
 use promptlab_models::ModelEntry;
 use state::AppState;
@@ -199,6 +200,11 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 traffic_persist::bootstrap_traffic_persistence(&traffic_app).await;
             });
 
+            let usage_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                token_usage_persist::bootstrap_token_usage_persistence(&usage_app).await;
+            });
+
             event_bus.info(
                 promptlab_core::LogCategory::Application,
                 "Application Ready",
@@ -313,6 +319,8 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::runtime::runtime_restart,
             commands::runtime::runtime_health,
             commands::runtime::runtime_traffic_stats,
+            commands::runtime::runtime_token_usage,
+            commands::runtime::runtime_token_usage_reset,
             commands::runtime::runtime_benchmark,
             commands::runtime::runtime_logs,
             commands::runtime::runtime_hardware,

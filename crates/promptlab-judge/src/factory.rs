@@ -25,9 +25,18 @@ pub async fn build_judge_engine_with_client(
 ) -> JudgeResult<JudgeEngine> {
     let engine_config = config.to_engine_config();
     let mut pool = ModelRolePool::new();
-    let runtime: Arc<Mutex<dyn InferenceRuntime>> =
-        Arc::new(Mutex::new(ClientRuntime { client }));
-    pool.set_all(runtime);
+    pool.set_judge(Arc::new(Mutex::new(ClientRuntime {
+        client: client.clone(),
+        agent_id: "judge_worker".into(),
+    })));
+    pool.set_classifier(Arc::new(Mutex::new(ClientRuntime {
+        client: client.clone(),
+        agent_id: "classifier_worker".into(),
+    })));
+    pool.set_attacker(Arc::new(Mutex::new(ClientRuntime {
+        client,
+        agent_id: "attacker_worker".into(),
+    })));
     Ok(JudgeEngine::new(engine_config, pool))
 }
 
@@ -76,6 +85,7 @@ fn attach_backend_to_pool(pool: &mut ModelRolePool, backend: Arc<dyn crate::prov
 
 struct ClientRuntime {
     client: InferenceClient,
+    agent_id: String,
 }
 
 #[async_trait::async_trait]
@@ -100,20 +110,29 @@ impl InferenceRuntime for ClientRuntime {
         request: promptlab_models::types::InferenceRequest,
     ) -> promptlab_models::error::ModelResult<promptlab_models::types::InferenceResponse> {
         // All judge LLM calls go through InferenceClient (gateway hot-path).
-        self.client
-            .complete(CompleteRequest {
-                prompt: request.prompt,
-                system: request.system,
-                max_tokens: Some(request.max_tokens),
-                temperature: Some(request.temperature),
-            })
-            .await
-            .map(|text| promptlab_models::types::InferenceResponse {
-                text,
-                tokens_predicted: 0,
-                duration_ms: 0,
-            })
-            .map_err(|e| promptlab_models::error::ModelError::runtime(e.to_string()))
+        let client = self.client.clone();
+        let agent_id = self.agent_id.clone();
+        let prompt = request.prompt;
+        let system = request.system;
+        let max_tokens = request.max_tokens;
+        let temperature = request.temperature;
+        promptlab_inference::with_agent(&agent_id, || async move {
+            client
+                .complete(CompleteRequest {
+                    prompt,
+                    system,
+                    max_tokens: Some(max_tokens),
+                    temperature: Some(temperature),
+                })
+                .await
+                .map(|text| promptlab_models::types::InferenceResponse {
+                    text,
+                    tokens_predicted: 0,
+                    duration_ms: 0,
+                })
+                .map_err(|e| promptlab_models::error::ModelError::runtime(e.to_string()))
+        })
+        .await
     }
 
     async fn health(&self) -> promptlab_models::error::ModelResult<bool> {

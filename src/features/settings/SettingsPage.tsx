@@ -1,9 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ask } from "@tauri-apps/plugin-dialog";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Button, Card, PageHeader, Select, Badge } from "@/shared/components";
+import { Button, Card, PageHeader, RefreshButton, Select, Badge } from "@/shared/components";
 import type { AppSettings } from "@/app/store/types";
 import { toAppError } from "@/shared/errors";
 import { clearAllAppData } from "@/shared/ipc/app";
@@ -13,8 +13,16 @@ import { JudgeRoleWeightsPanel } from "./JudgeRoleWeightsPanel";
 import { ProxySettingsPanel } from "./ProxySettingsPanel";
 import { RuntimeInferencePanel } from "./RuntimeInferencePanel";
 import { TroubleshootingPanel } from "./TroubleshootingPanel";
+import { UsagePanel } from "./UsagePanel";
 
-type SettingsTab = "general" | "ai" | "network" | "storage" | "diagnostics" | "about";
+type SettingsTab =
+  | "general"
+  | "ai"
+  | "usage"
+  | "network"
+  | "storage"
+  | "diagnostics"
+  | "about";
 
 const SETTINGS_SECTIONS: {
   id: SettingsTab;
@@ -23,6 +31,7 @@ const SETTINGS_SECTIONS: {
 }[] = [
   { id: "general", label: "General", hint: "Theme and privacy" },
   { id: "ai", label: "AI Runtime", hint: "Model and inference" },
+  { id: "usage", label: "Usage", hint: "Token consumption" },
   { id: "network", label: "Network", hint: "Proxy and connectivity" },
   { id: "storage", label: "Data & storage", hint: "Paths and reset" },
   { id: "diagnostics", label: "Diagnostics", hint: "Logs and health" },
@@ -117,18 +126,37 @@ function ClearAllDataCard({ backendConnected }: { backendConnected: boolean }) {
 }
 
 export function SettingsPage() {
-  const { settings, dispatch, backendVersion, backendConnected } = useAppStore();
+  const { settings, dispatch, backendVersion, backendConnected, loading, error, actions } =
+    useAppStore();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  const [usageRefreshKey, setUsageRefreshKey] = useState(0);
+  const [usageLoading, setUsageLoading] = useState(false);
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     dispatch({ type: "UPDATE_SETTING", key, value });
   };
+
+  const handleUsageLoadingChange = useCallback((next: boolean) => {
+    setUsageLoading(next);
+  }, []);
+
+  async function handleRefresh() {
+    setUsageRefreshKey((key) => key + 1);
+    await actions.refresh();
+  }
 
   return (
     <div className="page settings-page">
       <PageHeader
         title="Settings"
         description="Preferences, workspace paths, and diagnostics for this device"
+        actions={
+          <RefreshButton
+            loading={loading || usageLoading}
+            error={error}
+            onClick={() => void handleRefresh()}
+          />
+        }
       />
 
       <div className="settings-layout">
@@ -204,8 +232,8 @@ export function SettingsPage() {
               </SettingsSection>
 
               <SettingsSection
-                title="Judge role weights"
-                description="Relative influence of each Yazg role when aggregating scan confidence."
+                title="Judge worker weights"
+                description="Relative influence of JudgeWorker, ClassifierWorker, and AttackerWorker when aggregating scan confidence."
               >
                 <JudgeRoleWeightsPanel disabled={!backendConnected} />
               </SettingsSection>
@@ -215,6 +243,21 @@ export function SettingsPage() {
                 description="Where the app invokes your AI Runtime model — verification, planning, execution, results, and Attack Factory."
               >
                 <RuntimeInferencePanel />
+              </SettingsSection>
+            </div>
+          )}
+
+          {activeTab === "usage" && (
+            <div className="settings-tab-panel settings-sections">
+              <SettingsSection
+                title="Token usage"
+                description="Lifetime input and output tokens consumed by AI Runtime, broken down by Yazg agent and sub-agent."
+              >
+                <UsagePanel
+                  backendConnected={backendConnected}
+                  refreshKey={usageRefreshKey}
+                  onLoadingChange={handleUsageLoadingChange}
+                />
               </SettingsSection>
             </div>
           )}

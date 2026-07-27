@@ -221,6 +221,30 @@ export function getRuntimeTrafficStats(
   });
 }
 
+export type AgentTokenUsageRow = {
+  agentId: string;
+  label: string;
+  note?: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  calls: number;
+};
+
+export type TokenUsageSnapshot = {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCalls: number;
+  agents: AgentTokenUsageRow[];
+};
+
+export function getRuntimeTokenUsage(): Promise<TokenUsageSnapshot> {
+  return invokeCommand<TokenUsageSnapshot>("runtime_token_usage");
+}
+
+export function resetRuntimeTokenUsage(): Promise<TokenUsageSnapshot> {
+  return invokeCommand<TokenUsageSnapshot>("runtime_token_usage_reset");
+}
+
 export function runRuntimeBenchmark(): Promise<RuntimeBenchmarkResult> {
   return invokeCommand<RuntimeBenchmarkResult>("runtime_benchmark");
 }

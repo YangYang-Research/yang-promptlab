@@ -13,6 +13,7 @@ pub mod manager;
 pub mod prompts;
 pub mod provider;
 pub mod runtime;
+pub mod token_usage;
 pub mod traffic;
 pub mod types;
 
@@ -30,6 +31,13 @@ pub use manager::InferenceRuntimeManager;
 pub use prompts::{PromptBuilder, PromptComposer, PromptContext, PromptId, PromptRegistry, PromptTemplate};
 pub use provider::{LlamaCppAdapter, ProviderAdapter, RemoteAdapterSettings, RemoteProviderAdapter};
 pub use runtime::{LocalRuntimeAdapterBridge, RuntimeAdapter};
+pub use token_usage::{
+    AgentTokenUsage, AgentTokenUsageRow, TokenUsageSnapshot, estimate_tokens,
+    export_map as token_usage_export_map, humanize_agent_id, record_completion,
+    replace_all as token_usage_replace_all, reset as token_usage_reset,
+    migrate_unattributed as token_usage_migrate_unattributed, snapshot as token_usage_snapshot,
+    take_dirty_snapshot as token_usage_take_dirty, with_agent, RUNTIME_SYSTEM_AGENT,
+};
 pub use traffic::{
     TrafficBucket, TrafficDirection, TrafficEvent, TrafficSnapshot,
     drain_pending as traffic_drain_pending, ensure_started as traffic_ensure_started,

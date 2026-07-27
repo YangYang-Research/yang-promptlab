@@ -65,6 +65,14 @@ impl ProviderAdapter for LlamaCppAdapter {
         match response {
             Ok(response) => {
                 crate::traffic::record_received();
+                let input = crate::token_usage::estimate_tokens(system.unwrap_or(""))
+                    .saturating_add(crate::token_usage::estimate_tokens(prompt));
+                let output = if response.tokens_predicted > 0 {
+                    response.tokens_predicted as u64
+                } else {
+                    crate::token_usage::estimate_tokens(&response.text)
+                };
+                crate::token_usage::record_completion(input, output);
                 Ok(response.text)
             }
             Err(err) => Err(err.into()),
