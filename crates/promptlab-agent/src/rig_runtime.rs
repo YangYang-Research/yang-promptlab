@@ -1,7 +1,7 @@
-//! Rig-based Yazg supervisor runtime — manager–worker (agents as tools).
+//! Yazg supervisor runtime (implemented with the Rig library).
 //!
 //! Per Rig Book *Multi-agent systems*:
-//! specialists are named/described Rig Agents attached with `.tool(worker)`.
+//! specialists are named/described worker agents attached with `.tool(worker)`.
 
 use std::sync::Arc;
 
@@ -27,7 +27,7 @@ use crate::types::{AgentEvent, AgentId};
 
 const DEFAULT_MAX_TURNS: usize = 6;
 
-/// Owned context for a Rig Yazg run (chat / tool-calling / wizard).
+/// Owned context for a Yazg run (chat / tool-calling / wizard).
 pub struct YazgRigRequest {
     pub goal: String,
     pub memory: Option<Arc<dyn AgentMemoryStore>>,
@@ -84,12 +84,12 @@ impl YazgRigRequest {
     }
 }
 
-/// Run Yazg via Rig manager–worker agents and return artifacts + raw PromptResponse JSON.
+/// Run Yazg manager–worker loop and return artifacts + raw PromptResponse JSON.
 pub async fn run_yazg_rig(request: YazgRigRequest) -> AgentResult<(YazgArtifacts, serde_json::Value)> {
     let mut artifacts = YazgArtifacts::default();
     artifacts.events.push(AgentEvent::started(
         AgentId::Yazg,
-        "Rig manager–worker loop started",
+        "Yazg manager–worker loop started",
     ));
 
     remember_stm(
@@ -189,21 +189,48 @@ pub async fn run_yazg_rig(request: YazgRigRequest) -> AgentResult<(YazgArtifacts
         ))
         .build();
 
-    info!(goal = %truncate(&request.goal, 120), "Yazg Rig manager–worker handle");
+    info!(goal = %truncate(&request.goal, 120), "Yazg manager–worker handle");
 
-    let prompt_response = agent
+    let prompt_result = agent
         .prompt(request.goal.trim())
         .max_turns(request.max_turns)
         .extended_details()
-        .await
-        .map_err(|err| {
-            warn!(error = %err, "Yazg Rig prompt failed");
-            AgentError::Supervisor(format!("Rig agent failed: {err}"))
-        })?;
+        .await;
 
-    let raw_output = serde_json::to_value(&prompt_response).unwrap_or_else(|_| {
-        serde_json::json!({ "output": prompt_response.output.clone() })
-    });
+    let (reply_text, raw_output, usage_note) = match prompt_result {
+        Ok(prompt_response) => {
+            let raw_output = serde_json::to_value(&prompt_response).unwrap_or_else(|_| {
+                serde_json::json!({ "output": prompt_response.output.clone() })
+            });
+            let usage_note = format!(
+                "Yazg usage: in={} out={} requests={}",
+                prompt_response.usage.input_tokens,
+                prompt_response.usage.output_tokens,
+                prompt_response.completion_calls.len()
+            );
+            (
+                prompt_response.output.trim().to_string(),
+                raw_output,
+                usage_note,
+            )
+        }
+        Err(err) => {
+            let msg = err.to_string();
+            // Nested worker turns can exhaust the manager budget after a successful
+            // specialist execute; salvage artifacts so wizard recovery can finish.
+            if msg.contains("MaxTurnsError") {
+                warn!(error = %err, "Yazg hit max turns; salvaging specialist artifacts");
+                (
+                    String::new(),
+                    serde_json::json!({ "error": "max_turns", "detail": msg }),
+                    format!("Yazg max-turns salvage: {msg}"),
+                )
+            } else {
+                warn!(error = %err, "Yazg agent loop failed");
+                return Err(AgentError::Supervisor(format!("Yazg agent loop failed: {err}")));
+            }
+        }
+    };
 
     let mut run_state = state.lock().await;
     artifacts.events.append(&mut run_state.artifacts.events);
@@ -221,15 +248,23 @@ pub async fn run_yazg_rig(request: YazgRigRequest) -> AgentResult<(YazgArtifacts
         .and_then(map_tool_to_action)
         .or(run_state.artifacts.last_action);
 
-    let reply = prompt_response.output.trim().to_string();
-    artifacts.final_reply = if reply.is_empty() {
+    artifacts.final_reply = if reply_text.is_empty() {
         if let Some(inventory) = artifacts.workspace_inventory.as_ref() {
             inventory.to_user_reply_for_goal(&request.goal)
+        } else if artifacts.summary.is_some()
+            || artifacts.plan.is_some()
+            || artifacts.analyze.is_some()
+            || artifacts.recommend.is_some()
+            || artifacts.generate_prompt.is_some()
+            || artifacts.judge.is_some()
+            || artifacts.created_project.is_some()
+        {
+            "Specialist finished; synthesizing UI reply.".into()
         } else {
             "Yazg finished without a reply.".into()
         }
     } else {
-        reply
+        reply_text
     };
 
     remember_stm(
@@ -255,17 +290,9 @@ pub async fn run_yazg_rig(request: YazgRigRequest) -> AgentResult<(YazgArtifacts
 
     artifacts.events.push(AgentEvent::completed(
         AgentId::Yazg,
-        "Rig manager–worker finished",
+        "Yazg manager–worker finished",
     ));
-    artifacts.events.push(AgentEvent::info(
-        AgentId::Yazg,
-        format!(
-            "Rig usage: in={} out={} requests={}",
-            prompt_response.usage.input_tokens,
-            prompt_response.usage.output_tokens,
-            prompt_response.completion_calls.len()
-        ),
-    ));
+    artifacts.events.push(AgentEvent::info(AgentId::Yazg, usage_note));
 
     Ok((artifacts, raw_output))
 }

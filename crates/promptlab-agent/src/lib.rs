@@ -1,8 +1,8 @@
-//! Yazg multi-agent orchestration (Rig manager–worker).
+//! Yazg multi-agent orchestration (manager–worker via Rig library).
 //!
-//! Hierarchy (Rig Book: workers are Agents attached with `.tool(worker)`):
+//! Hierarchy (workers are Agents attached with `.tool(worker)`):
 //! ```text
-//! Yazg (Manager — Rig Agent)
+//! Yazg (Manager)
 //! ├── list_workspace        — worker Agent → ListWorkspace tool
 //! ├── create_project        — worker Agent → CreateProject tool
 //! ├── analyze_endpoint      — worker Agent → AnalyzeEndpoint tool
@@ -14,9 +14,9 @@
 //! │   ├── JudgeWorker       — nested worker Agent
 //! │   ├── ClassifierWorker  — nested worker Agent
 //! │   └── AttackerWorker    — nested worker Agent
-//! ├── AgenticAttackExecutionAgent    — Rig Agent + host execute bridge
-//! ├── SequentialAttackExecutionAgent — Rig Agent + host execute bridge
-//! └── ReflectionAgent       — Rig Extractor (structured submit)
+//! ├── AgenticAttackExecutionAgent    — pick + host execute bridge
+//! ├── SequentialAttackExecutionAgent — pick + host execute bridge
+//! └── ReflectionAgent       — structured extractor
 //! ```
 
 pub mod agent_log;

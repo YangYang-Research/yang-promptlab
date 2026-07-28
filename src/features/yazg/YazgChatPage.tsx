@@ -315,7 +315,7 @@ export function YazgChatPage() {
                     <hr className="yazg-chat-bubble__divider" />
                     <details className="yazg-chat-thinking">
                       <summary className="yazg-chat-thinking__summary">
-                        Rig output
+                        Agent trace
                       </summary>
                       <pre className="yazg-chat-events__msg">
                         {formatRawOutput(msg.rawOutput)}

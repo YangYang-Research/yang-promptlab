@@ -218,13 +218,14 @@ pub struct ListWorkspaceRigTool {
 }
 
 impl Tool for ListWorkspaceRigTool {
-    const NAME: &'static str = "list_workspace";
+    /// Distinct from the worker agent name (`list_workspace`) to avoid LLM confusion.
+    const NAME: &'static str = "execute";
     type Error = YazgToolError;
     type Args = EmptyArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Worker execute tool: list PromptLab workspace inventory from the local database."
+        "Execute: list PromptLab workspace inventory from the local database."
             .into()
     }
 
@@ -245,14 +246,14 @@ impl Tool for ListWorkspaceRigTool {
         let observation = inventory.to_observation();
         mark_tool(
             &self.state,
-            Self::NAME,
+            "list_workspace",
             crate::artifacts::YazgActionKind::ListWorkspace,
         )
         .await;
         let mut guard = self.state.lock().await;
         guard.artifacts.events.push(AgentEvent::info(
             AgentId::Yazg,
-            "Acting: ListWorkspaceTool (Rig)",
+            "Acting: ListWorkspaceTool",
         ));
         guard.artifacts.events.push(AgentEvent::completed(
             AgentId::ListWorkspace,
@@ -275,13 +276,13 @@ pub struct CreateProjectRigTool {
 }
 
 impl Tool for CreateProjectRigTool {
-    const NAME: &'static str = "create_project";
+    const NAME: &'static str = "execute";
     type Error = YazgToolError;
     type Args = CreateProjectArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Worker execute tool: create a workspace project (requires name; optional description)."
+        "Execute: create a workspace project (requires name; optional description)."
             .into()
     }
 
@@ -322,7 +323,7 @@ impl Tool for CreateProjectRigTool {
         );
         mark_tool(
             &self.state,
-            Self::NAME,
+            "create_project",
             crate::artifacts::YazgActionKind::CreateProject,
         )
         .await;
@@ -347,13 +348,13 @@ pub struct AnalyzeEndpointRigTool {
 }
 
 impl Tool for AnalyzeEndpointRigTool {
-    const NAME: &'static str = "analyze_endpoint";
+    const NAME: &'static str = "execute";
     type Error = YazgToolError;
     type Args = ThoughtArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Worker execute tool: probe/classify the bound scan target (AnalyzeEndpointAgent)."
+        "Execute: probe/classify the bound scan target (AnalyzeEndpointAgent)."
             .into()
     }
 
@@ -369,7 +370,7 @@ impl Tool for AnalyzeEndpointRigTool {
             let mut guard = self.state.lock().await;
             guard.artifacts.events.push(AgentEvent::info(
                 AgentId::Yazg,
-                "Acting: AnalyzeEndpointAgent (Rig)",
+                "Acting: AnalyzeEndpointAgent",
             ));
         }
         let outcome = if let Some(http) = self.ctx.capability_probe.as_ref() {
@@ -380,7 +381,7 @@ impl Tool for AnalyzeEndpointRigTool {
         };
         mark_tool(
             &self.state,
-            Self::NAME,
+            "analyze_endpoint",
             crate::artifacts::YazgActionKind::AnalyzeEndpoint,
         )
         .await;
@@ -417,13 +418,13 @@ pub struct AttackPlanRigTool {
 }
 
 impl Tool for AttackPlanRigTool {
-    const NAME: &'static str = "attack_plan";
+    const NAME: &'static str = "execute";
     type Error = YazgToolError;
     type Args = ThoughtArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Worker execute tool: build an attack plan for the verified bound target."
+        "Execute: build an attack plan for the verified bound target."
             .into()
     }
 
@@ -440,11 +441,11 @@ impl Tool for AttackPlanRigTool {
             guard
                 .artifacts
                 .events
-                .push(AgentEvent::info(AgentId::Yazg, "Acting: AttackPlanAgent (Rig)"));
+                .push(AgentEvent::info(AgentId::Yazg, "Acting: AttackPlanAgent"));
         }
         mark_tool(
             &self.state,
-            Self::NAME,
+            "attack_plan",
             crate::artifacts::YazgActionKind::AttackPlan,
         )
         .await;
@@ -481,13 +482,13 @@ pub struct GeneratePromptRigTool {
 }
 
 impl Tool for GeneratePromptRigTool {
-    const NAME: &'static str = "generate_prompt";
+    const NAME: &'static str = "execute";
     type Error = YazgToolError;
     type Args = ThoughtArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Worker execute tool: invent a novel Attack Factory technique probe."
+        "Execute: invent a novel Attack Factory technique probe."
             .into()
     }
 
@@ -503,12 +504,12 @@ impl Tool for GeneratePromptRigTool {
             let mut guard = self.state.lock().await;
             guard.artifacts.events.push(AgentEvent::info(
                 AgentId::Yazg,
-                "Acting: GeneratePromptAgent (Rig)",
+                "Acting: GeneratePromptAgent",
             ));
         }
         mark_tool(
             &self.state,
-            Self::NAME,
+            "generate_prompt",
             crate::artifacts::YazgActionKind::GeneratePrompt,
         )
         .await;
@@ -544,13 +545,13 @@ pub struct RecommendRigTool {
 }
 
 impl Tool for RecommendRigTool {
-    const NAME: &'static str = "recommend";
+    const NAME: &'static str = "execute";
     type Error = YazgToolError;
     type Args = ThoughtArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Worker execute tool: produce post-scan remediation recommendations."
+        "Execute: produce post-scan remediation recommendations."
             .into()
     }
 
@@ -567,11 +568,11 @@ impl Tool for RecommendRigTool {
             guard
                 .artifacts
                 .events
-                .push(AgentEvent::info(AgentId::Yazg, "Acting: RecommendAgent (Rig)"));
+                .push(AgentEvent::info(AgentId::Yazg, "Acting: RecommendAgent"));
         }
         mark_tool(
             &self.state,
-            Self::NAME,
+            "recommend",
             crate::artifacts::YazgActionKind::Recommend,
         )
         .await;
@@ -606,13 +607,13 @@ pub struct SummaryRigTool {
 }
 
 impl Tool for SummaryRigTool {
-    const NAME: &'static str = "summary";
+    const NAME: &'static str = "execute";
     type Error = YazgToolError;
     type Args = ThoughtArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Worker execute tool: project or scan posture summary + highlights."
+        "Execute: project or scan posture summary + highlights from bound request data."
             .into()
     }
 
@@ -629,9 +630,9 @@ impl Tool for SummaryRigTool {
             guard
                 .artifacts
                 .events
-                .push(AgentEvent::info(AgentId::Yazg, "Acting: SummaryAgent (Rig)"));
+                .push(AgentEvent::info(AgentId::Yazg, "Acting: SummaryAgent"));
         }
-        mark_tool(&self.state, Self::NAME, crate::artifacts::YazgActionKind::Summary).await;
+        mark_tool(&self.state, "summary", crate::artifacts::YazgActionKind::Summary).await;
         match SummaryAgent::run(summary_request, self.llm.as_ref()).await {
             Ok(out) => {
                 let msg = format!(
@@ -664,13 +665,13 @@ pub struct JudgeRigTool {
 }
 
 impl Tool for JudgeRigTool {
-    const NAME: &'static str = "judge";
+    const NAME: &'static str = "execute";
     type Error = YazgToolError;
     type Args = ThoughtArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Worker execute tool: run JudgeCoordinator consensus judging for the bound probe."
+        "Execute: run JudgeCoordinator consensus judging for the bound probe."
             .into()
     }
 
@@ -690,10 +691,10 @@ impl Tool for JudgeRigTool {
             let mut guard = self.state.lock().await;
             guard.artifacts.events.push(AgentEvent::info(
                 AgentId::Yazg,
-                "Acting: JudgeCoordinatorAgent (Rig AgentBuilder)",
+                "Acting: JudgeCoordinatorAgent",
             ));
         }
-        mark_tool(&self.state, Self::NAME, crate::artifacts::YazgActionKind::Judge).await;
+        mark_tool(&self.state, "judge", crate::artifacts::YazgActionKind::Judge).await;
         match JudgeCoordinatorAgent::run_with_orchestrator(
             judge_request,
             engine.clone(),

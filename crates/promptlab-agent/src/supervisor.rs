@@ -17,7 +17,9 @@ use crate::attack_execution::{
 use crate::attack_plan::{AttackPlanAgent, AttackPlanAgentOutcome};
 use crate::create_project::{CreateProjectTools, CreatedProject};
 use crate::error::AgentResult;
-use crate::generate_prompt::{GeneratePromptAgentOutcome, TechniquePromptContext};
+use crate::generate_prompt::{
+    GeneratePromptAgent, GeneratePromptAgentOutcome, TechniquePromptContext,
+};
 use crate::judge_coordinator::JudgeCoordinatorAgentOutcome;
 use crate::list_workspace::WorkspaceTools;
 use crate::memory::{AgentMemoryStore, MemoryContext};
@@ -248,13 +250,13 @@ impl YazgSupervisor {
 
         warn!(
             endpoint = %profile.full_url(),
-            "Yazg Rig missed AnalyzeEndpointAgent during Verification; forcing classify_probe"
+            "Yazg missed AnalyzeEndpointAgent during Verification; forcing classify_probe"
         );
         let outcome =
             AnalyzeEndpointAgent::classify_probe(profile, http, llms.analyze.as_ref()).await?;
         let mut events = vec![AgentEvent::info(
             AgentId::Yazg,
-            "Rig recovery: forced AnalyzeEndpointAgent after misrouted Verification turn",
+            "Yazg recovery: forced AnalyzeEndpointAgent after misrouted Verification turn",
         )];
         events.extend(outcome.events.clone());
         Ok(YazgDelegation::AnalyzedEndpoint {
@@ -298,12 +300,12 @@ impl YazgSupervisor {
 
         warn!(
             endpoint = %profile.full_url(),
-            "Yazg Rig missed AttackPlanAgent during Attack Plan; forcing AttackPlanAgent::run"
+            "Yazg missed AttackPlanAgent during Attack Plan; forcing AttackPlanAgent::run"
         );
         let outcome = AttackPlanAgent::run(profile, llms.plan.as_ref()).await?;
         let mut events = vec![AgentEvent::info(
             AgentId::Yazg,
-            "Rig recovery: forced AttackPlanAgent after misrouted Attack Plan turn",
+            "Yazg recovery: forced AttackPlanAgent after misrouted Attack Plan turn",
         )];
         events.extend(outcome.events.clone());
         let plan_summary = format_plan_summary(&outcome.plan);
@@ -329,8 +331,10 @@ impl YazgSupervisor {
     ) -> AgentResult<YazgDelegation> {
         let message = format!(
             "Attack Factory: invent an improved adversarial factory prompt for technique \
-             `{}` (id={}, category={}). No scan target is required — technique context is enough. \
-             Call generate_prompt, then finish with a short summary for the UI.",
+             `{}` (id={}, category={}). No scan target is required — technique context is enough.\n\
+             You MUST call action \"generate_prompt\" exactly once in this turn.\n\
+             After GeneratePromptAgent succeeds, finish with a short UI summary.\n\
+             Do not invent a probe yourself — only use the worker result.",
             technique.name, technique.id, technique.category_id
         );
         let goal = Self::build_goal(&message, SupervisorIntent::GeneratePrompt);
@@ -338,8 +342,68 @@ impl YazgSupervisor {
         let request = YazgRigRequest::new(goal, llms.clone())
             .with_memory(memory, memory_ctx)
             .with_specialist(specialist)
-            .with_max_turns(4);
-        Self::react_rig(request).await
+            .with_max_turns(6);
+
+        let delegation = match Self::react_rig(request).await {
+            Ok(d) => d,
+            Err(err) => {
+                warn!(
+                    technique = %technique.id,
+                    error = %err,
+                    "Yazg generate_prompt missed specialist; forcing GeneratePromptAgent::run"
+                );
+                let outcome = GeneratePromptAgent::run(technique, llms.prompt.as_ref()).await?;
+                let mut events = vec![AgentEvent::info(
+                    AgentId::Yazg,
+                    format!("Yazg recovery after error: {err}"),
+                )];
+                events.extend(outcome.events.clone());
+                return Ok(YazgDelegation::GeneratedPrompt {
+                    turn: YazgTurn {
+                        reply: format!(
+                            "Factory prompt generated for {} ({} chars).",
+                            outcome.technique_id,
+                            outcome.content.chars().count()
+                        ),
+                        intent: SupervisorIntent::GeneratePrompt,
+                        events,
+                        verified: None,
+                        plan_summary: None,
+                        raw_output: None,
+                    },
+                    outcome,
+                });
+            }
+        };
+        if matches!(delegation, YazgDelegation::GeneratedPrompt { .. }) {
+            return Ok(delegation);
+        }
+
+        warn!(
+            technique = %technique.id,
+            "Yazg missed GeneratePromptAgent; forcing GeneratePromptAgent::run"
+        );
+        let outcome = GeneratePromptAgent::run(technique, llms.prompt.as_ref()).await?;
+        let mut events = vec![AgentEvent::info(
+            AgentId::Yazg,
+            "Yazg recovery: forced GeneratePromptAgent after misrouted factory turn",
+        )];
+        events.extend(outcome.events.clone());
+        Ok(YazgDelegation::GeneratedPrompt {
+            turn: YazgTurn {
+                reply: format!(
+                    "Factory prompt generated for {} ({} chars).",
+                    outcome.technique_id,
+                    outcome.content.chars().count()
+                ),
+                intent: SupervisorIntent::GeneratePrompt,
+                events,
+                verified: None,
+                plan_summary: None,
+                raw_output: None,
+            },
+            outcome,
+        })
     }
 
     /// Post-scan recommendations.
@@ -371,12 +435,12 @@ impl YazgSupervisor {
 
         warn!(
             findings = results.total_findings,
-            "Yazg Rig missed RecommendAgent; forcing RecommendAgent::run"
+            "Yazg missed RecommendAgent; forcing RecommendAgent::run"
         );
         let outcome = RecommendAgent::run(results, llms.recommend.as_ref()).await?;
         let mut events = vec![AgentEvent::info(
             AgentId::Yazg,
-            "Rig recovery: forced RecommendAgent after misrouted recommendations turn",
+            "Yazg recovery: forced RecommendAgent after misrouted recommendations turn",
         )];
         events.extend(outcome.events.clone());
         Ok(YazgDelegation::Recommended {
@@ -425,20 +489,50 @@ impl YazgSupervisor {
         let request = YazgRigRequest::new(goal, llms.clone())
             .with_memory(memory, memory_ctx)
             .with_specialist(specialist)
-            .with_max_turns(4);
-        let delegation = Self::react_rig(request).await?;
+            .with_max_turns(6);
+        let delegation = match Self::react_rig(request).await {
+            Ok(d) => d,
+            Err(err) => {
+                warn!(
+                    kind = %summary_request.kind_label(),
+                    error = %err,
+                    "Yazg summary missed specialist; forcing SummaryAgent::run"
+                );
+                let outcome = SummaryAgent::run(summary_request, llms.summary.as_ref()).await?;
+                let mut events = vec![AgentEvent::info(
+                    AgentId::Yazg,
+                    format!("Yazg recovery after error: {err}"),
+                )];
+                events.extend(outcome.events.clone());
+                return Ok(YazgDelegation::Summarized {
+                    turn: YazgTurn {
+                        reply: format!(
+                            "{} summary ready ({} highlights).",
+                            outcome.kind,
+                            outcome.bundle.highlights.len()
+                        ),
+                        intent: SupervisorIntent::Summary,
+                        events,
+                        verified: None,
+                        plan_summary: None,
+                        raw_output: None,
+                    },
+                    outcome,
+                });
+            }
+        };
         if matches!(delegation, YazgDelegation::Summarized { .. }) {
             return Ok(delegation);
         }
 
         warn!(
             kind = %summary_request.kind_label(),
-            "Yazg Rig missed SummaryAgent; forcing SummaryAgent::run"
+            "Yazg missed SummaryAgent; forcing SummaryAgent::run"
         );
         let outcome = SummaryAgent::run(summary_request, llms.summary.as_ref()).await?;
         let mut events = vec![AgentEvent::info(
             AgentId::Yazg,
-            "Rig recovery: forced SummaryAgent after misrouted summary turn",
+            "Yazg recovery: forced SummaryAgent after misrouted summary turn",
         )];
         events.extend(outcome.events.clone());
         Ok(YazgDelegation::Summarized {
@@ -568,7 +662,7 @@ impl YazgSupervisor {
             )
         } else {
             format!(
-                "AI Runtime is not ready, so I cannot run the Rig agent loop.\n\n{target_line}"
+                "AI Runtime is not ready, so I cannot run the Yazg agent loop.\n\n{target_line}"
             )
         };
 

@@ -8,7 +8,7 @@ use rig::completion::{
     AssistantContent, CompletionError, CompletionModel, CompletionRequest, CompletionResponse,
     GetTokenUsage, Message, Usage,
 };
-use rig::message::{ToolCall, ToolFunction, UserContent};
+use rig::message::{ToolCall, ToolChoice, ToolFunction, UserContent};
 use rig::streaming::StreamingCompletionResponse;
 use serde::{Deserialize, Serialize};
 
@@ -52,7 +52,25 @@ impl CompletionModel for YazgRigModel {
         &self,
         request: CompletionRequest,
     ) -> Result<CompletionResponse<Self::Response>, CompletionError> {
-        let prompt = flatten_completion_request(&request);
+        let mut prompt = flatten_completion_request(&request);
+        // PlannerLlm has no native tool_choice; enforce via prompt for Required/Specific.
+        match request.tool_choice.as_ref() {
+            Some(ToolChoice::Required) => {
+                prompt.push_str(
+                    "\n\nSystem constraint: You MUST call exactly one tool now. \
+                     Do not answer with plain text. Do not claim a tool already ran.",
+                );
+            }
+            Some(ToolChoice::Specific { function_names }) if !function_names.is_empty() => {
+                prompt.push_str(&format!(
+                    "\n\nSystem constraint: You MUST call tool `{}` now. \
+                     Do not answer with plain text. Do not claim a tool already ran.",
+                    function_names.join("` or `")
+                ));
+            }
+            _ => {}
+        }
+
         let tools = request
             .tools
             .iter()

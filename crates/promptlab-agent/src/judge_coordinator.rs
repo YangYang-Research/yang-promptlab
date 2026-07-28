@@ -185,7 +185,7 @@ fn build_role_worker_agent(
         .build()
 }
 
-/// Coordinates JudgeWorker / ClassifierWorker / AttackerWorker under Yazg via Rig Agent.
+/// Coordinates JudgeWorker / ClassifierWorker / AttackerWorker under Yazg.
 pub struct JudgeCoordinatorAgent;
 
 impl JudgeCoordinatorAgent {
@@ -205,7 +205,7 @@ impl JudgeCoordinatorAgent {
         Self::run_workers_direct(request, engine, events).await
     }
 
-    /// Rig manager–worker: role workers are Agents attached with `.tool(worker)`.
+    /// Manager–worker: role workers are Agents attached with `.tool(worker)`.
     pub async fn run_with_orchestrator(
         request: &JudgeRequest,
         engine: Arc<JudgeEngine>,
@@ -214,7 +214,7 @@ impl JudgeCoordinatorAgent {
         let mut events = vec![AgentEvent::started(
             AgentId::JudgeCoordinator,
             format!(
-                "Coordinating judge worker agents via Rig for probe {} ({})",
+                "Coordinating judge worker agents for probe {} ({})",
                 request.probe_id, request.attack_category
             ),
         )];
@@ -222,7 +222,7 @@ impl JudgeCoordinatorAgent {
         info!(
             probe_id = %request.probe_id,
             category = %request.attack_category,
-            "JudgeCoordinatorAgent started (Rig manager–worker)"
+            "JudgeCoordinatorAgent started"
         );
 
         let configured = engine.role_pool().configured_roles();

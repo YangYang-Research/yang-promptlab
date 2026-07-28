@@ -27,7 +27,7 @@ pub enum YazgActionKind {
     Finish,
 }
 
-/// Typed outputs collected during a Yazg Rig (or legacy) turn.
+/// Typed outputs collected during a Yazg turn.
 #[derive(Debug, Clone, Default)]
 pub struct YazgArtifacts {
     pub events: Vec<AgentEvent>,
