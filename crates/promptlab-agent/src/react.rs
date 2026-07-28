@@ -25,6 +25,7 @@ use crate::memory::{
 use crate::recommend::{RecommendAgent, RecommendAgentOutcome};
 use crate::summary::{SummaryAgent, SummaryAgentOutcome, SummaryRequest};
 use crate::types::{AgentEvent, AgentId};
+use crate::yazg_tools::yazg_react_tools;
 
 const DEFAULT_MAX_STEPS: usize = 6;
 /// Invalid / non-JSON supervisor replies do not consume action steps; keep asking until valid.
@@ -228,36 +229,18 @@ pub async fn run_react(
     )
     .await;
 
-    // DB inventory / finding-count questions must not go through analyze_endpoint.
-    // Small models misroute "how many vulns in project X" → analyze_endpoint and loop.
-    if looks_like_workspace_inventory_goal(&request.goal) && request.workspace_tools.is_some() {
-        info!("Yazg ReAct fast-path: list_workspace for inventory/findings question");
-        artifacts.events.push(AgentEvent::info(
-            AgentId::Yazg,
-            "Fast-path: list_workspace (findings/inventory question)",
-        ));
-        return finish_via_list_workspace(&request, &mut artifacts).await;
-    }
-
     let memory_block =
         load_memory_prompt_block(request.memory, &request.memory_ctx, AgentId::Yazg, None).await;
 
+    // LangChain-style: bind tool specs (name + description + schema); model picks via tool_calls.
+    let tools = yazg_react_tools();
     let mut transcript = String::new();
     transcript.push_str(
-        "You are Yazg, the in-app AI Assistant.\n\
-         Workflow each turn:\n\
-         1) Read and analyze the user prompt.\n\
-         2) Use short-term / long-term memory for facts already known about this workspace.\n\
-         3) Call a specialist tool only when needed for fresh work \
-         (analyze_endpoint, attack_plan, generate_prompt, recommend, summary, judge, \
-         create_project, list_workspace).\n\
-         4) When you have enough to answer, finish with a concise reply.\n\
-         Do not invent tool results. Prefer finish for general app questions.\n\
-         For create_project: include JSON fields name (required) and optional description; \
-         do not ask for a scan target — projects do not need a target.\n\
-         For questions about existing projects/targets/scans/findings/vulnerabilities \
-         (counts, inventory, \"how many\", \"số lỗ hổng\"), call list_workspace — \
-         NEVER analyze_endpoint. analyze_endpoint only verifies a live bound scan target.\n\n",
+        "You are Yazg, the in-app AI Assistant for PromptLab.\n\
+         Tools are bound on this call — read each tool's description and choose the \
+         best tool (or finish) for the user prompt. Do not invent tool results.\n\
+         Prefer the smallest useful tool. After an Observation, either call another \
+         tool or finish with a clear reply.\n\n",
     );
     transcript.push_str(&format!("User prompt:\n{}\n\n", request.goal.trim()));
     if !memory_block.is_empty() {
@@ -272,9 +255,7 @@ pub async fn run_react(
         request.judge_request.is_some() && request.judge_engine.is_some(),
     ));
     transcript.push_str(
-        "\nBegin ReAct. Respond with one JSON step (thought + action).\n\
-         Reply with a single JSON object only — no markdown fences, no prose outside JSON.\n\
-         Example: {\"thought\":\"Plan attacks for the verified target\",\"action\":\"attack_plan\"}\n",
+        "\nBegin. Select one bound tool (or finish) based on tool descriptions and runtime context.\n",
     );
 
     let mut step = 0usize;
@@ -287,17 +268,25 @@ pub async fn run_react(
             format!("ReAct step {display_step}/{max}", max = request.max_steps),
         ));
 
-        let raw = match llms.supervisor.complete(&transcript).await {
-            Ok(raw) => {
+        let completion = match llms.supervisor.complete_with_tools(&transcript, &tools).await {
+            Ok(completion) => {
+                let preview = if let Some(call) = completion.primary_tool() {
+                    format!("tool_call:{} args={}", call.name, call.arguments)
+                } else {
+                    completion
+                        .content
+                        .clone()
+                        .unwrap_or_else(|| "(empty)".into())
+                };
                 log_llm_call(
                     AgentId::Yazg,
                     "supervisor",
                     transcript.len(),
-                    &raw,
+                    &preview,
                     true,
                     request.log_ctx(),
                 );
-                raw
+                completion
             }
             Err(err) => {
                 log_llm_call(
@@ -314,10 +303,14 @@ pub async fn run_react(
             }
         };
 
-        let parsed = match parse_react_step(&raw) {
+        let parsed = match step_from_completion(&completion) {
             Ok(parsed) => parsed,
             Err(err) => {
                 parse_failures = parse_failures.saturating_add(1);
+                let raw = completion
+                    .content
+                    .clone()
+                    .unwrap_or_else(|| format!("{:?}", completion.tool_calls));
                 warn!(
                     error = %err,
                     parse_failures,
@@ -333,21 +326,19 @@ pub async fn run_react(
                 artifacts.events.push(AgentEvent::info(
                     AgentId::Yazg,
                     format!(
-                        "Invalid ReAct JSON ({parse_failures}/{MAX_PARSE_FAILURES}): {err} — retrying"
+                        "Invalid ReAct step ({parse_failures}/{MAX_PARSE_FAILURES}): {err} — retrying"
                     ),
                 ));
                 if parse_failures >= MAX_PARSE_FAILURES {
                     return Err(AgentError::Supervisor(format!(
-                        "ReAct response did not contain a valid JSON object after {parse_failures} attempts: {err}"
+                        "ReAct response did not contain a valid tool call or JSON after {parse_failures} attempts: {err}"
                     )));
                 }
                 transcript.push_str(&format!(
                     "\nObservation: INVALID supervisor response ({err}).\n\
                      Raw preview: {}\n\
-                     Respond again with ONE JSON object only, no markdown, no extra text.\n\
-                     Required shape: {{\"thought\":\"...\",\"action\":\"analyze_endpoint|attack_plan|generate_prompt|recommend|summary|judge|create_project|list_workspace|finish\"}}\n\
-                     For attack planning use action \"attack_plan\".\n\
-                     For workspace/DB inventory use action \"list_workspace\".\n",
+                     Call exactly one bound tool (or finish). If falling back to text, \
+                     reply with ONE JSON object only.\n",
                     truncate(&raw, 240)
                 ));
                 continue;
@@ -913,6 +904,48 @@ fn parse_react_step(raw: &str) -> Result<ReactStepJson, String> {
         "ReAct response did not contain a JSON object".to_string()
     })?;
     serde_json::from_str(json_slice).map_err(|err| format!("invalid ReAct JSON: {err}"))
+}
+
+/// Prefer native `tool_calls` (LangChain-style); fall back to JSON-in-text ReAct.
+fn step_from_completion(
+    completion: &promptlab_planner::LlmCompletion,
+) -> Result<ReactStepJson, String> {
+    if let Some(call) = completion.primary_tool() {
+        let thought = call
+            .arguments
+            .get("thought")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let reply = call
+            .arguments
+            .get("reply")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let name = call
+            .arguments
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let description = call
+            .arguments
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        return Ok(ReactStepJson {
+            thought,
+            action: call.name.clone(),
+            reply,
+            name,
+            project_name: None,
+            description,
+        });
+    }
+
+    let raw = completion
+        .content
+        .as_deref()
+        .ok_or_else(|| "model returned neither tool_calls nor text content".to_string())?;
+    parse_react_step(raw)
 }
 
 /// Strip ``` / ```json wrappers so models that wrap JSON still parse.
@@ -1530,18 +1563,27 @@ mod tests {
     }
 
     #[test]
-    fn detects_finding_count_questions_as_workspace_inventory() {
-        assert!(looks_like_workspace_inventory_goal(
-            "cho tôi số lỗ hổng của project AI"
-        ));
-        assert!(looks_like_workspace_inventory_goal(
-            "How many findings in project AI?"
-        ));
-        assert!(looks_like_workspace_inventory_goal(
-            "list everything in my workspace"
-        ));
-        assert!(!looks_like_workspace_inventory_goal(
-            "Scan wizard Verification / endpoint analysis: call analyze_endpoint"
-        ));
+    fn step_from_native_tool_call() {
+        let completion = promptlab_planner::LlmCompletion {
+            content: None,
+            tool_calls: vec![promptlab_planner::ToolCall {
+                id: "1".into(),
+                name: "list_workspace".into(),
+                arguments: serde_json::json!({"thought": "Need inventory"}),
+            }],
+        };
+        let step = step_from_completion(&completion).expect("tool call");
+        assert_eq!(step.action, "list_workspace");
+        assert_eq!(step.thought.as_deref(), Some("Need inventory"));
+    }
+
+    #[test]
+    fn step_from_text_json_fallback() {
+        let completion = promptlab_planner::LlmCompletion::from_text(
+            r#"{"thought":"hi","action":"finish","reply":"Hello"}"#,
+        );
+        let step = step_from_completion(&completion).expect("json");
+        assert_eq!(step.action, "finish");
+        assert_eq!(step.reply.as_deref(), Some("Hello"));
     }
 }

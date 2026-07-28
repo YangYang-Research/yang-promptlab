@@ -11,8 +11,8 @@ use crate::manager::InferenceRuntimeManager;
 use crate::prompts::PromptComposer;
 use crate::provider::{ProviderAdapter, RemoteAdapterSettings};
 use crate::types::{
-    ChatRequest, ChatResponse, CompleteRequest, ConnectivityTestResult, EmbedRequest,
-    EmbedResponse, HealthStatus, JsonGenerateRequest, StreamChunk, StreamRequest,
+    ChatRequest, ChatResponse, CompleteRequest, CompletionOutcome, ConnectivityTestResult,
+    EmbedRequest, EmbedResponse, HealthStatus, JsonGenerateRequest, StreamChunk, StreamRequest,
 };
 
 /// Single public inference API — all AI features must use this gateway.
@@ -147,14 +147,39 @@ impl InferenceClient {
     }
 
     pub async fn complete(&self, request: CompleteRequest) -> InferenceResult<String> {
+        let outcome = self.complete_outcome(request).await?;
+        outcome.content.ok_or_else(|| {
+            InferenceError::Provider("model returned tool_calls without text content".into())
+        })
+    }
+
+    /// LangChain-style completion that may return native `tool_calls`.
+    pub async fn complete_outcome(
+        &self,
+        request: CompleteRequest,
+    ) -> InferenceResult<CompletionOutcome> {
         let max_tokens = request.max_tokens.unwrap_or(self.default_max_tokens);
         let temperature = request.temperature.unwrap_or(self.default_temperature);
+        if request.tools.is_empty() {
+            let content = self
+                .adapter
+                .complete(
+                    request.system.as_deref(),
+                    &request.prompt,
+                    max_tokens,
+                    temperature,
+                )
+                .await?;
+            return Ok(CompletionOutcome::from_text(content));
+        }
         self.adapter
-            .complete(
+            .complete_with_tools(
                 request.system.as_deref(),
                 &request.prompt,
                 max_tokens,
                 temperature,
+                &request.tools,
+                request.tool_choice.as_ref(),
             )
             .await
     }
@@ -220,6 +245,8 @@ impl<'a> GatewaySession<'a> {
                 system: None,
                 max_tokens: request.max_tokens,
                 temperature: request.temperature,
+                tools: Vec::new(),
+                tool_choice: None,
             })
             .await?;
         extract_json_value(&raw)
@@ -264,6 +291,8 @@ impl<'a> GatewaySession<'a> {
                 system: Some(crate::prompts::PromptRegistry::health_check_system().into()),
                 max_tokens: Some(32),
                 temperature: Some(0.0),
+                tools: Vec::new(),
+                tool_choice: None,
             })
             .await?;
         Ok(ConnectivityTestResult {
@@ -299,6 +328,8 @@ impl<'a> GatewaySession<'a> {
                 system: request.system,
                 max_tokens: request.max_tokens,
                 temperature: request.temperature,
+                tools: Vec::new(),
+                tool_choice: None,
             })
             .await?;
         Ok(vec![StreamChunk {
@@ -348,6 +379,8 @@ impl<'a> GatewayLlmBridge<'a> {
                 system: None,
                 max_tokens: Some(self.max_tokens),
                 temperature: Some(self.temperature),
+                tools: Vec::new(),
+                tool_choice: None,
             })
             .await
     }

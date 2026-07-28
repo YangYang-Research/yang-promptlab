@@ -123,6 +123,8 @@ impl InferenceRuntime for ClientRuntime {
                     system,
                     max_tokens: Some(max_tokens),
                     temperature: Some(temperature),
+                    tools: Vec::new(),
+                    tool_choice: None,
                 })
                 .await
                 .map(|text| promptlab_models::types::InferenceResponse {

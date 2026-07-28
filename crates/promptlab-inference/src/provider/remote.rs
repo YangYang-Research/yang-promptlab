@@ -9,7 +9,7 @@ use crate::capabilities::ModelCapabilities;
 use crate::config::InferenceProvider;
 use crate::error::{InferenceError, InferenceResult};
 use crate::prompts::PromptRegistry;
-use crate::types::ChatMessage;
+use crate::types::{ChatMessage, CompletionOutcome, ToolCall, ToolDefinition};
 
 pub struct RemoteProviderAdapter {
     settings: RemoteAdapterSettings,
@@ -107,6 +107,56 @@ impl ProviderAdapter for RemoteProviderAdapter {
         result
     }
 
+    async fn complete_with_tools(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        max_tokens: u32,
+        temperature: f32,
+        tools: &[ToolDefinition],
+        tool_choice: Option<&serde_json::Value>,
+    ) -> InferenceResult<CompletionOutcome> {
+        if tools.is_empty() {
+            let content = self
+                .complete(system, prompt, max_tokens, temperature)
+                .await?;
+            return Ok(CompletionOutcome::from_text(content));
+        }
+
+        // Native tools are supported on OpenAI-compatible providers (incl. NVIDIA).
+        match self.settings.provider {
+            InferenceProvider::Anthropic | InferenceProvider::Gemini | InferenceProvider::Bedrock => {
+                // Fall back to text until provider-specific tool formats are wired.
+                let content = self
+                    .complete(system, prompt, max_tokens, temperature)
+                    .await?;
+                Ok(CompletionOutcome::from_text(content))
+            }
+            _ => {
+                crate::traffic::record_sent();
+                let system = system.unwrap_or(PromptRegistry::inference_system());
+                let mut messages = Vec::new();
+                if !system.trim().is_empty() {
+                    messages.push(json!({"role": "system", "content": system}));
+                }
+                messages.push(json!({"role": "user", "content": prompt}));
+                let result = self
+                    .post_openai_compatible_chat(
+                        messages,
+                        max_tokens,
+                        temperature,
+                        tools,
+                        tool_choice,
+                    )
+                    .await;
+                if result.is_ok() {
+                    crate::traffic::record_received();
+                }
+                result
+            }
+        }
+    }
+
     async fn chat(
         &self,
         messages: &[ChatMessage],
@@ -176,8 +226,12 @@ impl RemoteProviderAdapter {
             messages.push(json!({"role": "system", "content": system}));
         }
         messages.push(json!({"role": "user", "content": prompt}));
-        self.post_openai_compatible_chat(messages, max_tokens, temperature)
-            .await
+        let outcome = self
+            .post_openai_compatible_chat(messages, max_tokens, temperature, &[], None)
+            .await?;
+        outcome.content.ok_or_else(|| {
+            InferenceError::Provider("remote llm returned empty content".into())
+        })
     }
 
     async fn complete_openai_compatible_user_only(
@@ -187,8 +241,12 @@ impl RemoteProviderAdapter {
         temperature: f32,
     ) -> InferenceResult<String> {
         let messages = vec![json!({"role": "user", "content": prompt})];
-        self.post_openai_compatible_chat(messages, max_tokens, temperature)
-            .await
+        let outcome = self
+            .post_openai_compatible_chat(messages, max_tokens, temperature, &[], None)
+            .await?;
+        outcome.content.ok_or_else(|| {
+            InferenceError::Provider("remote llm returned empty content".into())
+        })
     }
 
     async fn post_openai_compatible_chat(
@@ -196,7 +254,9 @@ impl RemoteProviderAdapter {
         messages: Vec<serde_json::Value>,
         max_tokens: u32,
         temperature: f32,
-    ) -> InferenceResult<String> {
+        tools: &[ToolDefinition],
+        tool_choice: Option<&serde_json::Value>,
+    ) -> InferenceResult<CompletionOutcome> {
         let url = format!("{}/chat/completions", self.base_url());
         let mut body = json!({
             "model": self.settings.model,
@@ -204,6 +264,22 @@ impl RemoteProviderAdapter {
             "max_tokens": max_tokens,
             "temperature": temperature,
         });
+        if !tools.is_empty() {
+            body["tools"] = json!(tools
+                .iter()
+                .map(|tool| {
+                    json!({
+                        "type": "function",
+                        "function": {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "parameters": tool.parameters,
+                        }
+                    })
+                })
+                .collect::<Vec<_>>());
+            body["tool_choice"] = tool_choice.cloned().unwrap_or_else(|| json!("auto"));
+        }
         if self.settings.provider == InferenceProvider::OpenRouter || self.is_openrouter_endpoint() {
             body["include_reasoning"] = json!(true);
         }
@@ -234,15 +310,23 @@ impl RemoteProviderAdapter {
             .await
             .map_err(|e| InferenceError::Provider(e.to_string()))?;
 
-        let content = extract_openai_chat_content(&value).ok_or_else(|| {
-            InferenceError::Provider("remote llm returned empty content".into())
-        })?;
+        let tool_calls = extract_openai_tool_calls(&value);
+        let content = extract_openai_chat_content(&value);
+        if content.is_none() && tool_calls.is_empty() {
+            return Err(InferenceError::Provider(
+                "remote llm returned empty content".into(),
+            ));
+        }
+        let content_for_usage = content.clone().unwrap_or_default();
         record_provider_usage(
             parse_openai_usage(&value),
             &messages_prompt_estimate(&messages),
-            &content,
+            &content_for_usage,
         );
-        Ok(content)
+        Ok(CompletionOutcome {
+            content,
+            tool_calls,
+        })
     }
 
     async fn probe_openai_compatible_connectivity(&self) -> InferenceResult<bool> {
@@ -595,6 +679,44 @@ fn extract_openai_chat_content(value: &serde_json::Value) -> Option<String> {
     }
 
     None
+}
+
+fn extract_openai_tool_calls(value: &serde_json::Value) -> Vec<ToolCall> {
+    let Some(calls) = value
+        .pointer("/choices/0/message/tool_calls")
+        .and_then(|v| v.as_array())
+    else {
+        return Vec::new();
+    };
+
+    calls
+        .iter()
+        .filter_map(|call| {
+            let id = call
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let function = call.get("function")?;
+            let name = function.get("name")?.as_str()?.to_string();
+            let arguments = match function.get("arguments") {
+                Some(serde_json::Value::String(raw)) => {
+                    serde_json::from_str(raw).unwrap_or_else(|_| json!({}))
+                }
+                Some(other) => other.clone(),
+                None => json!({}),
+            };
+            Some(ToolCall {
+                id: if id.is_empty() {
+                    format!("call_{name}")
+                } else {
+                    id
+                },
+                name,
+                arguments,
+            })
+        })
+        .collect()
 }
 
 fn connectivity_response_has_completion(value: &serde_json::Value) -> bool {

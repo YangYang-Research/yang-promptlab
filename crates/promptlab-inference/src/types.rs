@@ -27,6 +27,42 @@ pub struct ChatResponse {
     pub provider: String,
 }
 
+/// OpenAI-compatible tool definition (LangChain `bind_tools` equivalent).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
+
+/// One native tool call from the model (`AIMessage.tool_calls`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
+/// Structured completion that may include native tool calls.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionOutcome {
+    pub content: Option<String>,
+    #[serde(default)]
+    pub tool_calls: Vec<ToolCall>,
+}
+
+impl CompletionOutcome {
+    pub fn from_text(content: impl Into<String>) -> Self {
+        Self {
+            content: Some(content.into()),
+            tool_calls: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompleteRequest {
@@ -37,6 +73,25 @@ pub struct CompleteRequest {
     pub max_tokens: Option<u32>,
     #[serde(default)]
     pub temperature: Option<f32>,
+    /// When non-empty, OpenAI-compatible providers bind these tools on the request.
+    #[serde(default)]
+    pub tools: Vec<ToolDefinition>,
+    /// e.g. `"auto"` | `"none"` | `{"type":"function","function":{"name":"..."}}`
+    #[serde(default)]
+    pub tool_choice: Option<serde_json::Value>,
+}
+
+impl CompleteRequest {
+    pub fn new(prompt: impl Into<String>) -> Self {
+        Self {
+            prompt: prompt.into(),
+            system: None,
+            max_tokens: None,
+            temperature: None,
+            tools: Vec::new(),
+            tool_choice: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

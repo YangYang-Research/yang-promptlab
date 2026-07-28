@@ -157,6 +157,8 @@ pub async fn gateway_complete(
             system: system.map(String::from),
             max_tokens: Some(max_tokens),
             temperature: Some(temperature),
+            tools: Vec::new(),
+            tool_choice: None,
         })
         .await
         .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
@@ -174,10 +176,47 @@ pub async fn gateway_complete_as(
     max_tokens: u32,
     temperature: f32,
 ) -> CommandResult<String> {
+    let outcome = gateway_complete_outcome_as(
+        data_dir,
+        inference,
+        model_manager,
+        model_provider,
+        runtime_manager,
+        agent_id,
+        system,
+        prompt,
+        max_tokens,
+        temperature,
+        &[],
+        None,
+    )
+    .await?;
+    outcome.content.ok_or_else(|| {
+        CommandError::from(PromptLabError::internal(
+            "model returned tool_calls without text content".into(),
+        ))
+    })
+}
+
+pub async fn gateway_complete_outcome_as(
+    data_dir: &Path,
+    inference: &InferenceRuntimeManager,
+    model_manager: &LocalModelManager,
+    model_provider: SharedModelProvider,
+    runtime_manager: &mut RuntimeManager,
+    agent_id: &str,
+    system: Option<&str>,
+    prompt: &str,
+    max_tokens: u32,
+    temperature: f32,
+    tools: &[promptlab_inference::ToolDefinition],
+    tool_choice: Option<serde_json::Value>,
+) -> CommandResult<promptlab_inference::CompletionOutcome> {
     let data_dir = data_dir.to_path_buf();
     let system_owned = system.map(str::to_string);
     let prompt = prompt.to_string();
     let agent_id = agent_id.to_string();
+    let tools = tools.to_vec();
     promptlab_inference::with_agent(&agent_id, || async {
         let mut session = open_gateway_session(
             &data_dir,
@@ -188,11 +227,16 @@ pub async fn gateway_complete_as(
         )
         .await?;
         session
-            .complete(CompleteRequest {
+            .client()
+            .await
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?
+            .complete_outcome(CompleteRequest {
                 prompt,
                 system: system_owned,
                 max_tokens: Some(max_tokens),
                 temperature: Some(temperature),
+                tools,
+                tool_choice,
             })
             .await
             .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
@@ -347,6 +391,52 @@ impl PlannerLlm for HostYazgReactLlm {
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
+    }
+
+    async fn complete_with_tools(
+        &self,
+        prompt: &str,
+        tools: &[promptlab_planner::ToolSpec],
+    ) -> promptlab_planner::PlannerResult<promptlab_planner::LlmCompletion> {
+        let inference = self.inference.lock().await;
+        let manager = self.model_manager.lock().await;
+        let mut runtime_mgr = self.runtime_manager.lock().await;
+        let wire_tools: Vec<promptlab_inference::ToolDefinition> = tools
+            .iter()
+            .map(|tool| promptlab_inference::ToolDefinition {
+                name: tool.name.clone(),
+                description: tool.description.clone(),
+                parameters: tool.parameters.clone(),
+            })
+            .collect();
+        let outcome = gateway_complete_outcome_as(
+            &self.data_dir,
+            &inference,
+            &manager,
+            self.model_provider.clone(),
+            &mut runtime_mgr,
+            "yazg",
+            Some(PromptRegistry::yazg_react_system()),
+            prompt,
+            1024,
+            0.2,
+            &wire_tools,
+            Some(serde_json::json!("auto")),
+        )
+        .await
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))?;
+        Ok(promptlab_planner::LlmCompletion {
+            content: outcome.content,
+            tool_calls: outcome
+                .tool_calls
+                .into_iter()
+                .map(|call| promptlab_planner::ToolCall {
+                    id: call.id,
+                    name: call.name,
+                    arguments: call.arguments,
+                })
+                .collect(),
+        })
     }
 }
 

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 
 use crate::capabilities::ModelCapabilities;
 use crate::error::InferenceResult;
-use crate::types::ChatMessage;
+use crate::types::{ChatMessage, CompletionOutcome, ToolDefinition};
 
 /// Common provider adapter interface — only instantiated by RuntimeManager.
 #[async_trait]
@@ -18,6 +18,22 @@ pub trait ProviderAdapter: Send + Sync {
         max_tokens: u32,
         temperature: f32,
     ) -> InferenceResult<String>;
+
+    /// LangChain-style tool calling. Default ignores tools and wraps [`Self::complete`].
+    async fn complete_with_tools(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        max_tokens: u32,
+        temperature: f32,
+        _tools: &[ToolDefinition],
+        _tool_choice: Option<&serde_json::Value>,
+    ) -> InferenceResult<CompletionOutcome> {
+        let content = self
+            .complete(system, prompt, max_tokens, temperature)
+            .await?;
+        Ok(CompletionOutcome::from_text(content))
+    }
 
     async fn chat(
         &self,

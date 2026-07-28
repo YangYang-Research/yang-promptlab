@@ -37,8 +37,14 @@ impl ModelCapabilities {
             supports_chat: true,
             supports_streaming: true,
             supports_json: true,
-            supports_tool_calling: matches!(provider, "openai" | "anthropic" | "gemini"),
-            supports_function_calling: matches!(provider, "openai" | "anthropic"),
+            supports_tool_calling: matches!(
+                provider,
+                "openai" | "anthropic" | "gemini" | "nvidia" | "openrouter" | "azure" | "custom"
+            ),
+            supports_function_calling: matches!(
+                provider,
+                "openai" | "anthropic" | "nvidia" | "openrouter" | "azure" | "custom"
+            ),
             ..Self::default()
         };
         if provider == "gemini" {

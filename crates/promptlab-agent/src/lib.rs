@@ -38,6 +38,7 @@ pub mod sequential_attack_execution;
 pub mod summary;
 pub mod supervisor;
 pub mod types;
+pub mod yazg_tools;
 
 pub use agent_log::{log_agent_event, log_llm_call, log_react, log_tool_call, AgentLogContext};
 pub use analyze_endpoint::{AnalyzeEndpointAgent, AnalyzeEndpointAgentOutcome};
@@ -78,4 +79,5 @@ pub use sequential_attack_execution::{
 };
 pub use summary::{SummaryAgent, SummaryAgentOutcome, SummaryRequest};
 pub use supervisor::{SupervisorIntent, YazgDelegation, YazgSupervisor, YazgTurn};
+pub use yazg_tools::yazg_react_tools;
 pub use types::{AgentEvent, AgentEventKind, AgentId};
