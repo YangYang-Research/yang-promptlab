@@ -1,10 +1,12 @@
-//! JudgeCoordinatorAgent — Rig Agent that fans out to role workers.
+//! JudgeCoordinatorAgent — Rig manager that fans out to role *worker agents*.
+//!
+//! Nested manager–worker (Rig Book): coordinator `.tool(JudgeWorkerAgent)` etc.
 
 use std::sync::Arc;
 
 use promptlab_judge::{EvaluatorResult, JudgeEngine, JudgeRequest, JudgeVerdict, ModelRole};
 use promptlab_planner::PlannerLlm;
-use rig::agent::AgentBuilder;
+use rig::agent::{Agent, AgentBuilder};
 use rig::completion::Prompt;
 use rig::tool::Tool;
 use serde::{Deserialize, Serialize};
@@ -41,7 +43,8 @@ struct JudgeToolError(String);
 #[derive(Deserialize, Serialize, Default)]
 struct EmptyArgs {}
 
-macro_rules! role_worker_tool {
+/// Domain execute tool inside a role worker agent.
+macro_rules! role_execute_tool {
     ($struct_name:ident, $const_name:expr, $role:expr, $desc:expr) => {
         struct $struct_name {
             request: JudgeRequest,
@@ -104,24 +107,83 @@ macro_rules! role_worker_tool {
     };
 }
 
-role_worker_tool!(
-    JudgeWorkerRigTool,
-    "run_judge_worker",
+role_execute_tool!(
+    JudgeVoteTool,
+    "cast_vote",
     ModelRole::Judge,
-    "Run JudgeWorker — success / vulnerability decision vote for this probe."
+    "Cast the JudgeWorker vote for this probe (success / vulnerability decision)."
 );
-role_worker_tool!(
-    ClassifierWorkerRigTool,
-    "run_classifier_worker",
+role_execute_tool!(
+    ClassifierVoteTool,
+    "cast_vote",
     ModelRole::Classifier,
-    "Run ClassifierWorker — category + severity vote for this probe."
+    "Cast the ClassifierWorker vote for this probe (category + severity)."
 );
-role_worker_tool!(
-    AttackerWorkerRigTool,
-    "run_attacker_worker",
+role_execute_tool!(
+    AttackerVoteTool,
+    "cast_vote",
     ModelRole::Attacker,
-    "Run AttackerWorker — adversarial compliance vote for this probe."
+    "Cast the AttackerWorker vote for this probe (adversarial compliance)."
 );
+
+fn build_role_worker_agent(
+    role: ModelRole,
+    request: &JudgeRequest,
+    engine: Arc<JudgeEngine>,
+    state: SharedJudgeState,
+    llm: Arc<dyn PlannerLlm>,
+) -> Agent<YazgRigModel> {
+    let (name, description, preamble, tool): (
+        &str,
+        &str,
+        String,
+        Box<dyn rig::tool::ToolDyn>,
+    ) = match role {
+        ModelRole::Judge => (
+            "JudgeWorker",
+            "JudgeWorker — success / vulnerability decision vote for this probe.",
+            "You are JudgeWorker. When JudgeCoordinator delegates, call cast_vote once, then summarize."
+                .into(),
+            Box::new(JudgeVoteTool {
+                request: request.clone(),
+                engine,
+                state,
+            }),
+        ),
+        ModelRole::Classifier => (
+            "ClassifierWorker",
+            "ClassifierWorker — category + severity vote for this probe.",
+            "You are ClassifierWorker. When JudgeCoordinator delegates, call cast_vote once, then summarize."
+                .into(),
+            Box::new(ClassifierVoteTool {
+                request: request.clone(),
+                engine,
+                state,
+            }),
+        ),
+        ModelRole::Attacker => (
+            "AttackerWorker",
+            "AttackerWorker — adversarial compliance vote for this probe.",
+            "You are AttackerWorker. When JudgeCoordinator delegates, call cast_vote once, then summarize."
+                .into(),
+            Box::new(AttackerVoteTool {
+                request: request.clone(),
+                engine,
+                state,
+            }),
+        ),
+    };
+
+    AgentBuilder::new(YazgRigModel::new(llm))
+        .name(name)
+        .description(description)
+        .preamble(&preamble)
+        .temperature(0.1)
+        .max_tokens(256)
+        .default_max_turns(3)
+        .tools(vec![tool])
+        .build()
+}
 
 /// Coordinates JudgeWorker / ClassifierWorker / AttackerWorker under Yazg via Rig Agent.
 pub struct JudgeCoordinatorAgent;
@@ -143,7 +205,7 @@ impl JudgeCoordinatorAgent {
         Self::run_workers_direct(request, engine, events).await
     }
 
-    /// Rig AgentBuilder orchestration: tools = role workers, then consensus synthesize.
+    /// Rig manager–worker: role workers are Agents attached with `.tool(worker)`.
     pub async fn run_with_orchestrator(
         request: &JudgeRequest,
         engine: Arc<JudgeEngine>,
@@ -152,7 +214,7 @@ impl JudgeCoordinatorAgent {
         let mut events = vec![AgentEvent::started(
             AgentId::JudgeCoordinator,
             format!(
-                "Coordinating judge workers via Rig for probe {} ({})",
+                "Coordinating judge worker agents via Rig for probe {} ({})",
                 request.probe_id, request.attack_category
             ),
         )];
@@ -160,7 +222,7 @@ impl JudgeCoordinatorAgent {
         info!(
             probe_id = %request.probe_id,
             category = %request.attack_category,
-            "JudgeCoordinatorAgent started (Rig AgentBuilder)"
+            "JudgeCoordinatorAgent started (Rig manager–worker)"
         );
 
         let configured = engine.role_pool().configured_roles();
@@ -175,48 +237,46 @@ impl JudgeCoordinatorAgent {
         }
 
         let state: SharedJudgeState = Arc::new(Mutex::new(JudgeRigState::default()));
-        let mut boxed_tools: Vec<Box<dyn rig::tool::ToolDyn>> = Vec::new();
-        for role in &configured {
-            match role {
-                ModelRole::Judge => boxed_tools.push(Box::new(JudgeWorkerRigTool {
-                    request: request.clone(),
-                    engine: engine.clone(),
-                    state: state.clone(),
-                })),
-                ModelRole::Classifier => boxed_tools.push(Box::new(ClassifierWorkerRigTool {
-                    request: request.clone(),
-                    engine: engine.clone(),
-                    state: state.clone(),
-                })),
-                ModelRole::Attacker => boxed_tools.push(Box::new(AttackerWorkerRigTool {
-                    request: request.clone(),
-                    engine: engine.clone(),
-                    state: state.clone(),
-                })),
-            }
-        }
-
-        let model = YazgRigModel::new(orchestrator);
+        let model = YazgRigModel::new(orchestrator.clone());
         let preamble = format!(
-            "You are JudgeCoordinatorAgent. Call each available role worker tool exactly once \
+            "You are JudgeCoordinatorAgent (manager). Role workers are bound as sub-agents.\n\
+             Delegate to each worker exactly once with JSON `{{\"prompt\": \"cast your vote\"}}` \
              for probe `{}` (category={}). After all workers return, reply with a short summary. \
              Do not invent votes.",
             request.probe_id, request.attack_category
         );
-        let max_turns = boxed_tools.len().saturating_mul(2).saturating_add(2);
 
-        let agent = AgentBuilder::new(model)
+        // Nested manager–worker: first role agent transitions builder state.
+        let first_role = configured[0];
+        let mut builder = AgentBuilder::new(model)
             .name("JudgeCoordinator")
-            .description("Consensus judge coordinator")
+            .description("Consensus judge manager (delegates to role worker agents)")
             .preamble(&preamble)
             .temperature(0.1)
             .max_tokens(512)
-            .default_max_turns(max_turns)
-            .tools(boxed_tools)
-            .build();
+            .tool(build_role_worker_agent(
+                first_role,
+                request,
+                engine.clone(),
+                state.clone(),
+                orchestrator.clone(),
+            ));
+
+        for role in configured.iter().skip(1) {
+            builder = builder.tool(build_role_worker_agent(
+                *role,
+                request,
+                engine.clone(),
+                state.clone(),
+                orchestrator.clone(),
+            ));
+        }
+
+        let max_turns = configured.len().saturating_mul(3).saturating_add(2);
+        let agent = builder.default_max_turns(max_turns).build();
 
         let goal = format!(
-            "Run all role worker tools for probe {} then finish.",
+            "Delegate to every role worker agent for probe {} then finish.",
             request.probe_id
         );
         if let Err(err) = agent.prompt(goal).max_turns(max_turns).await {

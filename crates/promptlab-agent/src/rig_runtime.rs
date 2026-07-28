@@ -1,4 +1,7 @@
-//! Rig-based Yazg supervisor runtime (replaces custom ReAct host loop).
+//! Rig-based Yazg supervisor runtime — manager–worker (agents as tools).
+//!
+//! Per Rig Book *Multi-agent systems*:
+//! specialists are named/described Rig Agents attached with `.tool(worker)`.
 
 use std::sync::Arc;
 
@@ -14,10 +17,11 @@ use crate::memory::{
 };
 use crate::artifacts::{persist_artifacts_ltm, YazgActionKind, YazgArtifacts};
 use crate::rig_model::YazgRigModel;
-use crate::rig_tools::{
-    AnalyzeEndpointRigTool, AttackPlanRigTool, CreateProjectRigTool, GeneratePromptRigTool,
-    JudgeRigTool, ListWorkspaceRigTool, RecommendRigTool, SharedYazgRigState, SummaryRigTool,
-    YazgRigLlms, YazgRigRunState, YazgSpecialistContext,
+use crate::rig_tools::{SharedYazgRigState, YazgRigLlms, YazgRigRunState, YazgSpecialistContext};
+use crate::rig_workers::{
+    build_analyze_endpoint_worker, build_attack_plan_worker, build_create_project_worker,
+    build_generate_prompt_worker, build_judge_worker, build_list_workspace_worker,
+    build_recommend_worker, build_summary_worker,
 };
 use crate::types::{AgentEvent, AgentId};
 
@@ -80,12 +84,12 @@ impl YazgRigRequest {
     }
 }
 
-/// Run Yazg via Rig Agent loop and return PromptLab artifacts + raw PromptResponse JSON.
+/// Run Yazg via Rig manager–worker agents and return artifacts + raw PromptResponse JSON.
 pub async fn run_yazg_rig(request: YazgRigRequest) -> AgentResult<(YazgArtifacts, serde_json::Value)> {
     let mut artifacts = YazgArtifacts::default();
     artifacts.events.push(AgentEvent::started(
         AgentId::Yazg,
-        "Rig agent loop started",
+        "Rig manager–worker loop started",
     ));
 
     remember_stm(
@@ -114,72 +118,78 @@ pub async fn run_yazg_rig(request: YazgRigRequest) -> AgentResult<(YazgArtifacts
     let specialist = Arc::new(request.specialist);
     let context_block = specialist.format_context_block();
     let model = YazgRigModel::new(request.llms.supervisor.clone());
+    let supervisor_llm = request.llms.supervisor.clone();
 
     let preamble = format!(
-        "You are Yazg, the in-app AI Assistant for PromptLab.\n\
-         Tools are bound — read each tool description before calling.\n\
+        "You are Yazg, the manager agent for PromptLab's in-app AI Assistant.\n\
+         Specialist workers are bound as tools — each tool is a sub-agent.\n\
+         When delegating, call the worker with JSON `{{\"prompt\": \"<task for the worker>\"}}`.\n\
          For greetings, math, and general chat, answer directly in natural language.\n\
-         Only call a specialist tool when the user request clearly requires it.\n\
+         Only delegate to a specialist when the user request clearly requires it.\n\
          Never mention tools, routing, ReAct, or internal decisions to the user.\n\
-         Do not invent tool results.\n\n\
+         Do not invent worker results.\n\n\
          {context_block}\n\
          {memory_block}"
     );
 
-    let mut boxed_tools: Vec<Box<dyn rig::tool::ToolDyn>> = Vec::new();
-    if let Some(tools) = request.workspace_tools.clone() {
-        boxed_tools.push(Box::new(ListWorkspaceRigTool {
-            tools,
-            state: state.clone(),
-        }));
-    }
-    if let Some(tools) = request.project_tools.clone() {
-        boxed_tools.push(Box::new(CreateProjectRigTool {
-            tools,
-            state: state.clone(),
-        }));
-    }
-    boxed_tools.push(Box::new(AnalyzeEndpointRigTool {
-        ctx: specialist.clone(),
-        llm: request.llms.analyze.clone(),
-        state: state.clone(),
-    }));
-    boxed_tools.push(Box::new(AttackPlanRigTool {
-        ctx: specialist.clone(),
-        llm: request.llms.plan.clone(),
-        state: state.clone(),
-    }));
-    boxed_tools.push(Box::new(GeneratePromptRigTool {
-        ctx: specialist.clone(),
-        llm: request.llms.prompt.clone(),
-        state: state.clone(),
-    }));
-    boxed_tools.push(Box::new(RecommendRigTool {
-        ctx: specialist.clone(),
-        llm: request.llms.recommend.clone(),
-        state: state.clone(),
-    }));
-    boxed_tools.push(Box::new(SummaryRigTool {
-        ctx: specialist.clone(),
-        llm: request.llms.summary.clone(),
-        state: state.clone(),
-    }));
-    boxed_tools.push(Box::new(JudgeRigTool {
-        ctx: specialist.clone(),
-        orchestrator: request.llms.supervisor.clone(),
-        state: state.clone(),
-    }));
-
-    let agent = AgentBuilder::new(model)
+    // Manager–worker: first `.tool` transitions builder; specialists are Rig Agents.
+    let mut builder = AgentBuilder::new(model)
         .name("Yazg")
-        .description("PromptLab AI Assistant supervisor")
+        .description("PromptLab AI Assistant manager (delegates to specialist worker agents)")
         .preamble(&preamble)
         .temperature(0.2)
         .max_tokens(1024)
         .default_max_turns(request.max_turns)
-        .tools(boxed_tools)
+        .tool(build_analyze_endpoint_worker(
+            request.llms.analyze.clone(),
+            specialist.clone(),
+            state.clone(),
+        ));
+
+    if let Some(tools) = request.workspace_tools.clone() {
+        builder = builder.tool(build_list_workspace_worker(
+            supervisor_llm.clone(),
+            tools,
+            state.clone(),
+        ));
+    }
+    if let Some(tools) = request.project_tools.clone() {
+        builder = builder.tool(build_create_project_worker(
+            supervisor_llm.clone(),
+            tools,
+            state.clone(),
+        ));
+    }
+
+    let agent = builder
+        .tool(build_attack_plan_worker(
+            request.llms.plan.clone(),
+            specialist.clone(),
+            state.clone(),
+        ))
+        .tool(build_generate_prompt_worker(
+            request.llms.prompt.clone(),
+            specialist.clone(),
+            state.clone(),
+        ))
+        .tool(build_recommend_worker(
+            request.llms.recommend.clone(),
+            specialist.clone(),
+            state.clone(),
+        ))
+        .tool(build_summary_worker(
+            request.llms.summary.clone(),
+            specialist.clone(),
+            state.clone(),
+        ))
+        .tool(build_judge_worker(
+            request.llms.supervisor.clone(),
+            specialist,
+            state.clone(),
+        ))
         .build();
-    info!(goal = %truncate(&request.goal, 120), "Yazg Rig handle");
+
+    info!(goal = %truncate(&request.goal, 120), "Yazg Rig manager–worker handle");
 
     let prompt_response = agent
         .prompt(request.goal.trim())
@@ -245,7 +255,7 @@ pub async fn run_yazg_rig(request: YazgRigRequest) -> AgentResult<(YazgArtifacts
 
     artifacts.events.push(AgentEvent::completed(
         AgentId::Yazg,
-        "Rig agent finished",
+        "Rig manager–worker finished",
     ));
     artifacts.events.push(AgentEvent::info(
         AgentId::Yazg,

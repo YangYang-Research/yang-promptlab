@@ -224,9 +224,7 @@ impl Tool for ListWorkspaceRigTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Read projects, targets, scans, and findings from the local PromptLab database. \
-         ONLY when the user explicitly asks for inventory or finding/vulnerability counts. \
-         Do NOT use for greetings, math, or general chat."
+        "Worker execute tool: list PromptLab workspace inventory from the local database."
             .into()
     }
 
@@ -283,8 +281,7 @@ impl Tool for CreateProjectRigTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Create a workspace project in the local database. Requires a project name. \
-         Optional description. Do NOT ask for a scan target."
+        "Worker execute tool: create a workspace project (requires name; optional description)."
             .into()
     }
 
@@ -356,9 +353,7 @@ impl Tool for AnalyzeEndpointRigTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Probe/classify whether a bound live scan target is a generative AI API \
-         (AnalyzeEndpointAgent). Requires a bound target or capability_probe_ready=true \
-         (Scan wizard Verification). Do NOT use for counting findings or general chat."
+        "Worker execute tool: probe/classify the bound scan target (AnalyzeEndpointAgent)."
             .into()
     }
 
@@ -428,8 +423,7 @@ impl Tool for AttackPlanRigTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Build an attack plan for a verified bound target (AttackPlanAgent). \
-         Requires verified=true (or a bound verified target)."
+        "Worker execute tool: build an attack plan for the verified bound target."
             .into()
     }
 
@@ -493,8 +487,7 @@ impl Tool for GeneratePromptRigTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Attack Factory: invent a novel technique probe (GeneratePromptAgent). \
-         Use only when factory_prompt_ready=true. Does not require a scan target."
+        "Worker execute tool: invent a novel Attack Factory technique probe."
             .into()
     }
 
@@ -557,8 +550,7 @@ impl Tool for RecommendRigTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Post-scan remediation recommendations from completed attack results \
-         (RecommendAgent). Requires attack_results_ready=true."
+        "Worker execute tool: produce post-scan remediation recommendations."
             .into()
     }
 
@@ -620,8 +612,7 @@ impl Tool for SummaryRigTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Project or scan posture overview + highlights (SummaryAgent). \
-         Requires summary_ready=true."
+        "Worker execute tool: project or scan posture summary + highlights."
             .into()
     }
 
@@ -679,8 +670,7 @@ impl Tool for JudgeRigTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Consensus judging via JudgeCoordinatorAgent (JudgeWorker + ClassifierWorker + \
-         AttackerWorker) orchestrated by Rig. Requires judge_ready=true and probe/response context."
+        "Worker execute tool: run JudgeCoordinator consensus judging for the bound probe."
             .into()
     }
 

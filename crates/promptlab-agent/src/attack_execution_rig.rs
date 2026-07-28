@@ -1,7 +1,11 @@
 //! Rig AgentBuilder decision helpers for scan orchestrators.
 //!
-//! Host tools (`AttackExecutionTools`) are non-`'static`, so Rig tools only *choose*
-//! an action via a channel; the host executes against `&dyn AttackExecutionTools`.
+//! Host tools (`AttackExecutionTools`) are borrowed (`&dyn`) from the Tauri scan
+//! host and are therefore non-`'static`, so they cannot be registered directly on
+//! a Rig Agent. The pick tools choose an action; the host loop executes against
+//! `&dyn AttackExecutionTools` (same observation contract as a full in-agent tool).
+//!
+//! Yazg chat/wizard specialists use true manager–worker (`manager.tool(worker_agent)`).
 
 use std::future::IntoFuture;
 use std::sync::Arc;

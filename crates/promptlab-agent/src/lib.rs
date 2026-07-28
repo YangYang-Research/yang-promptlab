@@ -1,21 +1,21 @@
-//! Yazg multi-agent orchestration.
+//! Yazg multi-agent orchestration (Rig manager–worker).
 //!
-//! Hierarchy:
+//! Hierarchy (Rig Book: workers are Agents attached with `.tool(worker)`):
 //! ```text
-//! Yazg (Supervisor — Rig Agent)
-//! ├── AnalyzeEndpointAgent  — HTTP capability probe + Yazg AI classification
-//! ├── AttackPlanAgent       — wizard attack plan + mid-scan adapt
-//! ├── GeneratePromptAgent   — Attack Factory novel technique probe
-//! ├── RecommendAgent        — post-scan remediation recommendations
-//! ├── SummaryAgent          — project / scan posture summaries
-//! ├── CreateProjectTool     — create a workspace project (host SQLite)
-//! ├── ListWorkspaceTool     — list projects/targets/scans/findings from DB
-//! ├── JudgeCoordinatorAgent — consensus judging via role workers
-//! │   ├── JudgeWorker
-//! │   ├── ClassifierWorker
-//! │   └── AttackerWorker
-//! ├── AgenticAttackExecutionAgent    — Rig AgentBuilder pick + host execute
-//! ├── SequentialAttackExecutionAgent — Rig AgentBuilder pick + host execute
+//! Yazg (Manager — Rig Agent)
+//! ├── list_workspace        — worker Agent → ListWorkspace tool
+//! ├── create_project        — worker Agent → CreateProject tool
+//! ├── analyze_endpoint      — worker Agent → AnalyzeEndpoint tool
+//! ├── attack_plan           — worker Agent → AttackPlan tool
+//! ├── generate_prompt       — worker Agent → GeneratePrompt tool
+//! ├── recommend             — worker Agent → Recommend tool
+//! ├── summary               — worker Agent → Summary tool
+//! ├── judge                 — worker Agent → JudgeCoordinator
+//! │   ├── JudgeWorker       — nested worker Agent
+//! │   ├── ClassifierWorker  — nested worker Agent
+//! │   └── AttackerWorker    — nested worker Agent
+//! ├── AgenticAttackExecutionAgent    — Rig Agent + host execute bridge
+//! ├── SequentialAttackExecutionAgent — Rig Agent + host execute bridge
 //! └── ReflectionAgent       — Rig Extractor (structured submit)
 //! ```
 
@@ -38,6 +38,7 @@ pub mod reflection;
 pub mod rig_model;
 pub mod rig_runtime;
 pub mod rig_tools;
+pub mod rig_workers;
 pub mod sequential_attack_execution;
 pub mod summary;
 pub mod supervisor;
