@@ -2,29 +2,71 @@
 //!
 //! Yazg is the manager agent; specialists are **domain tools** (not nested LLM workers)
 //! that call AnalyzeEndpointAgent / SummaryAgent / … directly.
+//!
+//! Pattern follows Rig examples (`agent_with_tools`, `multi_turn_agent`,
+//! `gemini_default_api_recovery`): AgentBuilder + tools + preamble + InvalidToolCall hook.
 
 use std::sync::Arc;
 
-use rig::agent::AgentBuilder;
+use rig::agent::{AgentBuilder, AgentHook, Flow, HookContext, StepEvent};
 use rig::completion::Prompt;
 use tracing::{info, warn};
 
+use crate::artifacts::{persist_artifacts_ltm, YazgActionKind, YazgArtifacts};
 use crate::create_project::CreateProjectTools;
 use crate::error::{AgentError, AgentResult};
 use crate::list_workspace::WorkspaceTools;
 use crate::memory::{
     load_memory_prompt_block, remember_stm, AgentMemoryStore, MemoryContext, StmRole, StmWrite,
 };
-use crate::artifacts::{persist_artifacts_ltm, YazgActionKind, YazgArtifacts};
+use crate::types::{AgentEvent, AgentId};
 use crate::yazg_model::YazgModel;
 use crate::yazg_tools::{
-    AnalyzeEndpointTool, AttackPlanTool, CreateProjectTool, GeneratePromptTool,
-    JudgeTool, ListWorkspaceTool, RecommendTool, SharedYazgState, SummaryTool,
-    YazgLlms, YazgRunState, YazgSpecialistContext,
+    AnalyzeEndpointTool, AttackPlanTool, CreateProjectTool, GeneratePromptTool, JudgeTool,
+    ListWorkspaceTool, RecommendTool, SharedYazgState, SummaryTool, YazgLlms, YazgRunState,
+    YazgSpecialistContext,
 };
-use crate::types::{AgentEvent, AgentId};
 
 const DEFAULT_MAX_TURNS: usize = 6;
+
+/// Core system preamble (mirrors PromptRegistry::yazg_react_system; kept here so
+/// Rig AgentBuilder owns the system prompt end-to-end like provider examples).
+const YAZG_PREAMBLE: &str = r#"You are Yazg, the PromptLab supervisor agent and in-app AI assistant.
+
+Identity: When asked who you are, introduce yourself as Yazg — PromptLab's AI assistant for authorized AI security testing (endpoint analysis, attack planning, prompt generation, judging, and workspace help).
+
+Tools are provided via the API tool-calling interface. Read each tool description and call the single best tool for the user goal, or respond directly with assistant text when no tool is needed.
+
+Rules:
+- User-visible replies MUST be markdown or plain text only. Never emit JSON, tool envelopes, function-call objects, or code that looks like `{"name":"assistant_reply",...}`.
+- Greetings (hi/hello), identity questions (who are you), thanks, and small talk → natural assistant text. Do not mention tools or internal routing.
+- Never invent tools. Only call names from the bound tool list. There is no assistant_reply / final_answer — plain text is the reply.
+- Forbidden in final replies: tool/tool-call mentions, ReAct/Observation/step logs, routing notes, or "I need to call tool..." phrasing.
+- Only call a specialist tool when the user request clearly needs it.
+- Prefer the smallest useful action; never invent tool results.
+- create_project needs a name; list_workspace only for explicit DB inventory questions.
+- After an Observation, either take another tool call or respond with a clear user reply."#;
+
+/// Rig-style recovery when the model invents a tool name (see `gemini_default_api_recovery`).
+#[derive(Clone, Default)]
+struct YazgInvalidToolHook;
+
+impl AgentHook<YazgModel> for YazgInvalidToolHook {
+    async fn on_event(&self, _ctx: &HookContext, event: StepEvent<'_, YazgModel>) -> Flow {
+        match event {
+            StepEvent::InvalidToolCall(inv) => {
+                warn!(tool = %inv.tool_name, "invalid tool call; asking model to reply in text");
+                Flow::retry(format!(
+                    "`{}` is not a valid tool. Available tools: [{}]. \
+                     Reply to the user in plain text, or call one of the available tools.",
+                    inv.tool_name,
+                    inv.available_tools.join(", ")
+                ))
+            }
+            _ => Flow::Continue,
+        }
+    }
+}
 
 /// Owned context for a Yazg run (chat / tool-calling / wizard).
 pub struct YazgRequest {
@@ -118,16 +160,7 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
     let context_block = specialist.format_context_block();
     let model = YazgModel::new(request.llms.supervisor.clone());
 
-    let preamble = format!(
-        "You are Yazg, the in-app AI Assistant for PromptLab.\n\
-         Specialist tools are bound — read each tool description before calling.\n\
-         For greetings, math, and general chat, answer directly in natural language.\n\
-         Only call a specialist tool when the user request clearly requires it.\n\
-         Never mention tools, routing, or internal decisions to the user.\n\
-         Do not invent tool results.\n\n\
-         {context_block}\n\
-         {memory_block}"
-    );
+    let preamble = format!("{YAZG_PREAMBLE}\n\n{context_block}\n{memory_block}");
 
     // Domain tools call specialist ::run() directly (no nested worker LLM).
     let mut builder = AgentBuilder::new(model)
@@ -137,6 +170,7 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         .temperature(0.2)
         .max_tokens(1024)
         .default_max_turns(request.max_turns)
+        .add_hook(YazgInvalidToolHook)
         .tool(AnalyzeEndpointTool {
             ctx: specialist.clone(),
             llm: request.llms.analyze.clone(),
@@ -220,7 +254,9 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
                 )
             } else {
                 warn!(error = %err, "Yazg agent loop failed");
-                return Err(AgentError::Supervisor(format!("Yazg agent loop failed: {err}")));
+                return Err(AgentError::Supervisor(format!(
+                    "Yazg agent loop failed: {err}"
+                )));
             }
         }
     };
@@ -257,7 +293,7 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
             "Yazg finished without a reply.".into()
         }
     } else {
-        reply_text
+        crate::yazg_model::normalize_user_facing_reply(&reply_text)
     };
 
     remember_stm(

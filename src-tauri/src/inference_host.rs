@@ -386,9 +386,22 @@ impl HostYazgReactLlm {
 #[async_trait]
 impl PlannerLlm for HostYazgReactLlm {
     async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
+        self.complete_with_system(Some(PromptRegistry::yazg_react_system()), prompt)
+            .await
+    }
+
+    async fn complete_with_system(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+    ) -> promptlab_planner::PlannerResult<String> {
         let inference = self.inference.lock().await;
         let manager = self.model_manager.lock().await;
         let mut runtime_mgr = self.runtime_manager.lock().await;
+        let system = system
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| PromptRegistry::yazg_react_system());
         gateway_complete_as(
             &self.data_dir,
             &inference,
@@ -396,7 +409,7 @@ impl PlannerLlm for HostYazgReactLlm {
             self.model_provider.clone(),
             &mut runtime_mgr,
             "yazg",
-            Some(PromptRegistry::yazg_react_system()),
+            Some(system),
             prompt,
             1024,
             0.2,
@@ -407,6 +420,20 @@ impl PlannerLlm for HostYazgReactLlm {
 
     async fn complete_with_tools(
         &self,
+        prompt: &str,
+        tools: &[promptlab_planner::ToolSpec],
+    ) -> promptlab_planner::PlannerResult<promptlab_planner::LlmCompletion> {
+        self.complete_with_tools_and_system(
+            Some(PromptRegistry::yazg_react_system()),
+            prompt,
+            tools,
+        )
+        .await
+    }
+
+    async fn complete_with_tools_and_system(
+        &self,
+        system: Option<&str>,
         prompt: &str,
         tools: &[promptlab_planner::ToolSpec],
     ) -> promptlab_planner::PlannerResult<promptlab_planner::LlmCompletion> {
@@ -421,6 +448,10 @@ impl PlannerLlm for HostYazgReactLlm {
                 parameters: tool.parameters.clone(),
             })
             .collect();
+        let system = system
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| PromptRegistry::yazg_react_system());
         let outcome = gateway_complete_outcome_as(
             &self.data_dir,
             &inference,
@@ -428,7 +459,7 @@ impl PlannerLlm for HostYazgReactLlm {
             self.model_provider.clone(),
             &mut runtime_mgr,
             "yazg",
-            Some(PromptRegistry::yazg_react_system()),
+            Some(system),
             prompt,
             1024,
             0.2,
