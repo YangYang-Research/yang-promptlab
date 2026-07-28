@@ -225,7 +225,9 @@ impl Tool for ListWorkspaceTool {
 
     fn description(&self) -> String {
         "Read projects, targets, scans, and findings from the local PromptLab database. \
-         ONLY when the user explicitly asks for inventory or finding/vulnerability counts. \
+         ONLY when the user explicitly asks for inventory, project info, or finding/vulnerability details. \
+         After the observation, answer the user's specific question in markdown \
+         (e.g. only finding #1 if asked) — do not dump the entire inventory. \
          Do NOT use for greetings, math, or general chat."
             .into()
     }

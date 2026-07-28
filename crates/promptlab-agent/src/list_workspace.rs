@@ -143,10 +143,11 @@ impl WorkspaceInventory {
         if self.findings.is_empty() {
             lines.push("Findings: (none)".into());
         } else {
-            lines.push("Findings:".into());
-            for finding in &self.findings {
+            lines.push("Findings (1-indexed; use this order for 'finding #N' / 'finding số N'):".into());
+            for (idx, finding) in self.findings.iter().enumerate() {
                 lines.push(format!(
-                    "  - id={} project={} scan={} severity={} status={} title={}",
+                    "  {}. id={} project={} scan={} severity={} status={} title={}",
+                    idx + 1,
                     finding.id,
                     finding.project_id,
                     finding.scan_id,
@@ -166,6 +167,9 @@ impl WorkspaceInventory {
     }
 
     /// Prefer a project-scoped finding count when the goal names a project.
+    ///
+    /// Prefer [`Self::compact_user_reply_for_goal`] for chat — this full dump is
+    /// a legacy salvage and feels hardcoded in the UI.
     pub fn to_user_reply_for_goal(&self, goal: &str) -> String {
         let mut lines = Vec::new();
         if let Some((project, count)) = self.project_finding_hit(goal) {
@@ -265,6 +269,79 @@ impl WorkspaceInventory {
         lines.join("\n")
     }
 
+    /// Short markdown answer tailored to the user goal (no full inventory dump).
+    pub fn compact_user_reply_for_goal(&self, goal: &str) -> String {
+        if let Some(n) = parse_finding_index(goal) {
+            return self.finding_at_index(n).unwrap_or_else(|| {
+                format!(
+                    "No finding #{n} in the listed results (showing {} of {} findings).",
+                    self.findings.len(),
+                    self.totals.findings
+                )
+            });
+        }
+
+        if let Some((project, count)) = self.project_finding_hit(goal) {
+            let targets: Vec<&str> = self
+                .targets
+                .iter()
+                .filter(|t| t.project_id == project.id)
+                .map(|t| t.name.as_str())
+                .collect();
+            let scans: Vec<String> = self
+                .scans
+                .iter()
+                .filter(|s| s.project_id == project.id)
+                .map(|s| format!("{} ({})", s.name, s.status))
+                .collect();
+            return format!(
+                "**{}**\n\n- Project id: `{}`\n- Findings: **{}**\n- Targets ({}): {}\n- Scans ({}): {}\n\nAsk for a specific finding (e.g. finding #1) for details.",
+                project.name,
+                project.id,
+                count,
+                targets.len(),
+                if targets.is_empty() {
+                    "(none)".into()
+                } else {
+                    targets.join(", ")
+                },
+                scans.len(),
+                if scans.is_empty() {
+                    "(none)".into()
+                } else {
+                    scans.join(", ")
+                }
+            );
+        }
+
+        format!(
+            "Workspace: **{}** projects, **{}** targets, **{}** scans, **{}** findings.",
+            self.totals.projects, self.totals.targets, self.totals.scans, self.totals.findings
+        )
+    }
+
+    fn finding_at_index(&self, one_based: usize) -> Option<String> {
+        if one_based == 0 {
+            return None;
+        }
+        let finding = self.findings.get(one_based - 1)?;
+        let project_label = self
+            .projects
+            .iter()
+            .find(|project| project.id == finding.project_id)
+            .map(|project| project.name.as_str())
+            .unwrap_or(finding.project_id.as_str());
+        Some(format!(
+            "### Finding #{one_based}\n\n- **Title:** {}\n- **Severity:** {}\n- **Status:** {}\n- **Project:** {}\n- **Id:** `{}`\n- **Scan:** `{}`",
+            finding.title,
+            finding.severity,
+            finding.status,
+            project_label,
+            finding.id,
+            finding.scan_id
+        ))
+    }
+
     /// Match a project named in the user goal and return its finding count (from listed rows).
     fn project_finding_hit(&self, goal: &str) -> Option<(&WorkspaceProjectSummary, usize)> {
         if goal.trim().is_empty() || self.projects.is_empty() {
@@ -324,6 +401,32 @@ impl WorkspaceInventory {
 #[async_trait]
 pub trait WorkspaceTools: Send + Sync {
     async fn list_workspace(&self) -> Result<WorkspaceInventory, String>;
+}
+
+fn parse_finding_index(goal: &str) -> Option<usize> {
+    let g = goal.to_lowercase();
+    // "finding số 1", "finding #1", "finding 1", "lỗ hổng số 1"
+    for (label, rest) in [
+        ("finding số ", g.split_once("finding số ").map(|(_, r)| r)),
+        ("finding #", g.split_once("finding #").map(|(_, r)| r)),
+        ("finding ", g.split_once("finding ").map(|(_, r)| r)),
+        ("lỗ hổng số ", g.split_once("lỗ hổng số ").map(|(_, r)| r)),
+        ("lo hong so ", g.split_once("lo hong so ").map(|(_, r)| r)),
+    ] {
+        let _ = label;
+        if let Some(rest) = rest {
+            let digits: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
+            if let Ok(n) = digits.parse::<usize>() {
+                if n > 0 {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -389,5 +492,57 @@ mod tests {
             reply.starts_with("Project **AI** has **36** findings."),
             "reply={reply}"
         );
+    }
+
+    #[test]
+    fn compact_reply_answers_finding_index() {
+        let inventory = WorkspaceInventory {
+            projects: vec![WorkspaceProjectSummary {
+                id: "p1".into(),
+                name: "AI".into(),
+                description: None,
+                findings_count: 2,
+            }],
+            targets: Vec::new(),
+            scans: Vec::new(),
+            findings: vec![
+                WorkspaceFindingSummary {
+                    id: "f1".into(),
+                    project_id: "p1".into(),
+                    scan_id: "s1".into(),
+                    severity: "high".into(),
+                    status: "open".into(),
+                    title: "Jailbreak A".into(),
+                    category: None,
+                },
+                WorkspaceFindingSummary {
+                    id: "f2".into(),
+                    project_id: "p1".into(),
+                    scan_id: "s1".into(),
+                    severity: "medium".into(),
+                    status: "open".into(),
+                    title: "Injection B".into(),
+                    category: None,
+                },
+            ],
+            totals: WorkspaceTotals {
+                projects: 1,
+                targets: 0,
+                scans: 0,
+                findings: 2,
+                findings_truncated: 0,
+            },
+        };
+        let reply = inventory.compact_user_reply_for_goal("cho tôi finding số 1 của project AI");
+        assert!(reply.contains("Finding #1"), "reply={reply}");
+        assert!(reply.contains("Jailbreak A"), "reply={reply}");
+        assert!(!reply.contains("Injection B"), "reply={reply}");
+        assert!(!reply.contains("Workspace inventory from the local database"));
+    }
+
+    #[test]
+    fn parse_finding_index_vi_en() {
+        assert_eq!(parse_finding_index("cho tôi finding số 1 của project AI"), Some(1));
+        assert_eq!(parse_finding_index("finding #3 please"), Some(3));
     }
 }

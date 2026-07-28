@@ -15,7 +15,7 @@ use tracing::{info, warn};
 use crate::artifacts::{persist_artifacts_ltm, YazgActionKind, YazgArtifacts};
 use crate::create_project::CreateProjectTools;
 use crate::error::{AgentError, AgentResult};
-use crate::list_workspace::WorkspaceTools;
+use crate::list_workspace::{WorkspaceInventory, WorkspaceTools};
 use crate::memory::{
     load_memory_prompt_block, remember_stm, AgentMemoryStore, MemoryContext, StmRole, StmWrite,
 };
@@ -26,6 +26,7 @@ use crate::yazg_tools::{
     ListWorkspaceTool, RecommendTool, SharedYazgState, SummaryTool, YazgLlms, YazgRunState,
     YazgSpecialistContext,
 };
+use promptlab_planner::PlannerLlm;
 
 const DEFAULT_MAX_TURNS: usize = 6;
 
@@ -44,7 +45,9 @@ Rules:
 - Forbidden in final replies: tool/tool-call mentions, ReAct/Observation/step logs, routing notes, or "I need to call tool..." phrasing.
 - Only call a specialist tool when the user request clearly needs it.
 - Prefer the smallest useful action; never invent tool results.
-- create_project needs a name; list_workspace only for explicit DB inventory questions.
+- list_workspace only for explicit DB inventory / project / finding questions — not greetings.
+- After list_workspace Observation: answer the user's question in markdown. If they asked for finding #N, show only that finding. If they asked for project info, summarize that project — never paste the full inventory dump.
+- create_project needs a name.
 - After an Observation, either take another tool call or respond with a clear user reply."#;
 
 /// Rig-style recovery when the model invents a tool name (see `gemini_default_api_recovery`).
@@ -277,10 +280,28 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         .and_then(map_tool_to_action)
         .or(run_state.artifacts.last_action);
 
-    artifacts.final_reply = if reply_text.is_empty() {
+    // Drop the lock before optional synthesis LLM call.
+    drop(run_state);
+
+    let inventory_dump = reply_text.contains("Workspace inventory from the local database:");
+    let needs_inventory_answer = artifacts.workspace_inventory.is_some()
+        && (reply_text.trim().is_empty()
+            || inventory_dump
+            || reply_text.trim() == "I'm Yazg, PromptLab's AI assistant for authorized AI security testing. How can I help?");
+
+    artifacts.final_reply = if needs_inventory_answer {
         if let Some(inventory) = artifacts.workspace_inventory.as_ref() {
-            inventory.to_user_reply_for_goal(&request.goal)
-        } else if artifacts.summary.is_some()
+            synthesize_inventory_reply(
+                request.llms.supervisor.as_ref(),
+                &request.goal,
+                inventory,
+            )
+            .await
+        } else {
+            "Yazg finished without a reply.".into()
+        }
+    } else if reply_text.is_empty() {
+        if artifacts.summary.is_some()
             || artifacts.plan.is_some()
             || artifacts.analyze.is_some()
             || artifacts.recommend.is_some()
@@ -337,6 +358,51 @@ fn map_tool_to_action(name: &str) -> Option<YazgActionKind> {
         "summary" => Some(YazgActionKind::Summary),
         "judge" => Some(YazgActionKind::Judge),
         _ => None,
+    }
+}
+
+async fn synthesize_inventory_reply(
+    llm: &dyn PlannerLlm,
+    goal: &str,
+    inventory: &WorkspaceInventory,
+) -> String {
+    // Prefer deterministic compact answers for indexed finding requests.
+    let compact = inventory.compact_user_reply_for_goal(goal);
+    if goal.to_lowercase().contains("finding") || goal.to_lowercase().contains("lỗ hổng") {
+        return compact;
+    }
+
+    let observation = inventory.to_observation();
+    let prompt = format!(
+        "User question:\n{goal}\n\nWorkspace tool observation:\n{observation}\n\n\
+         Reply in markdown answering ONLY what the user asked. \
+         For project info: summarize that project (targets, scans, finding count) — do not list every finding. \
+         For finding #N: show only that finding. \
+         Never emit JSON or tool envelopes."
+    );
+    match llm
+        .complete_with_system(
+            Some(
+                "You are Yazg. Answer from the workspace observation in markdown/plain text only.",
+            ),
+            &prompt,
+        )
+        .await
+    {
+        Ok(text) => {
+            let normalized = crate::yazg_model::normalize_user_facing_reply(&text);
+            if normalized.trim().is_empty()
+                || normalized.contains("Workspace inventory from the local database:")
+            {
+                compact
+            } else {
+                normalized
+            }
+        }
+        Err(err) => {
+            warn!(error = %err, "inventory reply synthesis failed; using compact fallback");
+            compact
+        }
     }
 }
 
