@@ -193,7 +193,7 @@ pub async fn gateway_complete_as(
     .await?;
     outcome.content.ok_or_else(|| {
         CommandError::from(PromptLabError::internal(
-            "model returned tool_calls without text content".into(),
+            "model returned tool_calls without text content",
         ))
     })
 }
