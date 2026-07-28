@@ -1,5 +1,7 @@
 //! AI-backed project posture summary (Project Details → Summary).
 
+use std::sync::Arc;
+
 use promptlab_agent::{MemoryContext, SummaryRequest, YazgDelegation, YazgSupervisor};
 use promptlab_storage::{
     FindingRepository, ProjectRepository, ScanRepository, TargetRepository, UpdateProject,
@@ -394,19 +396,20 @@ pub async fn project_summary_generate_op(
                         state.model_provider().clone(),
                         state.runtime_manager().clone(),
                     );
-                    let llms = hosts.react_llms();
+                    let llms = hosts.into_rig_llms();
                     let summary_request = SummaryRequest::Project {
                         project_name: input.project_name.clone(),
                         input_json,
                     };
-                    let memory = SqliteAgentMemoryStore::new(state.repositories());
+                    let memory: Arc<dyn promptlab_agent::AgentMemoryStore> =
+                        Arc::new(SqliteAgentMemoryStore::new(state.repositories()));
                     let memory_ctx =
                         MemoryContext::new(format!("project-summary:{project_id}"))
                             .with_project(Some(project_id.to_string()));
                     match YazgSupervisor::react_summarize(
                         &summary_request,
                         &llms,
-                        Some(&memory),
+                        Some(memory),
                         memory_ctx,
                     )
                     .await

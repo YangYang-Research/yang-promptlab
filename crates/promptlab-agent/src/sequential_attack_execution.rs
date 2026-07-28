@@ -1,16 +1,17 @@
-//! SequentialAttackExecutionAgent — ReAct generate → attack → recover → finish.
+//! SequentialAttackExecutionAgent — Rig tool-calling generate → attack → recover → finish.
 //!
 //! Used for Sequential execution strategy. No reflection/adapt loop, but still
 //! recovers from endpoint/transport failures via pacing adjustments.
 
+use std::sync::Arc;
+
 use promptlab_planner::PlannerLlm;
-use serde::Deserialize;
 use tracing::{info, warn};
 
-use crate::agent_log::{log_llm_call, AgentLogContext};
 use crate::attack_execution::{
     emit_and_record, AttackAttemptObservation, AttackExecutionOutcome, AttackExecutionTools,
 };
+use crate::attack_execution_rig::{pick_sequential_action_rig, AttackRigAction};
 use crate::endpoint_recovery::{
     error_is_endpoint_recoverable, heuristic_recovery, observation_needs_recovery,
     seed_pacing_from_prior_failure, MAX_ENDPOINT_RECOVERIES,
@@ -28,14 +29,14 @@ const DEFAULT_MAX_REACT_STEPS: usize = 24;
 #[derive(Debug, Clone)]
 pub struct SequentialAttackExecutionRequest {
     pub category: String,
-    pub max_react_steps: usize,
+    pub max_tool_turns: usize,
 }
 
 impl Default for SequentialAttackExecutionRequest {
     fn default() -> Self {
         Self {
             category: String::new(),
-            max_react_steps: DEFAULT_MAX_REACT_STEPS,
+            max_tool_turns: DEFAULT_MAX_REACT_STEPS,
         }
     }
 }
@@ -48,21 +49,15 @@ enum SeqAction {
     Finish,
 }
 
-#[derive(Debug, Deserialize)]
-struct SeqReactStep {
-    thought: Option<String>,
-    action: String,
-}
-
 /// Sequential scan orchestrator under Yazg.
 pub struct SequentialAttackExecutionAgent;
 
 impl SequentialAttackExecutionAgent {
-    /// ReAct: generate → attack; on endpoint failure → recover (pacing) → re-attack → finish.
+    /// Rig tools: generate → attack; on endpoint failure → recover → re-attack → finish.
     pub async fn run(
         request: &SequentialAttackExecutionRequest,
         tools: &dyn AttackExecutionTools,
-        orchestrator: Option<&dyn PlannerLlm>,
+        orchestrator: Option<Arc<dyn PlannerLlm>>,
         llm_ready: bool,
         memory: Option<&dyn AgentMemoryStore>,
         memory_ctx: MemoryContext,
@@ -73,7 +68,7 @@ impl SequentialAttackExecutionAgent {
             ));
         }
 
-        let max_steps = request.max_react_steps.max(8);
+        let max_steps = request.max_tool_turns.max(8);
         let mut events = Vec::new();
         emit_and_record(
             tools,
@@ -192,10 +187,10 @@ impl SequentialAttackExecutionAgent {
             );
         }
         transcript.push_str(
-            "Respond with one JSON step each turn:\n\
-             {\"thought\":\"...\",\"action\":\"generate|attack|recover|finish\"}\n\n\
+            "Call exactly one tool per turn. Available tools: generate, attack, recover.\n\
+             When finished, reply with plain text (no tool call).\n\n\
              Policy:\n\
-             - Only those four actions. Never use Yazg/Attack-Factory verbs \
+             - Only those three tools. Never use Yazg/Attack-Factory verbs \
                (generate_prompt, analyze_endpoint, attack_plan, recommend, …).\n\
              - generate once, then attack.\n\
              - If attack errors or observation is unhealthy (timeouts, 429, 5xx, or\n\
@@ -204,7 +199,7 @@ impl SequentialAttackExecutionAgent {
                raise timeout / backoff, then attack again with the same payloads.\n\
              - Do not recover solely because successful responses were slow.\n\
              - Never recover before the first attack observation; never recover twice without a new unhealthy attack.\n\
-             - finish only after at least one attack observation (healthy, or recoveries exhausted).\n\
+             - Stop with plain text only after at least one attack observation (healthy, or recoveries exhausted).\n\
              - Never invent HTTP results.\n",
         );
 
@@ -220,9 +215,11 @@ impl SequentialAttackExecutionAgent {
             }
 
             let action = if llm_ready {
-                if let Some(llm) = orchestrator {
-                    match decide_action(llm, &transcript, step, max_steps).await {
-                        Ok((thought, action)) => {
+                if let Some(llm) = orchestrator.as_ref() {
+                    match pick_sequential_action_rig(llm.clone(), &transcript, step, max_steps).await
+                    {
+                        Ok((thought, rig_action)) => {
+                            let action = map_seq_rig_action(rig_action);
                             emit_and_record(
                                 tools,
                                 &mut events,
@@ -240,11 +237,11 @@ impl SequentialAttackExecutionAgent {
                         Err(err) => {
                             warn!(
                                 error = %err,
-                                "SequentialAttackExecutionAgent ReAct parse failed; using policy"
+                                "SequentialAttackExecutionAgent Rig pick failed; using policy"
                             );
                             transcript.push_str(&format!(
-                                "\n--- Step {step} ---\nInvalid ReAct response: {err}\n\
-                                 Valid actions: generate|attack|recover|finish. Using policy.\n"
+                                "\n--- Step {step} ---\nInvalid Rig tool choice: {err}\n\
+                                 Valid tools: generate|attack|recover. Using policy.\n"
                             ));
                             policy_next_action(
                                 generated,
@@ -807,52 +804,15 @@ fn gate_seq_action(
     action
 }
 
-async fn decide_action(
-    llm: &dyn PlannerLlm,
-    transcript: &str,
-    step: usize,
-    max_steps: usize,
-) -> Result<(String, SeqAction), String> {
-    let prompt = format!(
-        "{transcript}\nReAct step {step}/{max_steps}. Reply with one JSON object only.\n"
-    );
-    let raw = match llm.complete(&prompt).await {
-        Ok(raw) => {
-            log_llm_call(
-                AgentId::SequentialAttackExecution,
-                "orchestrator",
-                prompt.len(),
-                &raw,
-                true,
-                AgentLogContext::default(),
-            );
-            raw
-        }
-        Err(err) => {
-            log_llm_call(
-                AgentId::SequentialAttackExecution,
-                "orchestrator",
-                prompt.len(),
-                &err.to_string(),
-                false,
-                AgentLogContext::default(),
-            );
-            return Err(err.to_string());
-        }
-    };
-    let parsed: SeqReactStep = {
-        let json = extract_json_object(&raw)
-            .ok_or_else(|| "no JSON in SequentialAttackExecutionAgent ReAct response".to_string())?;
-        serde_json::from_str(&json).map_err(|e| e.to_string())?
-    };
-    let thought = parsed
-        .thought
-        .unwrap_or_else(|| "(no thought)".into())
-        .trim()
-        .to_string();
-    let action = parse_seq_action(&parsed.action)?;
-    Ok((thought, action))
+fn map_seq_rig_action(action: AttackRigAction) -> SeqAction {
+    match action {
+        AttackRigAction::Generate => SeqAction::Generate,
+        AttackRigAction::Attack => SeqAction::Attack,
+        AttackRigAction::Recover => SeqAction::Recover,
+        AttackRigAction::Reflect | AttackRigAction::Adapt | AttackRigAction::Finish => SeqAction::Finish,
+    }
 }
+
 
 fn parse_seq_action(raw: &str) -> Result<SeqAction, String> {
     match raw.trim().to_ascii_lowercase().replace('-', "_").as_str() {
@@ -928,41 +888,4 @@ mod tests {
         }
         .produced_no_requests());
     }
-}
-
-fn extract_json_object(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    let start = trimmed.find('{')?;
-    let slice = &trimmed[start..];
-    let mut depth = 0i32;
-    let mut in_string = false;
-    let mut escape = false;
-    for (idx, ch) in slice.char_indices() {
-        if in_string {
-            if escape {
-                escape = false;
-                continue;
-            }
-            if ch == '\\' {
-                escape = true;
-                continue;
-            }
-            if ch == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-        match ch {
-            '"' => in_string = true,
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(slice[..=idx].to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }

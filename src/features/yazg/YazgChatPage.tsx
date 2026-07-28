@@ -39,6 +39,14 @@ function previewText(text: string, max = 72): string {
   return `${trimmed.slice(0, max - 1)}…`;
 }
 
+function formatRawOutput(raw: unknown): string {
+  try {
+    return JSON.stringify(raw, null, 2);
+  } catch {
+    return String(raw);
+  }
+}
+
 export function YazgChatPage() {
   const { actions } = useAppStore();
   const [backendConnected, setBackendConnected] = useState(false);
@@ -302,6 +310,19 @@ export function YazgChatPage() {
                   ) : null}
                 </header>
                 <p className="yazg-chat-bubble__text">{msg.text}</p>
+                {msg.rawOutput != null ? (
+                  <>
+                    <hr className="yazg-chat-bubble__divider" />
+                    <details className="yazg-chat-thinking">
+                      <summary className="yazg-chat-thinking__summary">
+                        Rig output
+                      </summary>
+                      <pre className="yazg-chat-events__msg">
+                        {formatRawOutput(msg.rawOutput)}
+                      </pre>
+                    </details>
+                  </>
+                ) : null}
                 {msg.events && msg.events.length > 0 ? (
                   <>
                     <hr className="yazg-chat-bubble__divider" />

@@ -11,6 +11,7 @@ use crate::types::{
 use time::OffsetDateTime;
 
 /// AI Judge Engine — LLM evaluation with multi-role consensus scoring.
+#[derive(Clone)]
 pub struct JudgeEngine {
     config: JudgeConfig,
     role_pool: ModelRolePool,

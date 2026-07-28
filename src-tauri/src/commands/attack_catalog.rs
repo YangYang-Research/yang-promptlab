@@ -1,5 +1,7 @@
 //! Attack technique catalog IPC — list / edit / reset default prompts.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -216,12 +218,13 @@ pub async fn attack_catalog_generate_prompt_op(
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
-    let llms = hosts.react_llms();
-    let memory = SqliteAgentMemoryStore::new(state.repositories());
+    let llms = hosts.into_rig_llms();
+    let memory: Arc<dyn promptlab_agent::AgentMemoryStore> =
+        Arc::new(SqliteAgentMemoryStore::new(state.repositories()));
     let memory_ctx = MemoryContext::new(format!("factory:{}", technique.id));
 
     let delegation =
-        YazgSupervisor::react_generate_prompt(&technique, &llms, Some(&memory), memory_ctx)
+        YazgSupervisor::react_generate_prompt(&technique, &llms, Some(memory), memory_ctx)
             .await
             .map_err(|err| CommandError::invalid_input(err.to_string()))?;
 

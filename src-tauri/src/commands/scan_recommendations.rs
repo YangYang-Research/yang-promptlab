@@ -1,5 +1,7 @@
 //! AI-backed remediation recommendations for scan results (wizard step 6).
 
+use std::sync::Arc;
+
 use promptlab_agent::{MemoryContext, YazgDelegation, YazgSupervisor};
 use promptlab_report::{generate_recommendations, data::StorageFindingRow};
 use promptlab_storage::{Finding, FindingRepository, ScanRepository, TargetRepository, UpdateScan};
@@ -173,13 +175,14 @@ pub async fn scan_recommendations_generate_op(
                 state.model_provider().clone(),
                 state.runtime_manager().clone(),
             );
-            let llms = hosts.react_llms();
-            let memory = SqliteAgentMemoryStore::new(state.repositories());
+            let llms = hosts.into_rig_llms();
+            let memory: Arc<dyn promptlab_agent::AgentMemoryStore> =
+                Arc::new(SqliteAgentMemoryStore::new(state.repositories()));
             let memory_ctx = MemoryContext::new(format!("scan-recommend:{}", request.scan_id))
                 .with_project(Some(scan.project_id.clone()))
                 .with_target(scan.target_id.clone())
                 .with_scan(Some(request.scan_id.clone()));
-            match YazgSupervisor::react_recommend(&summary, &llms, Some(&memory), memory_ctx)
+            match YazgSupervisor::react_recommend(&summary, &llms, Some(memory), memory_ctx)
                 .await
             {
                 Ok(YazgDelegation::Recommended { outcome, .. }) => {

@@ -12,6 +12,7 @@ export type ChatMessage = {
   role: "user" | "yazg";
   text: string;
   events?: YazgAgentEventDto[];
+  rawOutput?: unknown;
   intent?: string;
   at: number;
 };
@@ -292,6 +293,7 @@ function appendYazgMessage(
     role: "yazg",
     text: message.text,
     events: message.events,
+    rawOutput: message.rawOutput,
     intent: message.intent,
     at: now,
   };
@@ -389,6 +391,7 @@ export async function sendYazgChatMessage(options: {
         ? response.reply
         : "Yazg finished without a reply. Try asking again.",
       events: response.events,
+      rawOutput: response.rawOutput,
       intent: response.intent,
     });
 

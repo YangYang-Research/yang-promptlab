@@ -1,5 +1,7 @@
 //! Target Profile IPC — templates, verification, persistence.
 
+use std::sync::Arc;
+
 use promptlab_auth::{resolve_descriptor_for_wizard, SecretStore};
 use promptlab_core::{PromptLabError, LogCategory};
 use promptlab_storage::TargetRepository;
@@ -511,13 +513,14 @@ pub async fn target_profile_verify_ai_classify_op(
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
-    let llms = hosts.react_llms();
-    let memory = SqliteAgentMemoryStore::new(state.repositories());
+    let llms = hosts.into_rig_llms();
+    let memory: Arc<dyn promptlab_agent::AgentMemoryStore> =
+        Arc::new(SqliteAgentMemoryStore::new(state.repositories()));
     let memory_ctx = MemoryContext::new(format!("wizard-verify:{target_id}"))
         .with_target(Some(target_id.clone()));
 
     let delegation =
-        YazgSupervisor::react_classify_probe(&profile, &http, &llms, Some(&memory), memory_ctx)
+        YazgSupervisor::react_classify_probe(&profile, &http, &llms, Some(memory), memory_ctx)
             .await;
     match delegation {
         Ok(YazgDelegation::AnalyzedEndpoint { outcome, .. }) => {
@@ -703,10 +706,11 @@ pub async fn planner_generate_from_profile_op(
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
-    let llms = hosts.react_llms();
-    let memory = SqliteAgentMemoryStore::new(state.repositories());
+    let llms = hosts.into_rig_llms();
+    let memory: Arc<dyn promptlab_agent::AgentMemoryStore> =
+        Arc::new(SqliteAgentMemoryStore::new(state.repositories()));
     // Fresh STM session per generate so prior AttackPlanAgent OK observations do not
-    // convince ReAct to skip regenerating. LTM remains target-scoped.
+    // convince Rig to skip regenerating. LTM remains target-scoped.
     let session_nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -721,7 +725,7 @@ pub async fn planner_generate_from_profile_op(
         "wizard attack plan: Yazg supervisor (soft AttackPlan hint)"
     );
 
-    let plan = match YazgSupervisor::react_plan(&profile, &llms, Some(&memory), memory_ctx).await {
+    let plan = match YazgSupervisor::react_plan(&profile, &llms, Some(memory), memory_ctx).await {
         Ok(YazgDelegation::Planned { outcome, .. }) => outcome.plan,
         Ok(other) => {
             let message = match other {

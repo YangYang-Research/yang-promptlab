@@ -956,7 +956,7 @@ async fn run_sequential_category(
 
     let request = SequentialAttackExecutionRequest {
         category: category.as_str().to_string(),
-        max_react_steps: 24,
+        max_tool_turns: 24,
     };
 
     let llm_ready = {
@@ -970,17 +970,17 @@ async fn run_sequential_category(
         ctx.model_provider.clone(),
         Arc::clone(&ctx.runtime_manager),
     );
-    let react = hosts.react_llms();
+    let llms = hosts.into_rig_llms();
 
     ctx.emitter.info(format!(
-        "Yazg → SequentialAttackExecutionAgent for {} (endpoint recovery ReAct)",
+        "Yazg → SequentialAttackExecutionAgent for {} (endpoint recovery)",
         category.display_name()
     ));
 
     let agent_result = YazgSupervisor::execute_sequential_attack(
         &request,
         &tools,
-        Some(react.supervisor),
+        Some(llms.supervisor.clone()),
         llm_ready,
         Some(&memory),
         memory_ctx,
@@ -1217,11 +1217,11 @@ async fn run_agentic_category(
         ctx.model_provider.clone(),
         Arc::clone(&ctx.runtime_manager),
     );
-    let react = hosts.react_llms();
+    let llms = hosts.into_rig_llms();
     let exec_llms = AttackExecutionLlms {
-        orchestrator: react.supervisor,
-        reflection: react.supervisor,
-        plan: react.plan,
+        orchestrator: llms.supervisor.clone(),
+        reflection: llms.supervisor.clone(),
+        plan: llms.plan.clone(),
         llm_ready,
     };
 
@@ -1234,7 +1234,7 @@ async fn run_agentic_category(
         generation_strategy: format!("{:?}", strategy.strategy),
         variants_per_test: strategy.variants_per_test.min(20) as u8,
         response_adaptation: strategy.enable_response_adaptation,
-        max_react_steps: (config.max_attempts.max(1) as usize)
+        max_tool_turns: (config.max_attempts.max(1) as usize)
             .saturating_mul(8)
             .max(16),
     };

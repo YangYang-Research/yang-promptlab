@@ -1,14 +1,15 @@
-//! AgenticAttackExecutionAgent — ReAct orchestrator for agentic scan execution.
+//! AgenticAttackExecutionAgent — Rig tool-calling orchestrator for agentic scan execution.
 //!
 //! Coordinates generate → attack (host HTTP) → reflect → adapt → retry/finish.
 //! Judge runs inside the host attack tool (JudgeCoordinatorAgent).
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use promptlab_planner::PlannerLlm;
-use serde::Deserialize;
 use tracing::{info, warn};
 
-use crate::agent_log::{log_llm_call, AgentLogContext};
+use crate::attack_execution_rig::{pick_agentic_action_rig, AttackRigAction};
 use crate::attack_plan::{AdaptPlanOutcome, AdaptPlanRequest, AttackPlanAgent};
 use crate::endpoint_recovery::{
     error_is_endpoint_recoverable, heuristic_recovery, observation_needs_recovery,
@@ -124,11 +125,11 @@ pub async fn emit_and_record(
 }
 
 /// LLMs used by AgenticAttackExecutionAgent and its sub-agents.
-pub struct AttackExecutionLlms<'a> {
-    /// Orchestrator ReAct brain (may be same as plan/reflection).
-    pub orchestrator: &'a dyn PlannerLlm,
-    pub reflection: &'a dyn PlannerLlm,
-    pub plan: &'a dyn PlannerLlm,
+pub struct AttackExecutionLlms {
+    /// Orchestrator Rig brain (may be same as plan/reflection).
+    pub orchestrator: Arc<dyn PlannerLlm>,
+    pub reflection: Arc<dyn PlannerLlm>,
+    pub plan: Arc<dyn PlannerLlm>,
     /// When false, reflection/adapt use deterministic fallbacks.
     pub llm_ready: bool,
 }
@@ -144,7 +145,7 @@ pub struct AttackExecutionRequest {
     pub generation_strategy: String,
     pub variants_per_test: u8,
     pub response_adaptation: bool,
-    pub max_react_steps: usize,
+    pub max_tool_turns: usize,
 }
 
 impl Default for AttackExecutionRequest {
@@ -158,7 +159,7 @@ impl Default for AttackExecutionRequest {
             generation_strategy: "deterministic".into(),
             variants_per_test: 3,
             response_adaptation: false,
-            max_react_steps: DEFAULT_MAX_REACT_STEPS,
+            max_tool_turns: DEFAULT_MAX_REACT_STEPS,
         }
     }
 }
@@ -183,12 +184,6 @@ enum ExecAction {
     Finish,
 }
 
-#[derive(Debug, Deserialize)]
-struct ExecReactStep {
-    thought: Option<String>,
-    action: String,
-}
-
 /// Agentic scan orchestrator under Yazg.
 pub struct AgenticAttackExecutionAgent;
 
@@ -197,7 +192,7 @@ impl AgenticAttackExecutionAgent {
     pub async fn run(
         request: &AttackExecutionRequest,
         tools: &dyn AttackExecutionTools,
-        llms: &AttackExecutionLlms<'_>,
+        llms: &AttackExecutionLlms,
         memory: Option<&dyn AgentMemoryStore>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<AttackExecutionOutcome> {
@@ -207,7 +202,7 @@ impl AgenticAttackExecutionAgent {
             ));
         }
         let max_attempts = request.max_attempts.max(1);
-        let max_steps = request.max_react_steps.max(8);
+        let max_steps = request.max_tool_turns.max(8);
 
         let mut events = Vec::new();
         emit_and_record(
@@ -333,21 +328,20 @@ impl AgenticAttackExecutionAgent {
             );
         }
         transcript.push_str(
-            "Respond with one JSON step each turn:\n\
-             {\"thought\":\"...\",\"action\":\"generate|attack|recover|reflect|adapt|finish\"}\n\n\
+            "Call exactly one tool per turn. Available tools: generate, attack, recover, reflect, adapt.\n\
+             When finished, reply with plain text (no tool call) summarizing the stopped reason.\n\n\
              Policy:\n\
-             - Only those actions. Never use Yazg/Attack-Factory verbs \
+             - Only those tools. Never use Yazg/Attack-Factory verbs \
                (generate_prompt, analyze_endpoint, attack_plan, recommend, …).\n\
              - Start with generate then attack for each attempt.\n\
              - If attack fails or observation shows endpoint unhealthy (timeouts, 429, 5xx, or\n\
                no HTTP successes with extreme latency),\n\
-               call recover to adjust pacing (lower concurrency, add inter-request delay, serial wait,\n\
-               raise timeout, backoff), then attack again with the same payloads.\n\
+               call recover to adjust pacing, then attack again with the same payloads.\n\
              - Do not recover solely because successful responses were slow.\n\
              - Never recover before the first attack observation; never recover twice without a new unhealthy attack.\n\
              - After a healthy attack, call reflect when reflection is enabled (else finish or adapt/retry).\n\
              - If reflect says retry and attempts remain, call adapt when adaptive_planning is on, then generate again.\n\
-             - Call finish when done (confirmed finding, no retry, cancel, or max attempts).\n\
+             - Stop with a plain-text final reply when done (confirmed finding, no retry, cancel, or max attempts).\n\
              - Never invent HTTP results — only use observations.\n",
         );
 
@@ -370,8 +364,16 @@ impl AgenticAttackExecutionAgent {
             }
 
             let action = if llms.llm_ready {
-                match decide_action(llms.orchestrator, &transcript, step, max_steps).await {
-                    Ok((thought, action)) => {
+                match pick_agentic_action_rig(
+                    llms.orchestrator.clone(),
+                    &transcript,
+                    step,
+                    max_steps,
+                )
+                .await
+                {
+                    Ok((thought, rig_action)) => {
+                        let action = map_rig_action(rig_action);
                         emit_and_record(
                             tools,
                             &mut events,
@@ -388,10 +390,10 @@ impl AgenticAttackExecutionAgent {
                         action
                     }
                     Err(err) => {
-                        warn!(error = %err, "AgenticAttackExecutionAgent ReAct parse failed; using policy");
+                        warn!(error = %err, "AgenticAttackExecutionAgent Rig pick failed; using policy");
                         transcript.push_str(&format!(
-                            "\n--- Step {step} ---\nInvalid ReAct response: {err}\n\
-                             Valid actions: generate|attack|recover|reflect|adapt|finish. Using policy.\n"
+                            "\n--- Step {step} ---\nInvalid Rig tool choice: {err}\n\
+                             Valid tools: generate|attack|recover|reflect|adapt. Using policy.\n"
                         ));
                         policy_next_action(
                             request,
@@ -787,7 +789,7 @@ impl AgenticAttackExecutionAgent {
                         ),
                     };
                     let reflection = if request.reflection_enabled && llms.llm_ready {
-                        match ReflectionAgent::run(&refl_req, llms.reflection).await {
+                        match ReflectionAgent::run(&refl_req, llms.reflection.clone()).await {
                             Ok(outcome) => outcome,
                             Err(err) => {
                                 warn!(error = %err, "ReflectionAgent failed; heuristic fallback");
@@ -877,7 +879,7 @@ impl AgenticAttackExecutionAgent {
                         focus_hints: focus_hints.clone(),
                     };
                     let adapt = if llms.llm_ready {
-                        match AttackPlanAgent::adapt(&adapt_req, llms.plan).await {
+                        match AttackPlanAgent::adapt(&adapt_req, llms.plan.as_ref()).await {
                             Ok(outcome) => outcome,
                             Err(err) => {
                                 warn!(error = %err, "AttackPlanAgent adapt failed; fallback");
@@ -1104,101 +1106,13 @@ fn policy_next_action(
     ExecAction::Finish
 }
 
-async fn decide_action(
-    llm: &dyn PlannerLlm,
-    transcript: &str,
-    step: usize,
-    max_steps: usize,
-) -> Result<(String, ExecAction), String> {
-    let prompt = format!(
-        "{transcript}\nReAct step {step}/{max_steps}. Reply with one JSON object only.\n"
-    );
-    let raw = match llm.complete(&prompt).await {
-        Ok(raw) => {
-            log_llm_call(
-                AgentId::AgenticAttackExecution,
-                "orchestrator",
-                prompt.len(),
-                &raw,
-                true,
-                AgentLogContext::default(),
-            );
-            raw
-        }
-        Err(err) => {
-            log_llm_call(
-                AgentId::AgenticAttackExecution,
-                "orchestrator",
-                prompt.len(),
-                &err.to_string(),
-                false,
-                AgentLogContext::default(),
-            );
-            return Err(err.to_string());
-        }
-    };
-    let parsed: ExecReactStep = {
-        let json = extract_json_object(&raw)
-            .ok_or_else(|| "no JSON in AgenticAttackExecutionAgent ReAct response".to_string())?;
-        serde_json::from_str(&json).map_err(|e| e.to_string())?
-    };
-    let thought = parsed
-        .thought
-        .unwrap_or_else(|| "(no thought)".into())
-        .trim()
-        .to_string();
-    let action = parse_exec_action(&parsed.action)?;
-    Ok((thought, action))
-}
-
-fn parse_exec_action(raw: &str) -> Result<ExecAction, String> {
-    match raw.trim().to_ascii_lowercase().replace('-', "_").as_str() {
-        // generate_prompt is a Yazg/Attack-Factory verb; treat as payload generate here.
-        "generate" | "generate_payloads" | "payloads" | "generate_prompt" | "prompt" => {
-            Ok(ExecAction::Generate)
-        }
-        "attack" | "run_attack" | "execute" => Ok(ExecAction::Attack),
-        "recover" | "recovery" | "pace" | "backoff" | "throttle" => Ok(ExecAction::Recover),
-        "reflect" | "reflection" => Ok(ExecAction::Reflect),
-        "adapt" | "adaptive" | "replan" => Ok(ExecAction::Adapt),
-        "finish" | "done" | "stop" => Ok(ExecAction::Finish),
-        other => Err(format!("unknown AgenticAttackExecutionAgent action '{other}'")),
+fn map_rig_action(action: AttackRigAction) -> ExecAction {
+    match action {
+        AttackRigAction::Generate => ExecAction::Generate,
+        AttackRigAction::Attack => ExecAction::Attack,
+        AttackRigAction::Recover => ExecAction::Recover,
+        AttackRigAction::Reflect => ExecAction::Reflect,
+        AttackRigAction::Adapt => ExecAction::Adapt,
+        AttackRigAction::Finish => ExecAction::Finish,
     }
-}
-
-fn extract_json_object(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    let start = trimmed.find('{')?;
-    let slice = &trimmed[start..];
-    let mut depth = 0i32;
-    let mut in_string = false;
-    let mut escape = false;
-    for (idx, ch) in slice.char_indices() {
-        if in_string {
-            if escape {
-                escape = false;
-                continue;
-            }
-            if ch == '\\' {
-                escape = true;
-                continue;
-            }
-            if ch == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-        match ch {
-            '"' => in_string = true,
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(slice[..=idx].to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }

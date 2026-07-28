@@ -35,6 +35,7 @@ export type YazgChatResponse = {
   reply: string;
   intent: string;
   events: YazgAgentEventDto[];
+  rawOutput?: unknown;
   verified?: boolean | null;
   planSummary?: string | null;
   createdProject?: YazgCreatedProjectDto | null;

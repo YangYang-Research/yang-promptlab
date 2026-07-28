@@ -353,6 +353,18 @@ pub struct HostYazgReactLlm {
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
 }
 
+impl Clone for HostYazgReactLlm {
+    fn clone(&self) -> Self {
+        Self {
+            data_dir: self.data_dir.clone(),
+            inference: self.inference.clone(),
+            model_manager: self.model_manager.clone(),
+            model_provider: self.model_provider.clone(),
+            runtime_manager: self.runtime_manager.clone(),
+        }
+    }
+}
+
 impl HostYazgReactLlm {
     pub fn new(
         data_dir: PathBuf,
@@ -704,19 +716,19 @@ impl YazgHostLlms {
         }
     }
 
-    pub fn react_llms(&self) -> promptlab_agent::ReactLlms<'_> {
-        promptlab_agent::ReactLlms {
-            supervisor: &self.supervisor,
-            analyze: &self.analyze,
-            plan: &self.plan,
-            prompt: &self.prompt,
-            recommend: &self.recommend,
-            summary: &self.summary,
+    pub fn into_rig_llms(self) -> promptlab_agent::YazgRigLlms {
+        promptlab_agent::YazgRigLlms {
+            supervisor: Arc::new(self.supervisor),
+            analyze: Arc::new(self.analyze),
+            plan: Arc::new(self.plan),
+            prompt: Arc::new(self.prompt),
+            recommend: Arc::new(self.recommend),
+            summary: Arc::new(self.summary),
         }
     }
 }
 
-/// Owned host LLMs for a Yazg ReAct turn that needs scan-summary system prompts.
+/// Owned host LLMs for a Yazg turn that needs scan-summary system prompts.
 pub struct YazgHostLlmsScanSummary {
     pub supervisor: HostYazgReactLlm,
     pub analyze: HostEndpointVerifyLlm,
@@ -780,14 +792,14 @@ impl YazgHostLlmsScanSummary {
         }
     }
 
-    pub fn react_llms(&self) -> promptlab_agent::ReactLlms<'_> {
-        promptlab_agent::ReactLlms {
-            supervisor: &self.supervisor,
-            analyze: &self.analyze,
-            plan: &self.plan,
-            prompt: &self.prompt,
-            recommend: &self.recommend,
-            summary: &self.summary,
+    pub fn into_rig_llms(self) -> promptlab_agent::YazgRigLlms {
+        promptlab_agent::YazgRigLlms {
+            supervisor: Arc::new(self.supervisor),
+            analyze: Arc::new(self.analyze),
+            plan: Arc::new(self.plan),
+            prompt: Arc::new(self.prompt),
+            recommend: Arc::new(self.recommend),
+            summary: Arc::new(self.summary),
         }
     }
 }

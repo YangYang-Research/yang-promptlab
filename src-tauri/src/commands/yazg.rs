@@ -9,15 +9,16 @@ use promptlab_agent::{
     YazgTurn,
 };
 use promptlab_storage::{
-    FindingRepository, ProjectRepository, ScanRepository, TargetRepository,
+    CreateProject, FindingRepository, ProjectRepository, ScanRepository, TargetRepository,
 };
 use promptlab_target_profile::TargetProfile;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::sync::Arc;
 use tauri::State;
 
 use crate::agent_memory::SqliteAgentMemoryStore;
-use crate::commands::projects::project_create_op;
 use crate::error::{CommandError, CommandResult};
 use crate::inference_host::{gateway_complete_as, is_inference_ready, YazgHostLlms};
 use crate::state::AppState;
@@ -52,6 +53,8 @@ pub struct YazgChatResponse {
     pub reply: String,
     pub intent: String,
     pub events: Vec<AgentEventDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_output: Option<Value>,
     pub verified: Option<bool>,
     pub plan_summary: Option<String>,
     pub created_project: Option<YazgCreatedProjectDto>,
@@ -65,42 +68,44 @@ pub struct AgentEventDto {
     pub message: String,
 }
 
-struct HostCreateProjectTools<'a> {
-    state: &'a AppState,
+struct HostCreateProjectTools {
+    repos: promptlab_storage::Repositories,
 }
 
 #[async_trait]
-impl CreateProjectTools for HostCreateProjectTools<'_> {
+impl CreateProjectTools for HostCreateProjectTools {
     async fn create_project(
         &self,
         name: &str,
         description: Option<&str>,
     ) -> Result<CreatedProject, String> {
-        project_create_op(
-            self.state,
-            name.to_string(),
-            description.map(str::to_string),
-        )
-        .await
-        .map(|project| CreatedProject {
+        let project = self
+            .repos
+            .projects()
+            .create(CreateProject {
+                name: name.to_string(),
+                description: description.map(str::to_string),
+            })
+            .await
+            .map_err(|err| err.to_string())?;
+        Ok(CreatedProject {
             id: project.id,
             name: project.name,
             description: project.description,
         })
-        .map_err(|err| err.to_string())
     }
 }
 
-struct HostWorkspaceTools<'a> {
-    state: &'a AppState,
+struct HostWorkspaceTools {
+    repos: promptlab_storage::Repositories,
 }
 
 const MAX_LISTED_FINDINGS: usize = 40;
 
 #[async_trait]
-impl WorkspaceTools for HostWorkspaceTools<'_> {
+impl WorkspaceTools for HostWorkspaceTools {
     async fn list_workspace(&self) -> Result<WorkspaceInventory, String> {
-        let repos = self.state.repositories();
+        let repos = &self.repos;
 
         let projects = repos
             .projects()
@@ -224,6 +229,10 @@ fn turn_to_response(
     turn: YazgTurn,
     created_project: Option<CreatedProject>,
 ) -> YazgChatResponse {
+    let raw_output = turn
+        .raw_output
+        .clone()
+        .or_else(|| serde_json::to_value(&turn).ok());
     YazgChatResponse {
         reply: turn.reply,
         intent: match turn.intent {
@@ -240,6 +249,7 @@ fn turn_to_response(
             SupervisorIntent::ListWorkspace => "list_workspace".into(),
         },
         events: turn.events.into_iter().map(event_dto).collect(),
+        raw_output,
         verified: turn.verified,
         plan_summary: turn.plan_summary,
         created_project: created_project.map(|project| YazgCreatedProjectDto {
@@ -293,10 +303,15 @@ pub async fn yazg_chat_op(
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
-    let llms = hosts.react_llms();
-    let memory = SqliteAgentMemoryStore::new(state.repositories());
-    let project_tools = HostCreateProjectTools { state };
-    let workspace_tools = HostWorkspaceTools { state };
+    let llms = hosts.into_rig_llms();
+    let memory: Arc<dyn promptlab_agent::AgentMemoryStore> =
+        Arc::new(SqliteAgentMemoryStore::new(state.repositories()));
+    let project_tools: Arc<dyn CreateProjectTools> = Arc::new(HostCreateProjectTools {
+        repos: state.repositories(),
+    });
+    let workspace_tools: Arc<dyn WorkspaceTools> = Arc::new(HostWorkspaceTools {
+        repos: state.repositories(),
+    });
     let session_id = request
         .session_id
         .as_deref()
@@ -314,11 +329,11 @@ pub async fn yazg_chat_op(
         intent_hint,
         profile.as_ref(),
         auth_headers,
-        &llms,
-        Some(&memory),
+        llms,
+        Some(memory),
         memory_ctx,
-        Some(&project_tools),
-        Some(&workspace_tools),
+        Some(project_tools),
+        Some(workspace_tools),
     )
     .await
     .map_err(map_agent_err)?;

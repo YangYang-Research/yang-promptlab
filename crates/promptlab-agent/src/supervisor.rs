@@ -1,6 +1,7 @@
 //! Yazg supervisor — ReAct routing to specialist sub-agents.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use promptlab_judge::{JudgeEngine, JudgeRequest};
 use promptlab_planner::PlannerLlm;
@@ -20,8 +21,10 @@ use crate::generate_prompt::{GeneratePromptAgentOutcome, TechniquePromptContext}
 use crate::judge_coordinator::JudgeCoordinatorAgentOutcome;
 use crate::list_workspace::WorkspaceTools;
 use crate::memory::{AgentMemoryStore, MemoryContext};
-use crate::react::{run_react, ReactActionKind, ReactArtifacts, ReactLlms, ReactRequest};
+use crate::artifacts::{YazgActionKind, YazgArtifacts};
 use crate::recommend::{RecommendAgent, RecommendAgentOutcome};
+use crate::rig_runtime::{run_yazg_rig, YazgRigRequest};
+use crate::rig_tools::{YazgRigLlms, YazgSpecialistContext};
 use crate::sequential_attack_execution::{
     SequentialAttackExecutionAgent, SequentialAttackExecutionRequest,
 };
@@ -94,6 +97,9 @@ pub struct YazgTurn {
     pub verified: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plan_summary: Option<String>,
+    /// Raw Rig `PromptResponse` (or equivalent engine payload) for UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_output: Option<serde_json::Value>,
 }
 
 /// Host-facing payloads when the caller needs typed domain results.
@@ -180,45 +186,43 @@ impl YazgSupervisor {
         format!("{}\n\n({hint})", message.trim())
     }
 
-    /// Primary entry: ReAct reasoning then act on sub-agents.
-    pub async fn react(
-        request: ReactRequest<'_>,
-        llms: &ReactLlms<'_>,
-    ) -> AgentResult<YazgDelegation> {
-        info!(goal = %truncate(&request.goal, 120), "Yazg ReAct handle");
-        let artifacts = run_react(request, llms).await?;
-        Ok(delegation_from_artifacts(artifacts))
+    /// Primary entry: Rig agent loop (tool-calling) then map to typed delegation.
+    pub async fn react_rig(request: YazgRigRequest) -> AgentResult<YazgDelegation> {
+        let (artifacts, raw_output) = run_yazg_rig(request).await?;
+        Ok(delegation_from_artifacts_with_raw(artifacts, Some(raw_output)))
     }
 
-    /// Chat / command turn — always ReAct (no hard-coded agent branch).
+    /// Chat / command turn — Rig agent loop (no hard-coded agent branch).
     pub async fn handle(
         message: &str,
         intent_hint: SupervisorIntent,
         profile: Option<&TargetProfile>,
         auth_headers: HashMap<String, String>,
-        llms: &ReactLlms<'_>,
-        memory: Option<&dyn AgentMemoryStore>,
+        llms: YazgRigLlms,
+        memory: Option<Arc<dyn AgentMemoryStore>>,
         memory_ctx: MemoryContext,
-        project_tools: Option<&dyn CreateProjectTools>,
-        workspace_tools: Option<&dyn WorkspaceTools>,
+        project_tools: Option<Arc<dyn CreateProjectTools>>,
+        workspace_tools: Option<Arc<dyn WorkspaceTools>>,
     ) -> AgentResult<YazgDelegation> {
         let goal = Self::build_goal(message, intent_hint);
-        let request = ReactRequest::new(goal)
-            .with_profile(profile)
-            .with_auth(auth_headers)
+        let mut specialist = YazgSpecialistContext::default().with_auth(auth_headers);
+        if let Some(p) = profile {
+            specialist = specialist.with_profile(p.clone());
+        }
+        let request = YazgRigRequest::new(goal, llms)
             .with_memory(memory, memory_ctx)
             .with_project_tools(project_tools)
-            .with_workspace_tools(workspace_tools);
-        Self::react(request, llms).await
+            .with_workspace_tools(workspace_tools)
+            .with_specialist(specialist);
+        Self::react_rig(request).await
     }
 
     /// Wizard Verification AI step: probe already captured.
-    /// Soft intent hint only — Yazg ReAct chooses the agent/action.
     pub async fn react_classify_probe(
         profile: &TargetProfile,
         http: &promptlab_target_profile::VerifyHttpSuccess,
-        llms: &ReactLlms<'_>,
-        memory: Option<&dyn AgentMemoryStore>,
+        llms: &YazgRigLlms,
+        memory: Option<Arc<dyn AgentMemoryStore>>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
         let message = format!(
@@ -230,27 +234,27 @@ impl YazgSupervisor {
             http.status_code
         );
         let goal = Self::build_goal(&message, SupervisorIntent::AnalyzeEndpoint);
-        let request = ReactRequest::new(goal)
-            .with_profile(Some(profile))
-            .with_capability_probe(Some(http))
+        let specialist = YazgSpecialistContext::default()
+            .with_profile(profile.clone())
+            .with_capability_probe(http.clone());
+        let request = YazgRigRequest::new(goal, llms.clone())
             .with_memory(memory, memory_ctx)
-            .with_max_steps(4);
-        let delegation = Self::react(request, llms).await?;
+            .with_specialist(specialist)
+            .with_max_turns(4);
+        let delegation = Self::react_rig(request).await?;
         if matches!(delegation, YazgDelegation::AnalyzedEndpoint { .. }) {
             return Ok(delegation);
         }
 
-        // Soft ReAct can misfire (e.g. Attack Factory "select a technique") on small models.
-        // Wizard Verification always needs AnalyzeEndpointAgent — recover by calling it directly.
         warn!(
             endpoint = %profile.full_url(),
-            "Yazg ReAct missed AnalyzeEndpointAgent during Verification; forcing classify_probe"
+            "Yazg Rig missed AnalyzeEndpointAgent during Verification; forcing classify_probe"
         );
         let outcome =
-            AnalyzeEndpointAgent::classify_probe(profile, http, llms.analyze).await?;
+            AnalyzeEndpointAgent::classify_probe(profile, http, llms.analyze.as_ref()).await?;
         let mut events = vec![AgentEvent::info(
             AgentId::Yazg,
-            "ReAct recovery: forced AnalyzeEndpointAgent after misrouted Verification turn",
+            "Rig recovery: forced AnalyzeEndpointAgent after misrouted Verification turn",
         )];
         events.extend(outcome.events.clone());
         Ok(YazgDelegation::AnalyzedEndpoint {
@@ -260,19 +264,17 @@ impl YazgSupervisor {
                 events,
                 verified: Some(true),
                 plan_summary: None,
+                raw_output: None,
             },
             outcome,
         })
     }
 
     /// Wizard attack-plan step.
-    /// Soft intent hint only — Yazg ReAct chooses the agent/action.
-    /// Recovers by calling AttackPlanAgent directly when ReAct finishes without a plan
-    /// (common misfire: memory of a prior plan causes an early finish).
     pub async fn react_plan(
         profile: &TargetProfile,
-        llms: &ReactLlms<'_>,
-        memory: Option<&dyn AgentMemoryStore>,
+        llms: &YazgRigLlms,
+        memory: Option<Arc<dyn AgentMemoryStore>>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
         let message = format!(
@@ -284,24 +286,24 @@ impl YazgSupervisor {
             profile.full_url()
         );
         let goal = Self::build_goal(&message, SupervisorIntent::AttackPlan);
-        let request = ReactRequest::new(goal)
-            .with_profile(Some(profile))
+        let specialist = YazgSpecialistContext::default().with_profile(profile.clone());
+        let request = YazgRigRequest::new(goal, llms.clone())
             .with_memory(memory, memory_ctx)
-            .with_max_steps(4);
-        let delegation = Self::react(request, llms).await?;
+            .with_specialist(specialist)
+            .with_max_turns(4);
+        let delegation = Self::react_rig(request).await?;
         if matches!(delegation, YazgDelegation::Planned { .. }) {
             return Ok(delegation);
         }
 
-        // Soft ReAct often skips attack_plan when STM/LTM still shows a previous OK observation.
         warn!(
             endpoint = %profile.full_url(),
-            "Yazg ReAct missed AttackPlanAgent during Attack Plan; forcing AttackPlanAgent::run"
+            "Yazg Rig missed AttackPlanAgent during Attack Plan; forcing AttackPlanAgent::run"
         );
-        let outcome = AttackPlanAgent::run(profile, llms.plan).await?;
+        let outcome = AttackPlanAgent::run(profile, llms.plan.as_ref()).await?;
         let mut events = vec![AgentEvent::info(
             AgentId::Yazg,
-            "ReAct recovery: forced AttackPlanAgent after misrouted Attack Plan turn",
+            "Rig recovery: forced AttackPlanAgent after misrouted Attack Plan turn",
         )];
         events.extend(outcome.events.clone());
         let plan_summary = format_plan_summary(&outcome.plan);
@@ -312,17 +314,17 @@ impl YazgSupervisor {
                 events,
                 verified: Some(true),
                 plan_summary: Some(plan_summary),
+                raw_output: None,
             },
             outcome,
         })
     }
 
     /// Attack Factory: invent a novel technique probe.
-    /// Soft intent hint only — Yazg ReAct chooses the agent/action.
     pub async fn react_generate_prompt(
         technique: &TechniquePromptContext,
-        llms: &ReactLlms<'_>,
-        memory: Option<&dyn AgentMemoryStore>,
+        llms: &YazgRigLlms,
+        memory: Option<Arc<dyn AgentMemoryStore>>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
         let message = format!(
@@ -332,20 +334,19 @@ impl YazgSupervisor {
             technique.name, technique.id, technique.category_id
         );
         let goal = Self::build_goal(&message, SupervisorIntent::GeneratePrompt);
-        let request = ReactRequest::new(goal)
-            .with_technique(Some(technique))
+        let specialist = YazgSpecialistContext::default().with_technique(technique.clone());
+        let request = YazgRigRequest::new(goal, llms.clone())
             .with_memory(memory, memory_ctx)
-            .with_max_steps(4);
-        Self::react(request, llms).await
+            .with_specialist(specialist)
+            .with_max_turns(4);
+        Self::react_rig(request).await
     }
 
     /// Post-scan recommendations.
-    /// Soft intent hint only — Yazg ReAct chooses the agent/action.
-    /// Recovers by calling RecommendAgent when ReAct finishes early due to STM/LTM.
     pub async fn react_recommend(
         results: &AttackResultsSummary,
-        llms: &ReactLlms<'_>,
-        memory: Option<&dyn AgentMemoryStore>,
+        llms: &YazgRigLlms,
+        memory: Option<Arc<dyn AgentMemoryStore>>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
         let message = format!(
@@ -358,23 +359,24 @@ impl YazgSupervisor {
             results.scan_status, results.total_findings
         );
         let goal = Self::build_goal(&message, SupervisorIntent::Recommend);
-        let request = ReactRequest::new(goal)
-            .with_attack_results(Some(results))
+        let specialist = YazgSpecialistContext::default().with_attack_results(results.clone());
+        let request = YazgRigRequest::new(goal, llms.clone())
             .with_memory(memory, memory_ctx)
-            .with_max_steps(4);
-        let delegation = Self::react(request, llms).await?;
+            .with_specialist(specialist)
+            .with_max_turns(4);
+        let delegation = Self::react_rig(request).await?;
         if matches!(delegation, YazgDelegation::Recommended { .. }) {
             return Ok(delegation);
         }
 
         warn!(
             findings = results.total_findings,
-            "Yazg ReAct missed RecommendAgent; forcing RecommendAgent::run"
+            "Yazg Rig missed RecommendAgent; forcing RecommendAgent::run"
         );
-        let outcome = RecommendAgent::run(results, llms.recommend).await?;
+        let outcome = RecommendAgent::run(results, llms.recommend.as_ref()).await?;
         let mut events = vec![AgentEvent::info(
             AgentId::Yazg,
-            "ReAct recovery: forced RecommendAgent after misrouted recommendations turn",
+            "Rig recovery: forced RecommendAgent after misrouted recommendations turn",
         )];
         events.extend(outcome.events.clone());
         Ok(YazgDelegation::Recommended {
@@ -387,19 +389,17 @@ impl YazgSupervisor {
                 events,
                 verified: None,
                 plan_summary: None,
+                raw_output: None,
             },
             outcome,
         })
     }
 
     /// Project or scan posture summary.
-    /// Soft intent hint only — Yazg ReAct chooses the agent/action.
-    /// Recovers by calling SummaryAgent when ReAct finishes early due to STM/LTM
-    /// (common misfire: memory of a prior SummaryAgent OK causes finish without calling summary).
     pub async fn react_summarize(
         summary_request: &SummaryRequest,
-        llms: &ReactLlms<'_>,
-        memory: Option<&dyn AgentMemoryStore>,
+        llms: &YazgRigLlms,
+        memory: Option<Arc<dyn AgentMemoryStore>>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
         let message = match summary_request {
@@ -420,23 +420,25 @@ impl YazgSupervisor {
             ),
         };
         let goal = Self::build_goal(&message, SupervisorIntent::Summary);
-        let request = ReactRequest::new(goal)
-            .with_summary_request(Some(summary_request))
+        let specialist =
+            YazgSpecialistContext::default().with_summary_request(summary_request.clone());
+        let request = YazgRigRequest::new(goal, llms.clone())
             .with_memory(memory, memory_ctx)
-            .with_max_steps(4);
-        let delegation = Self::react(request, llms).await?;
+            .with_specialist(specialist)
+            .with_max_turns(4);
+        let delegation = Self::react_rig(request).await?;
         if matches!(delegation, YazgDelegation::Summarized { .. }) {
             return Ok(delegation);
         }
 
         warn!(
             kind = %summary_request.kind_label(),
-            "Yazg ReAct missed SummaryAgent; forcing SummaryAgent::run"
+            "Yazg Rig missed SummaryAgent; forcing SummaryAgent::run"
         );
-        let outcome = SummaryAgent::run(summary_request, llms.summary).await?;
+        let outcome = SummaryAgent::run(summary_request, llms.summary.as_ref()).await?;
         let mut events = vec![AgentEvent::info(
             AgentId::Yazg,
-            "ReAct recovery: forced SummaryAgent after misrouted summary turn",
+            "Rig recovery: forced SummaryAgent after misrouted summary turn",
         )];
         events.extend(outcome.events.clone());
         Ok(YazgDelegation::Summarized {
@@ -450,18 +452,18 @@ impl YazgSupervisor {
                 events,
                 verified: None,
                 plan_summary: None,
+                raw_output: None,
             },
             outcome,
         })
     }
 
     /// Consensus judge a single probe via JudgeCoordinatorAgent workers.
-    /// Soft intent hint only — Yazg ReAct chooses the agent/action.
     pub async fn react_judge(
         judge_request: &JudgeRequest,
-        judge_engine: &JudgeEngine,
-        llms: &ReactLlms<'_>,
-        memory: Option<&dyn AgentMemoryStore>,
+        judge_engine: Arc<JudgeEngine>,
+        llms: &YazgRigLlms,
+        memory: Option<Arc<dyn AgentMemoryStore>>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
         let message = format!(
@@ -471,11 +473,13 @@ impl YazgSupervisor {
             judge_request.probe_id, judge_request.attack_category
         );
         let goal = Self::build_goal(&message, SupervisorIntent::Judge);
-        let request = ReactRequest::new(goal)
-            .with_judge(Some(judge_request), Some(judge_engine))
+        let specialist =
+            YazgSpecialistContext::default().with_judge(judge_request.clone(), judge_engine);
+        let request = YazgRigRequest::new(goal, llms.clone())
             .with_memory(memory, memory_ctx)
-            .with_max_steps(4);
-        Self::react(request, llms).await
+            .with_specialist(specialist)
+            .with_max_turns(4);
+        Self::react_rig(request).await
     }
 
     /// Hard-gate agentic scan execution: Yazg delegates to AgenticAttackExecutionAgent.
@@ -483,7 +487,7 @@ impl YazgSupervisor {
     pub async fn execute_attack(
         request: &AttackExecutionRequest,
         tools: &dyn AttackExecutionTools,
-        llms: &AttackExecutionLlms<'_>,
+        llms: &AttackExecutionLlms,
         memory: Option<&dyn AgentMemoryStore>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<AttackExecutionOutcome> {
@@ -511,7 +515,7 @@ impl YazgSupervisor {
     pub async fn execute_sequential_attack(
         request: &SequentialAttackExecutionRequest,
         tools: &dyn AttackExecutionTools,
-        orchestrator: Option<&dyn PlannerLlm>,
+        orchestrator: Option<Arc<dyn PlannerLlm>>,
         llm_ready: bool,
         memory: Option<&dyn AgentMemoryStore>,
         memory_ctx: MemoryContext,
@@ -541,7 +545,7 @@ impl YazgSupervisor {
         Ok(outcome)
     }
 
-    /// Offline fallback when AI Runtime is unavailable (no ReAct).
+    /// Offline fallback when AI Runtime is unavailable (no Rig loop).
     pub fn offline_chat(message: &str, profile: Option<&TargetProfile>) -> YazgTurn {
         let trimmed = message.trim();
         let target_line = match profile {
@@ -564,31 +568,35 @@ impl YazgSupervisor {
             )
         } else {
             format!(
-                "AI Runtime is not ready, so I cannot run the ReAct loop.\n\n{target_line}"
+                "AI Runtime is not ready, so I cannot run the Rig agent loop.\n\n{target_line}"
             )
         };
 
         YazgTurn {
             reply,
             intent: SupervisorIntent::Chat,
-            events: vec![AgentEvent::info(AgentId::Yazg, "Offline chat (no ReAct)")],
+            events: vec![AgentEvent::info(AgentId::Yazg, "Offline chat (no Rig)")],
             verified: profile.map(|p| p.is_verified()),
             plan_summary: None,
+            raw_output: None,
         }
     }
 }
 
-fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
+fn delegation_from_artifacts_with_raw(
+    artifacts: YazgArtifacts,
+    raw_output: Option<serde_json::Value>,
+) -> YazgDelegation {
     let intent = match artifacts.last_action {
-        Some(ReactActionKind::AnalyzeEndpoint) => SupervisorIntent::AnalyzeEndpoint,
-        Some(ReactActionKind::AttackPlan) => SupervisorIntent::AttackPlan,
-        Some(ReactActionKind::GeneratePrompt) => SupervisorIntent::GeneratePrompt,
-        Some(ReactActionKind::Recommend) => SupervisorIntent::Recommend,
-        Some(ReactActionKind::Summary) => SupervisorIntent::Summary,
-        Some(ReactActionKind::Judge) => SupervisorIntent::Judge,
-        Some(ReactActionKind::CreateProject) => SupervisorIntent::CreateProject,
-        Some(ReactActionKind::ListWorkspace) => SupervisorIntent::ListWorkspace,
-        Some(ReactActionKind::Finish) | None => {
+        Some(YazgActionKind::AnalyzeEndpoint) => SupervisorIntent::AnalyzeEndpoint,
+        Some(YazgActionKind::AttackPlan) => SupervisorIntent::AttackPlan,
+        Some(YazgActionKind::GeneratePrompt) => SupervisorIntent::GeneratePrompt,
+        Some(YazgActionKind::Recommend) => SupervisorIntent::Recommend,
+        Some(YazgActionKind::Summary) => SupervisorIntent::Summary,
+        Some(YazgActionKind::Judge) => SupervisorIntent::Judge,
+        Some(YazgActionKind::CreateProject) => SupervisorIntent::CreateProject,
+        Some(YazgActionKind::ListWorkspace) => SupervisorIntent::ListWorkspace,
+        Some(YazgActionKind::Finish) | None => {
             if artifacts.created_project.is_some() {
                 SupervisorIntent::CreateProject
             } else if artifacts.workspace_inventory.is_some() {
@@ -623,6 +631,7 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
         events: artifacts.events.clone(),
         verified: verified.or(artifacts.analyze.as_ref().map(|_| true)),
         plan_summary: plan_summary.clone(),
+        raw_output,
     };
 
     if let Some(project) = artifacts.created_project.clone() {
@@ -639,7 +648,7 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
 
     if let Some(outcome) = artifacts.judge {
         if matches!(intent, SupervisorIntent::Judge)
-            || artifacts.last_action == Some(ReactActionKind::Judge)
+            || artifacts.last_action == Some(YazgActionKind::Judge)
         {
             let mut turn = turn;
             turn.intent = SupervisorIntent::Judge;
@@ -657,7 +666,7 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
 
     if let Some(outcome) = artifacts.summary {
         if matches!(intent, SupervisorIntent::Summary)
-            || artifacts.last_action == Some(ReactActionKind::Summary)
+            || artifacts.last_action == Some(YazgActionKind::Summary)
         {
             let mut turn = turn;
             turn.intent = SupervisorIntent::Summary;
@@ -674,7 +683,7 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
 
     if let Some(outcome) = artifacts.recommend {
         if matches!(intent, SupervisorIntent::Recommend)
-            || artifacts.last_action == Some(ReactActionKind::Recommend)
+            || artifacts.last_action == Some(YazgActionKind::Recommend)
         {
             let mut turn = turn;
             turn.intent = SupervisorIntent::Recommend;
@@ -690,7 +699,7 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
 
     if let Some(outcome) = artifacts.generate_prompt {
         if matches!(intent, SupervisorIntent::GeneratePrompt)
-            || artifacts.last_action == Some(ReactActionKind::GeneratePrompt)
+            || artifacts.last_action == Some(YazgActionKind::GeneratePrompt)
         {
             let mut turn = turn;
             turn.intent = SupervisorIntent::GeneratePrompt;
@@ -707,7 +716,7 @@ fn delegation_from_artifacts(artifacts: ReactArtifacts) -> YazgDelegation {
 
     if let Some(outcome) = artifacts.plan {
         if matches!(intent, SupervisorIntent::AttackPlan)
-            || artifacts.last_action == Some(ReactActionKind::AttackPlan)
+            || artifacts.last_action == Some(YazgActionKind::AttackPlan)
         {
             let mut turn = turn;
             turn.intent = SupervisorIntent::AttackPlan;

@@ -4,6 +4,7 @@ dist/
 
 # Rust
 target/
+target-*/
 
 # Tauri
 src-tauri/target/
