@@ -1,4 +1,4 @@
-//! Rig tools for Yazg supervisor (workspace CRUD + specialist sub-agents).
+//! Domain tools bound on the Yazg manager (workspace CRUD + specialists).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,16 +23,16 @@ use crate::recommend::RecommendAgent;
 use crate::summary::{SummaryAgent, SummaryRequest};
 use crate::types::{AgentEvent, AgentId};
 
-/// Shared mutable run state filled by Rig tools and consumed after `agent.prompt`.
+/// Shared mutable run state filled by tools and consumed after `agent.prompt`.
 #[derive(Default)]
-pub struct YazgRigRunState {
+pub struct YazgRunState {
     pub artifacts: YazgArtifacts,
     pub last_tool: Option<String>,
 }
 
-pub type SharedYazgRigState = Arc<Mutex<YazgRigRunState>>;
+pub type SharedYazgState = Arc<Mutex<YazgRunState>>;
 
-/// Owned specialist inputs for one Rig turn (wizard / chat with bound context).
+/// Owned specialist inputs for one Yazg turn (wizard / chat with bound context).
 #[derive(Default, Clone)]
 pub struct YazgSpecialistContext {
     pub profile: Option<TargetProfile>,
@@ -141,9 +141,9 @@ impl YazgSpecialistContext {
     }
 }
 
-/// Arc LLM handles for Rig supervisor + specialists.
+/// Arc LLM handles for Yazg supervisor + specialists.
 #[derive(Clone)]
-pub struct YazgRigLlms {
+pub struct YazgLlms {
     pub supervisor: Arc<dyn PlannerLlm>,
     pub analyze: Arc<dyn PlannerLlm>,
     pub plan: Arc<dyn PlannerLlm>,
@@ -152,7 +152,7 @@ pub struct YazgRigLlms {
     pub summary: Arc<dyn PlannerLlm>,
 }
 
-impl YazgRigLlms {
+impl YazgLlms {
     pub fn supervisor_only(supervisor: Arc<dyn PlannerLlm>) -> Self {
         Self {
             analyze: supervisor.clone(),
@@ -206,26 +206,27 @@ fn truncate(s: &str, max: usize) -> String {
     format!("{shortened}…")
 }
 
-async fn mark_tool(state: &SharedYazgRigState, name: &str, action: crate::artifacts::YazgActionKind) {
+async fn mark_tool(state: &SharedYazgState, name: &str, action: crate::artifacts::YazgActionKind) {
     let mut guard = state.lock().await;
     guard.last_tool = Some(name.into());
     guard.artifacts.last_action = Some(action);
 }
 
-pub struct ListWorkspaceRigTool {
+pub struct ListWorkspaceTool {
     pub tools: Arc<dyn WorkspaceTools>,
-    pub state: SharedYazgRigState,
+    pub state: SharedYazgState,
 }
 
-impl Tool for ListWorkspaceRigTool {
-    /// Distinct from the worker agent name (`list_workspace`) to avoid LLM confusion.
-    const NAME: &'static str = "execute";
+impl Tool for ListWorkspaceTool {
+    const NAME: &'static str = "list_workspace";
     type Error = YazgToolError;
     type Args = EmptyArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Execute: list PromptLab workspace inventory from the local database."
+        "Read projects, targets, scans, and findings from the local PromptLab database. \
+         ONLY when the user explicitly asks for inventory or finding/vulnerability counts. \
+         Do NOT use for greetings, math, or general chat."
             .into()
     }
 
@@ -270,19 +271,20 @@ impl Tool for ListWorkspaceRigTool {
     }
 }
 
-pub struct CreateProjectRigTool {
+pub struct CreateProjectTool {
     pub tools: Arc<dyn CreateProjectTools>,
-    pub state: SharedYazgRigState,
+    pub state: SharedYazgState,
 }
 
-impl Tool for CreateProjectRigTool {
-    const NAME: &'static str = "execute";
+impl Tool for CreateProjectTool {
+    const NAME: &'static str = "create_project";
     type Error = YazgToolError;
     type Args = CreateProjectArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Execute: create a workspace project (requires name; optional description)."
+        "Create a workspace project in the local database. Requires a project name. \
+         Optional description. Do NOT ask for a scan target."
             .into()
     }
 
@@ -341,20 +343,22 @@ impl Tool for CreateProjectRigTool {
     }
 }
 
-pub struct AnalyzeEndpointRigTool {
+pub struct AnalyzeEndpointTool {
     pub ctx: Arc<YazgSpecialistContext>,
     pub llm: Arc<dyn PlannerLlm>,
-    pub state: SharedYazgRigState,
+    pub state: SharedYazgState,
 }
 
-impl Tool for AnalyzeEndpointRigTool {
-    const NAME: &'static str = "execute";
+impl Tool for AnalyzeEndpointTool {
+    const NAME: &'static str = "analyze_endpoint";
     type Error = YazgToolError;
     type Args = ThoughtArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Execute: probe/classify the bound scan target (AnalyzeEndpointAgent)."
+        "Probe/classify whether a bound live scan target is a generative AI API \
+         (AnalyzeEndpointAgent). Requires a bound target or capability_probe_ready=true \
+         (Scan wizard Verification). Do NOT use for counting findings or general chat."
             .into()
     }
 
@@ -411,20 +415,21 @@ impl Tool for AnalyzeEndpointRigTool {
     }
 }
 
-pub struct AttackPlanRigTool {
+pub struct AttackPlanTool {
     pub ctx: Arc<YazgSpecialistContext>,
     pub llm: Arc<dyn PlannerLlm>,
-    pub state: SharedYazgRigState,
+    pub state: SharedYazgState,
 }
 
-impl Tool for AttackPlanRigTool {
-    const NAME: &'static str = "execute";
+impl Tool for AttackPlanTool {
+    const NAME: &'static str = "attack_plan";
     type Error = YazgToolError;
     type Args = ThoughtArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Execute: build an attack plan for the verified bound target."
+        "Build an attack plan for a verified bound target (AttackPlanAgent). \
+         Requires verified=true (or a bound verified target)."
             .into()
     }
 
@@ -475,20 +480,21 @@ impl Tool for AttackPlanRigTool {
     }
 }
 
-pub struct GeneratePromptRigTool {
+pub struct GeneratePromptTool {
     pub ctx: Arc<YazgSpecialistContext>,
     pub llm: Arc<dyn PlannerLlm>,
-    pub state: SharedYazgRigState,
+    pub state: SharedYazgState,
 }
 
-impl Tool for GeneratePromptRigTool {
-    const NAME: &'static str = "execute";
+impl Tool for GeneratePromptTool {
+    const NAME: &'static str = "generate_prompt";
     type Error = YazgToolError;
     type Args = ThoughtArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Execute: invent a novel Attack Factory technique probe."
+        "Attack Factory: invent a novel technique probe (GeneratePromptAgent). \
+         Use only when factory_prompt_ready=true. Does not require a scan target."
             .into()
     }
 
@@ -538,20 +544,21 @@ impl Tool for GeneratePromptRigTool {
     }
 }
 
-pub struct RecommendRigTool {
+pub struct RecommendTool {
     pub ctx: Arc<YazgSpecialistContext>,
     pub llm: Arc<dyn PlannerLlm>,
-    pub state: SharedYazgRigState,
+    pub state: SharedYazgState,
 }
 
-impl Tool for RecommendRigTool {
-    const NAME: &'static str = "execute";
+impl Tool for RecommendTool {
+    const NAME: &'static str = "recommend";
     type Error = YazgToolError;
     type Args = ThoughtArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Execute: produce post-scan remediation recommendations."
+        "Post-scan remediation recommendations from completed attack results \
+         (RecommendAgent). Requires attack_results_ready=true."
             .into()
     }
 
@@ -600,20 +607,21 @@ impl Tool for RecommendRigTool {
     }
 }
 
-pub struct SummaryRigTool {
+pub struct SummaryTool {
     pub ctx: Arc<YazgSpecialistContext>,
     pub llm: Arc<dyn PlannerLlm>,
-    pub state: SharedYazgRigState,
+    pub state: SharedYazgState,
 }
 
-impl Tool for SummaryRigTool {
-    const NAME: &'static str = "execute";
+impl Tool for SummaryTool {
+    const NAME: &'static str = "summary";
     type Error = YazgToolError;
     type Args = ThoughtArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Execute: project or scan posture summary + highlights from bound request data."
+        "Project or scan posture overview + highlights (SummaryAgent). \
+         Requires summary_ready=true."
             .into()
     }
 
@@ -658,20 +666,21 @@ impl Tool for SummaryRigTool {
     }
 }
 
-pub struct JudgeRigTool {
+pub struct JudgeTool {
     pub ctx: Arc<YazgSpecialistContext>,
     pub orchestrator: Arc<dyn PlannerLlm>,
-    pub state: SharedYazgRigState,
+    pub state: SharedYazgState,
 }
 
-impl Tool for JudgeRigTool {
-    const NAME: &'static str = "execute";
+impl Tool for JudgeTool {
+    const NAME: &'static str = "judge";
     type Error = YazgToolError;
     type Args = ThoughtArgs;
     type Output = String;
 
     fn description(&self) -> String {
-        "Execute: run JudgeCoordinator consensus judging for the bound probe."
+        "Consensus judging via JudgeCoordinatorAgent (JudgeWorker + ClassifierWorker + \
+         AttackerWorker). Requires judge_ready=true and probe/response context."
             .into()
     }
 
@@ -727,6 +736,6 @@ impl Tool for JudgeRigTool {
 }
 
 /// Helper used by runtime to seed inventory into artifacts without re-query.
-pub fn inventory_snapshot(state: &YazgRigRunState) -> Option<&WorkspaceInventory> {
+pub fn inventory_snapshot(state: &YazgRunState) -> Option<&WorkspaceInventory> {
     state.artifacts.workspace_inventory.as_ref()
 }

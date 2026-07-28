@@ -1,11 +1,11 @@
-//! Rig AgentBuilder decision helpers for scan orchestrators.
+//! Orchestrator action-pick helpers for scan orchestrators.
 //!
 //! Host tools (`AttackExecutionTools`) are borrowed (`&dyn`) from the Tauri scan
 //! host and are therefore non-`'static`, so they cannot be registered directly on
-//! a Rig Agent. The pick tools choose an action; the host loop executes against
+//! an AgentBuilder agent. The pick tools choose an action; the host loop executes against
 //! `&dyn AttackExecutionTools` (same observation contract as a full in-agent tool).
 //!
-//! Yazg chat/wizard specialists use true manager–worker (`manager.tool(worker_agent)`).
+//! Domain specialists are tools on Yazg.
 
 use std::future::IntoFuture;
 use std::sync::Arc;
@@ -19,10 +19,10 @@ use serde_json::json;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::rig_model::YazgRigModel;
+use crate::yazg_model::YazgModel;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AttackRigAction {
+pub enum AttackPickAction {
     Generate,
     Attack,
     Recover,
@@ -32,7 +32,7 @@ pub enum AttackRigAction {
 }
 
 struct ActionPick {
-    action: AttackRigAction,
+    action: AttackPickAction,
     reply: oneshot::Sender<String>,
 }
 
@@ -87,41 +87,41 @@ macro_rules! pick_tool {
 pick_tool!(
     GeneratePickTool,
     "generate",
-    AttackRigAction::Generate,
+    AttackPickAction::Generate,
     "Generate / regenerate payloads for the next attack attempt."
 );
 pick_tool!(
     AttackPickTool,
     "attack",
-    AttackRigAction::Attack,
+    AttackPickAction::Attack,
     "Run HTTP attack+judge for the current attempt."
 );
 pick_tool!(
     RecoverPickTool,
     "recover",
-    AttackRigAction::Recover,
+    AttackPickAction::Recover,
     "Adjust endpoint pacing after an unhealthy attack observation."
 );
 pick_tool!(
     ReflectPickTool,
     "reflect",
-    AttackRigAction::Reflect,
+    AttackPickAction::Reflect,
     "Decide whether to retry after a healthy attack observation."
 );
 pick_tool!(
     AdaptPickTool,
     "adapt",
-    AttackRigAction::Adapt,
+    AttackPickAction::Adapt,
     "Adapt payload strategy after reflect says retry."
 );
 
-/// Ask a Rig agent to pick the next agentic action (one tool call), or Finish on text.
-pub async fn pick_agentic_action_rig(
+/// Ask the orchestrator LLM to pick the next agentic action (one tool call), or Finish on text.
+pub async fn pick_agentic_action(
     llm: Arc<dyn PlannerLlm>,
     transcript: &str,
     step: usize,
     max_steps: usize,
-) -> Result<(String, AttackRigAction), String> {
+) -> Result<(String, AttackPickAction), String> {
     let (tx, mut rx) = mpsc::channel::<ActionPick>(1);
     let tools: Vec<Box<dyn rig::tool::ToolDyn>> = vec![
         Box::new(GeneratePickTool { tx: tx.clone() }),
@@ -132,7 +132,7 @@ pub async fn pick_agentic_action_rig(
     ];
     drop(tx);
 
-    let model = YazgRigModel::new(llm);
+    let model = YazgModel::new(llm);
     let preamble = "\
 You are AgenticAttackExecutionAgent. Call exactly one tool for the next step, \
 or reply with plain text (no tool) to finish. Never invent HTTP results.";
@@ -146,13 +146,13 @@ or reply with plain text (no tool) to finish. Never invent HTTP results.";
         .build();
 
     let goal = format!(
-        "{transcript}\nRig step {step}/{max_steps}. Call one tool or finish with plain text."
+        "{transcript}\nOrchestrator step {step}/{max_steps}. Call one tool or finish with plain text."
     );
     let prompt_fut = agent.prompt(goal).max_turns(2).into_future();
     tokio::pin!(prompt_fut);
 
-    let mut picked: Option<AttackRigAction> = None;
-    let mut thought = String::from("(rig)");
+    let mut picked: Option<AttackPickAction> = None;
+    let mut thought = String::from("(orchestrator)");
     loop {
         tokio::select! {
             biased;
@@ -180,36 +180,36 @@ or reply with plain text (no tool) to finish. Never invent HTTP results.";
 
     Ok((
         thought,
-        picked.unwrap_or(AttackRigAction::Finish),
+        picked.unwrap_or(AttackPickAction::Finish),
     ))
 }
 
 pick_tool!(
     SeqGeneratePickTool,
     "generate",
-    AttackRigAction::Generate,
+    AttackPickAction::Generate,
     "Generate payloads for the sequential attack attempt."
 );
 pick_tool!(
     SeqAttackPickTool,
     "attack",
-    AttackRigAction::Attack,
+    AttackPickAction::Attack,
     "Run HTTP attack+judge. Requires generate first."
 );
 pick_tool!(
     SeqRecoverPickTool,
     "recover",
-    AttackRigAction::Recover,
+    AttackPickAction::Recover,
     "Adjust endpoint pacing after an unhealthy attack observation."
 );
 
-/// Ask a Rig agent to pick the next sequential action.
-pub async fn pick_sequential_action_rig(
+/// Ask the orchestrator LLM to pick the next sequential action.
+pub async fn pick_sequential_action(
     llm: Arc<dyn PlannerLlm>,
     transcript: &str,
     step: usize,
     max_steps: usize,
-) -> Result<(String, AttackRigAction), String> {
+) -> Result<(String, AttackPickAction), String> {
     let (tx, mut rx) = mpsc::channel::<ActionPick>(1);
     let tools: Vec<Box<dyn rig::tool::ToolDyn>> = vec![
         Box::new(SeqGeneratePickTool { tx: tx.clone() }),
@@ -218,7 +218,7 @@ pub async fn pick_sequential_action_rig(
     ];
     drop(tx);
 
-    let model = YazgRigModel::new(llm);
+    let model = YazgModel::new(llm);
     let preamble = "\
 You are SequentialAttackExecutionAgent. Call exactly one tool for the next step, \
 or reply with plain text (no tool) to finish.";
@@ -232,13 +232,13 @@ or reply with plain text (no tool) to finish.";
         .build();
 
     let goal = format!(
-        "{transcript}\nRig step {step}/{max_steps}. Call one tool or finish with plain text."
+        "{transcript}\nOrchestrator step {step}/{max_steps}. Call one tool or finish with plain text."
     );
     let prompt_fut = agent.prompt(goal).max_turns(2).into_future();
     tokio::pin!(prompt_fut);
 
-    let mut picked: Option<AttackRigAction> = None;
-    let mut thought = String::from("(rig)");
+    let mut picked: Option<AttackPickAction> = None;
+    let mut thought = String::from("(orchestrator)");
     loop {
         tokio::select! {
             biased;
@@ -265,6 +265,6 @@ or reply with plain text (no tool) to finish.";
 
     Ok((
         thought,
-        picked.unwrap_or(AttackRigAction::Finish),
+        picked.unwrap_or(AttackPickAction::Finish),
     ))
 }

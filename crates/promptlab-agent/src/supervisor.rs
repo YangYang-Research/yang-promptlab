@@ -25,8 +25,8 @@ use crate::list_workspace::WorkspaceTools;
 use crate::memory::{AgentMemoryStore, MemoryContext};
 use crate::artifacts::{YazgActionKind, YazgArtifacts};
 use crate::recommend::{RecommendAgent, RecommendAgentOutcome};
-use crate::rig_runtime::{run_yazg_rig, YazgRigRequest};
-use crate::rig_tools::{YazgRigLlms, YazgSpecialistContext};
+use crate::yazg_runtime::{run_yazg, YazgRequest};
+use crate::yazg_tools::{YazgLlms, YazgSpecialistContext};
 use crate::sequential_attack_execution::{
     SequentialAttackExecutionAgent, SequentialAttackExecutionRequest,
 };
@@ -99,7 +99,7 @@ pub struct YazgTurn {
     pub verified: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plan_summary: Option<String>,
-    /// Raw Rig `PromptResponse` (or equivalent engine payload) for UI.
+    /// Raw agent `PromptResponse` (or equivalent engine payload) for UI.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_output: Option<serde_json::Value>,
 }
@@ -188,19 +188,19 @@ impl YazgSupervisor {
         format!("{}\n\n({hint})", message.trim())
     }
 
-    /// Primary entry: Rig agent loop (tool-calling) then map to typed delegation.
-    pub async fn react_rig(request: YazgRigRequest) -> AgentResult<YazgDelegation> {
-        let (artifacts, raw_output) = run_yazg_rig(request).await?;
+    /// Primary entry: Yazg tool-calling loop (tool-calling) then map to typed delegation.
+    pub async fn run_yazg_turn(request: YazgRequest) -> AgentResult<YazgDelegation> {
+        let (artifacts, raw_output) = run_yazg(request).await?;
         Ok(delegation_from_artifacts_with_raw(artifacts, Some(raw_output)))
     }
 
-    /// Chat / command turn — Rig agent loop (no hard-coded agent branch).
+    /// Chat / command turn — Yazg tool-calling loop (no hard-coded agent branch).
     pub async fn handle(
         message: &str,
         intent_hint: SupervisorIntent,
         profile: Option<&TargetProfile>,
         auth_headers: HashMap<String, String>,
-        llms: YazgRigLlms,
+        llms: YazgLlms,
         memory: Option<Arc<dyn AgentMemoryStore>>,
         memory_ctx: MemoryContext,
         project_tools: Option<Arc<dyn CreateProjectTools>>,
@@ -211,19 +211,19 @@ impl YazgSupervisor {
         if let Some(p) = profile {
             specialist = specialist.with_profile(p.clone());
         }
-        let request = YazgRigRequest::new(goal, llms)
+        let request = YazgRequest::new(goal, llms)
             .with_memory(memory, memory_ctx)
             .with_project_tools(project_tools)
             .with_workspace_tools(workspace_tools)
             .with_specialist(specialist);
-        Self::react_rig(request).await
+        Self::run_yazg_turn(request).await
     }
 
     /// Wizard Verification AI step: probe already captured.
     pub async fn react_classify_probe(
         profile: &TargetProfile,
         http: &promptlab_target_profile::VerifyHttpSuccess,
-        llms: &YazgRigLlms,
+        llms: &YazgLlms,
         memory: Option<Arc<dyn AgentMemoryStore>>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
@@ -239,11 +239,11 @@ impl YazgSupervisor {
         let specialist = YazgSpecialistContext::default()
             .with_profile(profile.clone())
             .with_capability_probe(http.clone());
-        let request = YazgRigRequest::new(goal, llms.clone())
+        let request = YazgRequest::new(goal, llms.clone())
             .with_memory(memory, memory_ctx)
             .with_specialist(specialist)
             .with_max_turns(4);
-        let delegation = Self::react_rig(request).await?;
+        let delegation = Self::run_yazg_turn(request).await?;
         if matches!(delegation, YazgDelegation::AnalyzedEndpoint { .. }) {
             return Ok(delegation);
         }
@@ -275,7 +275,7 @@ impl YazgSupervisor {
     /// Wizard attack-plan step.
     pub async fn react_plan(
         profile: &TargetProfile,
-        llms: &YazgRigLlms,
+        llms: &YazgLlms,
         memory: Option<Arc<dyn AgentMemoryStore>>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
@@ -289,11 +289,11 @@ impl YazgSupervisor {
         );
         let goal = Self::build_goal(&message, SupervisorIntent::AttackPlan);
         let specialist = YazgSpecialistContext::default().with_profile(profile.clone());
-        let request = YazgRigRequest::new(goal, llms.clone())
+        let request = YazgRequest::new(goal, llms.clone())
             .with_memory(memory, memory_ctx)
             .with_specialist(specialist)
             .with_max_turns(4);
-        let delegation = Self::react_rig(request).await?;
+        let delegation = Self::run_yazg_turn(request).await?;
         if matches!(delegation, YazgDelegation::Planned { .. }) {
             return Ok(delegation);
         }
@@ -325,7 +325,7 @@ impl YazgSupervisor {
     /// Attack Factory: invent a novel technique probe.
     pub async fn react_generate_prompt(
         technique: &TechniquePromptContext,
-        llms: &YazgRigLlms,
+        llms: &YazgLlms,
         memory: Option<Arc<dyn AgentMemoryStore>>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
@@ -339,12 +339,12 @@ impl YazgSupervisor {
         );
         let goal = Self::build_goal(&message, SupervisorIntent::GeneratePrompt);
         let specialist = YazgSpecialistContext::default().with_technique(technique.clone());
-        let request = YazgRigRequest::new(goal, llms.clone())
+        let request = YazgRequest::new(goal, llms.clone())
             .with_memory(memory, memory_ctx)
             .with_specialist(specialist)
             .with_max_turns(6);
 
-        let delegation = match Self::react_rig(request).await {
+        let delegation = match Self::run_yazg_turn(request).await {
             Ok(d) => d,
             Err(err) => {
                 warn!(
@@ -409,7 +409,7 @@ impl YazgSupervisor {
     /// Post-scan recommendations.
     pub async fn react_recommend(
         results: &AttackResultsSummary,
-        llms: &YazgRigLlms,
+        llms: &YazgLlms,
         memory: Option<Arc<dyn AgentMemoryStore>>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
@@ -424,11 +424,11 @@ impl YazgSupervisor {
         );
         let goal = Self::build_goal(&message, SupervisorIntent::Recommend);
         let specialist = YazgSpecialistContext::default().with_attack_results(results.clone());
-        let request = YazgRigRequest::new(goal, llms.clone())
+        let request = YazgRequest::new(goal, llms.clone())
             .with_memory(memory, memory_ctx)
             .with_specialist(specialist)
             .with_max_turns(4);
-        let delegation = Self::react_rig(request).await?;
+        let delegation = Self::run_yazg_turn(request).await?;
         if matches!(delegation, YazgDelegation::Recommended { .. }) {
             return Ok(delegation);
         }
@@ -462,7 +462,7 @@ impl YazgSupervisor {
     /// Project or scan posture summary.
     pub async fn react_summarize(
         summary_request: &SummaryRequest,
-        llms: &YazgRigLlms,
+        llms: &YazgLlms,
         memory: Option<Arc<dyn AgentMemoryStore>>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
@@ -486,11 +486,11 @@ impl YazgSupervisor {
         let goal = Self::build_goal(&message, SupervisorIntent::Summary);
         let specialist =
             YazgSpecialistContext::default().with_summary_request(summary_request.clone());
-        let request = YazgRigRequest::new(goal, llms.clone())
+        let request = YazgRequest::new(goal, llms.clone())
             .with_memory(memory, memory_ctx)
             .with_specialist(specialist)
             .with_max_turns(6);
-        let delegation = match Self::react_rig(request).await {
+        let delegation = match Self::run_yazg_turn(request).await {
             Ok(d) => d,
             Err(err) => {
                 warn!(
@@ -556,7 +556,7 @@ impl YazgSupervisor {
     pub async fn react_judge(
         judge_request: &JudgeRequest,
         judge_engine: Arc<JudgeEngine>,
-        llms: &YazgRigLlms,
+        llms: &YazgLlms,
         memory: Option<Arc<dyn AgentMemoryStore>>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
@@ -569,11 +569,11 @@ impl YazgSupervisor {
         let goal = Self::build_goal(&message, SupervisorIntent::Judge);
         let specialist =
             YazgSpecialistContext::default().with_judge(judge_request.clone(), judge_engine);
-        let request = YazgRigRequest::new(goal, llms.clone())
+        let request = YazgRequest::new(goal, llms.clone())
             .with_memory(memory, memory_ctx)
             .with_specialist(specialist)
             .with_max_turns(4);
-        Self::react_rig(request).await
+        Self::run_yazg_turn(request).await
     }
 
     /// Hard-gate agentic scan execution: Yazg delegates to AgenticAttackExecutionAgent.
@@ -639,7 +639,7 @@ impl YazgSupervisor {
         Ok(outcome)
     }
 
-    /// Offline fallback when AI Runtime is unavailable (no Rig loop).
+    /// Offline fallback when AI Runtime is unavailable (no Yazg loop).
     pub fn offline_chat(message: &str, profile: Option<&TargetProfile>) -> YazgTurn {
         let trimmed = message.trim();
         let target_line = match profile {
@@ -669,7 +669,7 @@ impl YazgSupervisor {
         YazgTurn {
             reply,
             intent: SupervisorIntent::Chat,
-            events: vec![AgentEvent::info(AgentId::Yazg, "Offline chat (no Rig)")],
+            events: vec![AgentEvent::info(AgentId::Yazg, "Offline chat (AI Runtime offline)")],
             verified: profile.map(|p| p.is_verified()),
             plan_summary: None,
             raw_output: None,

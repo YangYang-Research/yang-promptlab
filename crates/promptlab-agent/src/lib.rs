@@ -1,29 +1,26 @@
-//! Yazg multi-agent orchestration (manager–worker via Rig library).
+//! Yazg multi-agent orchestration (manager + domain tools).
 //!
-//! Hierarchy (workers are Agents attached with `.tool(worker)`):
+//! Hierarchy:
 //! ```text
 //! Yazg (Manager)
-//! ├── list_workspace        — worker Agent → ListWorkspace tool
-//! ├── create_project        — worker Agent → CreateProject tool
-//! ├── analyze_endpoint      — worker Agent → AnalyzeEndpoint tool
-//! ├── attack_plan           — worker Agent → AttackPlan tool
-//! ├── generate_prompt       — worker Agent → GeneratePrompt tool
-//! ├── recommend             — worker Agent → Recommend tool
-//! ├── summary               — worker Agent → Summary tool
-//! ├── judge                 — worker Agent → JudgeCoordinator
-//! │   ├── JudgeWorker       — nested worker Agent
-//! │   ├── ClassifierWorker  — nested worker Agent
-//! │   └── AttackerWorker    — nested worker Agent
+//! ├── list_workspace      — tool → WorkspaceTools
+//! ├── create_project      — tool → CreateProjectTools
+//! ├── analyze_endpoint    — tool → AnalyzeEndpointAgent::run
+//! ├── attack_plan         — tool → AttackPlanAgent::run
+//! ├── generate_prompt     — tool → GeneratePromptAgent::run
+//! ├── recommend           — tool → RecommendAgent::run
+//! ├── summary             — tool → SummaryAgent::run
+//! ├── judge               — tool → JudgeCoordinator (+ role vote tools)
 //! ├── AgenticAttackExecutionAgent    — pick + host execute bridge
 //! ├── SequentialAttackExecutionAgent — pick + host execute bridge
-//! └── ReflectionAgent       — structured extractor
+//! └── ReflectionAgent                — structured extractor
 //! ```
 
 pub mod agent_log;
 pub mod analyze_endpoint;
 pub mod artifacts;
 pub mod attack_execution;
-pub mod attack_execution_rig;
+pub mod attack_execution_pick;
 pub mod attack_plan;
 pub mod create_project;
 pub mod endpoint_recovery;
@@ -35,10 +32,9 @@ pub mod list_workspace;
 pub mod memory;
 pub mod recommend;
 pub mod reflection;
-pub mod rig_model;
-pub mod rig_runtime;
-pub mod rig_tools;
-pub mod rig_workers;
+pub mod yazg_model;
+pub mod yazg_runtime;
+pub mod yazg_tools;
 pub mod sequential_attack_execution;
 pub mod summary;
 pub mod supervisor;
@@ -78,8 +74,8 @@ pub use memory::{
 };
 pub use recommend::{RecommendAgent, RecommendAgentOutcome};
 pub use reflection::{ReflectionAgent, ReflectionOutcome, ReflectionRequest};
-pub use rig_runtime::{run_yazg_rig, YazgRigRequest};
-pub use rig_tools::{YazgRigLlms, YazgSpecialistContext};
+pub use yazg_runtime::{run_yazg, YazgRequest};
+pub use yazg_tools::{YazgLlms, YazgSpecialistContext};
 pub use sequential_attack_execution::{
     SequentialAttackExecutionAgent, SequentialAttackExecutionRequest,
 };

@@ -1,4 +1,4 @@
-//! AgenticAttackExecutionAgent — Rig tool-calling orchestrator for agentic scan execution.
+//! AgenticAttackExecutionAgent — tool-calling orchestrator for agentic scan execution.
 //!
 //! Coordinates generate → attack (host HTTP) → reflect → adapt → retry/finish.
 //! Judge runs inside the host attack tool (JudgeCoordinatorAgent).
@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use promptlab_planner::PlannerLlm;
 use tracing::{info, warn};
 
-use crate::attack_execution_rig::{pick_agentic_action_rig, AttackRigAction};
+use crate::attack_execution_pick::{pick_agentic_action, AttackPickAction};
 use crate::attack_plan::{AdaptPlanOutcome, AdaptPlanRequest, AttackPlanAgent};
 use crate::endpoint_recovery::{
     error_is_endpoint_recoverable, heuristic_recovery, observation_needs_recovery,
@@ -126,7 +126,7 @@ pub async fn emit_and_record(
 
 /// LLMs used by AgenticAttackExecutionAgent and its sub-agents.
 pub struct AttackExecutionLlms {
-    /// Orchestrator Rig brain (may be same as plan/reflection).
+    /// Orchestrator LLM (may be same as plan/reflection).
     pub orchestrator: Arc<dyn PlannerLlm>,
     pub reflection: Arc<dyn PlannerLlm>,
     pub plan: Arc<dyn PlannerLlm>,
@@ -364,7 +364,7 @@ impl AgenticAttackExecutionAgent {
             }
 
             let action = if llms.llm_ready {
-                match pick_agentic_action_rig(
+                match pick_agentic_action(
                     llms.orchestrator.clone(),
                     &transcript,
                     step,
@@ -372,8 +372,8 @@ impl AgenticAttackExecutionAgent {
                 )
                 .await
                 {
-                    Ok((thought, rig_action)) => {
-                        let action = map_rig_action(rig_action);
+                    Ok((thought, pick_action)) => {
+                        let action = map_pick_action(pick_action);
                         emit_and_record(
                             tools,
                             &mut events,
@@ -390,9 +390,9 @@ impl AgenticAttackExecutionAgent {
                         action
                     }
                     Err(err) => {
-                        warn!(error = %err, "AgenticAttackExecutionAgent Rig pick failed; using policy");
+                        warn!(error = %err, "AgenticAttackExecutionAgent action pick failed; using policy");
                         transcript.push_str(&format!(
-                            "\n--- Step {step} ---\nInvalid Rig tool choice: {err}\n\
+                            "\n--- Step {step} ---\nInvalid tool choice: {err}\n\
                              Valid tools: generate|attack|recover|reflect|adapt. Using policy.\n"
                         ));
                         policy_next_action(
@@ -1106,13 +1106,13 @@ fn policy_next_action(
     ExecAction::Finish
 }
 
-fn map_rig_action(action: AttackRigAction) -> ExecAction {
+fn map_pick_action(action: AttackPickAction) -> ExecAction {
     match action {
-        AttackRigAction::Generate => ExecAction::Generate,
-        AttackRigAction::Attack => ExecAction::Attack,
-        AttackRigAction::Recover => ExecAction::Recover,
-        AttackRigAction::Reflect => ExecAction::Reflect,
-        AttackRigAction::Adapt => ExecAction::Adapt,
-        AttackRigAction::Finish => ExecAction::Finish,
+        AttackPickAction::Generate => ExecAction::Generate,
+        AttackPickAction::Attack => ExecAction::Attack,
+        AttackPickAction::Recover => ExecAction::Recover,
+        AttackPickAction::Reflect => ExecAction::Reflect,
+        AttackPickAction::Adapt => ExecAction::Adapt,
+        AttackPickAction::Finish => ExecAction::Finish,
     }
 }

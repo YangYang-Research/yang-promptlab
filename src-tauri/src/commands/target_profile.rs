@@ -513,7 +513,7 @@ pub async fn target_profile_verify_ai_classify_op(
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
-    let llms = hosts.into_rig_llms();
+    let llms = hosts.into_yazg_llms();
     let memory: Arc<dyn promptlab_agent::AgentMemoryStore> =
         Arc::new(SqliteAgentMemoryStore::new(state.repositories()));
     let memory_ctx = MemoryContext::new(format!("wizard-verify:{target_id}"))
@@ -706,11 +706,11 @@ pub async fn planner_generate_from_profile_op(
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
-    let llms = hosts.into_rig_llms();
+    let llms = hosts.into_yazg_llms();
     let memory: Arc<dyn promptlab_agent::AgentMemoryStore> =
         Arc::new(SqliteAgentMemoryStore::new(state.repositories()));
     // Fresh STM session per generate so prior AttackPlanAgent OK observations do not
-    // convince Rig to skip regenerating. LTM remains target-scoped.
+    // convince Yazg to skip regenerating. LTM remains target-scoped.
     let session_nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())

@@ -303,7 +303,7 @@ pub async fn yazg_chat_op(
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
-    let llms = hosts.into_rig_llms();
+    let llms = hosts.into_yazg_llms();
     let memory: Arc<dyn promptlab_agent::AgentMemoryStore> =
         Arc::new(SqliteAgentMemoryStore::new(state.repositories()));
     let project_tools: Arc<dyn CreateProjectTools> = Arc::new(HostCreateProjectTools {

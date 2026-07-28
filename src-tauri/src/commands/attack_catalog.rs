@@ -218,7 +218,7 @@ pub async fn attack_catalog_generate_prompt_op(
         state.model_provider().clone(),
         state.runtime_manager().clone(),
     );
-    let llms = hosts.into_rig_llms();
+    let llms = hosts.into_yazg_llms();
     let memory: Arc<dyn promptlab_agent::AgentMemoryStore> =
         Arc::new(SqliteAgentMemoryStore::new(state.repositories()));
     let memory_ctx = MemoryContext::new(format!("factory:{}", technique.id));

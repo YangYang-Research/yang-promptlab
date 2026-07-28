@@ -716,8 +716,8 @@ impl YazgHostLlms {
         }
     }
 
-    pub fn into_rig_llms(self) -> promptlab_agent::YazgRigLlms {
-        promptlab_agent::YazgRigLlms {
+    pub fn into_yazg_llms(self) -> promptlab_agent::YazgLlms {
+        promptlab_agent::YazgLlms {
             supervisor: Arc::new(self.supervisor),
             analyze: Arc::new(self.analyze),
             plan: Arc::new(self.plan),
@@ -792,8 +792,8 @@ impl YazgHostLlmsScanSummary {
         }
     }
 
-    pub fn into_rig_llms(self) -> promptlab_agent::YazgRigLlms {
-        promptlab_agent::YazgRigLlms {
+    pub fn into_yazg_llms(self) -> promptlab_agent::YazgLlms {
+        promptlab_agent::YazgLlms {
             supervisor: Arc::new(self.supervisor),
             analyze: Arc::new(self.analyze),
             plan: Arc::new(self.plan),

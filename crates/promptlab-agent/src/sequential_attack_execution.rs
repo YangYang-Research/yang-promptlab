@@ -1,4 +1,4 @@
-//! SequentialAttackExecutionAgent — Rig tool-calling generate → attack → recover → finish.
+//! SequentialAttackExecutionAgent — tool-calling generate → attack → recover → finish.
 //!
 //! Used for Sequential execution strategy. No reflection/adapt loop, but still
 //! recovers from endpoint/transport failures via pacing adjustments.
@@ -11,7 +11,7 @@ use tracing::{info, warn};
 use crate::attack_execution::{
     emit_and_record, AttackAttemptObservation, AttackExecutionOutcome, AttackExecutionTools,
 };
-use crate::attack_execution_rig::{pick_sequential_action_rig, AttackRigAction};
+use crate::attack_execution_pick::{pick_sequential_action, AttackPickAction};
 use crate::endpoint_recovery::{
     error_is_endpoint_recoverable, heuristic_recovery, observation_needs_recovery,
     seed_pacing_from_prior_failure, MAX_ENDPOINT_RECOVERIES,
@@ -216,10 +216,10 @@ impl SequentialAttackExecutionAgent {
 
             let action = if llm_ready {
                 if let Some(llm) = orchestrator.as_ref() {
-                    match pick_sequential_action_rig(llm.clone(), &transcript, step, max_steps).await
+                    match pick_sequential_action(llm.clone(), &transcript, step, max_steps).await
                     {
-                        Ok((thought, rig_action)) => {
-                            let action = map_seq_rig_action(rig_action);
+                        Ok((thought, pick_action)) => {
+                            let action = map_seq_pick_action(pick_action);
                             emit_and_record(
                                 tools,
                                 &mut events,
@@ -237,10 +237,10 @@ impl SequentialAttackExecutionAgent {
                         Err(err) => {
                             warn!(
                                 error = %err,
-                                "SequentialAttackExecutionAgent Rig pick failed; using policy"
+                                "SequentialAttackExecutionAgent action pick failed; using policy"
                             );
                             transcript.push_str(&format!(
-                                "\n--- Step {step} ---\nInvalid Rig tool choice: {err}\n\
+                                "\n--- Step {step} ---\nInvalid tool choice: {err}\n\
                                  Valid tools: generate|attack|recover. Using policy.\n"
                             ));
                             policy_next_action(
@@ -804,12 +804,12 @@ fn gate_seq_action(
     action
 }
 
-fn map_seq_rig_action(action: AttackRigAction) -> SeqAction {
+fn map_seq_pick_action(action: AttackPickAction) -> SeqAction {
     match action {
-        AttackRigAction::Generate => SeqAction::Generate,
-        AttackRigAction::Attack => SeqAction::Attack,
-        AttackRigAction::Recover => SeqAction::Recover,
-        AttackRigAction::Reflect | AttackRigAction::Adapt | AttackRigAction::Finish => SeqAction::Finish,
+        AttackPickAction::Generate => SeqAction::Generate,
+        AttackPickAction::Attack => SeqAction::Attack,
+        AttackPickAction::Recover => SeqAction::Recover,
+        AttackPickAction::Reflect | AttackPickAction::Adapt | AttackPickAction::Finish => SeqAction::Finish,
     }
 }
 

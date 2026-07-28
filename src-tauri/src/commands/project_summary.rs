@@ -396,7 +396,7 @@ pub async fn project_summary_generate_op(
                         state.model_provider().clone(),
                         state.runtime_manager().clone(),
                     );
-                    let llms = hosts.into_rig_llms();
+                    let llms = hosts.into_yazg_llms();
                     let summary_request = SummaryRequest::Project {
                         project_name: input.project_name.clone(),
                         input_json,

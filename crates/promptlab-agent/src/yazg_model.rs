@@ -14,31 +14,31 @@ use serde::{Deserialize, Serialize};
 
 /// Cloneable Rig model that delegates completions to PromptLab inference.
 #[derive(Clone)]
-pub struct YazgRigModel {
+pub struct YazgModel {
     llm: Arc<dyn PlannerLlm>,
 }
 
-impl YazgRigModel {
+impl YazgModel {
     pub fn new(llm: Arc<dyn PlannerLlm>) -> Self {
         Self { llm }
     }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct YazgRigRawResponse {
+pub struct YazgRawResponse {
     pub content: Option<String>,
     pub tool_calls: Vec<promptlab_planner::ToolCall>,
 }
 
-impl GetTokenUsage for YazgRigRawResponse {
+impl GetTokenUsage for YazgRawResponse {
     fn token_usage(&self) -> Usage {
         Usage::new()
     }
 }
 
-impl CompletionModel for YazgRigModel {
-    type Response = YazgRigRawResponse;
-    type StreamingResponse = YazgRigRawResponse;
+impl CompletionModel for YazgModel {
+    type Response = YazgRawResponse;
+    type StreamingResponse = YazgRawResponse;
     type Client = ();
 
     fn make(_: &Self::Client, _: impl Into<String>) -> Self {
@@ -91,7 +91,7 @@ impl CompletionModel for YazgRigModel {
                 .map_err(|err| CompletionError::ProviderError(err.to_string()))?
         };
 
-        let raw = YazgRigRawResponse {
+        let raw = YazgRawResponse {
             content: outcome.content.clone(),
             tool_calls: outcome.tool_calls.clone(),
         };
@@ -110,7 +110,7 @@ impl CompletionModel for YazgRigModel {
         _request: CompletionRequest,
     ) -> Result<StreamingCompletionResponse<Self::StreamingResponse>, CompletionError> {
         Err(CompletionError::ProviderError(
-            "YazgRigModel does not support streaming yet".into(),
+            "YazgModel does not support streaming yet".into(),
         ))
     }
 }
@@ -121,7 +121,7 @@ struct UnsupportedLlm;
 impl PlannerLlm for UnsupportedLlm {
     async fn complete(&self, _prompt: &str) -> promptlab_planner::PlannerResult<String> {
         Err(promptlab_planner::PlannerError::Llm(
-            "YazgRigModel placeholder has no LLM bound".into(),
+            "YazgModel placeholder has no LLM bound".into(),
         ))
     }
 }

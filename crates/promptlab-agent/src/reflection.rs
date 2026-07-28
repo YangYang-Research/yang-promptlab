@@ -1,4 +1,4 @@
-//! ReflectionAgent — Rig Extractor for agentic retry decisions.
+//! ReflectionAgent — structured extractor for agentic retry decisions.
 
 use std::sync::Arc;
 
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use crate::error::{AgentError, AgentResult};
-use crate::rig_model::YazgRigModel;
+use crate::yazg_model::YazgModel;
 use crate::types::{AgentEvent, AgentId};
 
 /// Input for one reflection turn after an attack+judge attempt.
@@ -42,11 +42,11 @@ struct ReflectionExtract {
     focus_hints: Vec<String>,
 }
 
-/// Agentic reflection sub-agent (Rig Extractor) under AgenticAttackExecutionAgent / Yazg.
+/// Agentic reflection sub-agent (structured extractor) under AgenticAttackExecutionAgent / Yazg.
 pub struct ReflectionAgent;
 
 impl ReflectionAgent {
-    /// Decide whether to retry via Rig [`Extractor`] (structured submit tool).
+    /// Decide whether to retry via structured [`Extractor`] (structured submit tool).
     pub async fn run(
         request: &ReflectionRequest,
         llm: Arc<dyn PlannerLlm>,
@@ -54,7 +54,7 @@ impl ReflectionAgent {
         let mut events = vec![AgentEvent::started(
             AgentId::Reflection,
             format!(
-                "Reflecting on {} attempt {}/{} (Rig Extractor)",
+                "Reflecting on {} attempt {}/{} (structured extractor)",
                 request.category, request.attempt, request.max_attempts
             ),
         )];
@@ -62,10 +62,10 @@ impl ReflectionAgent {
         info!(
             category = %request.category,
             attempt = request.attempt,
-            "ReflectionAgent started (Rig Extractor)"
+            "ReflectionAgent started (structured extractor)"
         );
 
-        let model = YazgRigModel::new(llm);
+        let model = YazgModel::new(llm);
         let preamble = "\
 You are ReflectionAgent for an authorized AI security scan (agentic execution).\n\
 Extract a retry decision from the user text.\n\

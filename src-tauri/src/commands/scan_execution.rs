@@ -970,7 +970,7 @@ async fn run_sequential_category(
         ctx.model_provider.clone(),
         Arc::clone(&ctx.runtime_manager),
     );
-    let llms = hosts.into_rig_llms();
+    let llms = hosts.into_yazg_llms();
 
     ctx.emitter.info(format!(
         "Yazg → SequentialAttackExecutionAgent for {} (endpoint recovery)",
@@ -1217,7 +1217,7 @@ async fn run_agentic_category(
         ctx.model_provider.clone(),
         Arc::clone(&ctx.runtime_manager),
     );
-    let llms = hosts.into_rig_llms();
+    let llms = hosts.into_yazg_llms();
     let exec_llms = AttackExecutionLlms {
         orchestrator: llms.supervisor.clone(),
         reflection: llms.supervisor.clone(),
