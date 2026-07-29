@@ -93,7 +93,7 @@ Reply with a single compact JSON object only - no markdown, no prose. One line:
 Optional: add "rationale" only when needed - max 120 characters, plain text, no quotes or backslashes.
 
 Set isAiEndpoint to true only when the response clearly contains AI-generated assistant text, completion choices, model output, or an equivalent generative AI payload.
-Set false for validation errors, auth failures rendered as JSON, static REST/CRUD payloads, HTML, or non-AI backends."#
+Set false for validation errors, auth failures rendered as JSON, static REST/CRUD payloads, HTML, or non-AI backends."##
     }
 
     /// Yazg supervisor system prompt - layered context engineering
