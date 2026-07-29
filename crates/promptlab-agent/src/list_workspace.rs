@@ -140,22 +140,85 @@ impl WorkspaceInventory {
         )
     }
 
-    fn project_named_in_goal(&self, goal: &str) -> Option<&WorkspaceProjectSummary> {
+    /// Exact id or case-insensitive name match.
+    pub fn find_project(&self, key: &str) -> Option<&WorkspaceProjectSummary> {
+        let key = key.trim();
+        if key.is_empty() {
+            return None;
+        }
+        if let Some(p) = self.projects.iter().find(|p| p.id == key) {
+            return Some(p);
+        }
+        let lower = key.to_lowercase();
+        self.projects
+            .iter()
+            .find(|p| p.name.to_lowercase() == lower)
+    }
+
+    pub fn missing_project_reply(&self, requested: &str) -> String {
+        let requested = requested.trim();
+        let candidates = if self.projects.is_empty() {
+            "- (none)".into()
+        } else {
+            self.projects
+                .iter()
+                .map(|p| format!("- **{}** (`{}`)", p.name, p.id))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        format!(
+            "Không có project **{requested}** trong workspace.\n\nProjects hiện có:\n{candidates}"
+        )
+    }
+
+    pub(crate) fn project_named_in_goal(&self, goal: &str) -> Option<&WorkspaceProjectSummary> {
         if goal.trim().is_empty() || self.projects.is_empty() {
             return None;
         }
-        let g = goal.to_lowercase();
+        if let Some(asked) = extract_requested_project_name(goal) {
+            return self.find_project(&asked);
+        }
+        // Fallback: project name appears as a whole token in the goal (not a substring).
+        let tokens: Vec<String> = goal
+            .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
+            .filter(|t| !t.is_empty())
+            .map(|t| t.to_lowercase())
+            .collect();
         let mut ranked: Vec<&WorkspaceProjectSummary> = self
             .projects
             .iter()
             .filter(|p| {
-                let name = p.name.trim();
-                !name.is_empty() && g.contains(&name.to_lowercase())
+                let name = p.name.trim().to_lowercase();
+                !name.is_empty() && tokens.iter().any(|t| t == &name)
             })
             .collect();
         ranked.sort_by(|a, b| b.name.len().cmp(&a.name.len()));
         ranked.into_iter().next()
     }
+}
+
+/// Extract a requested project name from goals like "project WebApp" / "thong tin project X".
+/// Returns None for inventory-style asks ("project nào", "projects in workspace").
+pub fn extract_requested_project_name(goal: &str) -> Option<String> {
+    let lower = goal.to_lowercase();
+    let idx = lower.find("project ")?;
+    let rest = goal[idx + "project ".len()..].trim();
+    let token = rest
+        .split_whitespace()
+        .next()?
+        .trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_');
+    if token.is_empty() {
+        return None;
+    }
+    const STOP: &[&str] = &[
+        "có", "nào", "nao", "trong", "workspace", "workspcae", "the", "a", "an", "của", "cua",
+        "thông", "thong", "tin", "information", "info", "overview", "list", "các", "cac", "all",
+        "những", "nhung", "với", "voi", "and", "or", "of", "in", "for",
+    ];
+    if STOP.iter().any(|s| token.eq_ignore_ascii_case(s)) {
+        return None;
+    }
+    Some(token.to_string())
 }
 
 /// Project detail: metadata + targets + scans (no finding rows).

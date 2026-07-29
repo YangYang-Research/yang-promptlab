@@ -10367,6 +10367,7 @@ a:hover {
   gap: 0.4rem;
   font-size: 0.75rem;
   line-height: 1.35;
+  align-items: start;
 }
 
 .yazg-chat-events__agent {
@@ -10380,8 +10381,19 @@ a:hover {
 }
 
 .yazg-chat-events__msg {
-  color: var(--text-muted);
+  margin: 0;
+  padding: 0.35rem 0.45rem;
+  max-height: 22rem;
+  overflow: auto;
+  white-space: pre-wrap;
   word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--surface-raised, #111) 88%, transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.35rem;
 }
 
 .yazg-chat-page__typing {

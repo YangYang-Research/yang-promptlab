@@ -21,7 +21,12 @@ use crate::list_workspace::{clamp_findings_limit, WorkspaceInventory, WorkspaceT
 use crate::artifacts::YazgArtifacts;
 use crate::recommend::RecommendAgent;
 use crate::summary::{SummaryAgent, SummaryRequest};
+use crate::tool_result::{ToolResult, TOOL_RESULT_CONTRACT};
 use crate::types::{AgentEvent, AgentId};
+
+/// Appended to workspace tool descriptions (Prompting Guide: when-to-use lives in tool defs).
+const WHEN_NOT_WORKSPACE: &str = " Do not call when the latest user message needs no live workspace \
+data (conversation, identity, general knowledge, or simple reasoning without DB rows).";
 
 /// Shared mutable run state filled by tools and consumed after `agent.prompt`.
 #[derive(Default)]
@@ -210,6 +215,73 @@ fn truncate(s: &str, max: usize) -> String {
     format!("{shortened}…")
 }
 
+/// True when a host/repo error is a closed-domain miss (entity absent), not a hard failure.
+fn is_lookup_miss(err: &str) -> bool {
+    let e = err.to_lowercase();
+    e.contains("not found")
+        || e.contains("no finding")
+        || e.contains("no rows")
+        || e.contains("does not exist")
+}
+
+fn id_name(id: &str, name: &str) -> serde_json::Value {
+    json!({ "id": id, "name": name })
+}
+
+async fn candidate_projects(tools: &dyn WorkspaceTools) -> Vec<serde_json::Value> {
+    match tools.list_workspace().await {
+        Ok(inv) => inv
+            .projects
+            .iter()
+            .map(|p| id_name(&p.id, &p.name))
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+async fn candidate_targets(tools: &dyn WorkspaceTools, project: &str) -> Vec<serde_json::Value> {
+    match tools.list_targets(project).await {
+        Ok(list) => list
+            .targets
+            .iter()
+            .map(|t| id_name(&t.id, &t.name))
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+async fn candidate_scans(tools: &dyn WorkspaceTools, project: &str) -> Vec<serde_json::Value> {
+    match tools.list_scan(project).await {
+        Ok(list) => list
+            .scans
+            .iter()
+            .map(|s| id_name(&s.id, &s.name))
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+async fn candidate_reports(
+    tools: &dyn WorkspaceTools,
+    project: Option<&str>,
+) -> Vec<serde_json::Value> {
+    match tools.list_reports(project).await {
+        Ok(list) => list
+            .reports
+            .iter()
+            .map(|r| id_name(&r.id, &r.name))
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn not_found_project_hints() -> Vec<String> {
+    vec![
+        "List candidates to the user; do not invent or rename another project".into(),
+        "Call list_workspace if you need a fresh inventory".into(),
+    ]
+}
+
 async fn mark_tool(state: &SharedYazgState, name: &str, action: crate::artifacts::YazgActionKind) {
     let mut guard = state.lock().await;
     guard.last_tool = Some(name.into());
@@ -260,11 +332,13 @@ impl Tool for ListWorkspaceTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "List all projects with counts only (targets/scans/findings totals). \
-         Use ONLY for a workspace overview / 'what projects exist'. \
-         Do NOT use for: targets in a project (list_targets), one project summary (project_detail), \
-         findings (list_findings), scans (list_scan), reports (list_reports), greetings, or math."
-            .into()
+        format!(
+            "List all projects with aggregate counts only (targets/scans/findings totals). \
+             Use when the user wants a workspace inventory / which projects exist. \
+             Do not use for one named project's overview (project_detail), targets \
+             (list_targets), findings, scans, or reports.{TOOL_RESULT_CONTRACT}\
+             {WHEN_NOT_WORKSPACE}"
+        )
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -281,7 +355,7 @@ impl Tool for ListWorkspaceTool {
             .list_workspace()
             .await
             .map_err(YazgToolError)?;
-        let observation = inventory.to_observation();
+        let observation = ToolResult::ok("list_workspace", &inventory).to_json_string();
         record_workspace_tool(
             &self.state,
             "list_workspace",
@@ -317,11 +391,14 @@ impl Tool for ProjectDetailTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Get one project summary: metadata, target list, and scans (no finding rows). \
-         Use when the user asks for information / overview of a named project. \
-         Pass project id or name. After Observation, reply — do NOT auto-call list_findings \
-         unless the user asked for findings."
-            .into()
+        format!(
+            "Return one project's metadata, targets, and scans (no finding rows). \
+             Use when the user asks about a specific project by exact id or name. \
+             Prefer this over list_workspace for named-project questions. \
+             `project` must be a real workspace project id/name — not the assistant's name. \
+             On miss: status=error error_class=not_found with candidates[]. Do not invent.\
+             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
+        )
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -330,7 +407,7 @@ impl Tool for ProjectDetailTool {
             "properties": {
                 "project": {
                     "type": "string",
-                    "description": "Project id or name"
+                    "description": "Exact project id or name"
                 }
             },
             "required": ["project"],
@@ -339,26 +416,70 @@ impl Tool for ProjectDetailTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let detail = self
-            .tools
-            .project_detail(&args.project)
-            .await
-            .map_err(YazgToolError)?;
-        let observation = detail.to_observation();
-        record_workspace_tool(
-            &self.state,
-            "project_detail",
-            crate::artifacts::YazgActionKind::ProjectDetail,
-            observation.clone(),
-            format!(
-                "Project detail: {} ({} findings)",
-                detail.project.name, detail.project.findings_count
-            ),
-            None,
-            &args_json(&args),
-        )
-        .await;
-        Ok(observation)
+        let requested = args.project.trim();
+        if requested.eq_ignore_ascii_case("yazg") {
+            let observation = ToolResult::skipped(
+                "project_detail",
+                "`yazg` is the assistant name, not a workspace project",
+                vec![
+                    "If the user greeted you or asked who you are, reply in natural language".into(),
+                    "Do not invent a project named Yazg".into(),
+                ],
+            )
+            .to_json_string();
+            record_workspace_tool(
+                &self.state,
+                "project_detail",
+                crate::artifacts::YazgActionKind::ProjectDetail,
+                observation.clone(),
+                "Skipped project_detail: yazg is the assistant name".into(),
+                None,
+                &args_json(&args),
+            )
+            .await;
+            return Ok(observation);
+        }
+        match self.tools.project_detail(&args.project).await {
+            Ok(detail) => {
+                let observation = ToolResult::ok("project_detail", &detail).to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "project_detail",
+                    crate::artifacts::YazgActionKind::ProjectDetail,
+                    observation.clone(),
+                    format!(
+                        "Project detail: {} ({} findings)",
+                        detail.project.name, detail.project.findings_count
+                    ),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) if is_lookup_miss(&err) => {
+                let candidates = candidate_projects(self.tools.as_ref()).await;
+                let observation = ToolResult::not_found(
+                    "project_detail",
+                    format!("No project matching `{requested}`"),
+                    candidates,
+                    not_found_project_hints(),
+                )
+                .to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "project_detail",
+                    crate::artifacts::YazgActionKind::ProjectDetail,
+                    observation.clone(),
+                    format!("Project not found: {requested}"),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) => Err(YazgToolError(err)),
+        }
     }
 }
 
@@ -374,9 +495,12 @@ impl Tool for ListScanTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "List scans for a project (id or name). Use when the user asks about scans/runs. \
-         Not for listing targets. Use scan_detail for one scan's findings."
-            .into()
+        format!(
+            "List scans for a project (exact id or name). Use when the user asks about scans/runs. \
+             Not for targets (list_targets) or a full project overview (project_detail). \
+             Use scan_detail for one scan. On miss: status=error error_class=not_found with candidates[].\
+             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
+        )
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -394,27 +518,54 @@ impl Tool for ListScanTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let list = self
-            .tools
-            .list_scan(&args.project)
-            .await
-            .map_err(YazgToolError)?;
-        let observation = list.to_observation();
-        record_workspace_tool(
-            &self.state,
-            "list_scan",
-            crate::artifacts::YazgActionKind::ListScan,
-            observation.clone(),
-            format!(
-                "Listed {} scans for {}",
-                list.scans.len(),
-                list.project_name
-            ),
-            None,
-            &args_json(&args),
-        )
-        .await;
-        Ok(observation)
+        match self.tools.list_scan(&args.project).await {
+            Ok(list) => {
+                let observation = ToolResult::ok("list_scan", &list).to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "list_scan",
+                    crate::artifacts::YazgActionKind::ListScan,
+                    observation.clone(),
+                    format!(
+                        "Listed {} scans for {}",
+                        list.scans.len(),
+                        list.project_name
+                    ),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) if is_lookup_miss(&err) => {
+                let requested = args.project.trim();
+                let project_miss = err.to_lowercase().contains("project not found");
+                let candidates = if project_miss {
+                    candidate_projects(self.tools.as_ref()).await
+                } else {
+                    candidate_scans(self.tools.as_ref(), requested).await
+                };
+                let observation = ToolResult::not_found(
+                    "list_scan",
+                    format!("No scans for project `{requested}` ({err})"),
+                    candidates,
+                    not_found_project_hints(),
+                )
+                .to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "list_scan",
+                    crate::artifacts::YazgActionKind::ListScan,
+                    observation.clone(),
+                    format!("list_scan miss: {err}"),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) => Err(YazgToolError(err)),
+        }
     }
 }
 
@@ -435,9 +586,11 @@ impl Tool for ScanDetailTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Get one scan by id, including a capped finding list for that scan. \
-         Use finding_detail for a single finding."
-            .into()
+        format!(
+            "Get one scan by id, including a capped finding list for that scan. \
+             Use finding_detail for a single finding. On miss: status=error error_class=not_found.\
+             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
+        )
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -455,26 +608,46 @@ impl Tool for ScanDetailTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let detail = self
-            .tools
-            .scan_detail(&args.scan_id)
-            .await
-            .map_err(YazgToolError)?;
-        let observation = detail.to_observation();
-        record_workspace_tool(
-            &self.state,
-            "scan_detail",
-            crate::artifacts::YazgActionKind::ScanDetail,
-            observation.clone(),
-            format!(
-                "Scan detail: {} ({} findings)",
-                detail.scan.name, detail.findings_total
-            ),
-            None,
-            &args_json(&args),
-        )
-        .await;
-        Ok(observation)
+        match self.tools.scan_detail(&args.scan_id).await {
+            Ok(detail) => {
+                let observation = ToolResult::ok("scan_detail", &detail).to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "scan_detail",
+                    crate::artifacts::YazgActionKind::ScanDetail,
+                    observation.clone(),
+                    format!(
+                        "Scan detail: {} ({} findings)",
+                        detail.scan.name, detail.findings_total
+                    ),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) if is_lookup_miss(&err) => {
+                let observation = ToolResult::not_found(
+                    "scan_detail",
+                    format!("No scan matching `{}`", args.scan_id.trim()),
+                    Vec::new(),
+                    vec!["Call list_scan(project) for ids in a known project".into()],
+                )
+                .to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "scan_detail",
+                    crate::artifacts::YazgActionKind::ScanDetail,
+                    observation.clone(),
+                    format!("scan_detail miss: {err}"),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) => Err(YazgToolError(err)),
+        }
     }
 }
 
@@ -502,11 +675,14 @@ impl Tool for ListFindingsTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "List findings for a project and/or scan (paginated, newest first). \
-         Use ONLY when the user asks for findings / vulnerabilities / lỗ hổng. \
-         Provide project (id/name) and/or scan_id. Optional limit (default 20, max 50) and offset. \
-         For finding #N use finding_detail(project, index=N). Not for project overview or targets."
-            .into()
+        format!(
+            "List findings for a project and/or scan (paginated, newest first). \
+             Use only when the user asks for findings / vulnerabilities. \
+             Provide project (id/name) and/or scan_id. Optional limit (default 20, max 50) and offset. \
+             For finding #N use finding_detail(project, index=N). Not for project overview or targets. \
+             On miss: status=error error_class=not_found with candidates[].\
+             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
+        )
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -523,7 +699,7 @@ impl Tool for ListFindingsTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let list = self
+        match self
             .tools
             .list_findings(
                 args.project.as_deref(),
@@ -532,23 +708,56 @@ impl Tool for ListFindingsTool {
                 args.offset.unwrap_or(0),
             )
             .await
-            .map_err(YazgToolError)?;
-        let observation = list.to_observation();
-        record_workspace_tool(
-            &self.state,
-            "list_findings",
-            crate::artifacts::YazgActionKind::ListFindings,
-            observation.clone(),
-            format!(
-                "Listed {}/{} findings",
-                list.findings.len(),
-                list.total
-            ),
-            None,
-            &args_json(&args),
-        )
-        .await;
-        Ok(observation)
+        {
+            Ok(list) => {
+                let observation = ToolResult::ok("list_findings", &list).to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "list_findings",
+                    crate::artifacts::YazgActionKind::ListFindings,
+                    observation.clone(),
+                    format!(
+                        "Listed {}/{} findings",
+                        list.findings.len(),
+                        list.total
+                    ),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) if is_lookup_miss(&err) => {
+                let requested = args
+                    .scan_id
+                    .as_deref()
+                    .or(args.project.as_deref())
+                    .unwrap_or("(unspecified)")
+                    .trim();
+                let candidates = candidate_projects(self.tools.as_ref()).await;
+                let observation = ToolResult::not_found(
+                    "list_findings",
+                    format!("No findings for `{requested}` ({err})"),
+                    candidates,
+                    vec![
+                        "Confirm project/scan id, or call list_workspace / list_scan".into(),
+                    ],
+                )
+                .to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "list_findings",
+                    crate::artifacts::YazgActionKind::ListFindings,
+                    observation.clone(),
+                    format!("list_findings miss: {err}"),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) => Err(YazgToolError(err)),
+        }
     }
 }
 
@@ -575,9 +784,12 @@ impl Tool for FindingDetailTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Get one finding: by finding_id, or by project (id/name) + 1-based index (newest first). \
-         Use this when the user asks for finding #1 / finding số N."
-            .into()
+        format!(
+            "Get one finding: by finding_id, or by project (id/name) + 1-based index (newest first). \
+             Use when the user asks for a specific finding by id or index. \
+             On miss: status=error error_class=not_found with candidates[].\
+             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
+        )
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -593,7 +805,7 @@ impl Tool for FindingDetailTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let detail = self
+        match self
             .tools
             .finding_detail(
                 args.finding_id.as_deref(),
@@ -601,19 +813,65 @@ impl Tool for FindingDetailTool {
                 args.index,
             )
             .await
-            .map_err(YazgToolError)?;
-        let observation = detail.to_observation();
-        record_workspace_tool(
-            &self.state,
-            "finding_detail",
-            crate::artifacts::YazgActionKind::FindingDetail,
-            observation.clone(),
-            format!("Finding detail: {}", detail.finding.title),
-            None,
-            &args_json(&args),
-        )
-        .await;
-        Ok(observation)
+        {
+            Ok(detail) => {
+                let observation = ToolResult::ok("finding_detail", &detail).to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "finding_detail",
+                    crate::artifacts::YazgActionKind::FindingDetail,
+                    observation.clone(),
+                    format!("Finding detail: {}", detail.finding.title),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) if is_lookup_miss(&err) => {
+                let requested = args
+                    .finding_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .or_else(|| {
+                        args.index.map(|i| {
+                            format!(
+                                "#{} in {}",
+                                i,
+                                args.project.as_deref().unwrap_or("?")
+                            )
+                        })
+                    })
+                    .unwrap_or_else(|| "(unspecified)".into());
+                let project_miss = err.to_lowercase().contains("project not found");
+                let candidates = if project_miss {
+                    candidate_projects(self.tools.as_ref()).await
+                } else {
+                    Vec::new()
+                };
+                let observation = ToolResult::not_found(
+                    "finding_detail",
+                    format!("No finding matching `{requested}`"),
+                    candidates,
+                    vec!["Call list_findings(project) for valid ids/indexes".into()],
+                )
+                .to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "finding_detail",
+                    crate::artifacts::YazgActionKind::FindingDetail,
+                    observation.clone(),
+                    format!("finding_detail miss: {err}"),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) => Err(YazgToolError(err)),
+        }
     }
 }
 
@@ -629,11 +887,14 @@ impl Tool for ListTargetsTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "List AI targets for a project (id or name). \
-         Use when the user asks for targets / all targets / endpoints in a project. \
-         Do NOT use list_workspace for this. After Observation, reply with target names — \
-         use target_detail only if the user wants one target's profile."
-            .into()
+        format!(
+            "List AI targets for a project (exact id or name). \
+             Use when the user asks for targets / endpoints in a project. \
+             Prefer this over list_workspace. Reply from the JSON data; \
+             use target_detail only when the user wants one target's profile. \
+             On miss: status=error error_class=not_found with candidates[].\
+             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
+        )
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -648,27 +909,48 @@ impl Tool for ListTargetsTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let list = self
-            .tools
-            .list_targets(&args.project)
-            .await
-            .map_err(YazgToolError)?;
-        let observation = list.to_observation();
-        record_workspace_tool(
-            &self.state,
-            "list_targets",
-            crate::artifacts::YazgActionKind::ListTargets,
-            observation.clone(),
-            format!(
-                "Listed {} targets for {}",
-                list.targets.len(),
-                list.project_name
-            ),
-            None,
-            &args_json(&args),
-        )
-        .await;
-        Ok(observation)
+        match self.tools.list_targets(&args.project).await {
+            Ok(list) => {
+                let observation = ToolResult::ok("list_targets", &list).to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "list_targets",
+                    crate::artifacts::YazgActionKind::ListTargets,
+                    observation.clone(),
+                    format!(
+                        "Listed {} targets for {}",
+                        list.targets.len(),
+                        list.project_name
+                    ),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) if is_lookup_miss(&err) => {
+                let requested = args.project.trim();
+                let observation = ToolResult::not_found(
+                    "list_targets",
+                    format!("No project matching `{requested}` for list_targets"),
+                    candidate_projects(self.tools.as_ref()).await,
+                    not_found_project_hints(),
+                )
+                .to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "list_targets",
+                    crate::artifacts::YazgActionKind::ListTargets,
+                    observation.clone(),
+                    format!("list_targets miss: {err}"),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) => Err(YazgToolError(err)),
+        }
     }
 }
 
@@ -694,10 +976,13 @@ impl Tool for TargetDetailTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Get one target by target_id, or by project + name. \
-         Use when the user asks for target detail / profile of a specific target. \
-         Returns type and clipped profile/descriptor summary."
-            .into()
+        format!(
+            "Get one target by target_id, or by project + name. \
+             Use when the user asks for detail/profile of a specific target. \
+             Returns type and clipped profile/descriptor summary. \
+             On miss: status=error error_class=not_found with candidates[].\
+             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
+        )
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -713,7 +998,7 @@ impl Tool for TargetDetailTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let detail = self
+        match self
             .tools
             .target_detail(
                 args.target_id.as_deref(),
@@ -721,19 +1006,60 @@ impl Tool for TargetDetailTool {
                 args.name.as_deref(),
             )
             .await
-            .map_err(YazgToolError)?;
-        let observation = detail.to_observation();
-        record_workspace_tool(
-            &self.state,
-            "target_detail",
-            crate::artifacts::YazgActionKind::TargetDetail,
-            observation.clone(),
-            format!("Target detail: {}", detail.target.name),
-            None,
-            &args_json(&args),
-        )
-        .await;
-        Ok(observation)
+        {
+            Ok(detail) => {
+                let observation = ToolResult::ok("target_detail", &detail).to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "target_detail",
+                    crate::artifacts::YazgActionKind::TargetDetail,
+                    observation.clone(),
+                    format!("Target detail: {}", detail.target.name),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) if is_lookup_miss(&err) => {
+                let requested = args
+                    .target_id
+                    .as_deref()
+                    .or(args.name.as_deref())
+                    .or(args.project.as_deref())
+                    .unwrap_or("(unspecified)")
+                    .trim();
+                let project_miss = err.to_lowercase().contains("project not found");
+                let candidates = if project_miss {
+                    candidate_projects(self.tools.as_ref()).await
+                } else if let Some(project) =
+                    args.project.as_deref().map(str::trim).filter(|s| !s.is_empty())
+                {
+                    candidate_targets(self.tools.as_ref(), project).await
+                } else {
+                    Vec::new()
+                };
+                let observation = ToolResult::not_found(
+                    "target_detail",
+                    format!("No target matching `{requested}`"),
+                    candidates,
+                    vec!["Call list_targets(project) for valid target names/ids".into()],
+                )
+                .to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "target_detail",
+                    crate::artifacts::YazgActionKind::TargetDetail,
+                    observation.clone(),
+                    format!("target_detail miss: {err}"),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) => Err(YazgToolError(err)),
+        }
     }
 }
 
@@ -755,9 +1081,12 @@ impl Tool for ListReportsTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "List generated reports for a project (id/name), or all projects when project is omitted. \
-         Use when the user asks about reports. Use report_detail to read one report."
-            .into()
+        format!(
+            "List generated reports for a project (id/name), or all projects when project is omitted. \
+             Use when the user asks about reports. Use report_detail to read one report. \
+             On miss: status=error error_class=not_found with candidates[].\
+             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
+        )
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -771,23 +1100,48 @@ impl Tool for ListReportsTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let list = self
-            .tools
-            .list_reports(args.project.as_deref())
-            .await
-            .map_err(YazgToolError)?;
-        let observation = list.to_observation();
-        record_workspace_tool(
-            &self.state,
-            "list_reports",
-            crate::artifacts::YazgActionKind::ListReports,
-            observation.clone(),
-            format!("Listed {} reports", list.reports.len()),
-            None,
-            &args_json(&args),
-        )
-        .await;
-        Ok(observation)
+        match self.tools.list_reports(args.project.as_deref()).await {
+            Ok(list) => {
+                let observation = ToolResult::ok("list_reports", &list).to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "list_reports",
+                    crate::artifacts::YazgActionKind::ListReports,
+                    observation.clone(),
+                    format!("Listed {} reports", list.reports.len()),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) if is_lookup_miss(&err) => {
+                let requested = args
+                    .project
+                    .as_deref()
+                    .unwrap_or("(unspecified)")
+                    .trim();
+                let observation = ToolResult::not_found(
+                    "list_reports",
+                    format!("No project matching `{requested}` for list_reports"),
+                    candidate_projects(self.tools.as_ref()).await,
+                    not_found_project_hints(),
+                )
+                .to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "list_reports",
+                    crate::artifacts::YazgActionKind::ListReports,
+                    observation.clone(),
+                    format!("list_reports miss: {err}"),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) => Err(YazgToolError(err)),
+        }
     }
 }
 
@@ -808,8 +1162,11 @@ impl Tool for ReportDetailTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Read one report by id (metadata + clipped content preview)."
-            .into()
+        format!(
+            "Read one report by id (metadata + clipped content preview). \
+             On miss: status=error error_class=not_found with candidates[].\
+             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
+        )
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -824,23 +1181,43 @@ impl Tool for ReportDetailTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let detail = self
-            .tools
-            .report_detail(&args.report_id)
-            .await
-            .map_err(YazgToolError)?;
-        let observation = detail.to_observation();
-        record_workspace_tool(
-            &self.state,
-            "report_detail",
-            crate::artifacts::YazgActionKind::ReportDetail,
-            observation.clone(),
-            format!("Report detail: {}", detail.report.name),
-            None,
-            &args_json(&args),
-        )
-        .await;
-        Ok(observation)
+        match self.tools.report_detail(&args.report_id).await {
+            Ok(detail) => {
+                let observation = ToolResult::ok("report_detail", &detail).to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "report_detail",
+                    crate::artifacts::YazgActionKind::ReportDetail,
+                    observation.clone(),
+                    format!("Report detail: {}", detail.report.name),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) if is_lookup_miss(&err) => {
+                let observation = ToolResult::not_found(
+                    "report_detail",
+                    format!("No report matching `{}`", args.report_id.trim()),
+                    candidate_reports(self.tools.as_ref(), None).await,
+                    vec!["Call list_reports(project?) for valid report ids".into()],
+                )
+                .to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "report_detail",
+                    crate::artifacts::YazgActionKind::ReportDetail,
+                    observation.clone(),
+                    format!("report_detail miss: {err}"),
+                    None,
+                    &args_json(&args),
+                )
+                .await;
+                Ok(observation)
+            }
+            Err(err) => Err(YazgToolError(err)),
+        }
     }
 }
 
@@ -856,9 +1233,10 @@ impl Tool for CreateProjectTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Create a workspace project in the local database. Requires a project name. \
-         Optional description. Do NOT ask for a scan target."
-            .into()
+        format!(
+            "Create a workspace project in the local database. Requires a project name. \
+             Optional description. Do NOT ask for a scan target.{TOOL_RESULT_CONTRACT}"
+        )
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -876,9 +1254,23 @@ impl Tool for CreateProjectTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let name = args.name.trim();
         if name.is_empty() {
-            return Err(YazgToolError(
-                "missing project name — provide JSON field \"name\"".into(),
-            ));
+            let observation = ToolResult::validation(
+                "create_project",
+                "missing project name — provide JSON field \"name\"",
+                vec!["Retry with a non-empty name".into()],
+            )
+            .to_json_string();
+            record_workspace_tool(
+                &self.state,
+                "create_project",
+                crate::artifacts::YazgActionKind::CreateProject,
+                observation.clone(),
+                "create_project validation miss".into(),
+                None,
+                &args_json(&args),
+            )
+            .await;
+            return Ok(observation);
         }
         let description = args
             .description
@@ -890,29 +1282,29 @@ impl Tool for CreateProjectTool {
             .create_project(name, description)
             .await
             .map_err(YazgToolError)?;
-        let msg = format!(
-            "CreateProjectTool OK — id={} name={} description={}",
-            project.id,
-            project.name,
-            project.description.as_deref().unwrap_or("(none)")
-        );
-        mark_tool(
+        let created = CreatedProject {
+            id: project.id.clone(),
+            name: project.name.clone(),
+            description: project.description.clone(),
+        };
+        let observation = ToolResult::ok("create_project", &created).to_json_string();
+        record_workspace_tool(
             &self.state,
             "create_project",
             crate::artifacts::YazgActionKind::CreateProject,
+            observation.clone(),
+            format!("Created project {}", created.name),
+            None,
+            &args_json(&args),
         )
         .await;
         let mut guard = self.state.lock().await;
         guard.artifacts.events.push(AgentEvent::completed(
             AgentId::CreateProject,
-            format!("Created project {}", project.name),
+            format!("Created project {}", created.name),
         ));
-        guard.artifacts.created_project = Some(CreatedProject {
-            id: project.id,
-            name: project.name,
-            description: project.description,
-        });
-        Ok(msg)
+        guard.artifacts.created_project = Some(created);
+        Ok(observation)
     }
 }
 
@@ -931,7 +1323,8 @@ impl Tool for AnalyzeEndpointTool {
     fn description(&self) -> String {
         "Probe/classify whether a bound live scan target is a generative AI API \
          (AnalyzeEndpointAgent). Requires a bound target or capability_probe_ready=true \
-         (Scan wizard Verification). Do NOT use for counting findings or general chat."
+         (Scan wizard Verification). Do NOT use for greetings, identity, general chat, \
+         or workspace inventory questions."
             .into()
     }
 
@@ -941,7 +1334,26 @@ impl Tool for AnalyzeEndpointTool {
 
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
         let Some(profile) = self.ctx.profile.as_ref() else {
-            return Ok("AnalyzeEndpointAgent FAILED — no target selected".into());
+            let observation = ToolResult::skipped(
+                "analyze_endpoint",
+                "No scan target is bound — cannot analyze an endpoint",
+                vec![
+                    "If the user greeted you or asked a non-endpoint question, reply in natural language".into(),
+                    "Only call analyze_endpoint when a live target or capability_probe is available".into(),
+                ],
+            )
+            .to_json_string();
+            let mut guard = self.state.lock().await;
+            guard.last_tool = Some("analyze_endpoint".into());
+            guard.artifacts.last_action =
+                Some(crate::artifacts::YazgActionKind::AnalyzeEndpoint);
+            guard.artifacts.events.push(AgentEvent::info(
+                AgentId::Yazg,
+                "analyze_endpoint skipped: no target bound",
+            ));
+            guard.workspace_observations.push(observation.clone());
+            guard.last_workspace_observation = Some(observation.clone());
+            return Ok(observation);
         };
         {
             let mut guard = self.state.lock().await;

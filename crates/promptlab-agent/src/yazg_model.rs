@@ -15,22 +15,77 @@ use rig::completion::{
 use rig::message::{ToolCall, ToolChoice, ToolFunction, UserContent};
 use rig::streaming::StreamingCompletionResponse;
 use serde::{Deserialize, Serialize};
-use tracing::warn;
+use serde_json::json;
+use tracing::{info, warn};
+
+use crate::types::{AgentEvent, AgentEventKind, AgentId};
+use crate::yazg_tools::SharedYazgState;
 
 /// Default text when a completion is empty (also used for MaxTurns recovery).
 pub const EMPTY_FALLBACK_REPLY: &str =
     "I'm Yazg, PromptLab's AI assistant for authorized AI security testing. How can I help?";
 
+/// Cap stage payload size so Thinking / agents.log stay usable.
+pub const STAGE_PAYLOAD_MAX_CHARS: usize = 48_000;
+
 /// Cloneable model that delegates completions to PromptLab inference.
 #[derive(Clone)]
 pub struct YazgModel {
     llm: Arc<dyn PlannerLlm>,
+    /// Optional sink for per-completion request/response stage events (UI Thinking).
+    stage_sink: Option<SharedYazgState>,
 }
 
 impl YazgModel {
     pub fn new(llm: Arc<dyn PlannerLlm>) -> Self {
-        Self { llm }
+        Self {
+            llm,
+            stage_sink: None,
+        }
     }
+
+    pub fn with_stage_sink(mut self, sink: SharedYazgState) -> Self {
+        self.stage_sink = Some(sink);
+        self
+    }
+
+    async fn emit_stage(&self, kind: AgentEventKind, message: impl Into<String>) {
+        let message = message.into();
+        info!(
+            agent = "yazg",
+            kind = kind.as_str(),
+            message = %truncate_stage(&message, 2_000),
+            "yazg stage"
+        );
+        let event = match kind {
+            AgentEventKind::Llm => AgentEvent::llm(AgentId::Yazg, message),
+            AgentEventKind::ToolCall => AgentEvent::tool_call(AgentId::Yazg, message),
+            AgentEventKind::React => AgentEvent::react(AgentId::Yazg, message),
+            AgentEventKind::Info => AgentEvent::info(AgentId::Yazg, message),
+            AgentEventKind::Failed => AgentEvent::failed(AgentId::Yazg, message),
+            AgentEventKind::Started => AgentEvent::started(AgentId::Yazg, message),
+            AgentEventKind::Completed => AgentEvent::completed(AgentId::Yazg, message),
+        };
+        if let Some(sink) = &self.stage_sink {
+            sink.lock().await.artifacts.events.push(event);
+        }
+    }
+}
+
+/// Pretty-print a stage payload; truncate if oversized.
+pub fn format_stage_payload(stage: &str, body: serde_json::Value) -> String {
+    let value = json!({ "stage": stage, "body": body });
+    let pretty = serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
+    truncate_stage(&pretty, STAGE_PAYLOAD_MAX_CHARS)
+}
+
+fn truncate_stage(s: &str, max: usize) -> String {
+    let t = s.trim();
+    if t.chars().count() <= max {
+        return t.to_string();
+    }
+    let shortened: String = t.chars().take(max.saturating_sub(1)).collect();
+    format!("{shortened}…\n[truncated at {max} chars]")
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -54,6 +109,7 @@ impl CompletionModel for YazgModel {
         // Placeholder; production paths always construct via `new`.
         Self {
             llm: Arc::new(UnsupportedLlm),
+            stage_sink: None,
         }
     }
 
@@ -92,6 +148,27 @@ impl CompletionModel for YazgModel {
             .map(|tool| ToolSpec::new(&tool.name, &tool.description, tool.parameters.clone()))
             .collect::<Vec<_>>();
 
+        // Exact payload sent to PlannerLlm (closest thing to HTTP request body).
+        let request_body = json!({
+            "system": system,
+            "prompt": prompt,
+            "tool_names": tools.iter().map(|t| t.name.clone()).collect::<Vec<_>>(),
+            "tools": tools.iter().map(|t| json!({
+                "name": t.name,
+                "description": t.description,
+                "parameters": t.parameters,
+            })).collect::<Vec<_>>(),
+            "tool_choice": request.tool_choice,
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+            "rig_completion_request": request,
+        });
+        self.emit_stage(
+            AgentEventKind::Llm,
+            format_stage_payload("llm_request", request_body),
+        )
+        .await;
+
         let outcome = if tools.is_empty() {
             let content = self
                 .llm
@@ -116,6 +193,14 @@ impl CompletionModel for YazgModel {
                     "\n\nSystem constraint: Reply in markdown or plain text only. \
                      Do not call tools. Do not emit JSON, tool envelopes, or assistant_reply.",
                 );
+                self.emit_stage(
+                    AgentEventKind::Llm,
+                    format_stage_payload(
+                        "llm_request_retry_text_only",
+                        json!({ "system": system, "prompt": retry }),
+                    ),
+                )
+                .await;
                 match self.llm.complete_with_system(system, &retry).await {
                     Ok(text) if !text.trim().is_empty() => ensure_non_empty_text(
                         normalize_completion_text(LlmCompletion::from_text(text)),
@@ -131,6 +216,18 @@ impl CompletionModel for YazgModel {
             content: outcome.content.clone(),
             tool_calls: outcome.tool_calls.clone(),
         };
+
+        self.emit_stage(
+            AgentEventKind::Llm,
+            format_stage_payload(
+                "llm_response",
+                json!({
+                    "content": raw.content,
+                    "tool_calls": raw.tool_calls,
+                }),
+            ),
+        )
+        .await;
 
         let choice = completion_to_assistant_content(&outcome)?;
         Ok(CompletionResponse {

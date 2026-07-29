@@ -122,11 +122,10 @@ impl HostWorkspaceTools {
             return Ok(p.clone());
         }
         let lower = key.to_lowercase();
-        let mut matches: Vec<_> = projects
+        let matches: Vec<_> = projects
             .into_iter()
-            .filter(|p| p.name.to_lowercase() == lower || p.name.to_lowercase().contains(&lower))
+            .filter(|p| p.name.to_lowercase() == lower)
             .collect();
-        matches.sort_by(|a, b| a.name.len().cmp(&b.name.len()));
         matches
             .into_iter()
             .next()

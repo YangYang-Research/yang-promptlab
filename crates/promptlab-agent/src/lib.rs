@@ -41,6 +41,7 @@ pub mod list_workspace;
 pub mod memory;
 pub mod recommend;
 pub mod reflection;
+pub mod tool_result;
 pub mod yazg_model;
 pub mod yazg_prompts;
 pub mod yazg_runtime;
@@ -75,11 +76,11 @@ pub use judge_workers::{
     AttackerWorker, ClassifierWorker, JudgeWorker, JudgeWorkerOutcome,
 };
 pub use list_workspace::{
-    clamp_findings_limit, parse_finding_index, FindingDetail, FindingList, ProjectDetail,
-    ReportDetail, ReportList, ScanDetail, ScanList, TargetDetail, TargetList,
-    WorkspaceFindingSummary, WorkspaceInventory, WorkspaceProjectSummary, WorkspaceReportSummary,
-    WorkspaceScanSummary, WorkspaceTargetSummary, WorkspaceTools, WorkspaceTotals,
-    DEFAULT_FINDINGS_LIMIT, MAX_FINDINGS_LIMIT, MAX_REPORT_PREVIEW_CHARS,
+    clamp_findings_limit, extract_requested_project_name, parse_finding_index, FindingDetail,
+    FindingList, ProjectDetail, ReportDetail, ReportList, ScanDetail, ScanList, TargetDetail,
+    TargetList, WorkspaceFindingSummary, WorkspaceInventory, WorkspaceProjectSummary,
+    WorkspaceReportSummary, WorkspaceScanSummary, WorkspaceTargetSummary, WorkspaceTools,
+    WorkspaceTotals, DEFAULT_FINDINGS_LIMIT, MAX_FINDINGS_LIMIT, MAX_REPORT_PREVIEW_CHARS,
 };
 pub use memory::{
     AgentMemoryStore, LtmEntry, LtmWrite, MemoryContext, MemoryScopeType, StmEntry, StmRole,
@@ -87,6 +88,7 @@ pub use memory::{
 };
 pub use recommend::{RecommendAgent, RecommendAgentOutcome};
 pub use reflection::{ReflectionAgent, ReflectionOutcome, ReflectionRequest};
+pub use tool_result::{ToolErrorClass, ToolResult, ToolStatus};
 pub use yazg_runtime::{run_yazg, YazgRequest};
 pub use yazg_tools::{YazgLlms, YazgSpecialistContext};
 pub use sequential_attack_execution::{

@@ -341,7 +341,7 @@ export function YazgChatPage() {
                               {event.agent}
                             </span>
                             <span className="yazg-chat-events__kind">{event.kind}</span>
-                            <span className="yazg-chat-events__msg">{event.message}</span>
+                            <pre className="yazg-chat-events__msg">{event.message}</pre>
                           </li>
                         ))}
                       </ul>
