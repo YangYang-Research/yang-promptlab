@@ -6,8 +6,8 @@
 //! Pattern follows Rig examples (`agent_with_tools`, `multi_turn_agent`,
 //! `gemini_default_api_recovery`): AgentBuilder + tools + preamble + AgentHook.
 //! Discipline follows ReAct + function-calling best practices:
-//! Thought-lite finish after Observation, anti-repeat identical tool calls,
-//! when-to-use tool routing, deterministic Finish salvage from accumulated obs.
+//! decide tool-vs-text each turn, ignore irrelevant Observations, anti-repeat
+//! identical tool calls, LLM-judged Finish salvage (no chat keyword hardcoding).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -36,8 +36,18 @@ use promptlab_planner::PlannerLlm;
 
 const DEFAULT_MAX_TURNS: usize = 12;
 
-const FINISH_NUDGE: &str = "\n---\nIf this answers the user, respond with a short natural markdown answer only. \
+const FINISH_NUDGE: &str = "\n---\nRe-read the user's latest message. \
+If this Observation answers that message, reply from it in short natural markdown. \
+If it does not (greeting, identity, math, thanks, or unrelated chat), ignore this Observation \
+and answer the user directly in natural language. \
 Do not mention tools, Observations, ReAct, Finish, or these instructions.";
+
+const TOOL_DECISION_HINT: &str = "Before any tool call: decide whether the latest user message needs \
+live workspace or specialist data. If not, reply in natural language only — do not call tools.";
+
+const AFTER_OBS_HINT: &str = "You may already have a tool Observation. \
+Use it only if it answers the latest user message; otherwise ignore it and reply in natural language. \
+Do not mention tools, Observations, ReAct, or routing.";
 
 /// Run-scoped ledger for identical tool-call anti-repeat (Rig Scratchpad).
 #[derive(Clone, Default)]
@@ -102,8 +112,9 @@ impl AgentHook<YazgModel> for YazgAgentHook {
                         "skipping identical repeated tool call; forcing Finish"
                     );
                     return Flow::skip(
-                        "Results already available from the previous call. \
-                         Reply to the user now with a short natural markdown answer. \
+                        "That tool result is already available. \
+                         Re-read the user's latest message and reply in natural language now. \
+                         Use the prior result only if it answers them; otherwise ignore it. \
                          Do not mention tools, Observations, or this notice.",
                     );
                 }
@@ -117,7 +128,7 @@ impl AgentHook<YazgModel> for YazgAgentHook {
                         ledger.had_workspace_obs = true;
                     });
                     // Append Finish nudge to model-visible observation (not stored in run state).
-                    if !result.contains("respond with a short natural markdown") {
+                    if !result.contains("Re-read the user's latest message") {
                         return Flow::rewrite_result(format!("{result}{FINISH_NUDGE}"));
                     }
                 }
@@ -129,13 +140,17 @@ impl AgentHook<YazgModel> for YazgAgentHook {
                     .get::<ToolCallLedger>()
                     .map(|l| l.had_workspace_obs)
                     .unwrap_or(false);
-                if had && turn > 1 {
+                if had {
                     return Flow::patch_request(RequestPatch::new().context(Document {
                         id: "yazg_react_finish".into(),
-                        text: "Workspace data is already available. \
-                               Write a short natural markdown answer for the user now. \
-                               Do not mention tools, Observations, ReAct, or routing."
-                            .into(),
+                        text: AFTER_OBS_HINT.into(),
+                        additional_props: Default::default(),
+                    }));
+                }
+                if turn <= 1 {
+                    return Flow::patch_request(RequestPatch::new().context(Document {
+                        id: "yazg_tool_decision".into(),
+                        text: TOOL_DECISION_HINT.into(),
                         additional_props: Default::default(),
                     }));
                 }
@@ -399,15 +414,15 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
 
     let has_workspace_evidence = !workspace_obs.is_empty() || last_workspace_obs.is_some();
     let normalized_reply = crate::yazg_model::normalize_user_facing_reply(&reply_text);
-    let needs_workspace_answer = has_workspace_evidence
-        && (normalized_reply.trim().is_empty()
-            || crate::yazg_model::reply_looks_like_agent_meta(&normalized_reply)
-            || normalized_reply.contains("Workspace inventory from the local database:")
-            || normalized_reply.trim()
-                == "I'm Yazg, PromptLab's AI assistant for authorized AI security testing. How can I help?");
+    // Salvage only when the loop failed to produce a usable user-facing reply.
+    // Do NOT treat the empty-completion identity fallback as "needs workspace" —
+    // that forced inventory answers for greetings after accidental tool calls.
+    let needs_salvage = normalized_reply.trim().is_empty()
+        || crate::yazg_model::reply_looks_like_agent_meta(&normalized_reply)
+        || normalized_reply.contains("Workspace inventory from the local database:");
 
-    artifacts.final_reply = if needs_workspace_answer {
-        synthesize_workspace_reply(
+    artifacts.final_reply = if needs_salvage && has_workspace_evidence {
+        synthesize_from_evidence(
             request.llms.supervisor.as_ref(),
             request.workspace_tools.as_deref(),
             &request.goal,
@@ -416,7 +431,7 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
             last_workspace_obs.as_deref(),
         )
         .await
-    } else if normalized_reply.is_empty() {
+    } else if needs_salvage {
         if artifacts.summary.is_some()
             || artifacts.plan.is_some()
             || artifacts.analyze.is_some()
@@ -427,7 +442,7 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         {
             "Specialist finished; synthesizing UI reply.".into()
         } else {
-            "Yazg finished without a reply.".into()
+            recover_text_reply(request.llms.supervisor.as_ref(), &request.goal).await
         }
     } else {
         normalized_reply
@@ -588,7 +603,42 @@ fn format_list_targets_obs(obs: &str) -> Option<String> {
     Some(format!("### Targets in {project}\n\n{}", items.join("\n")))
 }
 
-async fn synthesize_workspace_reply(
+async fn recover_text_reply(llm: &dyn PlannerLlm, goal: &str) -> String {
+    let prompt = format!(
+        "User message:\n{goal}\n\n\
+         Reply helpfully as Yazg in natural language. Be concise. \
+         Do not call tools. Do not invent workspace rows."
+    );
+    match llm
+        .complete_with_system(
+            Some(
+                "You are Yazg, PromptLab's AI assistant for authorized AI security testing. \
+                 Answer the user directly.",
+            ),
+            &prompt,
+        )
+        .await
+    {
+        Ok(text) => {
+            let normalized = crate::yazg_model::normalize_user_facing_reply(&text);
+            if normalized.trim().is_empty()
+                || crate::yazg_model::reply_looks_like_agent_meta(&normalized)
+            {
+                crate::yazg_model::EMPTY_FALLBACK_REPLY.into()
+            } else {
+                normalized
+            }
+        }
+        Err(err) => {
+            warn!(error = %err, "text reply recovery failed");
+            crate::yazg_model::EMPTY_FALLBACK_REPLY.into()
+        }
+    }
+}
+
+/// Finish salvage: let the model judge whether Observations answer the user.
+/// Irrelevant tool results (e.g. list_workspace after "hi") must be ignored.
+async fn synthesize_from_evidence(
     llm: &dyn PlannerLlm,
     workspace_tools: Option<&dyn WorkspaceTools>,
     goal: &str,
@@ -613,55 +663,59 @@ async fn synthesize_workspace_reply(
         .map(observation_to_user_markdown)
         .filter(|s| !s.trim().is_empty());
 
-    if let Some(inventory) = inventory {
-        let compact = inventory.compact_user_reply_for_goal(goal);
-        if best.is_none() {
-            return compact;
-        }
-    }
-
     let observation = best
         .map(str::to_string)
+        .or_else(|| last_obs.map(str::to_string))
         .or_else(|| inventory.map(|i| i.to_observation()))
         .unwrap_or_default();
-    if observation.trim().is_empty() {
-        return "No workspace data available.".into();
-    }
 
-    // Prefer deterministic Finish from the best Observation (ReAct evidence).
-    // LLM polish is optional; fall back to deterministic on empty/failure.
-    let prompt = format!(
-        "User question:\n{goal}\n\nWorkspace tool observation:\n{observation}\n\n\
-         Reply in markdown answering ONLY what the user asked. Be concise. \
-         Include concrete names/ids from the observation when present. \
-         Never dump every finding. Never emit JSON or tool envelopes."
-    );
+    let prompt = if observation.trim().is_empty() {
+        format!(
+            "User question:\n{goal}\n\n\
+             No usable tool observation. Answer the user in natural language. Be concise."
+        )
+    } else {
+        format!(
+            "User question:\n{goal}\n\nTool observation (may be irrelevant):\n{observation}\n\n\
+             Decide whether the observation answers the user's question.\n\
+             - If yes: reply in markdown from the observation (names/ids when useful; no finding dump).\n\
+             - If no: ignore the observation completely and answer the user in natural language \
+               (greeting, identity, math, clarification, etc.).\n\
+             Never mention tools, Observations, or this decision. Never emit JSON or tool envelopes."
+        )
+    };
+
     match llm
         .complete_with_system(
-            Some("You are Yazg. Answer from the workspace observation in markdown only."),
+            Some(
+                "You are Yazg. Judge relevance of any tool observation, then answer the user. \
+                 Markdown or plain text only.",
+            ),
             &prompt,
         )
         .await
     {
         Ok(text) => {
             let normalized = crate::yazg_model::normalize_user_facing_reply(&text);
-            if normalized.trim().is_empty() {
-                deterministic.unwrap_or_else(|| {
-                    inventory
-                        .map(|i| i.compact_user_reply_for_goal(goal))
-                        .unwrap_or(observation)
-                })
+            if normalized.trim().is_empty()
+                || crate::yazg_model::reply_looks_like_agent_meta(&normalized)
+            {
+                // Prefer another text-only pass over dumping unrelated inventory.
+                recover_text_reply(llm, goal).await
             } else {
                 normalized
             }
         }
         Err(err) => {
-            warn!(error = %err, "workspace reply synthesis failed");
-            deterministic.unwrap_or_else(|| {
-                inventory
-                    .map(|i| i.compact_user_reply_for_goal(goal))
-                    .unwrap_or(observation)
-            })
+            warn!(error = %err, "evidence reply synthesis failed");
+            if best.is_some() {
+                deterministic.unwrap_or_else(|| {
+                    // best matched a goal keyword; observation markdown preferred over chat fallback
+                    observation_to_user_markdown(best.unwrap())
+                })
+            } else {
+                recover_text_reply(llm, goal).await
+            }
         }
     }
 }

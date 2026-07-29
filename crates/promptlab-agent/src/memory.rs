@@ -401,7 +401,9 @@ pub async fn load_memory_prompt_block(
 
     match store.stm_list(&ctx.session_id, None, 24).await {
         Ok(entries) if !entries.is_empty() => {
-            out.push_str("Short-term memory (this session):\n");
+            out.push_str(
+                "Short-term memory (this session; may be imperfect — prioritize the latest user message):\n",
+            );
             for entry in entries {
                 out.push_str(&format!(
                     "- [{}|{}] {}\n",

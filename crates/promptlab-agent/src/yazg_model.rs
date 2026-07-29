@@ -17,7 +17,8 @@ use rig::streaming::StreamingCompletionResponse;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-const EMPTY_FALLBACK_REPLY: &str =
+/// Default text when a completion is empty (also used for MaxTurns recovery).
+pub const EMPTY_FALLBACK_REPLY: &str =
     "I'm Yazg, PromptLab's AI assistant for authorized AI security testing. How can I help?";
 
 /// Cloneable model that delegates completions to PromptLab inference.
