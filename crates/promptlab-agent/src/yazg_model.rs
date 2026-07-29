@@ -189,7 +189,103 @@ fn normalize_completion_text(mut outcome: LlmCompletion) -> LlmCompletion {
 
 /// Public unwrap for final chat replies (tool-envelope / quoted / JS-concat junk).
 pub fn normalize_user_facing_reply(raw: &str) -> String {
-    unwrap_user_facing_text(raw)
+    let unwrapped = unwrap_user_facing_text(raw);
+    strip_agent_meta_reasoning(&unwrapped)
+}
+
+/// True when a reply still leaks tool/ReAct/internal routing text to the user.
+pub fn reply_looks_like_agent_meta(s: &str) -> bool {
+    let lower = s.to_lowercase();
+    lower.contains("[tool_call")
+        || lower.contains("[tool_result")
+        || lower.contains("[reasoning]")
+        || lower.contains("react check:")
+        || lower.contains("identical tool call")
+        || lower.contains("here is the final reply")
+        || lower.contains("you already have workspace observation")
+        || lower.contains("do not repeat the same tool")
+        || lower.contains("only call a different tool")
+        || lower.contains("no forced action")
+}
+
+fn strip_agent_meta_reasoning(s: &str) -> String {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    // Prefer explicit final-answer markers when the model narrates then answers.
+    for marker in [
+        "Here is the final reply:",
+        "here is the final reply:",
+        "Final Answer:",
+        "Final answer:",
+        "final reply:",
+        "Final reply:",
+    ] {
+        if let Some(idx) = trimmed.find(marker) {
+            let after = trimmed[idx + marker.len()..].trim();
+            if !after.is_empty() && !reply_looks_like_agent_meta(after) {
+                return after.to_string();
+            }
+            if !after.is_empty() {
+                return strip_agent_meta_lines(after);
+            }
+        }
+    }
+
+    strip_agent_meta_lines(trimmed)
+}
+
+fn strip_agent_meta_lines(s: &str) -> String {
+    let mut out = Vec::new();
+    for line in s.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            if out.last().is_some_and(|prev: &&str| !prev.is_empty()) {
+                out.push("");
+            }
+            continue;
+        }
+        if t.starts_with("[tool_call")
+            || t.starts_with("[tool_result")
+            || t.starts_with("[reasoning]")
+            || t.starts_with("ReAct check:")
+            || (t == "---" && s.contains("ReAct check:"))
+        {
+            continue;
+        }
+        let lower = t.to_lowercase();
+        if lower.contains("identical tool call")
+            || lower.contains("you already have workspace observation")
+            || lower.contains("do not repeat the same tool")
+            || lower.contains("only call a different tool")
+            || lower.contains("since the tool call is identical")
+            || lower.contains("we can skip it")
+            || lower.contains("therefore, we can reply")
+            || lower.contains("the user has already asked")
+            || lower.contains("the user's original question")
+            || lower.contains("which translates to")
+            || lower.contains("list_targets tool has")
+            || lower.contains("has already been called")
+            || lower.contains("answer the user in markdown now")
+            || lower.contains("respond to the user with a short markdown")
+            || lower.contains("do not mention tools")
+            || lower.contains("no forced action")
+            || lower.starts_with("here is the final reply")
+        {
+            continue;
+        }
+        out.push(line);
+    }
+    // Trim leading/trailing blank lines introduced by stripping.
+    while out.first().is_some_and(|l| l.trim().is_empty()) {
+        out.remove(0);
+    }
+    while out.last().is_some_and(|l| l.trim().is_empty()) {
+        out.pop();
+    }
+    out.join("\n").trim().to_string()
 }
 
 fn unwrap_user_facing_text(raw: &str) -> String {
@@ -778,5 +874,27 @@ mod tests {
     #[test]
     fn strips_wrapping_quotes() {
         assert_eq!(unwrap_user_facing_text(r#""Hello!""#), "Hello!");
+    }
+
+    #[test]
+    fn strips_tool_call_and_react_meta_from_reply() {
+        let raw = r#"[tool_call id=call-1 name=list_targets args={"project":"AI"}]
+
+The user has already asked for the list of targets in project AI, and the list_targets tool has been called with the same arguments. Since the tool call is identical, we can skip it and reply to the user directly.
+
+You already have workspace Observation(s). If they answer the user, reply in markdown now (Finish). Do not repeat the same tool.
+
+Here is the final reply:
+
+### Targets in AI
+1. **10.100.109.76** (`019fa414`) — llm_api
+2. **192.168.30.146** (`019f99fe`) — llm_api"#;
+        let cleaned = normalize_user_facing_reply(raw);
+        assert!(!cleaned.contains("[tool_call"));
+        assert!(!cleaned.contains("identical"));
+        assert!(!cleaned.contains("Observation"));
+        assert!(cleaned.contains("10.100.109.76"));
+        assert!(cleaned.contains("192.168.30.146"));
+        assert!(!reply_looks_like_agent_meta(&cleaned));
     }
 }

@@ -42,6 +42,7 @@ pub mod memory;
 pub mod recommend;
 pub mod reflection;
 pub mod yazg_model;
+pub mod yazg_prompts;
 pub mod yazg_runtime;
 pub mod yazg_tools;
 pub mod sequential_attack_execution;

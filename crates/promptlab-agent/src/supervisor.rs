@@ -146,46 +146,44 @@ pub enum YazgDelegation {
 pub struct YazgSupervisor;
 
 impl YazgSupervisor {
-    /// Build a goal string; intent is only a soft hint inside the goal.
+    /// Build a goal string; intent is only a soft hint (kept short — context engineering:
+    /// do not dump internal policy into the user utterance stored in STM).
     pub fn build_goal(message: &str, intent_hint: SupervisorIntent) -> String {
+        let message = message.trim();
         let hint = match intent_hint {
             SupervisorIntent::AnalyzeEndpoint => {
-                "User preference hint: endpoint analysis may be appropriate."
+                Some("Hint: endpoint analysis may fit.")
             }
-            SupervisorIntent::AttackPlan => {
-                "User preference hint: attack planning may be appropriate."
-            }
+            SupervisorIntent::AttackPlan => Some("Hint: attack planning may fit."),
             SupervisorIntent::GeneratePrompt => {
-                "User preference hint: Attack Factory prompt generation may be appropriate."
+                Some("Hint: Attack Factory prompt generation may fit.")
             }
             SupervisorIntent::Recommend => {
-                "User preference hint: post-scan remediation recommendations may be appropriate."
+                Some("Hint: post-scan remediation recommendations may fit.")
             }
-            SupervisorIntent::Summary => {
-                "User preference hint: project/scan summary may be appropriate."
-            }
+            SupervisorIntent::Summary => Some("Hint: project/scan summary may fit."),
             SupervisorIntent::Judge => {
-                "User preference hint: consensus judging via JudgeCoordinatorAgent may be appropriate."
+                Some("Hint: consensus judging may fit.")
             }
             SupervisorIntent::CreateProject => {
-                "User preference hint: create a workspace project via create_project \
-                 (include JSON name; target is NOT required)."
+                Some("Hint: create_project if the user wants a new project (name required).")
             }
             SupervisorIntent::ListWorkspace => {
-                "User preference hint: call list_workspace to read projects/targets/scans/findings \
-                 from the local DB (including finding counts for a named project). \
-                 Do not call analyze_endpoint. Do not invent rows."
+                Some(
+                    "Hint: use scoped workspace tools (list_targets / project_detail / \
+                     list_findings / …) — not invent rows; prefer the smallest tool.",
+                )
             }
             SupervisorIntent::ExecuteAttack => {
-                "User preference hint: agentic scan execution via AgenticAttackExecutionAgent may be appropriate."
+                Some("Hint: agentic scan execution may fit.")
             }
-            SupervisorIntent::Chat => "User preference hint: conversational reply may be enough.",
-            SupervisorIntent::Auto => {
-                "No forced action — read the user prompt carefully, use STM/LTM for prior facts, \
-                 call specialist tools only when needed, then finish with a clear reply."
-            }
+            // Keep Auto as the raw user message — system preamble already covers routing.
+            SupervisorIntent::Chat | SupervisorIntent::Auto => None,
         };
-        format!("{}\n\n({hint})", message.trim())
+        match hint {
+            Some(h) => format!("{message}\n\n({h})"),
+            None => message.to_string(),
+        }
     }
 
     /// Primary entry: Yazg tool-calling loop (tool-calling) then map to typed delegation.
@@ -904,9 +902,20 @@ mod tests {
             SupervisorIntent::AttackPlan,
         );
         assert!(goal.contains("generate an attack plan"));
-        assert!(goal.contains("User preference hint"));
+        assert!(goal.contains("Hint:"));
+        assert!(goal.contains("attack planning"));
         assert!(!goal.to_ascii_lowercase().contains("prefer generating"));
         assert!(!goal.contains("AttackPlanAgent"));
+    }
+
+    #[test]
+    fn auto_goal_keeps_raw_user_message() {
+        let goal = YazgSupervisor::build_goal(
+            "cho tôi các target trong project AI",
+            SupervisorIntent::Auto,
+        );
+        assert_eq!(goal, "cho tôi các target trong project AI");
+        assert!(!goal.contains("No forced action"));
     }
 
     #[test]

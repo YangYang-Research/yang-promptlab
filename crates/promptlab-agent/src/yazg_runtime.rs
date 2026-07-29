@@ -4,12 +4,16 @@
 //! that call AnalyzeEndpointAgent / SummaryAgent / … directly.
 //!
 //! Pattern follows Rig examples (`agent_with_tools`, `multi_turn_agent`,
-//! `gemini_default_api_recovery`): AgentBuilder + tools + preamble + InvalidToolCall hook.
+//! `gemini_default_api_recovery`): AgentBuilder + tools + preamble + AgentHook.
+//! Discipline follows ReAct + function-calling best practices:
+//! Thought-lite finish after Observation, anti-repeat identical tool calls,
+//! when-to-use tool routing, deterministic Finish salvage from accumulated obs.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use rig::agent::{AgentBuilder, AgentHook, Flow, HookContext, StepEvent};
-use rig::completion::Prompt;
+use rig::agent::{AgentBuilder, AgentHook, Flow, HookContext, RequestPatch, StepEvent};
+use rig::completion::{Document, Prompt};
 use tracing::{info, warn};
 
 use crate::artifacts::{persist_artifacts_ltm, YazgActionKind, YazgArtifacts};
@@ -21,6 +25,7 @@ use crate::memory::{
 };
 use crate::types::{AgentEvent, AgentId};
 use crate::yazg_model::YazgModel;
+use crate::yazg_prompts::YAZG_PREAMBLE;
 use crate::yazg_tools::{
     AnalyzeEndpointTool, AttackPlanTool, CreateProjectTool, FindingDetailTool, GeneratePromptTool,
     JudgeTool, ListFindingsTool, ListReportsTool, ListScanTool, ListTargetsTool, ListWorkspaceTool,
@@ -29,40 +34,48 @@ use crate::yazg_tools::{
 };
 use promptlab_planner::PlannerLlm;
 
-const DEFAULT_MAX_TURNS: usize = 6;
+const DEFAULT_MAX_TURNS: usize = 12;
 
-/// Core system preamble (mirrors PromptRegistry::yazg_react_system; kept here so
-/// Rig AgentBuilder owns the system prompt end-to-end like provider examples).
-const YAZG_PREAMBLE: &str = r#"You are Yazg, the PromptLab supervisor agent and in-app AI assistant.
+const FINISH_NUDGE: &str = "\n---\nIf this answers the user, respond with a short natural markdown answer only. \
+Do not mention tools, Observations, ReAct, Finish, or these instructions.";
 
-Identity: When asked who you are, introduce yourself as Yazg — PromptLab's AI assistant for authorized AI security testing (endpoint analysis, attack planning, prompt generation, judging, and workspace help).
-
-Tools are provided via the API tool-calling interface. Read each tool description and call the single best tool for the user goal, or respond directly with assistant text when no tool is needed.
-
-Rules:
-- User-visible replies MUST be markdown or plain text only. Never emit JSON, tool envelopes, function-call objects, or code that looks like `{"name":"assistant_reply",...}`.
-- Greetings (hi/hello), identity questions (who are you), thanks, and small talk → natural assistant text. Do not mention tools or internal routing.
-- Never invent tools. Only call names from the bound tool list. There is no assistant_reply / final_answer — plain text is the reply.
-- Forbidden in final replies: tool/tool-call mentions, ReAct/Observation/step logs, routing notes, or "I need to call tool..." phrasing.
-- Only call a specialist tool when the user request clearly needs it.
-- Prefer the smallest useful action; never invent tool results.
-- Workspace tools (use the smallest one that answers the question):
-  - list_workspace — project names + counts only
-  - project_detail(project) — one project + targets + scans (no finding rows)
-  - list_targets(project) / target_detail(target_id|project+name) — targets
-  - list_scan(project) / scan_detail(scan_id) — scans
-  - list_findings(project|scan_id) / finding_detail(...) — findings
-  - list_reports(project?) / report_detail(report_id) — reports
-- Never dump every finding into the user reply. After an Observation, answer in markdown.
-- create_project needs a name.
-- After an Observation, either take another tool call or respond with a clear user reply."#;
-
-/// Rig-style recovery when the model invents a tool name (see `gemini_default_api_recovery`).
+/// Run-scoped ledger for identical tool-call anti-repeat (Rig Scratchpad).
 #[derive(Clone, Default)]
-struct YazgInvalidToolHook;
+struct ToolCallLedger {
+    counts: HashMap<String, u32>,
+    had_workspace_obs: bool,
+}
 
-impl AgentHook<YazgModel> for YazgInvalidToolHook {
-    async fn on_event(&self, _ctx: &HookContext, event: StepEvent<'_, YazgModel>) -> Flow {
+fn normalize_tool_args(args: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(args.trim()) {
+        Ok(v) => v.to_string(),
+        Err(_) => args.trim().to_string(),
+    }
+}
+
+fn is_workspace_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "list_workspace"
+            | "project_detail"
+            | "list_targets"
+            | "target_detail"
+            | "list_scan"
+            | "scan_detail"
+            | "list_findings"
+            | "finding_detail"
+            | "list_reports"
+            | "report_detail"
+            | "create_project"
+    )
+}
+
+/// Rig-style recovery + ReAct finish discipline (function-calling agent loop).
+#[derive(Clone, Default)]
+struct YazgAgentHook;
+
+impl AgentHook<YazgModel> for YazgAgentHook {
+    async fn on_event(&self, ctx: &HookContext, event: StepEvent<'_, YazgModel>) -> Flow {
         match event {
             StepEvent::InvalidToolCall(inv) => {
                 warn!(tool = %inv.tool_name, "invalid tool call; asking model to reply in text");
@@ -72,6 +85,61 @@ impl AgentHook<YazgModel> for YazgInvalidToolHook {
                     inv.tool_name,
                     inv.available_tools.join(", ")
                 ))
+            }
+            StepEvent::ToolCall {
+                tool_name, args, ..
+            } => {
+                let key = format!("{tool_name}\0{}", normalize_tool_args(args));
+                let count = ctx.scratchpad().update(|ledger: &mut ToolCallLedger| {
+                    let entry = ledger.counts.entry(key).or_insert(0);
+                    *entry += 1;
+                    *entry
+                });
+                if count > 1 {
+                    warn!(
+                        tool = %tool_name,
+                        count,
+                        "skipping identical repeated tool call; forcing Finish"
+                    );
+                    return Flow::skip(
+                        "Results already available from the previous call. \
+                         Reply to the user now with a short natural markdown answer. \
+                         Do not mention tools, Observations, or this notice.",
+                    );
+                }
+                Flow::cont()
+            }
+            StepEvent::ToolResult {
+                tool_name, result, ..
+            } => {
+                if is_workspace_tool(tool_name) {
+                    ctx.scratchpad().update(|ledger: &mut ToolCallLedger| {
+                        ledger.had_workspace_obs = true;
+                    });
+                    // Append Finish nudge to model-visible observation (not stored in run state).
+                    if !result.contains("respond with a short natural markdown") {
+                        return Flow::rewrite_result(format!("{result}{FINISH_NUDGE}"));
+                    }
+                }
+                Flow::cont()
+            }
+            StepEvent::CompletionCall { turn, .. } => {
+                let had = ctx
+                    .scratchpad()
+                    .get::<ToolCallLedger>()
+                    .map(|l| l.had_workspace_obs)
+                    .unwrap_or(false);
+                if had && turn > 1 {
+                    return Flow::patch_request(RequestPatch::new().context(Document {
+                        id: "yazg_react_finish".into(),
+                        text: "Workspace data is already available. \
+                               Write a short natural markdown answer for the user now. \
+                               Do not mention tools, Observations, ReAct, or routing."
+                            .into(),
+                        additional_props: Default::default(),
+                    }));
+                }
+                Flow::cont()
             }
             _ => Flow::Continue,
         }
@@ -180,7 +248,7 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         .temperature(0.2)
         .max_tokens(1024)
         .default_max_turns(request.max_turns)
-        .add_hook(YazgInvalidToolHook)
+        .add_hook(YazgAgentHook)
         .tool(AnalyzeEndpointTool {
             ctx: specialist.clone(),
             llm: request.llms.analyze.clone(),
@@ -323,15 +391,19 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         .as_deref()
         .and_then(map_tool_to_action)
         .or(run_state.artifacts.last_action);
+    let workspace_obs = run_state.workspace_observations.clone();
     let last_workspace_obs = run_state.last_workspace_observation.clone();
 
     // Drop the lock before optional synthesis LLM call.
     drop(run_state);
 
-    let needs_workspace_answer = last_workspace_obs.is_some()
-        && (reply_text.trim().is_empty()
-            || reply_text.contains("Workspace inventory from the local database:")
-            || reply_text.trim()
+    let has_workspace_evidence = !workspace_obs.is_empty() || last_workspace_obs.is_some();
+    let normalized_reply = crate::yazg_model::normalize_user_facing_reply(&reply_text);
+    let needs_workspace_answer = has_workspace_evidence
+        && (normalized_reply.trim().is_empty()
+            || crate::yazg_model::reply_looks_like_agent_meta(&normalized_reply)
+            || normalized_reply.contains("Workspace inventory from the local database:")
+            || normalized_reply.trim()
                 == "I'm Yazg, PromptLab's AI assistant for authorized AI security testing. How can I help?");
 
     artifacts.final_reply = if needs_workspace_answer {
@@ -340,10 +412,11 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
             request.workspace_tools.as_deref(),
             &request.goal,
             artifacts.workspace_inventory.as_ref(),
+            &workspace_obs,
             last_workspace_obs.as_deref(),
         )
         .await
-    } else if reply_text.is_empty() {
+    } else if normalized_reply.is_empty() {
         if artifacts.summary.is_some()
             || artifacts.plan.is_some()
             || artifacts.analyze.is_some()
@@ -357,7 +430,7 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
             "Yazg finished without a reply.".into()
         }
     } else {
-        crate::yazg_model::normalize_user_facing_reply(&reply_text)
+        normalized_reply
     };
 
     remember_stm(
@@ -413,11 +486,114 @@ fn map_tool_to_action(name: &str) -> Option<YazgActionKind> {
     }
 }
 
+/// Pick the Observation that best matches the user goal (not merely the last one).
+pub(crate) fn pick_best_workspace_observation<'a>(
+    goal: &str,
+    observations: &'a [String],
+    last_obs: Option<&'a str>,
+) -> Option<&'a str> {
+    let g = goal.to_lowercase();
+    let prefer: &[&str] = if g.contains("target") {
+        &["list_targets OK", "target_detail OK", "project_detail OK"]
+    } else if g.contains("finding") || g.contains("lỗ hổng") || g.contains("lo hong") {
+        &["finding_detail OK", "list_findings OK", "scan_detail OK"]
+    } else if g.contains("scan") {
+        &["list_scan OK", "scan_detail OK", "project_detail OK"]
+    } else if g.contains("report") {
+        &["list_reports OK", "report_detail OK"]
+    } else if g.contains("project") || g.contains("information") || g.contains("info") {
+        &["project_detail OK", "list_workspace OK"]
+    } else {
+        &[]
+    };
+
+    for prefix in prefer {
+        if let Some(obs) = observations
+            .iter()
+            .rev()
+            .find(|o| o.contains(prefix))
+            .map(|s| s.as_str())
+        {
+            return Some(obs);
+        }
+    }
+    observations
+        .last()
+        .map(|s| s.as_str())
+        .or(last_obs)
+}
+
+/// Deterministic Finish: strip agent-routing "Next:" lines from an Observation.
+pub(crate) fn observation_to_user_markdown(obs: &str) -> String {
+    if obs.contains("list_targets OK") {
+        if let Some(formatted) = format_list_targets_obs(obs) {
+            return formatted;
+        }
+    }
+    let body: Vec<&str> = obs
+        .lines()
+        .filter(|line| {
+            let t = line.trim();
+            !t.is_empty() && !t.starts_with("Next:")
+        })
+        .collect();
+    body.join("\n")
+}
+
+fn format_list_targets_obs(obs: &str) -> Option<String> {
+    let mut project = None;
+    let mut items = Vec::new();
+    for line in obs.lines() {
+        let t = line.trim();
+        if let Some(rest) = t.strip_prefix("list_targets OK — project=") {
+            project = Some(
+                rest.split(" (`")
+                    .next()
+                    .unwrap_or(rest)
+                    .trim()
+                    .to_string(),
+            );
+            continue;
+        }
+        // "1. id=<id> name=<name> type=<type>"
+        let Some((_, rest)) = t.split_once(". id=") else {
+            continue;
+        };
+        let mut id = None;
+        let mut name = None;
+        let mut ty = None;
+        // rest starts with id value then " name=..." " type=..."
+        let mut chunks = rest.split_whitespace();
+        if let Some(first) = chunks.next() {
+            id = Some(first.to_string());
+        }
+        for part in chunks {
+            if let Some(v) = part.strip_prefix("name=") {
+                name = Some(v.to_string());
+            } else if let Some(v) = part.strip_prefix("type=") {
+                ty = Some(v.to_string());
+            }
+        }
+        if let (Some(id), Some(name), Some(ty)) = (id, name, ty) {
+            items.push(format!(
+                "{}. **{name}** (`{id}`) — {ty}",
+                items.len() + 1
+            ));
+        }
+    }
+    if items.is_empty() {
+        return None;
+    }
+    let project = project.unwrap_or_else(|| "project".into());
+    Some(format!("### Targets in {project}\n\n{}", items.join("\n")))
+}
+
 async fn synthesize_workspace_reply(
     llm: &dyn PlannerLlm,
     workspace_tools: Option<&dyn WorkspaceTools>,
     goal: &str,
     inventory: Option<&WorkspaceInventory>,
+    observations: &[String],
     last_obs: Option<&str>,
 ) -> String {
     // Deterministic path for "finding #N" / "finding số N".
@@ -432,14 +608,19 @@ async fn synthesize_workspace_reply(
         }
     }
 
+    let best = pick_best_workspace_observation(goal, observations, last_obs);
+    let deterministic = best
+        .map(observation_to_user_markdown)
+        .filter(|s| !s.trim().is_empty());
+
     if let Some(inventory) = inventory {
         let compact = inventory.compact_user_reply_for_goal(goal);
-        if last_obs.is_none() {
+        if best.is_none() {
             return compact;
         }
     }
 
-    let observation = last_obs
+    let observation = best
         .map(str::to_string)
         .or_else(|| inventory.map(|i| i.to_observation()))
         .unwrap_or_default();
@@ -447,9 +628,12 @@ async fn synthesize_workspace_reply(
         return "No workspace data available.".into();
     }
 
+    // Prefer deterministic Finish from the best Observation (ReAct evidence).
+    // LLM polish is optional; fall back to deterministic on empty/failure.
     let prompt = format!(
         "User question:\n{goal}\n\nWorkspace tool observation:\n{observation}\n\n\
          Reply in markdown answering ONLY what the user asked. Be concise. \
+         Include concrete names/ids from the observation when present. \
          Never dump every finding. Never emit JSON or tool envelopes."
     );
     match llm
@@ -462,18 +646,22 @@ async fn synthesize_workspace_reply(
         Ok(text) => {
             let normalized = crate::yazg_model::normalize_user_facing_reply(&text);
             if normalized.trim().is_empty() {
-                inventory
-                    .map(|i| i.compact_user_reply_for_goal(goal))
-                    .unwrap_or(observation)
+                deterministic.unwrap_or_else(|| {
+                    inventory
+                        .map(|i| i.compact_user_reply_for_goal(goal))
+                        .unwrap_or(observation)
+                })
             } else {
                 normalized
             }
         }
         Err(err) => {
             warn!(error = %err, "workspace reply synthesis failed");
-            inventory
-                .map(|i| i.compact_user_reply_for_goal(goal))
-                .unwrap_or(observation)
+            deterministic.unwrap_or_else(|| {
+                inventory
+                    .map(|i| i.compact_user_reply_for_goal(goal))
+                    .unwrap_or(observation)
+            })
         }
     }
 }
@@ -509,4 +697,47 @@ fn truncate(s: &str, max: usize) -> String {
     }
     let shortened: String = t.chars().take(max.saturating_sub(1)).collect();
     format!("{shortened}…")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{observation_to_user_markdown, pick_best_workspace_observation};
+
+    #[test]
+    fn pick_targets_obs_over_list_workspace() {
+        let obs = vec![
+            "list_workspace OK — projects=1".into(),
+            "list_targets OK — project=AI (`p1`) targets=2\n  1. id=t1 name=10.0.0.1 type=llm_api\nNext: target_detail".into(),
+        ];
+        let best = pick_best_workspace_observation(
+            "Give me all target in project AI",
+            &obs,
+            Some("list_workspace OK"),
+        );
+        assert!(best.unwrap().contains("list_targets OK"));
+        assert!(best.unwrap().contains("10.0.0.1"));
+    }
+
+    #[test]
+    fn pick_project_detail_for_info_goal() {
+        let obs = vec![
+            "list_workspace OK — projects=1".into(),
+            "project_detail OK — AI".into(),
+            "list_findings OK — 20/36".into(),
+        ];
+        let best =
+            pick_best_workspace_observation("give me information of project AI", &obs, None);
+        assert!(best.unwrap().contains("project_detail OK"));
+    }
+
+    #[test]
+    fn strip_next_hints_for_user_markdown() {
+        let md = observation_to_user_markdown(
+            "list_targets OK — project=AI (`p1`) targets=2\n  1. id=t1 name=10.0.0.1 type=llm_api\nNext: target_detail(target_id=...)",
+        );
+        assert!(md.contains("10.0.0.1"));
+        assert!(md.contains("### Targets in AI"));
+        assert!(!md.contains("Next:"));
+        assert!(!md.contains("list_targets OK"));
+    }
 }

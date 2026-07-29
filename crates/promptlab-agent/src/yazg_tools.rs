@@ -30,6 +30,8 @@ pub struct YazgRunState {
     pub last_tool: Option<String>,
     /// Last workspace tool observation text (for empty-reply salvage).
     pub last_workspace_observation: Option<String>,
+    /// Accumulated workspace Observations this run (ReAct evidence trail).
+    pub workspace_observations: Vec<String>,
 }
 
 pub type SharedYazgState = Arc<Mutex<YazgRunState>>;
@@ -226,21 +228,29 @@ async fn record_workspace_tool(
     observation: String,
     event_msg: String,
     inventory: Option<WorkspaceInventory>,
+    args_json: &str,
 ) {
     mark_tool(state, tool_name, action).await;
     let mut guard = state.lock().await;
+    let args_snip = truncate(args_json, 160);
+    let obs_snip = truncate(&observation, 240);
     guard.artifacts.events.push(AgentEvent::info(
         AgentId::Yazg,
-        format!("Acting: {tool_name}"),
+        format!("Acting: {tool_name} args={args_snip}"),
     ));
     guard.artifacts.events.push(AgentEvent::completed(
         AgentId::ListWorkspace,
-        event_msg,
+        format!("{event_msg} | obs={obs_snip}"),
     ));
+    guard.workspace_observations.push(observation.clone());
     guard.last_workspace_observation = Some(observation);
     if let Some(inv) = inventory {
         guard.artifacts.workspace_inventory = Some(inv);
     }
+}
+
+fn args_json<T: Serialize>(args: &T) -> String {
+    serde_json::to_string(args).unwrap_or_else(|_| "{}".into())
 }
 
 impl Tool for ListWorkspaceTool {
@@ -250,9 +260,10 @@ impl Tool for ListWorkspaceTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "List PromptLab projects with counts only (targets/scans/findings totals). \
-         Does NOT return finding rows. For one project use project_detail; for scans use list_scan; \
-         for findings use list_findings or finding_detail. Not for greetings/math/chat."
+        "List all projects with counts only (targets/scans/findings totals). \
+         Use ONLY for a workspace overview / 'what projects exist'. \
+         Do NOT use for: targets in a project (list_targets), one project summary (project_detail), \
+         findings (list_findings), scans (list_scan), reports (list_reports), greetings, or math."
             .into()
     }
 
@@ -281,13 +292,14 @@ impl Tool for ListWorkspaceTool {
                 inventory.totals.projects, inventory.totals.findings
             ),
             Some(inventory),
+            "{}",
         )
         .await;
         Ok(observation)
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ProjectRefArgs {
     /// Project id or name.
     pub project: String,
@@ -305,8 +317,10 @@ impl Tool for ProjectDetailTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Get one project: metadata, targets, and scans (no finding rows). \
-         Pass project id or name. Then use list_findings / list_scan / scan_detail as needed."
+        "Get one project summary: metadata, target list, and scans (no finding rows). \
+         Use when the user asks for information / overview of a named project. \
+         Pass project id or name. After Observation, reply — do NOT auto-call list_findings \
+         unless the user asked for findings."
             .into()
     }
 
@@ -341,6 +355,7 @@ impl Tool for ProjectDetailTool {
                 detail.project.name, detail.project.findings_count
             ),
             None,
+            &args_json(&args),
         )
         .await;
         Ok(observation)
@@ -359,7 +374,8 @@ impl Tool for ListScanTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "List scans for a project (id or name). Use scan_detail for findings on one scan."
+        "List scans for a project (id or name). Use when the user asks about scans/runs. \
+         Not for listing targets. Use scan_detail for one scan's findings."
             .into()
     }
 
@@ -395,13 +411,14 @@ impl Tool for ListScanTool {
                 list.project_name
             ),
             None,
+            &args_json(&args),
         )
         .await;
         Ok(observation)
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ScanIdArgs {
     pub scan_id: String,
 }
@@ -454,13 +471,14 @@ impl Tool for ScanDetailTool {
                 detail.scan.name, detail.findings_total
             ),
             None,
+            &args_json(&args),
         )
         .await;
         Ok(observation)
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ListFindingsArgs {
     #[serde(default)]
     pub project: Option<String>,
@@ -485,8 +503,9 @@ impl Tool for ListFindingsTool {
 
     fn description(&self) -> String {
         "List findings for a project and/or scan (paginated, newest first). \
+         Use ONLY when the user asks for findings / vulnerabilities / lỗ hổng. \
          Provide project (id/name) and/or scan_id. Optional limit (default 20, max 50) and offset. \
-         For finding #N of a project use finding_detail(project, index=N)."
+         For finding #N use finding_detail(project, index=N). Not for project overview or targets."
             .into()
     }
 
@@ -526,13 +545,14 @@ impl Tool for ListFindingsTool {
                 list.total
             ),
             None,
+            &args_json(&args),
         )
         .await;
         Ok(observation)
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct FindingDetailArgs {
     #[serde(default)]
     pub finding_id: Option<String>,
@@ -590,6 +610,7 @@ impl Tool for FindingDetailTool {
             observation.clone(),
             format!("Finding detail: {}", detail.finding.title),
             None,
+            &args_json(&args),
         )
         .await;
         Ok(observation)
@@ -608,7 +629,10 @@ impl Tool for ListTargetsTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "List AI targets for a project (id or name). Use target_detail for one target's profile."
+        "List AI targets for a project (id or name). \
+         Use when the user asks for targets / all targets / endpoints in a project. \
+         Do NOT use list_workspace for this. After Observation, reply with target names — \
+         use target_detail only if the user wants one target's profile."
             .into()
     }
 
@@ -641,13 +665,14 @@ impl Tool for ListTargetsTool {
                 list.project_name
             ),
             None,
+            &args_json(&args),
         )
         .await;
         Ok(observation)
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct TargetDetailArgs {
     #[serde(default)]
     pub target_id: Option<String>,
@@ -669,7 +694,9 @@ impl Tool for TargetDetailTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Get one target by target_id, or by project + name. Returns type and clipped profile/descriptor summary."
+        "Get one target by target_id, or by project + name. \
+         Use when the user asks for target detail / profile of a specific target. \
+         Returns type and clipped profile/descriptor summary."
             .into()
     }
 
@@ -703,13 +730,14 @@ impl Tool for TargetDetailTool {
             observation.clone(),
             format!("Target detail: {}", detail.target.name),
             None,
+            &args_json(&args),
         )
         .await;
         Ok(observation)
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ListReportsArgs {
     #[serde(default)]
     pub project: Option<String>,
@@ -728,7 +756,7 @@ impl Tool for ListReportsTool {
 
     fn description(&self) -> String {
         "List generated reports for a project (id/name), or all projects when project is omitted. \
-         Use report_detail to read one report."
+         Use when the user asks about reports. Use report_detail to read one report."
             .into()
     }
 
@@ -756,13 +784,14 @@ impl Tool for ListReportsTool {
             observation.clone(),
             format!("Listed {} reports", list.reports.len()),
             None,
+            &args_json(&args),
         )
         .await;
         Ok(observation)
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ReportIdArgs {
     pub report_id: String,
 }
@@ -808,6 +837,7 @@ impl Tool for ReportDetailTool {
             observation.clone(),
             format!("Report detail: {}", detail.report.name),
             None,
+            &args_json(&args),
         )
         .await;
         Ok(observation)

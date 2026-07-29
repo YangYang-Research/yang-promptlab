@@ -466,6 +466,27 @@ impl TargetList {
         lines.push("Next: target_detail(target_id=...) for profile summary.".into());
         lines.join("\n")
     }
+
+    pub fn compact_user_reply(&self) -> String {
+        let mut out = format!(
+            "### Targets in {}\n\n",
+            self.project_name
+        );
+        if self.targets.is_empty() {
+            out.push_str("_No targets in this project._");
+            return out;
+        }
+        for (i, t) in self.targets.iter().enumerate() {
+            out.push_str(&format!(
+                "{}. **{}** (`{}`) — {}\n",
+                i + 1,
+                t.name,
+                t.id,
+                t.target_type
+            ));
+        }
+        out
+    }
 }
 
 /// One target with a clipped profile summary (not full JSON dump).
