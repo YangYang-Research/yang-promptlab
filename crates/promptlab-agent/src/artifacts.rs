@@ -29,6 +29,10 @@ pub enum YazgActionKind {
     ScanDetail,
     ListFindings,
     FindingDetail,
+    ListTargets,
+    TargetDetail,
+    ListReports,
+    ReportDetail,
     Finish,
 }
 

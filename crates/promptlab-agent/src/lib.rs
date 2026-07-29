@@ -5,10 +5,14 @@
 //! Yazg (Manager)
 //! ├── list_workspace      — projects + counts only
 //! ├── project_detail      — one project + targets + scans
+//! ├── list_targets        — targets for a project
+//! ├── target_detail       — one target + profile summary
 //! ├── list_scan           — scans for a project
 //! ├── scan_detail         — one scan + capped findings
 //! ├── list_findings       — paginated findings
 //! ├── finding_detail      — one finding
+//! ├── list_reports        — reports for a project / all
+//! ├── report_detail       — one report preview
 //! ├── create_project      — tool → CreateProjectTools
 //! ├── analyze_endpoint    — tool → AnalyzeEndpointAgent::run
 //! ├── attack_plan         — tool → AttackPlanAgent::run
@@ -71,9 +75,10 @@ pub use judge_workers::{
 };
 pub use list_workspace::{
     clamp_findings_limit, parse_finding_index, FindingDetail, FindingList, ProjectDetail,
-    ScanDetail, ScanList, WorkspaceFindingSummary, WorkspaceInventory, WorkspaceProjectSummary,
+    ReportDetail, ReportList, ScanDetail, ScanList, TargetDetail, TargetList,
+    WorkspaceFindingSummary, WorkspaceInventory, WorkspaceProjectSummary, WorkspaceReportSummary,
     WorkspaceScanSummary, WorkspaceTargetSummary, WorkspaceTools, WorkspaceTotals,
-    DEFAULT_FINDINGS_LIMIT, MAX_FINDINGS_LIMIT,
+    DEFAULT_FINDINGS_LIMIT, MAX_FINDINGS_LIMIT, MAX_REPORT_PREVIEW_CHARS,
 };
 pub use memory::{
     AgentMemoryStore, LtmEntry, LtmWrite, MemoryContext, MemoryScopeType, StmEntry, StmRole,

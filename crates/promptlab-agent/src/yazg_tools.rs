@@ -596,6 +596,224 @@ impl Tool for FindingDetailTool {
     }
 }
 
+pub struct ListTargetsTool {
+    pub tools: Arc<dyn WorkspaceTools>,
+    pub state: SharedYazgState,
+}
+
+impl Tool for ListTargetsTool {
+    const NAME: &'static str = "list_targets";
+    type Error = YazgToolError;
+    type Args = ProjectRefArgs;
+    type Output = String;
+
+    fn description(&self) -> String {
+        "List AI targets for a project (id or name). Use target_detail for one target's profile."
+            .into()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "project": { "type": "string", "description": "Project id or name" }
+            },
+            "required": ["project"],
+            "additionalProperties": false
+        })
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let list = self
+            .tools
+            .list_targets(&args.project)
+            .await
+            .map_err(YazgToolError)?;
+        let observation = list.to_observation();
+        record_workspace_tool(
+            &self.state,
+            "list_targets",
+            crate::artifacts::YazgActionKind::ListTargets,
+            observation.clone(),
+            format!(
+                "Listed {} targets for {}",
+                list.targets.len(),
+                list.project_name
+            ),
+            None,
+        )
+        .await;
+        Ok(observation)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TargetDetailArgs {
+    #[serde(default)]
+    pub target_id: Option<String>,
+    #[serde(default)]
+    pub project: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+pub struct TargetDetailTool {
+    pub tools: Arc<dyn WorkspaceTools>,
+    pub state: SharedYazgState,
+}
+
+impl Tool for TargetDetailTool {
+    const NAME: &'static str = "target_detail";
+    type Error = YazgToolError;
+    type Args = TargetDetailArgs;
+    type Output = String;
+
+    fn description(&self) -> String {
+        "Get one target by target_id, or by project + name. Returns type and clipped profile/descriptor summary."
+            .into()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "target_id": { "type": "string" },
+                "project": { "type": "string", "description": "Project id or name (with name)" },
+                "name": { "type": "string", "description": "Target name when resolving via project" }
+            },
+            "additionalProperties": false
+        })
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let detail = self
+            .tools
+            .target_detail(
+                args.target_id.as_deref(),
+                args.project.as_deref(),
+                args.name.as_deref(),
+            )
+            .await
+            .map_err(YazgToolError)?;
+        let observation = detail.to_observation();
+        record_workspace_tool(
+            &self.state,
+            "target_detail",
+            crate::artifacts::YazgActionKind::TargetDetail,
+            observation.clone(),
+            format!("Target detail: {}", detail.target.name),
+            None,
+        )
+        .await;
+        Ok(observation)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListReportsArgs {
+    #[serde(default)]
+    pub project: Option<String>,
+}
+
+pub struct ListReportsTool {
+    pub tools: Arc<dyn WorkspaceTools>,
+    pub state: SharedYazgState,
+}
+
+impl Tool for ListReportsTool {
+    const NAME: &'static str = "list_reports";
+    type Error = YazgToolError;
+    type Args = ListReportsArgs;
+    type Output = String;
+
+    fn description(&self) -> String {
+        "List generated reports for a project (id/name), or all projects when project is omitted. \
+         Use report_detail to read one report."
+            .into()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "project": { "type": "string", "description": "Optional project id or name" }
+            },
+            "additionalProperties": false
+        })
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let list = self
+            .tools
+            .list_reports(args.project.as_deref())
+            .await
+            .map_err(YazgToolError)?;
+        let observation = list.to_observation();
+        record_workspace_tool(
+            &self.state,
+            "list_reports",
+            crate::artifacts::YazgActionKind::ListReports,
+            observation.clone(),
+            format!("Listed {} reports", list.reports.len()),
+            None,
+        )
+        .await;
+        Ok(observation)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReportIdArgs {
+    pub report_id: String,
+}
+
+pub struct ReportDetailTool {
+    pub tools: Arc<dyn WorkspaceTools>,
+    pub state: SharedYazgState,
+}
+
+impl Tool for ReportDetailTool {
+    const NAME: &'static str = "report_detail";
+    type Error = YazgToolError;
+    type Args = ReportIdArgs;
+    type Output = String;
+
+    fn description(&self) -> String {
+        "Read one report by id (metadata + clipped content preview)."
+            .into()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "report_id": { "type": "string" }
+            },
+            "required": ["report_id"],
+            "additionalProperties": false
+        })
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let detail = self
+            .tools
+            .report_detail(&args.report_id)
+            .await
+            .map_err(YazgToolError)?;
+        let observation = detail.to_observation();
+        record_workspace_tool(
+            &self.state,
+            "report_detail",
+            crate::artifacts::YazgActionKind::ReportDetail,
+            observation.clone(),
+            format!("Report detail: {}", detail.report.name),
+            None,
+        )
+        .await;
+        Ok(observation)
+    }
+}
+
 pub struct CreateProjectTool {
     pub tools: Arc<dyn CreateProjectTools>,
     pub state: SharedYazgState,

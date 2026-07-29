@@ -23,8 +23,9 @@ use crate::types::{AgentEvent, AgentId};
 use crate::yazg_model::YazgModel;
 use crate::yazg_tools::{
     AnalyzeEndpointTool, AttackPlanTool, CreateProjectTool, FindingDetailTool, GeneratePromptTool,
-    JudgeTool, ListFindingsTool, ListScanTool, ListWorkspaceTool, ProjectDetailTool, RecommendTool,
-    ScanDetailTool, SharedYazgState, SummaryTool, YazgLlms, YazgRunState, YazgSpecialistContext,
+    JudgeTool, ListFindingsTool, ListReportsTool, ListScanTool, ListTargetsTool, ListWorkspaceTool,
+    ProjectDetailTool, RecommendTool, ReportDetailTool, ScanDetailTool, SharedYazgState,
+    SummaryTool, TargetDetailTool, YazgLlms, YazgRunState, YazgSpecialistContext,
 };
 use promptlab_planner::PlannerLlm;
 
@@ -48,10 +49,10 @@ Rules:
 - Workspace tools (use the smallest one that answers the question):
   - list_workspace — project names + counts only
   - project_detail(project) — one project + targets + scans (no finding rows)
-  - list_scan(project) — scans for a project
-  - scan_detail(scan_id) — one scan + capped findings
-  - list_findings(project|scan_id, limit?, offset?) — paginated findings
-  - finding_detail(finding_id) or finding_detail(project, index) — one finding (#N)
+  - list_targets(project) / target_detail(target_id|project+name) — targets
+  - list_scan(project) / scan_detail(scan_id) — scans
+  - list_findings(project|scan_id) / finding_detail(...) — findings
+  - list_reports(project?) / report_detail(report_id) — reports
 - Never dump every finding into the user reply. After an Observation, answer in markdown.
 - create_project needs a name.
 - After an Observation, either take another tool call or respond with a clear user reply."#;
@@ -209,6 +210,22 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
                 state: state.clone(),
             })
             .tool(FindingDetailTool {
+                tools: tools.clone(),
+                state: state.clone(),
+            })
+            .tool(ListTargetsTool {
+                tools: tools.clone(),
+                state: state.clone(),
+            })
+            .tool(TargetDetailTool {
+                tools: tools.clone(),
+                state: state.clone(),
+            })
+            .tool(ListReportsTool {
+                tools: tools.clone(),
+                state: state.clone(),
+            })
+            .tool(ReportDetailTool {
                 tools,
                 state: state.clone(),
             });
@@ -377,10 +394,14 @@ fn map_tool_to_action(name: &str) -> Option<YazgActionKind> {
     match name {
         "list_workspace" => Some(YazgActionKind::ListWorkspace),
         "project_detail" => Some(YazgActionKind::ProjectDetail),
+        "list_targets" => Some(YazgActionKind::ListTargets),
+        "target_detail" => Some(YazgActionKind::TargetDetail),
         "list_scan" => Some(YazgActionKind::ListScan),
         "scan_detail" => Some(YazgActionKind::ScanDetail),
         "list_findings" => Some(YazgActionKind::ListFindings),
         "finding_detail" => Some(YazgActionKind::FindingDetail),
+        "list_reports" => Some(YazgActionKind::ListReports),
+        "report_detail" => Some(YazgActionKind::ReportDetail),
         "create_project" => Some(YazgActionKind::CreateProject),
         "analyze_endpoint" => Some(YazgActionKind::AnalyzeEndpoint),
         "attack_plan" => Some(YazgActionKind::AttackPlan),

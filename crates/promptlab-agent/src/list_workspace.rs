@@ -432,6 +432,164 @@ impl FindingDetail {
     }
 }
 
+/// Targets for one project.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetList {
+    pub project_id: String,
+    pub project_name: String,
+    pub targets: Vec<WorkspaceTargetSummary>,
+}
+
+impl TargetList {
+    pub fn to_observation(&self) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "list_targets OK — project={} (`{}`) targets={}",
+            self.project_name,
+            self.project_id,
+            self.targets.len()
+        ));
+        if self.targets.is_empty() {
+            lines.push("Targets: (none)".into());
+        } else {
+            for (i, t) in self.targets.iter().enumerate() {
+                lines.push(format!(
+                    "  {}. id={} name={} type={}",
+                    i + 1,
+                    t.id,
+                    t.name,
+                    t.target_type
+                ));
+            }
+        }
+        lines.push("Next: target_detail(target_id=...) for profile summary.".into());
+        lines.join("\n")
+    }
+}
+
+/// One target with a clipped profile summary (not full JSON dump).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetDetail {
+    pub target: WorkspaceTargetSummary,
+    pub project_name: String,
+    pub profile_summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descriptor_summary: Option<String>,
+}
+
+impl TargetDetail {
+    pub fn to_observation(&self) -> String {
+        let t = &self.target;
+        format!(
+            "target_detail OK — {} (`{}`) project={} type={}\nprofile: {}\ndescriptor: {}",
+            t.name,
+            t.id,
+            self.project_name,
+            t.target_type,
+            self.profile_summary,
+            self.descriptor_summary.as_deref().unwrap_or("-")
+        )
+    }
+
+    pub fn compact_user_reply(&self) -> String {
+        format!(
+            "### Target {}\n\n- **Id:** `{}`\n- **Project:** {}\n- **Type:** {}\n- **Profile:** {}\n- **Descriptor:** {}",
+            self.target.name,
+            self.target.id,
+            self.project_name,
+            self.target.target_type,
+            self.profile_summary,
+            self.descriptor_summary.as_deref().unwrap_or("-")
+        )
+    }
+}
+
+/// Reports for a project (or workspace-wide).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportList {
+    pub project_id: Option<String>,
+    pub project_name: Option<String>,
+    pub reports: Vec<WorkspaceReportSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceReportSummary {
+    pub id: String,
+    pub project_id: String,
+    pub scan_id: Option<String>,
+    pub name: String,
+    pub format: String,
+    pub status: String,
+    #[serde(default)]
+    pub finding_count: u64,
+}
+
+impl ReportList {
+    pub fn to_observation(&self) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "list_reports OK — project={} reports={}",
+            self.project_name.as_deref().unwrap_or("(all)"),
+            self.reports.len()
+        ));
+        if self.reports.is_empty() {
+            lines.push("Reports: (none)".into());
+        } else {
+            for (i, r) in self.reports.iter().enumerate() {
+                lines.push(format!(
+                    "  {}. id={} name={} format={} status={} findings={} scan={}",
+                    i + 1,
+                    r.id,
+                    r.name,
+                    r.format,
+                    r.status,
+                    r.finding_count,
+                    r.scan_id.as_deref().unwrap_or("-")
+                ));
+            }
+        }
+        lines.push("Next: report_detail(report_id=...) to read content.".into());
+        lines.join("\n")
+    }
+}
+
+/// One report with clipped content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportDetail {
+    pub report: WorkspaceReportSummary,
+    pub project_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+    /// Clipped file content (HTML/markdown/text) for agent context.
+    pub content_preview: String,
+    pub content_truncated: bool,
+}
+
+impl ReportDetail {
+    pub fn to_observation(&self) -> String {
+        let r = &self.report;
+        format!(
+            "report_detail OK — {} (`{}`) project={} format={} status={} findings={}\nfile={}\npreview_truncated={}\n---\n{}",
+            r.name,
+            r.id,
+            self.project_name,
+            r.format,
+            r.status,
+            r.finding_count,
+            self.file_path.as_deref().unwrap_or("-"),
+            self.content_truncated,
+            self.content_preview
+        )
+    }
+}
+
+pub const MAX_REPORT_PREVIEW_CHARS: usize = 4000;
+
 fn format_finding_markdown(
     one_based: usize,
     finding: &WorkspaceFindingSummary,
@@ -483,6 +641,23 @@ pub trait WorkspaceTools: Send + Sync {
         project: Option<&str>,
         index: Option<usize>,
     ) -> Result<FindingDetail, String>;
+
+    /// List targets for a project (id or name).
+    async fn list_targets(&self, project: &str) -> Result<TargetList, String>;
+
+    /// One target by id (or project + name), with clipped profile summary.
+    async fn target_detail(
+        &self,
+        target_id: Option<&str>,
+        project: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<TargetDetail, String>;
+
+    /// List reports for a project, or all reports when project is None/empty.
+    async fn list_reports(&self, project: Option<&str>) -> Result<ReportList, String>;
+
+    /// One report by id; content is clipped for agent context.
+    async fn report_detail(&self, report_id: &str) -> Result<ReportDetail, String>;
 }
 
 pub fn clamp_findings_limit(limit: Option<usize>) -> usize {

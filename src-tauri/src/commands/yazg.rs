@@ -4,13 +4,15 @@ use std::collections::HashMap;
 
 use promptlab_agent::{
     AgentEvent, CreateProjectTools, CreatedProject, MemoryContext, SupervisorIntent,
-    WorkspaceFindingSummary, WorkspaceInventory, WorkspaceProjectSummary, WorkspaceScanSummary,
-    WorkspaceTargetSummary, WorkspaceTools, WorkspaceTotals, YazgDelegation, YazgSupervisor,
-    YazgTurn, FindingDetail, FindingList, ProjectDetail, ScanDetail, ScanList,
-    DEFAULT_FINDINGS_LIMIT, MAX_FINDINGS_LIMIT, clamp_findings_limit,
+    WorkspaceFindingSummary, WorkspaceInventory, WorkspaceProjectSummary, WorkspaceReportSummary,
+    WorkspaceScanSummary, WorkspaceTargetSummary, WorkspaceTools, WorkspaceTotals, YazgDelegation,
+    YazgSupervisor, YazgTurn, FindingDetail, FindingList, ProjectDetail, ReportDetail, ReportList,
+    ScanDetail, ScanList, TargetDetail, TargetList, DEFAULT_FINDINGS_LIMIT, MAX_FINDINGS_LIMIT,
+    MAX_REPORT_PREVIEW_CHARS, clamp_findings_limit,
 };
 use promptlab_storage::{
-    CreateProject, FindingRepository, ProjectRepository, ScanRepository, TargetRepository,
+    CreateProject, FindingRepository, ProjectRepository, ReportRepository, ScanRepository,
+    TargetRepository,
 };
 use promptlab_target_profile::TargetProfile;
 use async_trait::async_trait;
@@ -493,8 +495,241 @@ impl WorkspaceTools for HostWorkspaceTools {
             evidence_json: f.evidence_json.clone(),
         })
     }
+
+    async fn list_targets(&self, project: &str) -> Result<TargetList, String> {
+        let project = self.resolve_project(project).await?;
+        let targets = self
+            .repos
+            .targets()
+            .list_by_project(&project.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(TargetList {
+            project_id: project.id,
+            project_name: project.name,
+            targets: targets
+                .into_iter()
+                .map(|t| WorkspaceTargetSummary {
+                    id: t.id,
+                    project_id: t.project_id,
+                    name: t.name,
+                    target_type: t.target_type,
+                })
+                .collect(),
+        })
+    }
+
+    async fn target_detail(
+        &self,
+        target_id: Option<&str>,
+        project: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<TargetDetail, String> {
+        let target = if let Some(id) = target_id.map(str::trim).filter(|s| !s.is_empty()) {
+            self.repos
+                .targets()
+                .get(id)
+                .await
+                .map_err(|e| e.to_string())?
+        } else {
+            let project_key = project
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    "target_detail requires target_id or project+name".to_string()
+                })?;
+            let name_key = name
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "target_detail name is required when using project".to_string())?;
+            let project = self.resolve_project(project_key).await?;
+            let targets = self
+                .repos
+                .targets()
+                .list_by_project(&project.id)
+                .await
+                .map_err(|e| e.to_string())?;
+            let lower = name_key.to_lowercase();
+            targets
+                .into_iter()
+                .find(|t| t.name.to_lowercase() == lower || t.name.to_lowercase().contains(&lower))
+                .ok_or_else(|| format!("target not found: {name_key} in project {}", project.name))?
+        };
+
+        let project_name = self
+            .repos
+            .projects()
+            .get(&target.project_id)
+            .await
+            .map(|p| p.name)
+            .unwrap_or_else(|_| target.project_id.clone());
+
+        Ok(TargetDetail {
+            target: WorkspaceTargetSummary {
+                id: target.id,
+                project_id: target.project_id,
+                name: target.name,
+                target_type: target.target_type,
+            },
+            project_name,
+            profile_summary: summarize_json_blob(&target.profile_json, 600),
+            descriptor_summary: Some(summarize_json_blob(&target.descriptor_json, 400)),
+        })
+    }
+
+    async fn list_reports(&self, project: Option<&str>) -> Result<ReportList, String> {
+        let (reports, project_id, project_name) =
+            if let Some(project) = project.map(str::trim).filter(|s| !s.is_empty()) {
+                let project = self.resolve_project(project).await?;
+                let reports = self
+                    .repos
+                    .reports()
+                    .list_by_project(&project.id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                (reports, Some(project.id), Some(project.name))
+            } else {
+                // Aggregate across projects (no list_all on trait — loop projects).
+                let projects = self
+                    .repos
+                    .projects()
+                    .list()
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let mut all = Vec::new();
+                for p in projects {
+                    let mut rows = self
+                        .repos
+                        .reports()
+                        .list_by_project(&p.id)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    all.append(&mut rows);
+                }
+                (all, None, None)
+            };
+
+        Ok(ReportList {
+            project_id,
+            project_name,
+            reports: reports
+                .into_iter()
+                .map(|r| WorkspaceReportSummary {
+                    finding_count: finding_count_from_report_metadata(r.metadata_json.as_deref()),
+                    id: r.id,
+                    project_id: r.project_id,
+                    scan_id: r.scan_id,
+                    name: r.name,
+                    format: r.format,
+                    status: r.status,
+                })
+                .collect(),
+        })
+    }
+
+    async fn report_detail(&self, report_id: &str) -> Result<ReportDetail, String> {
+        let report_id = report_id.trim();
+        if report_id.is_empty() {
+            return Err("report_id is required".into());
+        }
+        let report = self
+            .repos
+            .reports()
+            .get(report_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let project_name = self
+            .repos
+            .projects()
+            .get(&report.project_id)
+            .await
+            .map(|p| p.name)
+            .unwrap_or_else(|_| report.project_id.clone());
+
+        let (content_preview, content_truncated) = match report.file_path.as_deref() {
+            Some(path) => match std::fs::read_to_string(path) {
+                Ok(raw) => clip_text(&raw, MAX_REPORT_PREVIEW_CHARS),
+                Err(err) => (format!("(failed to read report file: {err})"), false),
+            },
+            None => ("(report has no saved file)".into(), false),
+        };
+
+        Ok(ReportDetail {
+            report: WorkspaceReportSummary {
+                finding_count: finding_count_from_report_metadata(report.metadata_json.as_deref()),
+                id: report.id,
+                project_id: report.project_id,
+                scan_id: report.scan_id,
+                name: report.name,
+                format: report.format,
+                status: report.status,
+            },
+            project_name,
+            file_path: report.file_path,
+            content_preview,
+            content_truncated,
+        })
+    }
 }
 
+fn summarize_json_blob(raw: &str, max_chars: usize) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "-".into();
+    }
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        let mut bits = Vec::new();
+        if let Some(obj) = value.as_object() {
+            for key in [
+                "provider",
+                "framework",
+                "baseUrl",
+                "base_url",
+                "url",
+                "fullUrl",
+                "endpoint",
+                "model",
+                "name",
+                "verified",
+            ] {
+                if let Some(v) = obj.get(key) {
+                    bits.push(format!("{key}={}", compact_json_value(v)));
+                }
+            }
+        }
+        if !bits.is_empty() {
+            let joined = bits.join(", ");
+            return clip_text(&joined, max_chars).0;
+        }
+        return clip_text(&value.to_string(), max_chars).0;
+    }
+    clip_text(trimmed, max_chars).0
+}
+
+fn compact_json_value(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn clip_text(raw: &str, max_chars: usize) -> (String, bool) {
+    let count = raw.chars().count();
+    if count <= max_chars {
+        return (raw.to_string(), false);
+    }
+    let clipped: String = raw.chars().take(max_chars).collect();
+    (format!("{clipped}…"), true)
+}
+
+fn finding_count_from_report_metadata(metadata_json: Option<&str>) -> u64 {
+    metadata_json
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .and_then(|v| v.get("findings").and_then(|f| f.as_u64()))
+        .unwrap_or(0)
+}
 
 fn profile_from_json(raw: &str) -> CommandResult<TargetProfile> {
     if raw.trim().is_empty() || raw == "{}" {

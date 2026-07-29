@@ -694,7 +694,11 @@ fn delegation_from_artifacts_with_raw(
         | Some(YazgActionKind::ListScan)
         | Some(YazgActionKind::ScanDetail)
         | Some(YazgActionKind::ListFindings)
-        | Some(YazgActionKind::FindingDetail) => SupervisorIntent::ListWorkspace,
+        | Some(YazgActionKind::FindingDetail)
+        | Some(YazgActionKind::ListTargets)
+        | Some(YazgActionKind::TargetDetail)
+        | Some(YazgActionKind::ListReports)
+        | Some(YazgActionKind::ReportDetail) => SupervisorIntent::ListWorkspace,
         Some(YazgActionKind::Finish) | None => {
             if artifacts.created_project.is_some() {
                 SupervisorIntent::CreateProject
