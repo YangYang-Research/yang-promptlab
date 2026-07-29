@@ -414,12 +414,14 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
 
     let has_workspace_evidence = !workspace_obs.is_empty() || last_workspace_obs.is_some();
     let normalized_reply = crate::yazg_model::normalize_user_facing_reply(&reply_text);
+    let raw_workspace_dump = looks_like_raw_workspace_obs(&normalized_reply);
     // Salvage only when the loop failed to produce a usable user-facing reply.
     // Do NOT treat the empty-completion identity fallback as "needs workspace" —
     // that forced inventory answers for greetings after accidental tool calls.
     let needs_salvage = normalized_reply.trim().is_empty()
         || crate::yazg_model::reply_looks_like_agent_meta(&normalized_reply)
-        || normalized_reply.contains("Workspace inventory from the local database:");
+        || normalized_reply.contains("Workspace inventory from the local database:")
+        || raw_workspace_dump;
 
     artifacts.final_reply = if needs_salvage && has_workspace_evidence {
         synthesize_from_evidence(
@@ -429,6 +431,11 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
             artifacts.workspace_inventory.as_ref(),
             &workspace_obs,
             last_workspace_obs.as_deref(),
+            if raw_workspace_dump {
+                SalvageMode::PolishStructured
+            } else {
+                SalvageMode::JudgeRelevance
+            },
         )
         .await
     } else if needs_salvage {
@@ -545,14 +552,81 @@ pub(crate) fn observation_to_user_markdown(obs: &str) -> String {
             return formatted;
         }
     }
+    if obs.contains("list_workspace OK") {
+        if let Some(formatted) = format_list_workspace_obs(obs) {
+            return formatted;
+        }
+    }
     let body: Vec<&str> = obs
         .lines()
         .filter(|line| {
             let t = line.trim();
-            !t.is_empty() && !t.starts_with("Next:")
+            !t.is_empty()
+                && !t.starts_with("Next:")
+                && !t.starts_with("list_workspace OK")
+                && !t.starts_with("list_targets OK")
         })
         .collect();
     body.join("\n")
+}
+
+fn format_list_workspace_obs(obs: &str) -> Option<String> {
+    let mut projects = Vec::new();
+    for line in obs.lines() {
+        let t = line.trim().trim_start_matches('-').trim();
+        let Some(after_id) = t.strip_prefix("id=") else {
+            continue;
+        };
+        let Some((id, after_name_key)) = after_id.split_once(" name=") else {
+            continue;
+        };
+        let mut cut = after_name_key.len();
+        for key in [" targets=", " scans=", " findings=", " description="] {
+            if let Some(i) = after_name_key.find(key) {
+                cut = cut.min(i);
+            }
+        }
+        let name = after_name_key[..cut].trim();
+        if name.is_empty() {
+            continue;
+        }
+        let mut targets = None;
+        let mut scans = None;
+        let mut findings = None;
+        for part in after_name_key[cut..].split_whitespace() {
+            if let Some(v) = part.strip_prefix("targets=") {
+                targets = Some(v);
+            } else if let Some(v) = part.strip_prefix("scans=") {
+                scans = Some(v);
+            } else if let Some(v) = part.strip_prefix("findings=") {
+                findings = Some(v);
+            }
+        }
+        let mut bits = Vec::new();
+        if let Some(v) = targets {
+            bits.push(format!("{v} targets"));
+        }
+        if let Some(v) = scans {
+            bits.push(format!("{v} scans"));
+        }
+        if let Some(v) = findings {
+            bits.push(format!("{v} findings"));
+        }
+        let suffix = if bits.is_empty() {
+            String::new()
+        } else {
+            format!(" — {}", bits.join(", "))
+        };
+        projects.push(format!("- **{name}** (`{id}`){suffix}"));
+    }
+    if projects.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "Workspace has **{}** project(s):\n\n{}",
+        projects.len(),
+        projects.join("\n")
+    ))
 }
 
 fn format_list_targets_obs(obs: &str) -> Option<String> {
@@ -636,8 +710,16 @@ async fn recover_text_reply(llm: &dyn PlannerLlm, goal: &str) -> String {
     }
 }
 
-/// Finish salvage: let the model judge whether Observations answer the user.
-/// Irrelevant tool results (e.g. list_workspace after "hi") must be ignored.
+/// Finish salvage modes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SalvageMode {
+    /// Empty / meta reply — model must decide if obs is relevant.
+    JudgeRelevance,
+    /// Model already answered from obs but leaked raw tool text — format only.
+    PolishStructured,
+}
+
+/// Finish salvage: judge Observation relevance, or polish raw tool dumps.
 async fn synthesize_from_evidence(
     llm: &dyn PlannerLlm,
     workspace_tools: Option<&dyn WorkspaceTools>,
@@ -645,6 +727,7 @@ async fn synthesize_from_evidence(
     inventory: Option<&WorkspaceInventory>,
     observations: &[String],
     last_obs: Option<&str>,
+    mode: SalvageMode,
 ) -> String {
     // Deterministic path for "finding #N" / "finding số N".
     if let (Some(tools), Some(index)) = (workspace_tools, parse_finding_index(goal)) {
@@ -663,6 +746,22 @@ async fn synthesize_from_evidence(
         .map(observation_to_user_markdown)
         .filter(|s| !s.trim().is_empty());
 
+    if mode == SalvageMode::PolishStructured {
+        if let Some(best_obs) = best {
+            if best_obs.contains("list_workspace OK") {
+                if let Some(inv) = inventory {
+                    return inv.compact_user_reply_for_goal(goal);
+                }
+            }
+        }
+        if let Some(md) = deterministic {
+            return md;
+        }
+        if let Some(inv) = inventory {
+            return inv.compact_user_reply_for_goal(goal);
+        }
+    }
+
     let observation = best
         .map(str::to_string)
         .or_else(|| last_obs.map(str::to_string))
@@ -677,19 +776,21 @@ async fn synthesize_from_evidence(
     } else {
         format!(
             "User question:\n{goal}\n\nTool observation (may be irrelevant):\n{observation}\n\n\
-             Decide whether the observation answers the user's question.\n\
-             - If yes: reply in markdown from the observation (names/ids when useful; no finding dump).\n\
-             - If no: ignore the observation completely and answer the user in natural language \
-               (greeting, identity, math, clarification, etc.).\n\
-             Never mention tools, Observations, or this decision. Never emit JSON or tool envelopes."
+             Privately decide if the observation answers the user. Then output ONLY the final \
+             user-visible reply — nothing else.\n\
+             - Relevant → short natural markdown with names/ids (no finding dump, no raw \
+               `list_workspace OK` / `id=… name=` tool lines).\n\
+             - Irrelevant → natural-language answer; ignore the observation.\n\
+             Forbidden in the output: Yes/No about relevance, the word Observation, tool names, \
+             decision narration, or wrapping the whole reply in a ``` fence."
         )
     };
 
     match llm
         .complete_with_system(
             Some(
-                "You are Yazg. Judge relevance of any tool observation, then answer the user. \
-                 Markdown or plain text only.",
+                "You are Yazg. Output only the final answer the user should see. \
+                 Never narrate internal decisions.",
             ),
             &prompt,
         )
@@ -699,8 +800,20 @@ async fn synthesize_from_evidence(
             let normalized = crate::yazg_model::normalize_user_facing_reply(&text);
             if normalized.trim().is_empty()
                 || crate::yazg_model::reply_looks_like_agent_meta(&normalized)
+                || looks_like_raw_workspace_obs(&normalized)
             {
-                // Prefer another text-only pass over dumping unrelated inventory.
+                if looks_like_raw_workspace_obs(&normalized) {
+                    if let Some(best_obs) = best {
+                        if best_obs.contains("list_workspace OK") {
+                            if let Some(inv) = inventory {
+                                return inv.compact_user_reply_for_goal(goal);
+                            }
+                        }
+                    }
+                    if let Some(md) = deterministic {
+                        return md;
+                    }
+                }
                 recover_text_reply(llm, goal).await
             } else {
                 normalized
@@ -708,16 +821,20 @@ async fn synthesize_from_evidence(
         }
         Err(err) => {
             warn!(error = %err, "evidence reply synthesis failed");
-            if best.is_some() {
-                deterministic.unwrap_or_else(|| {
-                    // best matched a goal keyword; observation markdown preferred over chat fallback
-                    observation_to_user_markdown(best.unwrap())
-                })
-            } else {
-                recover_text_reply(llm, goal).await
-            }
+            recover_text_reply(llm, goal).await
         }
     }
+}
+
+fn looks_like_raw_workspace_obs(s: &str) -> bool {
+    let lower = s.to_lowercase();
+    lower.contains("list_workspace ok")
+        || lower.contains("list_targets ok")
+        || lower.contains("project_detail ok")
+        || (lower.contains("id=") && lower.contains("name=") && lower.contains("type="))
+        || (lower.contains("id=")
+            && lower.contains("name=")
+            && (lower.contains("targets=") || lower.contains("findings=")))
 }
 
 fn extract_project_hint(goal: &str, inventory: Option<&WorkspaceInventory>) -> Option<String> {
@@ -793,5 +910,16 @@ mod tests {
         assert!(md.contains("### Targets in AI"));
         assert!(!md.contains("Next:"));
         assert!(!md.contains("list_targets OK"));
+    }
+
+    #[test]
+    fn formats_list_workspace_obs_for_user() {
+        let md = observation_to_user_markdown(
+            "list_workspace OK — 1 project(s).\nTotals: projects=1 targets=2 scans=2 findings=36\nProjects:\n  - id=p1 name=AI targets=2 scans=2 findings=36 description=-",
+        );
+        assert!(md.contains("**AI**"));
+        assert!(md.contains("`p1`"));
+        assert!(!md.contains("list_workspace OK"));
+        assert!(!md.contains("name=AI"));
     }
 }

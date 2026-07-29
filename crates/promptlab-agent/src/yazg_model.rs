@@ -191,7 +191,17 @@ fn normalize_completion_text(mut outcome: LlmCompletion) -> LlmCompletion {
 /// Public unwrap for final chat replies (tool-envelope / quoted / JS-concat junk).
 pub fn normalize_user_facing_reply(raw: &str) -> String {
     let unwrapped = unwrap_user_facing_text(raw);
-    strip_agent_meta_reasoning(&unwrapped)
+    let stripped = strip_agent_meta_reasoning(&unwrapped);
+    // Models often wrap the real answer in ```markdown … ``` after narrating a decision.
+    let unfenced = strip_markdown_fence(&stripped);
+    if unfenced != stripped {
+        return strip_agent_meta_reasoning(&unfenced);
+    }
+    // Fence may sit after a decision preamble on earlier lines.
+    if let Some(body) = extract_fenced_body(&stripped) {
+        return strip_agent_meta_reasoning(&body);
+    }
+    stripped
 }
 
 /// True when a reply still leaks tool/ReAct/internal routing text to the user.
@@ -207,6 +217,11 @@ pub fn reply_looks_like_agent_meta(s: &str) -> bool {
         || lower.contains("do not repeat the same tool")
         || lower.contains("only call a different tool")
         || lower.contains("no forced action")
+        || lower.contains("observation answers the")
+        || lower.contains("observation does not answer")
+        || lower.contains("the observation is relevant")
+        || lower.contains("the observation is irrelevant")
+        || lower.contains("decide whether the observation")
 }
 
 fn strip_agent_meta_reasoning(s: &str) -> String {
@@ -274,6 +289,14 @@ fn strip_agent_meta_lines(s: &str) -> String {
             || lower.contains("do not mention tools")
             || lower.contains("no forced action")
             || lower.starts_with("here is the final reply")
+            || lower.contains("observation answers the")
+            || lower.contains("observation does not answer")
+            || lower.contains("the observation is relevant")
+            || lower.contains("the observation is irrelevant")
+            || lower.starts_with("decide whether the observation")
+            || (lower.starts_with("yes,") && lower.contains("observation"))
+            || (lower.starts_with("no,") && lower.contains("observation"))
+            || (lower.starts_with("yes.") && lower.contains("observation"))
         {
             continue;
         }
@@ -491,6 +514,22 @@ fn strip_markdown_fence(s: &str) -> String {
         }
     }
     t.to_string()
+}
+
+/// Pull the first fenced ```…``` body when the model narrates then fences the answer.
+fn extract_fenced_body(s: &str) -> Option<String> {
+    let start = s.find("```")?;
+    let after_open = &s[start + 3..];
+    let after_lang = after_open
+        .trim_start_matches(|c: char| c.is_ascii_alphanumeric())
+        .trim_start_matches('\n');
+    let end = after_lang.find("```")?;
+    let body = after_lang[..end].trim();
+    if body.is_empty() {
+        None
+    } else {
+        Some(body.to_string())
+    }
 }
 
 fn extract_text_from_tool_envelope(s: &str) -> Option<String> {
@@ -897,5 +936,14 @@ Here is the final reply:
         assert!(cleaned.contains("10.100.109.76"));
         assert!(cleaned.contains("192.168.30.146"));
         assert!(!reply_looks_like_agent_meta(&cleaned));
+    }
+
+    #[test]
+    fn strips_observation_decision_and_markdown_fence() {
+        let raw = "Yes, the observation answers the user's question.\n\n```markdown\nProjects:\n  - id=abc name=AI targets=2\n```";
+        let cleaned = normalize_user_facing_reply(raw);
+        assert!(!cleaned.to_lowercase().contains("observation answers"));
+        assert!(!cleaned.contains("```"));
+        assert!(cleaned.contains("name=AI") || cleaned.contains("AI"));
     }
 }

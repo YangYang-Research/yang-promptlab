@@ -22,6 +22,7 @@ import { isYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
 import { useToast } from "@/shared/notifications";
 import { useAppStore } from "@/app/store/AppStore";
 
+import { YazgMarkdown } from "./YazgMarkdown";
 import {
   deleteYazgChatThread,
   getYazgChatSessionSnapshot,
@@ -309,7 +310,7 @@ export function YazgChatPage() {
                     <span className="yazg-chat-bubble__intent">{msg.intent}</span>
                   ) : null}
                 </header>
-                <p className="yazg-chat-bubble__text">{msg.text}</p>
+                <YazgMarkdown className="yazg-chat-bubble__text yazg-chat-md" text={msg.text} />
                 {msg.rawOutput != null ? (
                   <>
                     <hr className="yazg-chat-bubble__divider" />
