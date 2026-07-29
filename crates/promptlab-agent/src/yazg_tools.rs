@@ -17,7 +17,7 @@ use crate::attack_plan::AttackPlanAgent;
 use crate::create_project::{CreateProjectTools, CreatedProject};
 use crate::generate_prompt::{GeneratePromptAgent, TechniquePromptContext};
 use crate::judge_coordinator::JudgeCoordinatorAgent;
-use crate::list_workspace::{WorkspaceInventory, WorkspaceTools};
+use crate::list_workspace::{clamp_findings_limit, WorkspaceInventory, WorkspaceTools};
 use crate::artifacts::YazgArtifacts;
 use crate::recommend::RecommendAgent;
 use crate::summary::{SummaryAgent, SummaryRequest};
@@ -28,6 +28,8 @@ use crate::types::{AgentEvent, AgentId};
 pub struct YazgRunState {
     pub artifacts: YazgArtifacts,
     pub last_tool: Option<String>,
+    /// Last workspace tool observation text (for empty-reply salvage).
+    pub last_workspace_observation: Option<String>,
 }
 
 pub type SharedYazgState = Arc<Mutex<YazgRunState>>;
@@ -217,6 +219,30 @@ pub struct ListWorkspaceTool {
     pub state: SharedYazgState,
 }
 
+async fn record_workspace_tool(
+    state: &SharedYazgState,
+    tool_name: &str,
+    action: crate::artifacts::YazgActionKind,
+    observation: String,
+    event_msg: String,
+    inventory: Option<WorkspaceInventory>,
+) {
+    mark_tool(state, tool_name, action).await;
+    let mut guard = state.lock().await;
+    guard.artifacts.events.push(AgentEvent::info(
+        AgentId::Yazg,
+        format!("Acting: {tool_name}"),
+    ));
+    guard.artifacts.events.push(AgentEvent::completed(
+        AgentId::ListWorkspace,
+        event_msg,
+    ));
+    guard.last_workspace_observation = Some(observation);
+    if let Some(inv) = inventory {
+        guard.artifacts.workspace_inventory = Some(inv);
+    }
+}
+
 impl Tool for ListWorkspaceTool {
     const NAME: &'static str = "list_workspace";
     type Error = YazgToolError;
@@ -224,11 +250,9 @@ impl Tool for ListWorkspaceTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Read projects, targets, scans, and findings from the local PromptLab database. \
-         ONLY when the user explicitly asks for inventory, project info, or finding/vulnerability details. \
-         After the observation, answer the user's specific question in markdown \
-         (e.g. only finding #1 if asked) — do not dump the entire inventory. \
-         Do NOT use for greetings, math, or general chat."
+        "List PromptLab projects with counts only (targets/scans/findings totals). \
+         Does NOT return finding rows. For one project use project_detail; for scans use list_scan; \
+         for findings use list_findings or finding_detail. Not for greetings/math/chat."
             .into()
     }
 
@@ -247,28 +271,327 @@ impl Tool for ListWorkspaceTool {
             .await
             .map_err(YazgToolError)?;
         let observation = inventory.to_observation();
-        mark_tool(
+        record_workspace_tool(
             &self.state,
             "list_workspace",
             crate::artifacts::YazgActionKind::ListWorkspace,
+            observation.clone(),
+            format!(
+                "Listed {} projects ({} findings total)",
+                inventory.totals.projects, inventory.totals.findings
+            ),
+            Some(inventory),
         )
         .await;
-        let mut guard = self.state.lock().await;
-        guard.artifacts.events.push(AgentEvent::info(
-            AgentId::Yazg,
-            "Acting: ListWorkspaceTool",
-        ));
-        guard.artifacts.events.push(AgentEvent::completed(
-            AgentId::ListWorkspace,
+        Ok(observation)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProjectRefArgs {
+    /// Project id or name.
+    pub project: String,
+}
+
+pub struct ProjectDetailTool {
+    pub tools: Arc<dyn WorkspaceTools>,
+    pub state: SharedYazgState,
+}
+
+impl Tool for ProjectDetailTool {
+    const NAME: &'static str = "project_detail";
+    type Error = YazgToolError;
+    type Args = ProjectRefArgs;
+    type Output = String;
+
+    fn description(&self) -> String {
+        "Get one project: metadata, targets, and scans (no finding rows). \
+         Pass project id or name. Then use list_findings / list_scan / scan_detail as needed."
+            .into()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "project": {
+                    "type": "string",
+                    "description": "Project id or name"
+                }
+            },
+            "required": ["project"],
+            "additionalProperties": false
+        })
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let detail = self
+            .tools
+            .project_detail(&args.project)
+            .await
+            .map_err(YazgToolError)?;
+        let observation = detail.to_observation();
+        record_workspace_tool(
+            &self.state,
+            "project_detail",
+            crate::artifacts::YazgActionKind::ProjectDetail,
+            observation.clone(),
             format!(
-                "Listed workspace: {} projects, {} targets, {} scans, {} findings",
-                inventory.totals.projects,
-                inventory.totals.targets,
-                inventory.totals.scans,
-                inventory.totals.findings
+                "Project detail: {} ({} findings)",
+                detail.project.name, detail.project.findings_count
             ),
-        ));
-        guard.artifacts.workspace_inventory = Some(inventory);
+            None,
+        )
+        .await;
+        Ok(observation)
+    }
+}
+
+pub struct ListScanTool {
+    pub tools: Arc<dyn WorkspaceTools>,
+    pub state: SharedYazgState,
+}
+
+impl Tool for ListScanTool {
+    const NAME: &'static str = "list_scan";
+    type Error = YazgToolError;
+    type Args = ProjectRefArgs;
+    type Output = String;
+
+    fn description(&self) -> String {
+        "List scans for a project (id or name). Use scan_detail for findings on one scan."
+            .into()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "project": {
+                    "type": "string",
+                    "description": "Project id or name"
+                }
+            },
+            "required": ["project"],
+            "additionalProperties": false
+        })
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let list = self
+            .tools
+            .list_scan(&args.project)
+            .await
+            .map_err(YazgToolError)?;
+        let observation = list.to_observation();
+        record_workspace_tool(
+            &self.state,
+            "list_scan",
+            crate::artifacts::YazgActionKind::ListScan,
+            observation.clone(),
+            format!(
+                "Listed {} scans for {}",
+                list.scans.len(),
+                list.project_name
+            ),
+            None,
+        )
+        .await;
+        Ok(observation)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ScanIdArgs {
+    pub scan_id: String,
+}
+
+pub struct ScanDetailTool {
+    pub tools: Arc<dyn WorkspaceTools>,
+    pub state: SharedYazgState,
+}
+
+impl Tool for ScanDetailTool {
+    const NAME: &'static str = "scan_detail";
+    type Error = YazgToolError;
+    type Args = ScanIdArgs;
+    type Output = String;
+
+    fn description(&self) -> String {
+        "Get one scan by id, including a capped finding list for that scan. \
+         Use finding_detail for a single finding."
+            .into()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "scan_id": {
+                    "type": "string",
+                    "description": "Scan id"
+                }
+            },
+            "required": ["scan_id"],
+            "additionalProperties": false
+        })
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let detail = self
+            .tools
+            .scan_detail(&args.scan_id)
+            .await
+            .map_err(YazgToolError)?;
+        let observation = detail.to_observation();
+        record_workspace_tool(
+            &self.state,
+            "scan_detail",
+            crate::artifacts::YazgActionKind::ScanDetail,
+            observation.clone(),
+            format!(
+                "Scan detail: {} ({} findings)",
+                detail.scan.name, detail.findings_total
+            ),
+            None,
+        )
+        .await;
+        Ok(observation)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListFindingsArgs {
+    #[serde(default)]
+    pub project: Option<String>,
+    #[serde(default)]
+    pub scan_id: Option<String>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub offset: Option<usize>,
+}
+
+pub struct ListFindingsTool {
+    pub tools: Arc<dyn WorkspaceTools>,
+    pub state: SharedYazgState,
+}
+
+impl Tool for ListFindingsTool {
+    const NAME: &'static str = "list_findings";
+    type Error = YazgToolError;
+    type Args = ListFindingsArgs;
+    type Output = String;
+
+    fn description(&self) -> String {
+        "List findings for a project and/or scan (paginated, newest first). \
+         Provide project (id/name) and/or scan_id. Optional limit (default 20, max 50) and offset. \
+         For finding #N of a project use finding_detail(project, index=N)."
+            .into()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "project": { "type": "string", "description": "Project id or name" },
+                "scan_id": { "type": "string", "description": "Scan id" },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 50 },
+                "offset": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+        })
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let list = self
+            .tools
+            .list_findings(
+                args.project.as_deref(),
+                args.scan_id.as_deref(),
+                clamp_findings_limit(args.limit),
+                args.offset.unwrap_or(0),
+            )
+            .await
+            .map_err(YazgToolError)?;
+        let observation = list.to_observation();
+        record_workspace_tool(
+            &self.state,
+            "list_findings",
+            crate::artifacts::YazgActionKind::ListFindings,
+            observation.clone(),
+            format!(
+                "Listed {}/{} findings",
+                list.findings.len(),
+                list.total
+            ),
+            None,
+        )
+        .await;
+        Ok(observation)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FindingDetailArgs {
+    #[serde(default)]
+    pub finding_id: Option<String>,
+    #[serde(default)]
+    pub project: Option<String>,
+    /// 1-based index within project findings (newest first).
+    #[serde(default)]
+    pub index: Option<usize>,
+}
+
+pub struct FindingDetailTool {
+    pub tools: Arc<dyn WorkspaceTools>,
+    pub state: SharedYazgState,
+}
+
+impl Tool for FindingDetailTool {
+    const NAME: &'static str = "finding_detail";
+    type Error = YazgToolError;
+    type Args = FindingDetailArgs;
+    type Output = String;
+
+    fn description(&self) -> String {
+        "Get one finding: by finding_id, or by project (id/name) + 1-based index (newest first). \
+         Use this when the user asks for finding #1 / finding số N."
+            .into()
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "finding_id": { "type": "string" },
+                "project": { "type": "string", "description": "Project id or name (with index)" },
+                "index": { "type": "integer", "minimum": 1, "description": "1-based finding index" }
+            },
+            "additionalProperties": false
+        })
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let detail = self
+            .tools
+            .finding_detail(
+                args.finding_id.as_deref(),
+                args.project.as_deref(),
+                args.index,
+            )
+            .await
+            .map_err(YazgToolError)?;
+        let observation = detail.to_observation();
+        record_workspace_tool(
+            &self.state,
+            "finding_detail",
+            crate::artifacts::YazgActionKind::FindingDetail,
+            observation.clone(),
+            format!("Finding detail: {}", detail.finding.title),
+            None,
+        )
+        .await;
         Ok(observation)
     }
 }

@@ -115,7 +115,7 @@ Rules:
 - generate_prompt only when Attack Factory / factory_prompt_ready=true.
 - recommend / summary / judge only when their readiness flags are true AND the user asked for that work.
 - create_project needs a name; no scan target required.
-- list_workspace only for explicit DB inventory / finding-count questions — not analyze_endpoint, not greetings.
+- list_workspace only for project names/counts — then project_detail / list_scan / scan_detail / list_findings / finding_detail as needed. Never dump every finding.
 - If analyze_endpoint fails with no bound target, do not retry it in a loop — finish or call list_workspace when the question is about existing DB data.
 - After an Observation, either take another tool call or respond directly with a clear user reply."#
     }

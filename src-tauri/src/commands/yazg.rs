@@ -6,7 +6,8 @@ use promptlab_agent::{
     AgentEvent, CreateProjectTools, CreatedProject, MemoryContext, SupervisorIntent,
     WorkspaceFindingSummary, WorkspaceInventory, WorkspaceProjectSummary, WorkspaceScanSummary,
     WorkspaceTargetSummary, WorkspaceTools, WorkspaceTotals, YazgDelegation, YazgSupervisor,
-    YazgTurn,
+    YazgTurn, FindingDetail, FindingList, ProjectDetail, ScanDetail, ScanList,
+    DEFAULT_FINDINGS_LIMIT, MAX_FINDINGS_LIMIT, clamp_findings_limit,
 };
 use promptlab_storage::{
     CreateProject, FindingRepository, ProjectRepository, ScanRepository, TargetRepository,
@@ -100,105 +101,400 @@ struct HostWorkspaceTools {
     repos: promptlab_storage::Repositories,
 }
 
-const MAX_LISTED_FINDINGS: usize = 40;
-
-#[async_trait]
-impl WorkspaceTools for HostWorkspaceTools {
-    async fn list_workspace(&self) -> Result<WorkspaceInventory, String> {
-        let repos = &self.repos;
-
-        let projects = repos
+impl HostWorkspaceTools {
+    async fn resolve_project(
+        &self,
+        project: &str,
+    ) -> Result<promptlab_storage::Project, String> {
+        let key = project.trim();
+        if key.is_empty() {
+            return Err("project id or name is required".into());
+        }
+        let projects = self
+            .repos
             .projects()
             .list()
             .await
             .map_err(|err| err.to_string())?;
-        let targets = repos
+        if let Some(p) = projects.iter().find(|p| p.id == key) {
+            return Ok(p.clone());
+        }
+        let lower = key.to_lowercase();
+        let mut matches: Vec<_> = projects
+            .into_iter()
+            .filter(|p| p.name.to_lowercase() == lower || p.name.to_lowercase().contains(&lower))
+            .collect();
+        matches.sort_by(|a, b| a.name.len().cmp(&b.name.len()));
+        matches
+            .into_iter()
+            .next()
+            .ok_or_else(|| format!("project not found: {key}"))
+    }
+
+    async fn project_counts(
+        &self,
+        project_id: &str,
+    ) -> Result<(usize, usize, usize), String> {
+        let targets = self
+            .repos
             .targets()
-            .list_all()
+            .list_by_project(project_id)
+            .await
+            .map_err(|e| e.to_string())?
+            .len();
+        let scans = self
+            .repos
+            .scans()
+            .list_by_project(project_id)
+            .await
+            .map_err(|e| e.to_string())?
+            .len();
+        let findings = self
+            .repos
+            .findings()
+            .list_by_project(project_id)
+            .await
+            .map_err(|e| e.to_string())?
+            .len();
+        Ok((targets, scans, findings))
+    }
+}
+
+#[async_trait]
+impl WorkspaceTools for HostWorkspaceTools {
+    async fn list_workspace(&self) -> Result<WorkspaceInventory, String> {
+        let projects = self
+            .repos
+            .projects()
+            .list()
             .await
             .map_err(|err| err.to_string())?;
 
-        let mut scans = Vec::new();
-        let mut findings = Vec::new();
-        let mut findings_by_project: std::collections::HashMap<String, usize> =
-            std::collections::HashMap::new();
-        for project in &projects {
-            let project_scans = repos
-                .scans()
-                .list_by_project(&project.id)
-                .await
-                .map_err(|err| err.to_string())?;
-            scans.extend(project_scans);
+        let mut total_targets = 0usize;
+        let mut total_scans = 0usize;
+        let mut total_findings = 0usize;
+        let mut summaries = Vec::with_capacity(projects.len());
 
-            let project_findings = repos
-                .findings()
-                .list_by_project(&project.id)
-                .await
-                .map_err(|err| err.to_string())?;
-            findings_by_project.insert(project.id.clone(), project_findings.len());
-            findings.extend(project_findings);
+        for project in projects {
+            let (targets_count, scans_count, findings_count) =
+                self.project_counts(&project.id).await?;
+            total_targets += targets_count;
+            total_scans += scans_count;
+            total_findings += findings_count;
+            summaries.push(WorkspaceProjectSummary {
+                id: project.id,
+                name: project.name,
+                description: project.description,
+                findings_count,
+                targets_count,
+                scans_count,
+            });
         }
-
-        // Newest findings first when truncating the listed set.
-        findings.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        let findings_total = findings.len();
-        let findings_truncated = findings_total.saturating_sub(MAX_LISTED_FINDINGS);
-        findings.truncate(MAX_LISTED_FINDINGS);
 
         Ok(WorkspaceInventory {
             totals: WorkspaceTotals {
-                projects: projects.len(),
-                targets: targets.len(),
-                scans: scans.len(),
-                findings: findings_total,
-                findings_truncated,
+                projects: summaries.len(),
+                targets: total_targets,
+                scans: total_scans,
+                findings: total_findings,
+                findings_truncated: 0,
             },
-            projects: projects
-                .into_iter()
-                .map(|project| WorkspaceProjectSummary {
-                    findings_count: findings_by_project
-                        .get(&project.id)
-                        .copied()
-                        .unwrap_or(0),
-                    id: project.id,
-                    name: project.name,
-                    description: project.description,
-                })
-                .collect(),
+            projects: summaries,
+        })
+    }
+
+    async fn project_detail(&self, project: &str) -> Result<ProjectDetail, String> {
+        let project = self.resolve_project(project).await?;
+        let targets = self
+            .repos
+            .targets()
+            .list_by_project(&project.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let scans = self
+            .repos
+            .scans()
+            .list_by_project(&project.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let findings_count = self
+            .repos
+            .findings()
+            .list_by_project(&project.id)
+            .await
+            .map_err(|e| e.to_string())?
+            .len();
+
+        Ok(ProjectDetail {
+            project: WorkspaceProjectSummary {
+                id: project.id.clone(),
+                name: project.name,
+                description: project.description,
+                findings_count,
+                targets_count: targets.len(),
+                scans_count: scans.len(),
+            },
             targets: targets
                 .into_iter()
-                .map(|target| WorkspaceTargetSummary {
-                    id: target.id,
-                    project_id: target.project_id,
-                    name: target.name,
-                    target_type: target.target_type,
+                .map(|t| WorkspaceTargetSummary {
+                    id: t.id,
+                    project_id: t.project_id,
+                    name: t.name,
+                    target_type: t.target_type,
                 })
                 .collect(),
             scans: scans
                 .into_iter()
-                .map(|scan| WorkspaceScanSummary {
-                    id: scan.id,
-                    project_id: scan.project_id,
-                    name: scan.name,
-                    status: scan.status,
-                    target_id: scan.target_id,
-                })
-                .collect(),
-            findings: findings
-                .into_iter()
-                .map(|finding| WorkspaceFindingSummary {
-                    id: finding.id,
-                    project_id: finding.project_id,
-                    scan_id: finding.scan_id,
-                    title: finding.title,
-                    severity: finding.severity,
-                    status: finding.status,
-                    category: finding.category,
+                .map(|s| WorkspaceScanSummary {
+                    id: s.id,
+                    project_id: s.project_id,
+                    name: s.name,
+                    status: s.status,
+                    target_id: s.target_id,
                 })
                 .collect(),
         })
     }
+
+    async fn list_scan(&self, project: &str) -> Result<ScanList, String> {
+        let project = self.resolve_project(project).await?;
+        let scans = self
+            .repos
+            .scans()
+            .list_by_project(&project.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(ScanList {
+            project_id: project.id,
+            project_name: project.name,
+            scans: scans
+                .into_iter()
+                .map(|s| WorkspaceScanSummary {
+                    id: s.id,
+                    project_id: s.project_id,
+                    name: s.name,
+                    status: s.status,
+                    target_id: s.target_id,
+                })
+                .collect(),
+        })
+    }
+
+    async fn scan_detail(&self, scan_id: &str) -> Result<ScanDetail, String> {
+        let scan_id = scan_id.trim();
+        if scan_id.is_empty() {
+            return Err("scan_id is required".into());
+        }
+        let scan = self
+            .repos
+            .scans()
+            .get(scan_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let project_name = self
+            .repos
+            .projects()
+            .get(&scan.project_id)
+            .await
+            .map(|p| p.name)
+            .unwrap_or_else(|_| scan.project_id.clone());
+
+        let mut findings = self
+            .repos
+            .findings()
+            .list_by_scan(&scan.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        findings.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        let findings_total = findings.len();
+        let limit = DEFAULT_FINDINGS_LIMIT.min(MAX_FINDINGS_LIMIT);
+        let findings_truncated = findings_total.saturating_sub(limit);
+        findings.truncate(limit);
+
+        Ok(ScanDetail {
+            scan: WorkspaceScanSummary {
+                id: scan.id,
+                project_id: scan.project_id,
+                name: scan.name,
+                status: scan.status,
+                target_id: scan.target_id,
+            },
+            project_name,
+            findings: findings
+                .into_iter()
+                .map(|f| WorkspaceFindingSummary {
+                    id: f.id,
+                    project_id: f.project_id,
+                    scan_id: f.scan_id,
+                    title: f.title,
+                    severity: f.severity,
+                    status: f.status,
+                    category: f.category,
+                })
+                .collect(),
+            findings_total,
+            findings_truncated,
+        })
+    }
+
+    async fn list_findings(
+        &self,
+        project: Option<&str>,
+        scan_id: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<FindingList, String> {
+        let limit = clamp_findings_limit(Some(limit));
+        let offset = offset;
+
+        let (mut findings, project_id, project_name, scan_id_out) =
+            if let Some(scan_id) = scan_id.map(str::trim).filter(|s| !s.is_empty()) {
+                let scan = self
+                    .repos
+                    .scans()
+                    .get(scan_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let project_name = self
+                    .repos
+                    .projects()
+                    .get(&scan.project_id)
+                    .await
+                    .map(|p| p.name)
+                    .unwrap_or_else(|_| scan.project_id.clone());
+                let findings = self
+                    .repos
+                    .findings()
+                    .list_by_scan(scan_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                (
+                    findings,
+                    Some(scan.project_id),
+                    Some(project_name),
+                    Some(scan_id.to_string()),
+                )
+            } else if let Some(project) = project.map(str::trim).filter(|s| !s.is_empty()) {
+                let project = self.resolve_project(project).await?;
+                let findings = self
+                    .repos
+                    .findings()
+                    .list_by_project(&project.id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                (
+                    findings,
+                    Some(project.id),
+                    Some(project.name),
+                    None,
+                )
+            } else {
+                return Err("list_findings requires project and/or scan_id".into());
+            };
+
+        findings.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        let total = findings.len();
+        let page: Vec<_> = findings.into_iter().skip(offset).take(limit).collect();
+
+        Ok(FindingList {
+            project_id,
+            project_name,
+            scan_id: scan_id_out,
+            findings: page
+                .into_iter()
+                .map(|f| WorkspaceFindingSummary {
+                    id: f.id,
+                    project_id: f.project_id,
+                    scan_id: f.scan_id,
+                    title: f.title,
+                    severity: f.severity,
+                    status: f.status,
+                    category: f.category,
+                })
+                .collect(),
+            total,
+            offset,
+            limit,
+        })
+    }
+
+    async fn finding_detail(
+        &self,
+        finding_id: Option<&str>,
+        project: Option<&str>,
+        index: Option<usize>,
+    ) -> Result<FindingDetail, String> {
+        if let Some(id) = finding_id.map(str::trim).filter(|s| !s.is_empty()) {
+            let f = self
+                .repos
+                .findings()
+                .get(id)
+                .await
+                .map_err(|e| e.to_string())?;
+            let project_name = self
+                .repos
+                .projects()
+                .get(&f.project_id)
+                .await
+                .map(|p| p.name)
+                .unwrap_or_else(|_| f.project_id.clone());
+            return Ok(FindingDetail {
+                index: None,
+                finding: WorkspaceFindingSummary {
+                    id: f.id,
+                    project_id: f.project_id,
+                    scan_id: f.scan_id,
+                    title: f.title,
+                    severity: f.severity,
+                    status: f.status,
+                    category: f.category,
+                },
+                project_name,
+                description: f.description,
+                evidence_json: f.evidence_json,
+            });
+        }
+
+        let project_key = project
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "finding_detail requires finding_id or project+index".to_string())?;
+        let index = index
+            .filter(|n| *n > 0)
+            .ok_or_else(|| "finding_detail index must be >= 1".to_string())?;
+        let project = self.resolve_project(project_key).await?;
+        let mut findings = self
+            .repos
+            .findings()
+            .list_by_project(&project.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        findings.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        let f = findings.get(index - 1).ok_or_else(|| {
+            format!(
+                "no finding #{index} for project {} (total {})",
+                project.name,
+                findings.len()
+            )
+        })?;
+        Ok(FindingDetail {
+            index: Some(index),
+            finding: WorkspaceFindingSummary {
+                id: f.id.clone(),
+                project_id: f.project_id.clone(),
+                scan_id: f.scan_id.clone(),
+                title: f.title.clone(),
+                severity: f.severity.clone(),
+                status: f.status.clone(),
+                category: f.category.clone(),
+            },
+            project_name: project.name,
+            description: f.description.clone(),
+            evidence_json: f.evidence_json.clone(),
+        })
+    }
 }
+
 
 fn profile_from_json(raw: &str) -> CommandResult<TargetProfile> {
     if raw.trim().is_empty() || raw == "{}" {

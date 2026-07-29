@@ -3,7 +3,12 @@
 //! Hierarchy:
 //! ```text
 //! Yazg (Manager)
-//! ├── list_workspace      — tool → WorkspaceTools
+//! ├── list_workspace      — projects + counts only
+//! ├── project_detail      — one project + targets + scans
+//! ├── list_scan           — scans for a project
+//! ├── scan_detail         — one scan + capped findings
+//! ├── list_findings       — paginated findings
+//! ├── finding_detail      — one finding
 //! ├── create_project      — tool → CreateProjectTools
 //! ├── analyze_endpoint    — tool → AnalyzeEndpointAgent::run
 //! ├── attack_plan         — tool → AttackPlanAgent::run
@@ -65,8 +70,10 @@ pub use judge_workers::{
     AttackerWorker, ClassifierWorker, JudgeWorker, JudgeWorkerOutcome,
 };
 pub use list_workspace::{
-    WorkspaceFindingSummary, WorkspaceInventory, WorkspaceProjectSummary, WorkspaceScanSummary,
-    WorkspaceTargetSummary, WorkspaceTools, WorkspaceTotals,
+    clamp_findings_limit, parse_finding_index, FindingDetail, FindingList, ProjectDetail,
+    ScanDetail, ScanList, WorkspaceFindingSummary, WorkspaceInventory, WorkspaceProjectSummary,
+    WorkspaceScanSummary, WorkspaceTargetSummary, WorkspaceTools, WorkspaceTotals,
+    DEFAULT_FINDINGS_LIMIT, MAX_FINDINGS_LIMIT,
 };
 pub use memory::{
     AgentMemoryStore, LtmEntry, LtmWrite, MemoryContext, MemoryScopeType, StmEntry, StmRole,

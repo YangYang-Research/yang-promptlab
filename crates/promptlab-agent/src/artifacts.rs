@@ -24,6 +24,11 @@ pub enum YazgActionKind {
     Judge,
     CreateProject,
     ListWorkspace,
+    ProjectDetail,
+    ListScan,
+    ScanDetail,
+    ListFindings,
+    FindingDetail,
     Finish,
 }
 
