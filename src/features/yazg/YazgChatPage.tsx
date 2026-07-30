@@ -40,14 +40,6 @@ function previewText(text: string, max = 72): string {
   return `${trimmed.slice(0, max - 1)}…`;
 }
 
-function formatRawOutput(raw: unknown): string {
-  try {
-    return JSON.stringify(raw, null, 2);
-  } catch {
-    return String(raw);
-  }
-}
-
 export function YazgChatPage() {
   const { actions } = useAppStore();
   const [backendConnected, setBackendConnected] = useState(false);
@@ -311,43 +303,6 @@ export function YazgChatPage() {
                   ) : null}
                 </header>
                 <YazgMarkdown className="yazg-chat-bubble__text yazg-chat-md" text={msg.text} />
-                {msg.rawOutput != null ? (
-                  <>
-                    <hr className="yazg-chat-bubble__divider" />
-                    <details className="yazg-chat-thinking">
-                      <summary className="yazg-chat-thinking__summary">
-                        Agent trace
-                      </summary>
-                      <pre className="yazg-chat-events__msg">
-                        {formatRawOutput(msg.rawOutput)}
-                      </pre>
-                    </details>
-                  </>
-                ) : null}
-                {msg.events && msg.events.length > 0 ? (
-                  <>
-                    <hr className="yazg-chat-bubble__divider" />
-                    <details className="yazg-chat-thinking">
-                      <summary className="yazg-chat-thinking__summary">
-                        Thinking
-                        <span className="yazg-chat-thinking__count">
-                          {msg.events.length}
-                        </span>
-                      </summary>
-                      <ul className="yazg-chat-events">
-                        {msg.events.map((event, index) => (
-                          <li key={`${msg.id}-${index}`} className="yazg-chat-events__item">
-                            <span className="yazg-chat-events__agent">
-                              {event.agent}
-                            </span>
-                            <span className="yazg-chat-events__kind">{event.kind}</span>
-                            <pre className="yazg-chat-events__msg">{event.message}</pre>
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  </>
-                ) : null}
               </article>
             ))}
             {activePending ? (

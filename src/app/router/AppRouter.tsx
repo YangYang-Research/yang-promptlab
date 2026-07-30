@@ -47,6 +47,11 @@ const AttackCategoriesPage = lazy(() =>
 const MutatorsPage = lazy(() =>
   import("@/features/mutators/MutatorsPage").then((m) => ({ default: m.MutatorsPage })),
 );
+const AgentTracePage = lazy(() =>
+  import("@/features/agent-trace/AgentTracePage").then((m) => ({
+    default: m.AgentTracePage,
+  })),
+);
 const AIRuntimePage = lazy(() =>
   import("@/features/runtime/AIRuntimePage").then((m) => ({ default: m.AIRuntimePage })),
 );
@@ -213,6 +218,14 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <MutatorsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="agent-trace"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <AgentTracePage />
               </Suspense>
             }
           />

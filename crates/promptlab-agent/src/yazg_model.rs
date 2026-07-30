@@ -25,10 +25,20 @@ use crate::yazg_tools::SharedYazgState;
 pub const EMPTY_FALLBACK_REPLY: &str =
     "I'm Yazg, PromptLab's AI assistant for authorized AI security testing. How can I help?";
 
-/// Cap stage payload size so Thinking / agents.log stay usable.
-pub const STAGE_PAYLOAD_MAX_CHARS: usize = 48_000;
+/// Pretty-print a stage payload for Thinking / agents.log (full body, no truncation).
+pub fn format_stage_payload(stage: &str, body: serde_json::Value) -> String {
+    let value = json!({ "stage": stage, "body": body });
+    serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string())
+}
 
-/// Cloneable model that delegates completions to PromptLab inference.
+fn truncate_stage(s: &str, max: usize) -> String {
+    let t = s.trim();
+    if t.chars().count() <= max {
+        return t.to_string();
+    }
+    let shortened: String = t.chars().take(max.saturating_sub(1)).collect();
+    format!("{shortened}…")
+}
 #[derive(Clone)]
 pub struct YazgModel {
     llm: Arc<dyn PlannerLlm>,
@@ -72,22 +82,6 @@ impl YazgModel {
     }
 }
 
-/// Pretty-print a stage payload; truncate if oversized.
-pub fn format_stage_payload(stage: &str, body: serde_json::Value) -> String {
-    let value = json!({ "stage": stage, "body": body });
-    let pretty = serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
-    truncate_stage(&pretty, STAGE_PAYLOAD_MAX_CHARS)
-}
-
-fn truncate_stage(s: &str, max: usize) -> String {
-    let t = s.trim();
-    if t.chars().count() <= max {
-        return t.to_string();
-    }
-    let shortened: String = t.chars().take(max.saturating_sub(1)).collect();
-    format!("{shortened}…\n[truncated at {max} chars]")
-}
-
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct YazgRawResponse {
     pub content: Option<String>,
@@ -117,27 +111,26 @@ impl CompletionModel for YazgModel {
         &self,
         request: CompletionRequest,
     ) -> Result<CompletionResponse<Self::Response>, CompletionError> {
-        // Rig OpenAI adapter: preamble is system; chat_history is the transcript.
-        let system = request
-            .preamble
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty());
-        let mut prompt = flatten_chat_history(&request);
+        // OpenAI-style split: system role vs user transcript (never embed System: in user).
+        let (mut system, prompt) = split_completion_request(&request);
 
         match request.tool_choice.as_ref() {
             Some(ToolChoice::Required) => {
-                prompt.push_str(
-                    "\n\nSystem constraint: You MUST call exactly one tool now. \
+                append_system_constraint(
+                    &mut system,
+                    "You MUST call exactly one tool now. \
                      Do not answer with plain text. Do not claim a tool already ran.",
                 );
             }
             Some(ToolChoice::Specific { function_names }) if !function_names.is_empty() => {
-                prompt.push_str(&format!(
-                    "\n\nSystem constraint: You MUST call tool `{}` now. \
-                     Do not answer with plain text. Do not claim a tool already ran.",
-                    function_names.join("` or `")
-                ));
+                append_system_constraint(
+                    &mut system,
+                    &format!(
+                        "You MUST call tool `{}` now. \
+                         Do not answer with plain text. Do not claim a tool already ran.",
+                        function_names.join("` or `")
+                    ),
+                );
             }
             _ => {}
         }
@@ -148,20 +141,26 @@ impl CompletionModel for YazgModel {
             .map(|tool| ToolSpec::new(&tool.name, &tool.description, tool.parameters.clone()))
             .collect::<Vec<_>>();
 
-        // Exact payload sent to PlannerLlm (closest thing to HTTP request body).
+        let system_ref = system.as_deref();
+        // Wire-shaped payload (what HostYazgLlm maps to OpenAI chat/completions).
         let request_body = json!({
-            "system": system,
-            "prompt": prompt,
-            "tool_names": tools.iter().map(|t| t.name.clone()).collect::<Vec<_>>(),
+            "messages": [
+                { "role": "system", "content": system_ref },
+                { "role": "user", "content": prompt },
+            ],
+            "model_params": {
+                "temperature": request.temperature,
+                "max_tokens": request.max_tokens,
+                "tool_choice": request.tool_choice,
+            },
             "tools": tools.iter().map(|t| json!({
-                "name": t.name,
-                "description": t.description,
-                "parameters": t.parameters,
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters,
+                }
             })).collect::<Vec<_>>(),
-            "tool_choice": request.tool_choice,
-            "temperature": request.temperature,
-            "max_tokens": request.max_tokens,
-            "rig_completion_request": request,
         });
         self.emit_stage(
             AgentEventKind::Llm,
@@ -172,14 +171,14 @@ impl CompletionModel for YazgModel {
         let outcome = if tools.is_empty() {
             let content = self
                 .llm
-                .complete_with_system(system, &prompt)
+                .complete_with_system(system_ref, &prompt)
                 .await
                 .map_err(|err| CompletionError::ProviderError(err.to_string()))?;
             ensure_non_empty_text(normalize_completion_text(LlmCompletion::from_text(content)))
         } else {
             let raw = self
                 .llm
-                .complete_with_tools_and_system(system, &prompt, &tools)
+                .complete_with_tools_and_system(system_ref, &prompt, &tools)
                 .await
                 .map_err(|err| CompletionError::ProviderError(err.to_string()))?;
             let cleaned = normalize_completion_text(sanitize_completion(raw, &tools));
@@ -188,20 +187,30 @@ impl CompletionModel for YazgModel {
                 // when tools are bound (tool_choice=auto). Fall back to text-only
                 // like a plain Rig agent without tools.
                 warn!("empty tool-aware completion; retrying text-only");
-                let mut retry = prompt.clone();
-                retry.push_str(
-                    "\n\nSystem constraint: Reply in markdown or plain text only. \
+                let mut retry_system = system.clone();
+                append_system_constraint(
+                    &mut retry_system,
+                    "Reply in markdown or plain text only. \
                      Do not call tools. Do not emit JSON, tool envelopes, or assistant_reply.",
                 );
                 self.emit_stage(
                     AgentEventKind::Llm,
                     format_stage_payload(
                         "llm_request_retry_text_only",
-                        json!({ "system": system, "prompt": retry }),
+                        json!({
+                            "messages": [
+                                { "role": "system", "content": retry_system },
+                                { "role": "user", "content": prompt },
+                            ],
+                        }),
                     ),
                 )
                 .await;
-                match self.llm.complete_with_system(system, &retry).await {
+                match self
+                    .llm
+                    .complete_with_system(retry_system.as_deref(), &prompt)
+                    .await
+                {
                     Ok(text) if !text.trim().is_empty() => ensure_non_empty_text(
                         normalize_completion_text(LlmCompletion::from_text(text)),
                     ),
@@ -849,36 +858,71 @@ fn completion_to_assistant_content(
     }
 }
 
-/// Flatten Rig chat history into a single prompt string (user/assistant/tool turns).
-/// Preamble is passed separately as the API `system` message — same split as Rig's
-/// OpenAI `CompletionRequest` adapter.
-fn flatten_chat_history(request: &CompletionRequest) -> String {
-    let mut out = String::new();
+/// Split Rig [`CompletionRequest`] into OpenAI-style system + user transcript.
+///
+/// System comes from `preamble` and any `Message::System` in `chat_history`.
+/// User prompt is only user/assistant/tool turns (+ documents) — never `System:` text.
+fn split_completion_request(request: &CompletionRequest) -> (Option<String>, String) {
+    let mut system_parts: Vec<String> = Vec::new();
+    if let Some(preamble) = request
+        .preamble
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        system_parts.push(preamble.to_string());
+    }
+
+    let mut transcript = String::new();
     for message in request.chat_history.iter() {
         match message {
             Message::System { content } => {
-                out.push_str("System:\n");
-                out.push_str(content);
-                out.push_str("\n\n");
+                let content = content.trim();
+                if content.is_empty() {
+                    continue;
+                }
+                if !system_parts.iter().any(|existing| existing == content) {
+                    system_parts.push(content.to_string());
+                }
             }
             Message::User { content } => {
-                out.push_str("User:\n");
-                out.push_str(&flatten_user_content(content));
-                out.push_str("\n\n");
+                transcript.push_str("User:\n");
+                transcript.push_str(&flatten_user_content(content));
+                transcript.push_str("\n\n");
             }
             Message::Assistant { content, .. } => {
-                out.push_str("Assistant:\n");
-                out.push_str(&flatten_assistant_content(content));
-                out.push_str("\n\n");
+                transcript.push_str("Assistant:\n");
+                transcript.push_str(&flatten_assistant_content(content));
+                transcript.push_str("\n\n");
             }
         }
     }
     for doc in &request.documents {
-        out.push_str("Context:\n");
-        out.push_str(&doc.to_string());
-        out.push('\n');
+        transcript.push_str("Context:\n");
+        transcript.push_str(&doc.to_string());
+        transcript.push('\n');
     }
-    out.trim().to_string()
+
+    let system = if system_parts.is_empty() {
+        None
+    } else {
+        Some(system_parts.join("\n\n"))
+    };
+    (system, transcript.trim().to_string())
+}
+
+fn append_system_constraint(system: &mut Option<String>, constraint: &str) {
+    let constraint = constraint.trim();
+    if constraint.is_empty() {
+        return;
+    }
+    match system {
+        Some(existing) => {
+            existing.push_str("\n\n");
+            existing.push_str(constraint);
+        }
+        None => *system = Some(constraint.to_string()),
+    }
 }
 
 fn flatten_user_content(content: &OneOrMany<UserContent>) -> String {
@@ -926,6 +970,67 @@ fn flatten_assistant_content(content: &OneOrMany<AssistantContent>) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn system_stays_out_of_user_prompt() {
+        use rig::completion::message::UserContent;
+        let history = OneOrMany::many(vec![
+            Message::System {
+                content: "You are Yazg preamble".into(),
+            },
+            Message::User {
+                content: OneOrMany::one(UserContent::text("hi")),
+            },
+        ])
+        .expect("history");
+        let request = CompletionRequest {
+            model: None,
+            preamble: None,
+            chat_history: history,
+            documents: Vec::new(),
+            tools: Vec::new(),
+            temperature: None,
+            max_tokens: None,
+            tool_choice: None,
+            additional_params: None,
+            output_schema: None,
+        };
+        let (system, prompt) = split_completion_request(&request);
+        assert_eq!(system.as_deref(), Some("You are Yazg preamble"));
+        assert!(prompt.starts_with("User:\nhi"), "prompt={prompt}");
+        assert!(
+            !prompt.contains("System:") && !prompt.contains("You are Yazg preamble"),
+            "system leaked into user prompt: {prompt}"
+        );
+    }
+
+    #[test]
+    fn preamble_and_system_message_deduped() {
+        use rig::completion::message::UserContent;
+        let history = OneOrMany::many(vec![
+            Message::System {
+                content: "Same system".into(),
+            },
+            Message::User {
+                content: OneOrMany::one(UserContent::text("hi")),
+            },
+        ])
+        .expect("history");
+        let request = CompletionRequest {
+            model: None,
+            preamble: Some("Same system".into()),
+            chat_history: history,
+            documents: Vec::new(),
+            tools: Vec::new(),
+            temperature: None,
+            max_tokens: None,
+            tool_choice: None,
+            additional_params: None,
+            output_schema: None,
+        };
+        let (system, _) = split_completion_request(&request);
+        assert_eq!(system.as_deref(), Some("Same system"));
+    }
 
     #[test]
     fn assistant_reply_becomes_text() {

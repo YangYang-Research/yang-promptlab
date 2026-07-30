@@ -30,6 +30,13 @@ export const navItems: NavItem[] = [
     icon: "mutators",
     section: "advanced",
   },
+  {
+    id: "agent-trace",
+    label: "Agent Trace",
+    path: "/agent-trace",
+    icon: "agent-trace",
+    section: "advanced",
+  },
   { id: "settings", label: "Settings", path: "/settings", icon: "settings", section: "system" },
 ];
 

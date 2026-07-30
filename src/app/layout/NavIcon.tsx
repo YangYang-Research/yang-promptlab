@@ -65,6 +65,8 @@ export function NavIcon({ name }: NavIconProps) {
       "M4 7h6V3H4v4zm10 0h6V3h-6v4zM4 13h6v8H4v-8zm10 0h6v8h-6v-8z",
     mutators:
       "M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 3l2-2 2 2 2-2v5h-8v-3z",
+    "agent-trace":
+      "M4 5h16v2H4V5zm0 6h10v2H4v-2zm0 6h16v2H4v-2zm14-7l4 3-4 3v-6z",
     judge:
       "M9 3l2 2 4-4 2 2-6 6-4-4 2-2zm-5 9h12v2H4v-2zm0 4h8v2H4v-2z",
   };
