@@ -453,6 +453,9 @@ pub struct UpdateMutatorSettings {
 }
 
 /// Session-scoped agent working memory (short-term).
+///
+/// AgentCore-aligned: raw interaction events within one `session_id`
+/// (user / assistant / tool / observation), not truncated wire LLM bodies.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
 pub struct AgentShortTermMemory {
     pub id: String,
@@ -469,6 +472,15 @@ pub struct AgentShortTermMemory {
     pub expires_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
+}
+
+/// Aggregated STM session for ListSessions-style browsing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct AgentStmSessionSummary {
+    pub session_id: String,
+    pub event_count: i64,
+    pub first_at: OffsetDateTime,
+    pub last_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

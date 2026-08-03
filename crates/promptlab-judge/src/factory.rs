@@ -125,6 +125,7 @@ impl InferenceRuntime for ClientRuntime {
                     temperature: Some(temperature),
                     tools: Vec::new(),
                     tool_choice: None,
+                    messages: Vec::new(),
                 })
                 .await
                 .map(|text| promptlab_models::types::InferenceResponse {

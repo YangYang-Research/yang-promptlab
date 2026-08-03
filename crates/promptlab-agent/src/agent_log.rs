@@ -60,6 +60,7 @@ pub fn log_react(
         agent,
         kind: AgentEventKind::React,
         message,
+        conversation_id: None,
     };
     publish_ocsf(
         &event,
@@ -89,6 +90,7 @@ pub fn log_tool_call(
         agent,
         kind: AgentEventKind::ToolCall,
         message,
+        conversation_id: None,
     };
     publish_ocsf(
         &event,
@@ -134,6 +136,7 @@ pub fn log_llm_call(
         agent,
         kind: AgentEventKind::Llm,
         message,
+        conversation_id: None,
     };
     publish_ocsf(
         &event,
@@ -188,7 +191,7 @@ fn publish_ocsf(
         }
         AgentEventKind::Info => OcsfSeverity::Informational,
     };
-    let ocsf = OcsfEvent::new(
+    let mut ocsf = OcsfEvent::new(
         LogCategory::Agent,
         severity,
         event.kind.as_str(),
@@ -204,6 +207,14 @@ fn publish_ocsf(
     .attr("agent", event.agent.as_str())
     .attr("agentDisplay", event.agent.display_name())
     .attr("eventKind", event.kind.as_str());
+    if let Some(conversation_id) = event
+        .conversation_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        ocsf = ocsf.attr("conversationId", conversation_id);
+    }
     bus.publish(ocsf);
 }
 

@@ -13,7 +13,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use rig::agent::{AgentBuilder, AgentHook, Flow, HookContext, RequestPatch, StepEvent};
-use rig::completion::{Document, Prompt};
+use rig::completion::{AssistantContent, Message, Prompt};
+use rig::message::{ToolChoice, UserContent};
+use rig::tool::ToolDyn;
+use rig::OneOrMany;
 use tracing::{info, warn};
 
 use crate::artifacts::{persist_artifacts_ltm, YazgActionKind, YazgArtifacts};
@@ -25,11 +28,15 @@ use crate::list_workspace::{
 };
 use crate::tool_result::ToolResult;
 use crate::memory::{
-    load_memory_prompt_block, remember_stm, AgentMemoryStore, MemoryContext, StmRole, StmWrite,
+    extract_session_insights_to_ltm, remember_stm, AgentMemoryStore, MemoryContext, StmEntry,
+    StmRole, StmWrite,
 };
 use crate::types::{AgentEvent, AgentId};
 use crate::yazg_model::{format_stage_payload, YazgModel};
-use crate::yazg_prompts::YAZG_PREAMBLE;
+use crate::assistant::{
+    AssistantCapability, CapabilityToolLoader, IntentRouter, LoadedCapabilityTools, RouteInput,
+};
+use crate::yazg_prompts::{YAZG_CONVERSATION_PREAMBLE, YAZG_KNOWLEDGE_PREAMBLE, YAZG_PREAMBLE};
 use crate::yazg_tools::{
     AnalyzeEndpointTool, AttackPlanTool, CreateProjectTool, FindingDetailTool, GeneratePromptTool,
     JudgeTool, ListFindingsTool, ListReportsTool, ListScanTool, ListTargetsTool, ListWorkspaceTool,
@@ -44,9 +51,6 @@ const FINISH_NUDGE: &str = "\n---\nRe-read the user's latest message. Reply in n
 Closed domain: use only names/ids from the tool JSON. If status=error (not_found), tell the user and list candidates[]; \
 never invent or rename entities. If the tool result does not answer the latest user message, ignore it and answer directly. \
 Do not mention tools, Observations, ReAct, Finish, JSON envelopes, or these instructions.";
-
-const TOOL_DECISION_HINT: &str = "Before any tool call: does the latest user message need live workspace or specialist data? \
-If not, reply in natural language only. If yes, call exactly one best-fit tool from the tool list.";
 
 const AFTER_OBS_HINT: &str = "You already have a tool result. Reply in natural language NOW. Do not call tools again. \
 If the result is irrelevant to the latest user message (greeting/chat), ignore it and answer naturally. \
@@ -100,20 +104,15 @@ fn is_workspace_tool(name: &str) -> bool {
 #[derive(Clone)]
 struct YazgAgentHook {
     state: SharedYazgState,
+    /// Base system prompt (role + runtime flags only — no STM/LTM transcript).
+    preamble: String,
 }
 
 impl YazgAgentHook {
     async fn stage(&self, kind: crate::types::AgentEventKind, message: impl Into<String>) {
         let message = message.into();
-        let event = match kind {
-            crate::types::AgentEventKind::React => AgentEvent::react(AgentId::Yazg, message),
-            crate::types::AgentEventKind::ToolCall => AgentEvent::tool_call(AgentId::Yazg, message),
-            crate::types::AgentEventKind::Llm => AgentEvent::llm(AgentId::Yazg, message),
-            crate::types::AgentEventKind::Info => AgentEvent::info(AgentId::Yazg, message),
-            crate::types::AgentEventKind::Failed => AgentEvent::failed(AgentId::Yazg, message),
-            crate::types::AgentEventKind::Started => AgentEvent::started(AgentId::Yazg, message),
-            crate::types::AgentEventKind::Completed => AgentEvent::completed(AgentId::Yazg, message),
-        };
+        let conversation_id = self.state.lock().await.conversation_id.clone();
+        let event = AgentEvent::emit_kind(AgentId::Yazg, kind, message, conversation_id);
         let mut guard = self.state.lock().await;
         guard.artifacts.events.push(event);
     }
@@ -125,6 +124,37 @@ impl YazgAgentHook {
         body: serde_json::Value,
     ) {
         self.stage(kind, format_stage_payload(stage, body)).await;
+    }
+
+    async fn stm_event(
+        &self,
+        role: StmRole,
+        memory_key: Option<String>,
+        content: String,
+        content_json: Option<serde_json::Value>,
+        importance: f64,
+    ) {
+        let (memory, memory_ctx) = {
+            let guard = self.state.lock().await;
+            (guard.memory.clone(), guard.memory_ctx.clone())
+        };
+        remember_stm(
+            memory.as_deref(),
+            &memory_ctx,
+            StmWrite {
+                agent_id: AgentId::Yazg,
+                role,
+                memory_key,
+                content,
+                content_json,
+                importance,
+            },
+        )
+        .await;
+    }
+
+    fn preamble_with(&self, extra: &str) -> String {
+        format!("{}\n\n{extra}", self.preamble.trim_end())
     }
 }
 
@@ -175,6 +205,24 @@ impl AgentHook<YazgModel> for YazgAgentHook {
                     });
                 let args_json: serde_json::Value =
                     serde_json::from_str(args).unwrap_or_else(|_| serde_json::json!(args));
+                {
+                    let mut guard = self.state.lock().await;
+                    if !guard.tools_used.iter().any(|t| t == tool_name) {
+                        guard.tools_used.push(tool_name.to_string());
+                    }
+                }
+                self.stm_event(
+                    StmRole::Tool,
+                    Some(tool_name.to_string()),
+                    format!("tool_call:{tool_name}"),
+                    Some(serde_json::json!({
+                        "tool": tool_name,
+                        "tool_call_id": tool_call_id,
+                        "args": args_json,
+                    })),
+                    0.55,
+                )
+                .await;
                 self.stage_json(
                     crate::types::AgentEventKind::ToolCall,
                     "tool_call_request",
@@ -287,6 +335,20 @@ impl AgentHook<YazgModel> for YazgAgentHook {
                     serde_json::from_str(args).unwrap_or_else(|_| serde_json::json!(args));
                 let result_json: serde_json::Value = serde_json::from_str(result)
                     .unwrap_or_else(|_| serde_json::json!(result));
+                self.stm_event(
+                    StmRole::Observation,
+                    Some(tool_name.to_string()),
+                    truncate(result, 4_000),
+                    Some(serde_json::json!({
+                        "event": "tool_result",
+                        "tool": tool_name,
+                        "tool_call_id": tool_call_id,
+                        "request_args": args_json,
+                        "response_preview": truncate(result, 2_000),
+                    })),
+                    0.6,
+                )
+                .await;
                 self.stage_json(
                     crate::types::AgentEventKind::React,
                     "tool_result_response",
@@ -335,18 +397,11 @@ impl AgentHook<YazgModel> for YazgAgentHook {
                     } else {
                         AFTER_OBS_HINT
                     };
-                    return Flow::patch_request(RequestPatch::new().context(Document {
-                        id: "yazg_react_finish".into(),
-                        text: text.into(),
-                        additional_props: Default::default(),
-                    }));
-                }
-                if turn <= 1 {
-                    return Flow::patch_request(RequestPatch::new().context(Document {
-                        id: "yazg_tool_decision".into(),
-                        text: TOOL_DECISION_HINT.into(),
-                        additional_props: Default::default(),
-                    }));
+                    // Append finish discipline to system — never as a fake user Document
+                    // (that caused models to answer the hint with "false"/"yes").
+                    return Flow::patch_request(
+                        RequestPatch::new().preamble(self.preamble_with(text)),
+                    );
                 }
                 Flow::cont()
             }
@@ -447,10 +502,16 @@ impl YazgRequest {
 
 /// Run Yazg tool-calling loop and return artifacts + raw PromptResponse JSON.
 pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde_json::Value)> {
+    let conversation_id = {
+        let s = request.memory_ctx.session_id.trim();
+        (!s.is_empty()).then(|| s.to_string())
+    };
     let mut artifacts = YazgArtifacts::default();
-    artifacts.events.push(AgentEvent::started(
+    artifacts.events.push(AgentEvent::emit_kind(
         AgentId::Yazg,
+        crate::types::AgentEventKind::Started,
         "Yazg agent loop started",
+        conversation_id.clone(),
     ));
 
     remember_stm(
@@ -459,131 +520,206 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         StmWrite {
             agent_id: AgentId::Yazg,
             role: StmRole::User,
-            memory_key: Some("goal".into()),
+            memory_key: Some("message".into()),
             content: request.goal.clone(),
-            content_json: None,
+            content_json: Some(serde_json::json!({
+                "event": "user_message",
+                "session_id": request.memory_ctx.session_id,
+            })),
             importance: 0.7,
         },
     )
     .await;
 
-    let memory_block = load_memory_prompt_block(
+    // STM → prior chat turns (messages[]), never into system prompt.
+    // LTM conversation.* stays out of the prompt; durable facts are for retrieval, not transcript.
+    let prior_history = load_prior_chat_history(
         request.memory.as_deref(),
-        &request.memory_ctx,
-        AgentId::Yazg,
-        None,
+        &request.memory_ctx.session_id,
+        request.goal.trim(),
     )
     .await;
 
-    let state: SharedYazgState = Arc::new(tokio::sync::Mutex::new(YazgRunState::default()));
-    let specialist = Arc::new(request.specialist);
-    let context_block = specialist.format_context_block();
+    // Capability routing: LLM #1 classifies capability (no tools), then loader
+    // injects only that capability's tools into LLM #2 (Yazg agent turn).
+    let route_started = std::time::Instant::now();
+    let history_snippets: Vec<String> = prior_history
+        .iter()
+        .filter_map(|m| match m {
+            Message::User { content } => Some(
+                content
+                    .iter()
+                    .filter_map(|c| match c {
+                        UserContent::Text(t) => Some(t.text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            Message::Assistant { content, .. } => Some(
+                content
+                    .iter()
+                    .filter_map(|c| match c {
+                        AssistantContent::Text(t) => Some(t.text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            _ => None,
+        })
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+
+    artifacts.events.push(AgentEvent::emit_kind(
+        AgentId::Yazg,
+        crate::types::AgentEventKind::Llm,
+        crate::yazg_model::format_stage_payload(
+            "capability_classify_request",
+            serde_json::json!({
+                "latest_user_message": request.goal.trim(),
+                "history_snippets": history_snippets.len(),
+            }),
+        ),
+        conversation_id.clone(),
+    ));
+
+    let resolution = IntentRouter::new()
+        .resolve_with_llm(request.llms.supervisor.as_ref(), &RouteInput {
+            latest_user_message: request.goal.trim(),
+            history_snippets: &history_snippets,
+        })
+        .await;
+    let loaded = CapabilityToolLoader::new().load(&resolution);
+    let route_ms = route_started.elapsed().as_millis();
+
+    artifacts.events.push(AgentEvent::emit_kind(
+        AgentId::Yazg,
+        crate::types::AgentEventKind::Llm,
+        crate::yazg_model::format_stage_payload(
+            "capability_classify_response",
+            serde_json::json!({
+                "capability": loaded.capability.as_str(),
+                "confidence": loaded.confidence,
+                "reason": loaded.reason,
+                "raw": resolution.raw_classifier_output,
+                "latency_ms": route_ms,
+            }),
+        ),
+        conversation_id.clone(),
+    ));
+
+    info!(
+        capability = %loaded.capability,
+        tool_count = loaded.tool_count(),
+        tools = ?loaded.tool_names,
+        allow_tool_calling = loaded.allow_tool_calling,
+        confidence = loaded.confidence,
+        reason = %loaded.reason,
+        latency_ms = route_ms,
+        "yazg capability resolved (llm)"
+    );
+    artifacts.events.push(AgentEvent::emit_kind(
+        AgentId::Yazg,
+        crate::types::AgentEventKind::Info,
+        format!(
+            "capability={} tools={} names={:?} tool_used=pending reason={} confidence={:.2} latency_ms={} router=llm",
+            loaded.capability,
+            loaded.tool_count(),
+            loaded.tool_names,
+            loaded.reason,
+            loaded.confidence,
+            route_ms
+        ),
+        conversation_id.clone(),
+    ));
+
+    let state: SharedYazgState = Arc::new(tokio::sync::Mutex::new(YazgRunState {
+        conversation_id: conversation_id.clone(),
+        memory: request.memory.clone(),
+        memory_ctx: request.memory_ctx.clone(),
+        ..Default::default()
+    }));
+    let specialist = Arc::new(request.specialist.clone());
+    let context_block = capability_context_block(loaded.capability, specialist.as_ref());
     let model = YazgModel::new(request.llms.supervisor.clone()).with_stage_sink(state.clone());
 
-    let preamble = format!("{YAZG_PREAMBLE}\n\n{context_block}\n{memory_block}");
+    let base_preamble = match loaded.capability {
+        AssistantCapability::Conversation => YAZG_CONVERSATION_PREAMBLE,
+        AssistantCapability::Knowledge => YAZG_KNOWLEDGE_PREAMBLE,
+        _ => YAZG_PREAMBLE,
+    };
+    let preamble = {
+        let mut p = base_preamble.to_string();
+        if !context_block.trim().is_empty() {
+            p.push_str("\n\n");
+            p.push_str(context_block.trim());
+        }
+        if !loaded.system_addon.trim().is_empty() {
+            p.push_str("\n\n");
+            p.push_str(loaded.system_addon.trim());
+        }
+        p
+    };
 
-    // Domain tools call specialist ::run() directly (no nested worker LLM).
-    let mut builder = AgentBuilder::new(model)
-        .name("Yazg")
-        .description("PromptLab AI Assistant")
-        .preamble(&preamble)
-        .temperature(0.2)
-        .max_tokens(1024)
-        .default_max_turns(request.max_turns)
-        .add_hook(YazgAgentHook {
-            state: state.clone(),
-        })
-        .tool(AnalyzeEndpointTool {
-            ctx: specialist.clone(),
-            llm: request.llms.analyze.clone(),
-            state: state.clone(),
-        });
+    let max_turns = if loaded.allow_tool_calling {
+        request.max_turns
+    } else {
+        1
+    };
 
-    if let Some(tools) = request.workspace_tools.clone() {
-        builder = builder
-            .tool(ListWorkspaceTool {
-                tools: tools.clone(),
-                state: state.clone(),
-            })
-            .tool(ProjectDetailTool {
-                tools: tools.clone(),
-                state: state.clone(),
-            })
-            .tool(ListScanTool {
-                tools: tools.clone(),
-                state: state.clone(),
-            })
-            .tool(ScanDetailTool {
-                tools: tools.clone(),
-                state: state.clone(),
-            })
-            .tool(ListFindingsTool {
-                tools: tools.clone(),
-                state: state.clone(),
-            })
-            .tool(FindingDetailTool {
-                tools: tools.clone(),
-                state: state.clone(),
-            })
-            .tool(ListTargetsTool {
-                tools: tools.clone(),
-                state: state.clone(),
-            })
-            .tool(TargetDetailTool {
-                tools: tools.clone(),
-                state: state.clone(),
-            })
-            .tool(ListReportsTool {
-                tools: tools.clone(),
-                state: state.clone(),
-            })
-            .tool(ReportDetailTool {
-                tools,
-                state: state.clone(),
-            });
-    }
-    if let Some(tools) = request.project_tools.clone() {
-        builder = builder.tool(CreateProjectTool {
-            tools,
-            state: state.clone(),
-        });
-    }
+    let tool_choice = if loaded.allow_tool_calling {
+        ToolChoice::Auto
+    } else {
+        ToolChoice::None
+    };
 
-    let agent = builder
-        .tool(AttackPlanTool {
-            ctx: specialist.clone(),
-            llm: request.llms.plan.clone(),
-            state: state.clone(),
-        })
-        .tool(GeneratePromptTool {
-            ctx: specialist.clone(),
-            llm: request.llms.prompt.clone(),
-            state: state.clone(),
-        })
-        .tool(RecommendTool {
-            ctx: specialist.clone(),
-            llm: request.llms.recommend.clone(),
-            state: state.clone(),
-        })
-        .tool(SummaryTool {
-            ctx: specialist.clone(),
-            llm: request.llms.summary.clone(),
-            state: state.clone(),
-        })
-        .tool(JudgeTool {
-            ctx: specialist,
-            orchestrator: request.llms.supervisor.clone(),
-            state: state.clone(),
-        })
-        .build();
+    let boxed_tools = build_capability_tools(&loaded, &request, &state, specialist.clone());
 
-    info!(goal = %truncate(&request.goal, 120), "Yazg agent handle");
-
-    let prompt_result = agent
-        .prompt(request.goal.trim())
-        .max_turns(request.max_turns)
-        .extended_details()
-        .await;
+    let prompt_result = if boxed_tools.is_empty() {
+        let agent = AgentBuilder::new(model)
+            .name("Yazg")
+            .description("PromptLab AI Assistant")
+            .preamble(&preamble)
+            .temperature(0.2)
+            .max_tokens(1024)
+            .default_max_turns(max_turns)
+            .tool_choice(tool_choice)
+            .add_hook(YazgAgentHook {
+                state: state.clone(),
+                preamble: preamble.clone(),
+            })
+            .build();
+        info!(goal = %truncate(&request.goal, 120), "Yazg agent handle (no tools)");
+        agent
+            .prompt(request.goal.trim())
+            .history(prior_history)
+            .max_turns(max_turns)
+            .extended_details()
+            .await
+    } else {
+        let agent = AgentBuilder::new(model)
+            .name("Yazg")
+            .description("PromptLab AI Assistant")
+            .preamble(&preamble)
+            .temperature(0.2)
+            .max_tokens(1024)
+            .default_max_turns(max_turns)
+            .tool_choice(tool_choice)
+            .add_hook(YazgAgentHook {
+                state: state.clone(),
+                preamble: preamble.clone(),
+            })
+            .tools(boxed_tools)
+            .build();
+        info!(goal = %truncate(&request.goal, 120), "Yazg agent handle");
+        agent
+            .prompt(request.goal.trim())
+            .history(prior_history)
+            .max_turns(max_turns)
+            .extended_details()
+            .await
+    };
 
     let (reply_text, raw_output, usage_note) = match prompt_result {
         Ok(prompt_response) => {
@@ -645,6 +781,7 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         .or(run_state.artifacts.last_action);
     let workspace_obs = run_state.workspace_observations.clone();
     let last_workspace_obs = run_state.last_workspace_observation.clone();
+    let tools_used = run_state.tools_used.clone();
 
     // Drop the lock before optional synthesis LLM call.
     drop(run_state);
@@ -660,8 +797,9 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         || normalized_reply.contains("Workspace inventory from the local database:")
         || raw_workspace_dump;
 
-    artifacts.events.push(AgentEvent::react(
+    artifacts.events.push(AgentEvent::emit_kind(
         AgentId::Yazg,
+        crate::types::AgentEventKind::React,
         format!(
             "stage=reply_normalize empty={} meta={} salvage={} tools_obs={}",
             normalized_reply.trim().is_empty(),
@@ -669,12 +807,15 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
             needs_salvage,
             workspace_obs.len()
         ),
+        conversation_id.clone(),
     ));
 
     artifacts.final_reply = if needs_salvage && has_workspace_evidence {
-        artifacts.events.push(AgentEvent::react(
+        artifacts.events.push(AgentEvent::emit_kind(
             AgentId::Yazg,
+            crate::types::AgentEventKind::React,
             "stage=salvage mode=workspace_evidence",
+            conversation_id.clone(),
         ));
         synthesize_from_evidence(
             request.llms.supervisor.as_ref(),
@@ -699,25 +840,31 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
             || artifacts.judge.is_some()
             || artifacts.created_project.is_some()
         {
-            artifacts.events.push(AgentEvent::react(
+            artifacts.events.push(AgentEvent::emit_kind(
                 AgentId::Yazg,
+                crate::types::AgentEventKind::React,
                 "stage=salvage mode=specialist_placeholder",
+                conversation_id.clone(),
             ));
             "Specialist finished; synthesizing UI reply.".into()
         } else {
-            artifacts.events.push(AgentEvent::react(
+            artifacts.events.push(AgentEvent::emit_kind(
                 AgentId::Yazg,
+                crate::types::AgentEventKind::React,
                 "stage=salvage mode=text_reply",
+                conversation_id.clone(),
             ));
             recover_text_reply(request.llms.supervisor.as_ref(), &request.goal).await
         }
     } else {
-        artifacts.events.push(AgentEvent::react(
+        artifacts.events.push(AgentEvent::emit_kind(
             AgentId::Yazg,
+            crate::types::AgentEventKind::React,
             format!(
                 "stage=direct_reply chars={}",
                 normalized_reply.chars().count()
             ),
+            conversation_id.clone(),
         ));
         normalized_reply
     };
@@ -730,7 +877,11 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
             role: StmRole::Assistant,
             memory_key: Some("reply".into()),
             content: artifacts.final_reply.clone(),
-            content_json: None,
+            content_json: Some(serde_json::json!({
+                "event": "assistant_message",
+                "session_id": request.memory_ctx.session_id,
+                "tools_used": tools_used,
+            })),
             importance: 0.6,
         },
     )
@@ -743,13 +894,204 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
     )
     .await;
 
-    artifacts.events.push(AgentEvent::completed(
+    extract_session_insights_to_ltm(
+        request.memory.as_deref(),
+        &request.memory_ctx,
         AgentId::Yazg,
+        &request.goal,
+        &artifacts.final_reply,
+        &tools_used,
+    )
+    .await;
+
+    artifacts.events.push(AgentEvent::emit_kind(
+        AgentId::Yazg,
+        crate::types::AgentEventKind::Completed,
         "Yazg agent loop finished",
+        conversation_id.clone(),
     ));
-    artifacts.events.push(AgentEvent::info(AgentId::Yazg, usage_note));
+    let tool_used = if tools_used.is_empty() {
+        "None".to_string()
+    } else {
+        tools_used.join(",")
+    };
+    info!(
+        capability = %loaded.capability,
+        loaded_tools = loaded.tool_count(),
+        tool_used = %tool_used,
+        "yazg capability turn complete"
+    );
+    artifacts.events.push(AgentEvent::emit_kind(
+        AgentId::Yazg,
+        crate::types::AgentEventKind::Info,
+        format!(
+            "capability={} loaded_tools={} tool_used={}",
+            loaded.capability,
+            loaded.tool_count(),
+            tool_used
+        ),
+        conversation_id.clone(),
+    ));
+    artifacts.events.push(AgentEvent::emit_kind(
+        AgentId::Yazg,
+        crate::types::AgentEventKind::Info,
+        usage_note,
+        conversation_id,
+    ));
 
     Ok((artifacts, raw_output))
+}
+
+/// Capability-scoped runtime context (do not inject unrelated state).
+fn capability_context_block(
+    capability: AssistantCapability,
+    specialist: &YazgSpecialistContext,
+) -> String {
+    match capability {
+        AssistantCapability::Conversation | AssistantCapability::Knowledge => String::new(),
+        AssistantCapability::Targets | AssistantCapability::Attack | AssistantCapability::Scan => {
+            specialist.format_context_block()
+        }
+        AssistantCapability::Projects
+        | AssistantCapability::Workspace
+        | AssistantCapability::Findings
+        | AssistantCapability::Reports => {
+            // Inventory capabilities do not need bound-target / factory flags.
+            String::new()
+        }
+        AssistantCapability::Models | AssistantCapability::Runtime | AssistantCapability::Settings => {
+            String::new()
+        }
+    }
+}
+
+/// Build only the Rig tools owned by the resolved capability (never the global set).
+fn build_capability_tools(
+    loaded: &LoadedCapabilityTools,
+    request: &YazgRequest,
+    state: &SharedYazgState,
+    specialist: Arc<YazgSpecialistContext>,
+) -> Vec<Box<dyn ToolDyn>> {
+    if !loaded.allow_tool_calling || loaded.tool_names.is_empty() {
+        return Vec::new();
+    }
+    let allowed: std::collections::HashSet<&str> =
+        loaded.tool_names.iter().copied().collect();
+    let mut out: Vec<Box<dyn ToolDyn>> = Vec::new();
+
+    if allowed.contains("analyze_endpoint") {
+        out.push(Box::new(AnalyzeEndpointTool {
+            ctx: specialist.clone(),
+            llm: request.llms.analyze.clone(),
+            state: state.clone(),
+        }));
+    }
+    if let Some(tools) = request.workspace_tools.clone() {
+        if allowed.contains("list_workspace") {
+            out.push(Box::new(ListWorkspaceTool {
+                tools: tools.clone(),
+                state: state.clone(),
+            }));
+        }
+        if allowed.contains("project_detail") {
+            out.push(Box::new(ProjectDetailTool {
+                tools: tools.clone(),
+                state: state.clone(),
+            }));
+        }
+        if allowed.contains("list_scan") {
+            out.push(Box::new(ListScanTool {
+                tools: tools.clone(),
+                state: state.clone(),
+            }));
+        }
+        if allowed.contains("scan_detail") {
+            out.push(Box::new(ScanDetailTool {
+                tools: tools.clone(),
+                state: state.clone(),
+            }));
+        }
+        if allowed.contains("list_findings") {
+            out.push(Box::new(ListFindingsTool {
+                tools: tools.clone(),
+                state: state.clone(),
+            }));
+        }
+        if allowed.contains("finding_detail") {
+            out.push(Box::new(FindingDetailTool {
+                tools: tools.clone(),
+                state: state.clone(),
+            }));
+        }
+        if allowed.contains("list_targets") {
+            out.push(Box::new(ListTargetsTool {
+                tools: tools.clone(),
+                state: state.clone(),
+            }));
+        }
+        if allowed.contains("target_detail") {
+            out.push(Box::new(TargetDetailTool {
+                tools: tools.clone(),
+                state: state.clone(),
+            }));
+        }
+        if allowed.contains("list_reports") {
+            out.push(Box::new(ListReportsTool {
+                tools: tools.clone(),
+                state: state.clone(),
+            }));
+        }
+        if allowed.contains("report_detail") {
+            out.push(Box::new(ReportDetailTool {
+                tools: tools.clone(),
+                state: state.clone(),
+            }));
+        }
+    }
+    if allowed.contains("create_project") {
+        if let Some(tools) = request.project_tools.clone() {
+            out.push(Box::new(CreateProjectTool {
+                tools,
+                state: state.clone(),
+            }));
+        }
+    }
+    if allowed.contains("attack_plan") {
+        out.push(Box::new(AttackPlanTool {
+            ctx: specialist.clone(),
+            llm: request.llms.plan.clone(),
+            state: state.clone(),
+        }));
+    }
+    if allowed.contains("generate_prompt") {
+        out.push(Box::new(GeneratePromptTool {
+            ctx: specialist.clone(),
+            llm: request.llms.prompt.clone(),
+            state: state.clone(),
+        }));
+    }
+    if allowed.contains("recommend") {
+        out.push(Box::new(RecommendTool {
+            ctx: specialist.clone(),
+            llm: request.llms.recommend.clone(),
+            state: state.clone(),
+        }));
+    }
+    if allowed.contains("summary") {
+        out.push(Box::new(SummaryTool {
+            ctx: specialist.clone(),
+            llm: request.llms.summary.clone(),
+            state: state.clone(),
+        }));
+    }
+    if allowed.contains("judge") {
+        out.push(Box::new(JudgeTool {
+            ctx: specialist,
+            orchestrator: request.llms.supervisor.clone(),
+            state: state.clone(),
+        }));
+    }
+    out
 }
 
 fn map_tool_to_action(name: &str) -> Option<YazgActionKind> {
@@ -773,6 +1115,65 @@ fn map_tool_to_action(name: &str) -> Option<YazgActionKind> {
         "judge" => Some(YazgActionKind::Judge),
         _ => None,
     }
+}
+
+/// Map session STM events → prior Rig chat messages (user/assistant only).
+///
+/// Skips the current user turn (already passed as `prompt`) and tool/observation
+/// rows (final assistant reply already closes those turns for chat continuity).
+async fn load_prior_chat_history(
+    memory: Option<&dyn AgentMemoryStore>,
+    session_id: &str,
+    current_user: &str,
+) -> Vec<Message> {
+    let Some(store) = memory else {
+        return Vec::new();
+    };
+    if session_id.trim().is_empty() {
+        return Vec::new();
+    }
+    let Ok(mut entries) = store
+        .stm_list(session_id, Some(AgentId::Yazg.as_str()), 48)
+        .await
+    else {
+        return Vec::new();
+    };
+
+    // Drop the STM user event we just appended for this turn.
+    if let Some(last) = entries.last() {
+        if last.role == "user" && last.content.trim() == current_user.trim() {
+            entries.pop();
+        }
+    }
+
+    stm_entries_to_chat_messages(&entries)
+}
+
+fn stm_entries_to_chat_messages(entries: &[StmEntry]) -> Vec<Message> {
+    let mut messages = Vec::new();
+    for entry in entries {
+        let content = entry.content.trim();
+        if content.is_empty() {
+            continue;
+        }
+        match entry.role.as_str() {
+            "user" => {
+                messages.push(Message::User {
+                    content: OneOrMany::one(UserContent::text(content)),
+                });
+            }
+            "assistant" => {
+                messages.push(Message::Assistant {
+                    id: None,
+                    content: OneOrMany::one(AssistantContent::text(content)),
+                });
+            }
+            // tool / observation / system: kept in STM for Agent Trace, not replayed
+            // as incomplete OpenAI tool turns on the next chat prompt.
+            _ => {}
+        }
+    }
+    messages
 }
 
 /// Pick the Observation that best matches the user goal (not merely the last one).
@@ -1390,5 +1791,49 @@ mod tests {
             extract_requested_project_name("cho tôi project có trong workspace"),
             None
         );
+    }
+
+    #[test]
+    fn stm_history_is_user_assistant_messages_not_tools() {
+        use super::stm_entries_to_chat_messages;
+        use crate::memory::StmEntry;
+        use rig::completion::Message;
+
+        let entries = vec![
+            StmEntry {
+                id: "1".into(),
+                agent_id: "yazg".into(),
+                role: "user".into(),
+                memory_key: Some("message".into()),
+                content: "hi".into(),
+                content_json: None,
+                importance: 0.7,
+                created_at: None,
+            },
+            StmEntry {
+                id: "2".into(),
+                agent_id: "yazg".into(),
+                role: "assistant".into(),
+                memory_key: Some("reply".into()),
+                content: "Hello!".into(),
+                content_json: None,
+                importance: 0.6,
+                created_at: None,
+            },
+            StmEntry {
+                id: "3".into(),
+                agent_id: "yazg".into(),
+                role: "tool".into(),
+                memory_key: Some("list_workspace".into()),
+                content: "tool_call:list_workspace".into(),
+                content_json: None,
+                importance: 0.5,
+                created_at: None,
+            },
+        ];
+        let msgs = stm_entries_to_chat_messages(&entries);
+        assert_eq!(msgs.len(), 2);
+        assert!(matches!(msgs[0], Message::User { .. }));
+        assert!(matches!(msgs[1], Message::Assistant { .. }));
     }
 }

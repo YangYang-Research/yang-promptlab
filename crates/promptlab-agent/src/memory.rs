@@ -1,13 +1,20 @@
 //! Agent short-term / long-term memory contracts.
 //!
+//! Aligned with AWS Bedrock AgentCore Memory types:
+//! - **STM** — raw interaction events within one `session_id` (CreateEvent / ListEvents).
+//! - **LTM** — durable insights extracted/consolidated across sessions (keyed records).
+//!
 //! Host (desktop) implements [`AgentMemoryStore`] against SQLite.
 //! Agents treat memory failures as soft — never fail the turn.
 
 use async_trait::async_trait;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tracing::warn;
 
 use crate::types::AgentId;
+
+/// Soft cap for a single STM event payload (conversational events, not wire LLM dumps).
+pub const STM_CONTENT_MAX_CHARS: usize = 8_000;
 
 /// Durable memory scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,13 +114,33 @@ pub struct StmWrite {
     pub importance: f64,
 }
 
+impl StmWrite {
+    /// Truncate oversized conversational payloads before persist.
+    pub fn capped(mut self) -> Self {
+        self.content = truncate(&self.content, STM_CONTENT_MAX_CHARS);
+        self
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StmEntry {
+    pub id: String,
     pub agent_id: String,
     pub role: String,
     pub memory_key: Option<String>,
     pub content: String,
+    pub content_json: Option<Value>,
     pub importance: f64,
+    pub created_at: Option<String>,
+}
+
+/// AgentCore ListSessions row.
+#[derive(Debug, Clone)]
+pub struct StmSessionSummary {
+    pub session_id: String,
+    pub event_count: usize,
+    pub first_at: Option<String>,
+    pub last_at: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -148,6 +175,12 @@ pub trait AgentMemoryStore: Send + Sync {
         agent_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<StmEntry>, String>;
+    /// List sessions with recent STM activity (newest first).
+    async fn stm_list_sessions(
+        &self,
+        prefix: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<StmSessionSummary>, String>;
 
     async fn ltm_upsert(&self, entry: LtmWrite) -> Result<(), String>;
     async fn ltm_list(
@@ -169,7 +202,7 @@ pub async fn remember_stm(
     if ctx.session_id.trim().is_empty() {
         return;
     }
-    if let Err(err) = store.stm_append(ctx, entry).await {
+    if let Err(err) = store.stm_append(ctx, entry.capped()).await {
         warn!(error = %err, "agent STM write failed");
     }
 }
@@ -180,6 +213,114 @@ pub async fn remember_ltm(store: Option<&dyn AgentMemoryStore>, entry: LtmWrite)
     if let Err(err) = store.ltm_upsert(entry).await {
         warn!(error = %err, "agent LTM write failed");
     }
+}
+
+/// Extract + consolidate durable insights from a finished session turn into LTM.
+///
+/// AgentCore LTM is produced from STM events; we approximate with deterministic
+/// extraction (last exchange + tools + rolling summary). Specialist artifact keys
+/// are written separately via `persist_artifacts_ltm`.
+pub async fn extract_session_insights_to_ltm(
+    store: Option<&dyn AgentMemoryStore>,
+    ctx: &MemoryContext,
+    agent_id: AgentId,
+    user_message: &str,
+    assistant_reply: &str,
+    tools_used: &[String],
+) {
+    let Some(store) = store else { return };
+    let (scope_type, scope_id) = ctx.primary_scope();
+
+    remember_ltm(
+        Some(store),
+        LtmWrite {
+            agent_id,
+            scope_type,
+            scope_id: scope_id.clone(),
+            memory_key: "conversation.last_user".into(),
+            content: truncate(user_message, 1_200),
+            content_json: Some(json!({
+                "session_id": ctx.session_id,
+                "role": "user",
+            })),
+            importance: 0.7,
+        },
+    )
+    .await;
+
+    remember_ltm(
+        Some(store),
+        LtmWrite {
+            agent_id,
+            scope_type,
+            scope_id: scope_id.clone(),
+            memory_key: "conversation.last_assistant".into(),
+            content: truncate(assistant_reply, 1_200),
+            content_json: Some(json!({
+                "session_id": ctx.session_id,
+                "role": "assistant",
+            })),
+            importance: 0.65,
+        },
+    )
+    .await;
+
+    if !tools_used.is_empty() {
+        remember_ltm(
+            Some(store),
+            LtmWrite {
+                agent_id,
+                scope_type,
+                scope_id: scope_id.clone(),
+                memory_key: "conversation.last_tools".into(),
+                content: tools_used.join(", "),
+                content_json: Some(json!({
+                    "session_id": ctx.session_id,
+                    "tools": tools_used,
+                })),
+                importance: 0.55,
+            },
+        )
+        .await;
+    }
+
+    let prior = store
+        .ltm_list(Some(agent_id.as_str()), scope_type, &scope_id, 24)
+        .await
+        .ok()
+        .into_iter()
+        .flatten()
+        .find(|e| e.memory_key == "conversation.rolling_summary")
+        .map(|e| e.content)
+        .unwrap_or_default();
+
+    let turn_blob = format!(
+        "User: {}\nAssistant: {}",
+        truncate(user_message, 280),
+        truncate(assistant_reply, 280)
+    );
+    let consolidated = if prior.trim().is_empty() {
+        turn_blob
+    } else {
+        format!("{}\n---\n{}", truncate(&prior, 1_600), turn_blob)
+    };
+
+    remember_ltm(
+        Some(store),
+        LtmWrite {
+            agent_id,
+            scope_type,
+            scope_id,
+            memory_key: "conversation.rolling_summary".into(),
+            content: truncate(&consolidated, 2_400),
+            content_json: Some(json!({
+                "session_id": ctx.session_id,
+                "turns_hint": true,
+            })),
+            importance: 0.6,
+        },
+    )
+    .await;
 }
 
 /// True when the category outcome should be treated as a durable failure for retry context.
@@ -382,6 +523,13 @@ pub async fn load_prior_attack_failure_block(
 
 /// Load STM + LTM into a prompt block for ReAct / orchestrators.
 ///
+/// Prefer **not** using this for Yazg chat — STM belongs in `messages[]` history,
+/// not the system preamble. Attack/specialist runners may still embed a compact
+/// block in their working transcript.
+///
+/// Conversation LTM keys (`conversation.*`) are excluded: those are durable
+/// extracts for retrieval/UI, not system-prompt transcript.
+///
 /// When `category` is set, LTM keys under `attack.*` are limited to that category
 /// so sibling category failures do not leak into the transcript.
 pub async fn load_memory_prompt_block(
@@ -405,11 +553,23 @@ pub async fn load_memory_prompt_block(
                 "Short-term memory (this session; may be imperfect — prioritize the latest user message):\n",
             );
             for entry in entries {
+                let cap = match entry.role.as_str() {
+                    "user" | "assistant" => 800,
+                    "tool" | "observation" => 480,
+                    _ => 280,
+                };
+                let key = entry
+                    .memory_key
+                    .as_deref()
+                    .filter(|k| !k.is_empty())
+                    .map(|k| format!("|{k}"))
+                    .unwrap_or_default();
                 out.push_str(&format!(
-                    "- [{}|{}] {}\n",
+                    "- [{}|{}{}] {}\n",
                     entry.agent_id,
                     entry.role,
-                    truncate(&entry.content, 220)
+                    key,
+                    truncate(&entry.content, cap)
                 ));
             }
             out.push('\n');
@@ -437,6 +597,9 @@ pub async fn load_memory_prompt_block(
         {
             Ok(entries) => {
                 for entry in entries {
+                    if entry.memory_key.starts_with("conversation.") {
+                        continue;
+                    }
                     if !ltm_key_relevant_for_category(&entry.memory_key, category) {
                         continue;
                     }
@@ -474,6 +637,9 @@ pub async fn load_memory_prompt_block(
             {
                 Ok(entries) => {
                     for entry in entries {
+                        if entry.memory_key.starts_with("conversation.") {
+                            continue;
+                        }
                         if !ltm_key_relevant_for_category(&entry.memory_key, category) {
                             continue;
                         }

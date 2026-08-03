@@ -3,6 +3,7 @@ export type StageEventLike = {
   kind: string;
   message: string;
   timestamp?: string;
+  conversationId?: string | null;
 };
 
 export type StageRole = "request" | "response" | "other";
@@ -30,6 +31,19 @@ export type StageTraceGroup =
       item: ParsedStageEvent;
     };
 
+export type ConversationTrace = {
+  id: string;
+  conversationId: string;
+  label: string;
+  eventCount: number;
+  pairCount: number;
+  firstTimestamp?: string;
+  lastTimestamp?: string;
+  groups: StageTraceGroup[];
+};
+
+export const UNKNOWN_CONVERSATION_ID = "(no conversation id)";
+
 /** Request stage → expected response stage. */
 const RESPONSE_FOR: Record<string, string> = {
   completion_call: "completion_response",
@@ -40,6 +54,17 @@ const RESPONSE_FOR: Record<string, string> = {
 
 const REQUEST_STAGES = new Set(Object.keys(RESPONSE_FOR));
 const RESPONSE_STAGES = new Set(Object.values(RESPONSE_FOR));
+
+/** Stages shown as LLM wire request/response bodies. */
+const LLM_WIRE_STAGES = new Set([
+  "llm_request",
+  "llm_response",
+  "llm_request_retry_text_only",
+]);
+
+export function isLlmWireStage(stage: string | null | undefined): boolean {
+  return stage != null && LLM_WIRE_STAGES.has(stage);
+}
 
 function familyForStage(stage: string | null): string {
   if (!stage) return "event";
@@ -170,6 +195,76 @@ export function groupStageEvents(events: StageEventLike[]): StageTraceGroup[] {
   return groups;
 }
 
+function conversationLabel(conversationId: string): string {
+  if (conversationId === UNKNOWN_CONVERSATION_ID) return conversationId;
+  if (conversationId.startsWith("yazg-chat:")) {
+    return conversationId.slice("yazg-chat:".length) || conversationId;
+  }
+  return conversationId;
+}
+
+function eventTimestamp(group: StageTraceGroup): string | undefined {
+  if (group.kind === "pair") {
+    return group.request.event.timestamp ?? group.response.event.timestamp;
+  }
+  return group.item.event.timestamp;
+}
+
+function isBodyGroup(group: StageTraceGroup): boolean {
+  if (group.kind === "pair") {
+    return (
+      isLlmWireStage(group.request.stage) || isLlmWireStage(group.response.stage)
+    );
+  }
+  return isLlmWireStage(group.item.stage);
+}
+
+/**
+ * Bucket Yazg stage events by conversation id, newest conversations first.
+ * Detail groups keep request/response bodies only (LLM + tool).
+ */
+export function groupByConversation(events: StageEventLike[]): ConversationTrace[] {
+  const buckets = new Map<string, StageEventLike[]>();
+  for (const event of events) {
+    const id =
+      (event.conversationId && event.conversationId.trim()) || UNKNOWN_CONVERSATION_ID;
+    const list = buckets.get(id);
+    if (list) list.push(event);
+    else buckets.set(id, [event]);
+  }
+
+  const conversations: ConversationTrace[] = [];
+  for (const [conversationId, bucket] of buckets) {
+    const sorted = [...bucket].sort((a, b) =>
+      (a.timestamp ?? "").localeCompare(b.timestamp ?? ""),
+    );
+    const allGroups = groupStageEvents(sorted);
+    const groups = allGroups.filter(isBodyGroup);
+    const timestamps = sorted
+      .map((e) => e.timestamp)
+      .filter((t): t is string => Boolean(t));
+    conversations.push({
+      id: conversationId,
+      conversationId,
+      label: conversationLabel(conversationId),
+      eventCount: sorted.length,
+      pairCount: groups.filter((g) => g.kind === "pair").length,
+      firstTimestamp: timestamps[0],
+      lastTimestamp: timestamps[timestamps.length - 1],
+      groups,
+    });
+  }
+
+  conversations.sort((a, b) =>
+    (b.lastTimestamp ?? "").localeCompare(a.lastTimestamp ?? ""),
+  );
+  return conversations;
+}
+
 export function stageLabel(stage: string | null, fallbackKind: string): string {
   return stage ?? fallbackKind;
+}
+
+export function groupTimestamp(group: StageTraceGroup): string | undefined {
+  return eventTimestamp(group);
 }

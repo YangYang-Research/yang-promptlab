@@ -79,6 +79,10 @@ pub struct CompleteRequest {
     /// e.g. `"auto"` | `"none"` | `{"type":"function","function":{"name":"..."}}`
     #[serde(default)]
     pub tool_choice: Option<serde_json::Value>,
+    /// Full OpenAI-style chat `messages[]` (system/user/assistant/tool).
+    /// When non-empty, providers should prefer this over `system` + `prompt`.
+    #[serde(default)]
+    pub messages: Vec<serde_json::Value>,
 }
 
 impl CompleteRequest {
@@ -90,6 +94,7 @@ impl CompleteRequest {
             temperature: None,
             tools: Vec::new(),
             tool_choice: None,
+            messages: Vec::new(),
         }
     }
 }

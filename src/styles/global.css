@@ -11153,6 +11153,15 @@ a:hover {
   font-size: 0.75rem;
 }
 
+.agent-trace-page__list-item--conversation {
+  grid-template-columns: 3.6rem minmax(0, 1fr) auto;
+}
+
+.agent-trace-page__list-item--conversation .agent-trace-page__list-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
 .agent-trace-page__list-item:hover {
   border-color: color-mix(in srgb, var(--accent, #3b82f6) 40%, var(--border-subtle));
 }
@@ -11180,6 +11189,51 @@ a:hover {
 
 .agent-trace-page__detail-card {
   overflow: auto;
+}
+
+.agent-trace-page__detail-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.agent-trace-page__detail-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.agent-trace-page__detail-turn:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.agent-trace-page__detail-turn-time {
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-trace-page__wire {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.agent-trace-payload--stm.agent-trace-payload--role-user {
+  border-color: color-mix(in srgb, #3b82f6 40%, var(--border-subtle));
+}
+
+.agent-trace-payload--stm.agent-trace-payload--role-assistant {
+  border-color: color-mix(in srgb, #22c55e 40%, var(--border-subtle));
+}
+
+.agent-trace-payload--stm.agent-trace-payload--role-tool,
+.agent-trace-payload--stm.agent-trace-payload--role-observation {
+  border-color: color-mix(in srgb, #a855f7 35%, var(--border-subtle));
 }
 
 .agent-trace-group {

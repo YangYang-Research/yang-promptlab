@@ -35,6 +35,32 @@ pub trait ProviderAdapter: Send + Sync {
         Ok(CompletionOutcome::from_text(content))
     }
 
+    /// Tool calling with a full OpenAI `messages[]` transcript.
+    /// Default flattens to system + last user text and delegates to [`Self::complete_with_tools`].
+    async fn complete_chat_with_tools(
+        &self,
+        messages: &[serde_json::Value],
+        max_tokens: u32,
+        temperature: f32,
+        tools: &[ToolDefinition],
+        tool_choice: Option<&serde_json::Value>,
+    ) -> InferenceResult<CompletionOutcome> {
+        let system = messages
+            .iter()
+            .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str());
+        let prompt = messages
+            .iter()
+            .rev()
+            .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("");
+        self.complete_with_tools(system, prompt, max_tokens, temperature, tools, tool_choice)
+            .await
+    }
+
     async fn chat(
         &self,
         messages: &[ChatMessage],

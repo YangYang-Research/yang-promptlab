@@ -1,33 +1,30 @@
-//! Yazg multi-agent orchestration (manager + domain tools).
+//! Yazg multi-agent orchestration (manager + capability-routed domain tools).
 //!
-//! Hierarchy:
+//! Architecture:
+//! ```text
+//! User → LLM IntentRouter (capability, no tools)
+//!      → CapabilityToolLoader
+//!      → AI Runtime (capability tools only) → optional tool → Response
+//! ```
+//!
+//! The tool-calling LLM never receives the full tool registry — only tools for the
+//! capability chosen by the classifier LLM.
+//!
+//! Hierarchy (tools owned by capabilities, not injected globally):
 //! ```text
 //! Yazg (Manager)
-//! ├── list_workspace      — projects + counts only
-//! ├── project_detail      — one project + targets + scans
-//! ├── list_targets        — targets for a project
-//! ├── target_detail       — one target + profile summary
-//! ├── list_scan           — scans for a project
-//! ├── scan_detail         — one scan + capped findings
-//! ├── list_findings       — paginated findings
-//! ├── finding_detail      — one finding
-//! ├── list_reports        — reports for a project / all
-//! ├── report_detail       — one report preview
-//! ├── create_project      — tool → CreateProjectTools
-//! ├── analyze_endpoint    — tool → AnalyzeEndpointAgent::run
-//! ├── attack_plan         — tool → AttackPlanAgent::run
-//! ├── generate_prompt     — tool → GeneratePromptAgent::run
-//! ├── recommend           — tool → RecommendAgent::run
-//! ├── summary             — tool → SummaryAgent::run
-//! ├── judge               — tool → JudgeCoordinator (+ role vote tools)
-//! ├── AgenticAttackExecutionAgent    — pick + host execute bridge
-//! ├── SequentialAttackExecutionAgent — pick + host execute bridge
-//! └── ReflectionAgent                — structured extractor
+//! ├── Conversation / Knowledge — zero tools
+//! ├── Workspace / Projects     — list_workspace, project_detail, create_project
+//! ├── Targets                  — list_targets, target_detail, analyze_endpoint
+//! ├── Scan / Findings/Reports  — list_scan, scan_detail, list_findings, …
+//! ├── Attack specialists       — attack_plan, generate_prompt, recommend, summary, judge
+//! ├── AgenticAttackExecutionAgent / SequentialAttackExecutionAgent / ReflectionAgent
 //! ```
 
 pub mod agent_log;
 pub mod analyze_endpoint;
 pub mod artifacts;
+pub mod assistant;
 pub mod attack_execution;
 pub mod attack_execution_pick;
 pub mod attack_plan;
@@ -54,6 +51,10 @@ pub mod types;
 pub use agent_log::{log_agent_event, log_llm_call, log_react, log_tool_call, AgentLogContext};
 pub use analyze_endpoint::{AnalyzeEndpointAgent, AnalyzeEndpointAgentOutcome};
 pub use artifacts::{persist_artifacts_ltm, YazgActionKind, YazgArtifacts};
+pub use assistant::{
+    AssistantCapability, CapabilityRegistry, CapabilityToolLoader, IntentResolution, IntentRouter,
+    LoadedCapabilityTools, RouteInput,
+};
 pub use attack_execution::{
     emit_and_record, AgenticAttackExecutionAgent, AttackAttemptObservation, AttackExecutionLlms,
     AttackExecutionOutcome, AttackExecutionRequest, AttackExecutionTools,
@@ -83,8 +84,8 @@ pub use list_workspace::{
     WorkspaceTotals, DEFAULT_FINDINGS_LIMIT, MAX_FINDINGS_LIMIT, MAX_REPORT_PREVIEW_CHARS,
 };
 pub use memory::{
-    AgentMemoryStore, LtmEntry, LtmWrite, MemoryContext, MemoryScopeType, StmEntry, StmRole,
-    StmWrite,
+    extract_session_insights_to_ltm, AgentMemoryStore, LtmEntry, LtmWrite, MemoryContext,
+    MemoryScopeType, StmEntry, StmRole, StmSessionSummary, StmWrite, STM_CONTENT_MAX_CHARS,
 };
 pub use recommend::{RecommendAgent, RecommendAgentOutcome};
 pub use reflection::{ReflectionAgent, ReflectionOutcome, ReflectionRequest};

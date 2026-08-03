@@ -157,6 +157,46 @@ impl ProviderAdapter for RemoteProviderAdapter {
         }
     }
 
+    async fn complete_chat_with_tools(
+        &self,
+        messages: &[serde_json::Value],
+        max_tokens: u32,
+        temperature: f32,
+        tools: &[ToolDefinition],
+        tool_choice: Option<&serde_json::Value>,
+    ) -> InferenceResult<CompletionOutcome> {
+        match self.settings.provider {
+            InferenceProvider::Anthropic | InferenceProvider::Gemini | InferenceProvider::Bedrock => {
+                // Provider-specific tool message formats not wired yet — flatten.
+                ProviderAdapter::complete_chat_with_tools(
+                    self,
+                    messages,
+                    max_tokens,
+                    temperature,
+                    tools,
+                    tool_choice,
+                )
+                .await
+            }
+            _ => {
+                crate::traffic::record_sent();
+                let result = self
+                    .post_openai_compatible_chat(
+                        messages.to_vec(),
+                        max_tokens,
+                        temperature,
+                        tools,
+                        tool_choice,
+                    )
+                    .await;
+                if result.is_ok() {
+                    crate::traffic::record_received();
+                }
+                result
+            }
+        }
+    }
+
     async fn chat(
         &self,
         messages: &[ChatMessage],

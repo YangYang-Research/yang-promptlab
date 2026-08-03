@@ -235,17 +235,49 @@ static SECRET_PATTERNS: &[&str] = &[
     "token",
 ];
 
+/// Mask credential-bearing strings without wiping entire agent LLM payloads.
+///
+/// Short header-like values (e.g. `Bearer …`) are fully redacted. Large JSON/text
+/// bodies (system prompts often contain words like "token") keep structure and only
+/// redact JSON values for secret keys via [`mask_value`].
 pub fn mask_secrets(input: &str) -> String {
-    let lower = input.to_ascii_lowercase();
-    for needle in SECRET_PATTERNS {
-        if lower.contains(needle) {
-            return "[REDACTED]".into();
-        }
-    }
+    let trimmed = input.trim();
+    let lower = trimmed.to_ascii_lowercase();
     if lower.starts_with("basic ") || lower.starts_with("bearer ") {
         return "[REDACTED]".into();
     }
+
+    // Short strings: keep aggressive full redaction (auth headers, env snippets).
+    if input.chars().count() <= 160 {
+        for needle in SECRET_PATTERNS {
+            if lower.contains(needle) {
+                return "[REDACTED]".into();
+            }
+        }
+        return input.to_string();
+    }
+
+    // Prefer JSON key-aware masking for agent stage payloads / large bodies.
+    if let Ok(value) = serde_json::from_str::<Value>(input) {
+        let masked = mask_value(value);
+        if let Ok(serialized) = serde_json::to_string(&masked) {
+            return serialized;
+        }
+    }
+
+    // Large non-JSON prose: do not wipe for incidental words like "token".
     input.to_string()
+}
+
+fn key_looks_secret(key: &str) -> bool {
+    let key_lower = key.to_ascii_lowercase();
+    SECRET_PATTERNS.iter().any(|pattern| {
+        key_lower == *pattern
+            || key_lower.ends_with(&format!("_{pattern}"))
+            || key_lower.ends_with(&format!("-{pattern}"))
+            || key_lower.starts_with(&format!("{pattern}_"))
+            || key_lower.starts_with(&format!("{pattern}-"))
+    })
 }
 
 fn mask_value(value: Value) -> Value {
@@ -254,8 +286,7 @@ fn mask_value(value: Value) -> Value {
         Value::Object(map) => {
             let mut out = Map::new();
             for (k, v) in map {
-                let key_lower = k.to_ascii_lowercase();
-                if SECRET_PATTERNS.iter().any(|p| key_lower.contains(p)) {
+                if key_looks_secret(&k) {
                     out.insert(k, Value::String("[REDACTED]".into()));
                 } else {
                     out.insert(k, mask_value(v));
@@ -497,6 +528,33 @@ mod tests {
     fn masks_secrets_in_message() {
         assert_eq!(mask_secrets("Bearer abc123"), "[REDACTED]");
         assert_eq!(mask_secrets("hello world"), "hello world");
+    }
+
+    #[test]
+    fn does_not_wipe_large_llm_json_for_incidental_token_word() {
+        let body = serde_json::json!({
+            "stage": "llm_request",
+            "body": {
+                "messages": [
+                    { "role": "system", "content": "Never leak API tokens to the user." },
+                    { "role": "user", "content": "hello" }
+                ],
+                "tools": []
+            }
+        });
+        let raw = serde_json::to_string_pretty(&body).unwrap();
+        let masked = mask_secrets(&raw);
+        assert_ne!(masked, "[REDACTED]");
+        assert!(masked.contains("hello"));
+        assert!(masked.contains("llm_request"));
+        // Secret-keyed values still redacted.
+        let with_secret = serde_json::json!({
+            "stage": "llm_request",
+            "body": { "api_key": "sk-live-123", "prompt": "hi" }
+        });
+        let masked_secret = mask_secrets(&serde_json::to_string(&with_secret).unwrap());
+        assert!(masked_secret.contains("[REDACTED]"));
+        assert!(masked_secret.contains("hi"));
     }
 
     #[test]

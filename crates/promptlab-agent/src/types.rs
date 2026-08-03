@@ -101,6 +101,9 @@ pub struct AgentEvent {
     pub agent: AgentId,
     pub kind: AgentEventKind,
     pub message: String,
+    /// Yazg chat STM session (`yazg-chat:<threadId>`) when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
 }
 
 impl AgentEvent {
@@ -109,66 +112,49 @@ impl AgentEvent {
         self
     }
 
-    pub fn started(agent: AgentId, message: impl Into<String>) -> Self {
+    /// Build + persist with optional conversation scope (preferred for Yazg stages).
+    pub fn emit_kind(
+        agent: AgentId,
+        kind: AgentEventKind,
+        message: impl Into<String>,
+        conversation_id: Option<String>,
+    ) -> Self {
         Self {
             agent,
-            kind: AgentEventKind::Started,
+            kind,
             message: message.into(),
+            conversation_id: conversation_id
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
         }
         .emit()
+    }
+
+    pub fn started(agent: AgentId, message: impl Into<String>) -> Self {
+        Self::emit_kind(agent, AgentEventKind::Started, message, None)
     }
 
     pub fn completed(agent: AgentId, message: impl Into<String>) -> Self {
-        Self {
-            agent,
-            kind: AgentEventKind::Completed,
-            message: message.into(),
-        }
-        .emit()
+        Self::emit_kind(agent, AgentEventKind::Completed, message, None)
     }
 
     pub fn failed(agent: AgentId, message: impl Into<String>) -> Self {
-        Self {
-            agent,
-            kind: AgentEventKind::Failed,
-            message: message.into(),
-        }
-        .emit()
+        Self::emit_kind(agent, AgentEventKind::Failed, message, None)
     }
 
     pub fn info(agent: AgentId, message: impl Into<String>) -> Self {
-        Self {
-            agent,
-            kind: AgentEventKind::Info,
-            message: message.into(),
-        }
-        .emit()
+        Self::emit_kind(agent, AgentEventKind::Info, message, None)
     }
 
     pub fn react(agent: AgentId, message: impl Into<String>) -> Self {
-        Self {
-            agent,
-            kind: AgentEventKind::React,
-            message: message.into(),
-        }
-        .emit()
+        Self::emit_kind(agent, AgentEventKind::React, message, None)
     }
 
     pub fn tool_call(agent: AgentId, message: impl Into<String>) -> Self {
-        Self {
-            agent,
-            kind: AgentEventKind::ToolCall,
-            message: message.into(),
-        }
-        .emit()
+        Self::emit_kind(agent, AgentEventKind::ToolCall, message, None)
     }
 
     pub fn llm(agent: AgentId, message: impl Into<String>) -> Self {
-        Self {
-            agent,
-            kind: AgentEventKind::Llm,
-            message: message.into(),
-        }
-        .emit()
+        Self::emit_kind(agent, AgentEventKind::Llm, message, None)
     }
 }

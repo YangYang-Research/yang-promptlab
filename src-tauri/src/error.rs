@@ -23,6 +23,13 @@ impl CommandError {
             message: message.into(),
         }
     }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self {
+            code: ErrorCode::Internal.as_str().to_string(),
+            message: message.into(),
+        }
+    }
 }
 
 impl From<PromptLabError> for CommandError {

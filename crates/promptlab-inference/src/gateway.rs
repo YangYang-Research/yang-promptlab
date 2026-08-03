@@ -160,6 +160,18 @@ impl InferenceClient {
     ) -> InferenceResult<CompletionOutcome> {
         let max_tokens = request.max_tokens.unwrap_or(self.default_max_tokens);
         let temperature = request.temperature.unwrap_or(self.default_temperature);
+        if !request.messages.is_empty() {
+            return self
+                .adapter
+                .complete_chat_with_tools(
+                    &request.messages,
+                    max_tokens,
+                    temperature,
+                    &request.tools,
+                    request.tool_choice.as_ref(),
+                )
+                .await;
+        }
         if request.tools.is_empty() {
             let content = self
                 .adapter
@@ -247,6 +259,7 @@ impl<'a> GatewaySession<'a> {
                 temperature: request.temperature,
                 tools: Vec::new(),
                 tool_choice: None,
+                messages: Vec::new(),
             })
             .await?;
         extract_json_value(&raw)
@@ -293,6 +306,7 @@ impl<'a> GatewaySession<'a> {
                 temperature: Some(0.0),
                 tools: Vec::new(),
                 tool_choice: None,
+                messages: Vec::new(),
             })
             .await?;
         Ok(ConnectivityTestResult {
@@ -330,6 +344,7 @@ impl<'a> GatewaySession<'a> {
                 temperature: request.temperature,
                 tools: Vec::new(),
                 tool_choice: None,
+                messages: Vec::new(),
             })
             .await?;
         Ok(vec![StreamChunk {
@@ -381,6 +396,7 @@ impl<'a> GatewayLlmBridge<'a> {
                 temperature: Some(self.temperature),
                 tools: Vec::new(),
                 tool_choice: None,
+                messages: Vec::new(),
             })
             .await
     }

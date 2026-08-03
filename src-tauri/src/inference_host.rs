@@ -159,6 +159,7 @@ pub async fn gateway_complete(
             temperature: Some(temperature),
             tools: Vec::new(),
             tool_choice: None,
+            messages: Vec::new(),
         })
         .await
         .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
@@ -212,9 +213,50 @@ pub async fn gateway_complete_outcome_as(
     tools: &[promptlab_inference::ToolDefinition],
     tool_choice: Option<serde_json::Value>,
 ) -> CommandResult<promptlab_inference::CompletionOutcome> {
+    gateway_complete_outcome_messages_as(
+        data_dir,
+        inference,
+        model_manager,
+        model_provider,
+        runtime_manager,
+        agent_id,
+        {
+            let mut messages = Vec::new();
+            if let Some(system) = system.map(str::trim).filter(|s| !s.is_empty()) {
+                messages.push(serde_json::json!({
+                    "role": "system",
+                    "content": system,
+                }));
+            }
+            messages.push(serde_json::json!({
+                "role": "user",
+                "content": prompt,
+            }));
+            messages
+        },
+        max_tokens,
+        temperature,
+        tools,
+        tool_choice,
+    )
+    .await
+}
+
+/// OpenAI-style multi-turn tool calling (`messages[]` with assistant/tool roles).
+pub async fn gateway_complete_outcome_messages_as(
+    data_dir: &Path,
+    inference: &InferenceRuntimeManager,
+    model_manager: &LocalModelManager,
+    model_provider: SharedModelProvider,
+    runtime_manager: &mut RuntimeManager,
+    agent_id: &str,
+    messages: Vec<serde_json::Value>,
+    max_tokens: u32,
+    temperature: f32,
+    tools: &[promptlab_inference::ToolDefinition],
+    tool_choice: Option<serde_json::Value>,
+) -> CommandResult<promptlab_inference::CompletionOutcome> {
     let data_dir = data_dir.to_path_buf();
-    let system_owned = system.map(str::to_string);
-    let prompt = prompt.to_string();
     let agent_id = agent_id.to_string();
     let tools = tools.to_vec();
     promptlab_inference::with_agent(&agent_id, || async {
@@ -231,12 +273,13 @@ pub async fn gateway_complete_outcome_as(
             .await
             .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?
             .complete_outcome(CompleteRequest {
-                prompt,
-                system: system_owned,
+                prompt: String::new(),
+                system: None,
                 max_tokens: Some(max_tokens),
                 temperature: Some(temperature),
                 tools,
                 tool_choice,
+                messages,
             })
             .await
             .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
@@ -461,6 +504,51 @@ impl PlannerLlm for HostYazgReactLlm {
             "yazg",
             Some(system),
             prompt,
+            1024,
+            0.2,
+            &wire_tools,
+            Some(serde_json::json!("auto")),
+        )
+        .await
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))?;
+        Ok(promptlab_planner::LlmCompletion {
+            content: outcome.content,
+            tool_calls: outcome
+                .tool_calls
+                .into_iter()
+                .map(|call| promptlab_planner::ToolCall {
+                    id: call.id,
+                    name: call.name,
+                    arguments: call.arguments,
+                })
+                .collect(),
+        })
+    }
+
+    async fn complete_with_tools_messages(
+        &self,
+        messages: &[serde_json::Value],
+        tools: &[promptlab_planner::ToolSpec],
+    ) -> promptlab_planner::PlannerResult<promptlab_planner::LlmCompletion> {
+        let inference = self.inference.lock().await;
+        let manager = self.model_manager.lock().await;
+        let mut runtime_mgr = self.runtime_manager.lock().await;
+        let wire_tools: Vec<promptlab_inference::ToolDefinition> = tools
+            .iter()
+            .map(|tool| promptlab_inference::ToolDefinition {
+                name: tool.name.clone(),
+                description: tool.description.clone(),
+                parameters: tool.parameters.clone(),
+            })
+            .collect();
+        let outcome = gateway_complete_outcome_messages_as(
+            &self.data_dir,
+            &inference,
+            &manager,
+            self.model_provider.clone(),
+            &mut runtime_mgr,
+            "yazg",
+            messages.to_vec(),
             1024,
             0.2,
             &wire_tools,

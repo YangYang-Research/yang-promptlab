@@ -19,6 +19,7 @@ use crate::generate_prompt::{GeneratePromptAgent, TechniquePromptContext};
 use crate::judge_coordinator::JudgeCoordinatorAgent;
 use crate::list_workspace::{clamp_findings_limit, WorkspaceInventory, WorkspaceTools};
 use crate::artifacts::YazgArtifacts;
+use crate::memory::{AgentMemoryStore, MemoryContext};
 use crate::recommend::RecommendAgent;
 use crate::summary::{SummaryAgent, SummaryRequest};
 use crate::tool_result::{ToolResult, TOOL_RESULT_CONTRACT};
@@ -37,6 +38,13 @@ pub struct YazgRunState {
     pub last_workspace_observation: Option<String>,
     /// Accumulated workspace Observations this run (ReAct evidence trail).
     pub workspace_observations: Vec<String>,
+    /// Chat STM session id (`yazg-chat:<threadId>`) for Agent Trace grouping.
+    pub conversation_id: Option<String>,
+    /// Host memory store for AgentCore-style STM event append during the loop.
+    pub memory: Option<Arc<dyn AgentMemoryStore>>,
+    pub memory_ctx: MemoryContext,
+    /// Tools invoked this turn (for LTM extraction).
+    pub tools_used: Vec<String>,
 }
 
 pub type SharedYazgState = Arc<Mutex<YazgRunState>>;

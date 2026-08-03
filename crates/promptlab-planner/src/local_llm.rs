@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use serde_json::Value;
 
 use crate::error::PlannerResult;
 use crate::tools::{LlmCompletion, ToolSpec};
@@ -40,5 +41,33 @@ pub trait PlannerLlm: Send + Sync {
         tools: &[ToolSpec],
     ) -> PlannerResult<LlmCompletion> {
         self.complete_with_tools(prompt, tools).await
+    }
+
+    /// OpenAI/LangChain tool-calling with a full `messages[]` transcript
+    /// (`system` / `user` / `assistant`+`tool_calls` / `tool`).
+    ///
+    /// Default flattens to the last user text and delegates to
+    /// [`Self::complete_with_tools_and_system`].
+    async fn complete_with_tools_messages(
+        &self,
+        messages: &[Value],
+        tools: &[ToolSpec],
+    ) -> PlannerResult<LlmCompletion> {
+        let system = messages
+            .iter()
+            .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .map(str::to_string);
+        let prompt = messages
+            .iter()
+            .rev()
+            .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string();
+        self.complete_with_tools_and_system(system.as_deref(), &prompt, tools)
+            .await
     }
 }

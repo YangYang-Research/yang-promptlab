@@ -6,7 +6,7 @@ use promptlab_core::PromptLabResult;
 
 use crate::error::StorageResultExt;
 use crate::models::{
-    json_string, AgentShortTermMemory, CreateAgentShortTermMemory,
+    json_string, AgentShortTermMemory, AgentStmSessionSummary, CreateAgentShortTermMemory,
 };
 use crate::repositories::AgentShortTermMemoryRepository;
 use crate::util::{ensure_rows_affected, new_id, now};
@@ -72,14 +72,17 @@ impl AgentShortTermMemoryRepository for SqliteAgentShortTermMemoryRepository {
     }
 
     async fn list_by_session(&self, session_id: &str) -> PromptLabResult<Vec<AgentShortTermMemory>> {
+        let cutoff = now();
         sqlx::query_as::<_, AgentShortTermMemory>(
             r#"
             SELECT * FROM agent_short_term_memory
             WHERE session_id = ?
+              AND (expires_at IS NULL OR expires_at > ?)
             ORDER BY created_at ASC
             "#,
         )
         .bind(session_id)
+        .bind(cutoff)
         .fetch_all(&self.pool)
         .await
         .map_storage()
@@ -90,18 +93,78 @@ impl AgentShortTermMemoryRepository for SqliteAgentShortTermMemoryRepository {
         session_id: &str,
         agent_id: &str,
     ) -> PromptLabResult<Vec<AgentShortTermMemory>> {
+        let cutoff = now();
         sqlx::query_as::<_, AgentShortTermMemory>(
             r#"
             SELECT * FROM agent_short_term_memory
             WHERE session_id = ? AND agent_id = ?
+              AND (expires_at IS NULL OR expires_at > ?)
             ORDER BY created_at ASC
             "#,
         )
         .bind(session_id)
         .bind(agent_id)
+        .bind(cutoff)
         .fetch_all(&self.pool)
         .await
         .map_storage()
+    }
+
+    async fn list_sessions(
+        &self,
+        prefix: Option<&str>,
+        limit: usize,
+    ) -> PromptLabResult<Vec<AgentStmSessionSummary>> {
+        let cutoff = now();
+        let limit = limit.clamp(1, 500) as i64;
+        let prefix = prefix
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| format!("{s}%"));
+
+        if let Some(prefix) = prefix {
+            sqlx::query_as::<_, AgentStmSessionSummary>(
+                r#"
+                SELECT
+                    session_id AS session_id,
+                    COUNT(*) AS event_count,
+                    MIN(created_at) AS first_at,
+                    MAX(created_at) AS last_at
+                FROM agent_short_term_memory
+                WHERE (expires_at IS NULL OR expires_at > ?)
+                  AND session_id LIKE ?
+                GROUP BY session_id
+                ORDER BY last_at DESC
+                LIMIT ?
+                "#,
+            )
+            .bind(cutoff)
+            .bind(prefix)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_storage()
+        } else {
+            sqlx::query_as::<_, AgentStmSessionSummary>(
+                r#"
+                SELECT
+                    session_id AS session_id,
+                    COUNT(*) AS event_count,
+                    MIN(created_at) AS first_at,
+                    MAX(created_at) AS last_at
+                FROM agent_short_term_memory
+                WHERE (expires_at IS NULL OR expires_at > ?)
+                GROUP BY session_id
+                ORDER BY last_at DESC
+                LIMIT ?
+                "#,
+            )
+            .bind(cutoff)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_storage()
+        }
     }
 
     async fn delete(&self, id: &str) -> PromptLabResult<()> {
@@ -191,5 +254,66 @@ mod tests {
         let deleted = stm.delete_by_session("sess-1").await.unwrap();
         assert_eq!(deleted, 1);
         assert!(stm.list_by_session("sess-1").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn short_term_memory_list_sessions() {
+        let db = test_database().await;
+        let repos = db.repositories();
+        let stm = repos.agent_short_term_memory();
+
+        stm.create(CreateAgentShortTermMemory {
+            session_id: "yazg-chat:a".into(),
+            agent_id: "yazg".into(),
+            project_id: None,
+            target_id: None,
+            scan_id: None,
+            role: "user".into(),
+            memory_key: Some("message".into()),
+            content: "hi".into(),
+            content_json: None,
+            importance: Some(0.7),
+            expires_at: None,
+        })
+        .await
+        .unwrap();
+        stm.create(CreateAgentShortTermMemory {
+            session_id: "yazg-chat:a".into(),
+            agent_id: "yazg".into(),
+            project_id: None,
+            target_id: None,
+            scan_id: None,
+            role: "assistant".into(),
+            memory_key: Some("reply".into()),
+            content: "hello".into(),
+            content_json: None,
+            importance: Some(0.6),
+            expires_at: None,
+        })
+        .await
+        .unwrap();
+        stm.create(CreateAgentShortTermMemory {
+            session_id: "scan-exec:x".into(),
+            agent_id: "yazg".into(),
+            project_id: None,
+            target_id: None,
+            scan_id: None,
+            role: "system".into(),
+            memory_key: None,
+            content: "start".into(),
+            content_json: None,
+            importance: Some(0.5),
+            expires_at: None,
+        })
+        .await
+        .unwrap();
+
+        let yazg = stm.list_sessions(Some("yazg-chat:"), 10).await.unwrap();
+        assert_eq!(yazg.len(), 1);
+        assert_eq!(yazg[0].session_id, "yazg-chat:a");
+        assert_eq!(yazg[0].event_count, 2);
+
+        let all = stm.list_sessions(None, 10).await.unwrap();
+        assert_eq!(all.len(), 2);
     }
 }

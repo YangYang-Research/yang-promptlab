@@ -1,14 +1,18 @@
 //! SQLite-backed [`promptlab_agent::AgentMemoryStore`] for Yazg + sub-agents.
+//!
+//! STM = session event log (AgentCore short-term).
+//! LTM = durable scoped facts (AgentCore long-term; extraction is host-side).
 
 use promptlab_agent::{
-    AgentMemoryStore, LtmEntry, LtmWrite, MemoryContext, MemoryScopeType, StmEntry, StmWrite,
+    AgentMemoryStore, LtmEntry, LtmWrite, MemoryContext, MemoryScopeType, StmEntry, StmSessionSummary,
+    StmWrite,
 };
 use promptlab_storage::{
     AgentLongTermMemoryRepository, AgentShortTermMemoryRepository, CreateAgentShortTermMemory,
     Repositories, UpsertAgentLongTermMemory,
 };
 use async_trait::async_trait;
-use time::{Duration, OffsetDateTime};
+use time::{Duration, OffsetDateTime, format_description::well_known::Rfc3339};
 
 const STM_DEFAULT_TTL_HOURS: i64 = 24;
 
@@ -21,6 +25,14 @@ impl SqliteAgentMemoryStore {
     pub fn new(repos: Repositories) -> Self {
         Self { repos }
     }
+}
+
+fn format_ts(ts: OffsetDateTime) -> Option<String> {
+    ts.format(&Rfc3339).ok()
+}
+
+fn parse_content_json(raw: Option<String>) -> Option<serde_json::Value> {
+    raw.and_then(|s| serde_json::from_str(&s).ok())
 }
 
 #[async_trait]
@@ -74,11 +86,44 @@ impl AgentMemoryStore for SqliteAgentMemoryStore {
             .into_iter()
             .rev()
             .map(|row| StmEntry {
+                id: row.id,
                 agent_id: row.agent_id,
                 role: row.role,
                 memory_key: row.memory_key,
                 content: row.content,
+                content_json: parse_content_json(row.content_json),
                 importance: row.importance,
+                created_at: format_ts(row.created_at),
+            })
+            .collect())
+    }
+
+    async fn stm_list_sessions(
+        &self,
+        prefix: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<StmSessionSummary>, String> {
+        // Opportunistic prune so ListSessions stays clean.
+        let _ = self
+            .repos
+            .agent_short_term_memory()
+            .prune_expired(OffsetDateTime::now_utc())
+            .await;
+
+        let rows = self
+            .repos
+            .agent_short_term_memory()
+            .list_sessions(prefix, limit)
+            .await
+            .map_err(|err| err.to_string())?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| StmSessionSummary {
+                session_id: row.session_id,
+                event_count: row.event_count.max(0) as usize,
+                first_at: format_ts(row.first_at),
+                last_at: format_ts(row.last_at),
             })
             .collect())
     }

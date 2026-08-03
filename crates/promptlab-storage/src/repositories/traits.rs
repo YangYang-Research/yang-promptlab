@@ -149,6 +149,14 @@ pub trait AgentShortTermMemoryRepository: Send + Sync {
         session_id: &str,
         agent_id: &str,
     ) -> PromptLabResult<Vec<AgentShortTermMemory>>;
+    /// List STM sessions (AgentCore ListSessions), newest activity first.
+    ///
+    /// `prefix` filters `session_id` (e.g. `yazg-chat:`). Expired rows are excluded.
+    async fn list_sessions(
+        &self,
+        prefix: Option<&str>,
+        limit: usize,
+    ) -> PromptLabResult<Vec<crate::models::AgentStmSessionSummary>>;
     async fn delete(&self, id: &str) -> PromptLabResult<()>;
     async fn delete_by_session(&self, session_id: &str) -> PromptLabResult<u64>;
     /// Remove rows with `expires_at` at or before `cutoff`.

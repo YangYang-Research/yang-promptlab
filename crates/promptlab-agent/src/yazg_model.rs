@@ -67,15 +67,11 @@ impl YazgModel {
             message = %truncate_stage(&message, 2_000),
             "yazg stage"
         );
-        let event = match kind {
-            AgentEventKind::Llm => AgentEvent::llm(AgentId::Yazg, message),
-            AgentEventKind::ToolCall => AgentEvent::tool_call(AgentId::Yazg, message),
-            AgentEventKind::React => AgentEvent::react(AgentId::Yazg, message),
-            AgentEventKind::Info => AgentEvent::info(AgentId::Yazg, message),
-            AgentEventKind::Failed => AgentEvent::failed(AgentId::Yazg, message),
-            AgentEventKind::Started => AgentEvent::started(AgentId::Yazg, message),
-            AgentEventKind::Completed => AgentEvent::completed(AgentId::Yazg, message),
+        let conversation_id = match &self.stage_sink {
+            Some(sink) => sink.lock().await.conversation_id.clone(),
+            None => None,
         };
+        let event = AgentEvent::emit_kind(AgentId::Yazg, kind, message, conversation_id);
         if let Some(sink) = &self.stage_sink {
             sink.lock().await.artifacts.events.push(event);
         }
@@ -111,20 +107,20 @@ impl CompletionModel for YazgModel {
         &self,
         request: CompletionRequest,
     ) -> Result<CompletionResponse<Self::Response>, CompletionError> {
-        // OpenAI-style split: system role vs user transcript (never embed System: in user).
-        let (mut system, prompt) = split_completion_request(&request);
+        // OpenAI/LangChain tool-calling: full messages[] with assistant+tool_calls / tool roles.
+        let mut messages = build_openai_messages(&request);
 
         match request.tool_choice.as_ref() {
             Some(ToolChoice::Required) => {
-                append_system_constraint(
-                    &mut system,
+                append_system_constraint_to_messages(
+                    &mut messages,
                     "You MUST call exactly one tool now. \
                      Do not answer with plain text. Do not claim a tool already ran.",
                 );
             }
             Some(ToolChoice::Specific { function_names }) if !function_names.is_empty() => {
-                append_system_constraint(
-                    &mut system,
+                append_system_constraint_to_messages(
+                    &mut messages,
                     &format!(
                         "You MUST call tool `{}` now. \
                          Do not answer with plain text. Do not claim a tool already ran.",
@@ -141,13 +137,10 @@ impl CompletionModel for YazgModel {
             .map(|tool| ToolSpec::new(&tool.name, &tool.description, tool.parameters.clone()))
             .collect::<Vec<_>>();
 
-        let system_ref = system.as_deref();
-        // Wire-shaped payload (what HostYazgLlm maps to OpenAI chat/completions).
+        // Body mapped to HostYazgLlm → OpenAI chat/completions (messages[] + tools).
+        // This is the LLM wire request Agent Trace should display (not Rig completion_call).
         let request_body = json!({
-            "messages": [
-                { "role": "system", "content": system_ref },
-                { "role": "user", "content": prompt },
-            ],
+            "messages": messages,
             "model_params": {
                 "temperature": request.temperature,
                 "max_tokens": request.max_tokens,
@@ -169,16 +162,16 @@ impl CompletionModel for YazgModel {
         .await;
 
         let outcome = if tools.is_empty() {
-            let content = self
+            let raw = self
                 .llm
-                .complete_with_system(system_ref, &prompt)
+                .complete_with_tools_messages(&messages, &[])
                 .await
                 .map_err(|err| CompletionError::ProviderError(err.to_string()))?;
-            ensure_non_empty_text(normalize_completion_text(LlmCompletion::from_text(content)))
+            ensure_non_empty_text(normalize_completion_text(raw))
         } else {
             let raw = self
                 .llm
-                .complete_with_tools_and_system(system_ref, &prompt, &tools)
+                .complete_with_tools_messages(&messages, &tools)
                 .await
                 .map_err(|err| CompletionError::ProviderError(err.to_string()))?;
             let cleaned = normalize_completion_text(sanitize_completion(raw, &tools));
@@ -187,9 +180,9 @@ impl CompletionModel for YazgModel {
                 // when tools are bound (tool_choice=auto). Fall back to text-only
                 // like a plain Rig agent without tools.
                 warn!("empty tool-aware completion; retrying text-only");
-                let mut retry_system = system.clone();
-                append_system_constraint(
-                    &mut retry_system,
+                let mut retry_messages = messages.clone();
+                append_system_constraint_to_messages(
+                    &mut retry_messages,
                     "Reply in markdown or plain text only. \
                      Do not call tools. Do not emit JSON, tool envelopes, or assistant_reply.",
                 );
@@ -197,23 +190,18 @@ impl CompletionModel for YazgModel {
                     AgentEventKind::Llm,
                     format_stage_payload(
                         "llm_request_retry_text_only",
-                        json!({
-                            "messages": [
-                                { "role": "system", "content": retry_system },
-                                { "role": "user", "content": prompt },
-                            ],
-                        }),
+                        json!({ "messages": retry_messages }),
                     ),
                 )
                 .await;
                 match self
                     .llm
-                    .complete_with_system(retry_system.as_deref(), &prompt)
+                    .complete_with_tools_messages(&retry_messages, &[])
                     .await
                 {
-                    Ok(text) if !text.trim().is_empty() => ensure_non_empty_text(
-                        normalize_completion_text(LlmCompletion::from_text(text)),
-                    ),
+                    Ok(text) if !completion_is_empty(&text) => {
+                        ensure_non_empty_text(normalize_completion_text(text))
+                    }
                     Ok(_) | Err(_) => ensure_non_empty_text(cleaned),
                 }
             } else {
@@ -858,11 +846,14 @@ fn completion_to_assistant_content(
     }
 }
 
-/// Split Rig [`CompletionRequest`] into OpenAI-style system + user transcript.
+/// Build OpenAI-style `messages[]` from a Rig [`CompletionRequest`].
 ///
-/// System comes from `preamble` and any `Message::System` in `chat_history`.
-/// User prompt is only user/assistant/tool turns (+ documents) — never `System:` text.
-fn split_completion_request(request: &CompletionRequest) -> (Option<String>, String) {
+/// Roles:
+/// - `system` from preamble + `Message::System`
+/// - `user` from text user content
+/// - `assistant` with optional `tool_calls` (arguments as JSON **strings**)
+/// - `tool` with `tool_call_id` from `UserContent::ToolResult`
+fn build_openai_messages(request: &CompletionRequest) -> Vec<serde_json::Value> {
     let mut system_parts: Vec<String> = Vec::new();
     if let Some(preamble) = request
         .preamble
@@ -873,7 +864,7 @@ fn split_completion_request(request: &CompletionRequest) -> (Option<String>, Str
         system_parts.push(preamble.to_string());
     }
 
-    let mut transcript = String::new();
+    let mut messages: Vec<serde_json::Value> = Vec::new();
     for message in request.chat_history.iter() {
         match message {
             Message::System { content } => {
@@ -886,51 +877,56 @@ fn split_completion_request(request: &CompletionRequest) -> (Option<String>, Str
                 }
             }
             Message::User { content } => {
-                transcript.push_str("User:\n");
-                transcript.push_str(&flatten_user_content(content));
-                transcript.push_str("\n\n");
+                push_user_openai_messages(&mut messages, content);
             }
             Message::Assistant { content, .. } => {
-                transcript.push_str("Assistant:\n");
-                transcript.push_str(&flatten_assistant_content(content));
-                transcript.push_str("\n\n");
+                if let Some(msg) = assistant_to_openai_message(content) {
+                    messages.push(msg);
+                }
             }
         }
     }
     for doc in &request.documents {
-        transcript.push_str("Context:\n");
-        transcript.push_str(&doc.to_string());
-        transcript.push('\n');
+        messages.push(json!({
+            "role": "user",
+            "content": format!("Context:\n{doc}"),
+        }));
     }
 
-    let system = if system_parts.is_empty() {
-        None
-    } else {
-        Some(system_parts.join("\n\n"))
-    };
-    (system, transcript.trim().to_string())
+    if !system_parts.is_empty() {
+        messages.insert(
+            0,
+            json!({
+                "role": "system",
+                "content": system_parts.join("\n\n"),
+            }),
+        );
+    }
+    messages
 }
 
-fn append_system_constraint(system: &mut Option<String>, constraint: &str) {
-    let constraint = constraint.trim();
-    if constraint.is_empty() {
-        return;
-    }
-    match system {
-        Some(existing) => {
-            existing.push_str("\n\n");
-            existing.push_str(constraint);
+fn push_user_openai_messages(messages: &mut Vec<serde_json::Value>, content: &OneOrMany<UserContent>) {
+    let mut text_parts: Vec<String> = Vec::new();
+    let flush_text = |parts: &mut Vec<String>, out: &mut Vec<serde_json::Value>| {
+        if parts.is_empty() {
+            return;
         }
-        None => *system = Some(constraint.to_string()),
-    }
-}
+        let joined = parts.join("\n");
+        parts.clear();
+        let trimmed = joined.trim();
+        if !trimmed.is_empty() {
+            out.push(json!({ "role": "user", "content": trimmed }));
+        }
+    };
 
-fn flatten_user_content(content: &OneOrMany<UserContent>) -> String {
-    let mut parts = Vec::new();
     for item in content.iter() {
         match item {
-            UserContent::Text(text) => parts.push(text.text.clone()),
+            UserContent::Text(text) => {
+                text_parts.push(text.text.clone());
+            }
             UserContent::ToolResult(result) => {
+                // Tool results must be separate `role: tool` messages (not embedded in user text).
+                flush_text(&mut text_parts, messages);
                 let body = result
                     .content
                     .iter()
@@ -940,30 +936,102 @@ fn flatten_user_content(content: &OneOrMany<UserContent>) -> String {
                     })
                     .collect::<Vec<_>>()
                     .join("\n");
-                parts.push(format!("[tool_result id={}]\n{body}", result.id));
+                messages.push(json!({
+                    "role": "tool",
+                    "tool_call_id": result.id,
+                    "content": body,
+                }));
             }
-            other => parts.push(format!("{other:?}")),
+            other => {
+                text_parts.push(format!("{other:?}"));
+            }
         }
     }
-    parts.join("\n")
+    flush_text(&mut text_parts, messages);
 }
 
-fn flatten_assistant_content(content: &OneOrMany<AssistantContent>) -> String {
-    let mut parts = Vec::new();
+fn assistant_to_openai_message(content: &OneOrMany<AssistantContent>) -> Option<serde_json::Value> {
+    let mut text_parts: Vec<String> = Vec::new();
+    let mut tool_calls: Vec<serde_json::Value> = Vec::new();
     for item in content.iter() {
         match item {
-            AssistantContent::Text(text) => parts.push(text.text.clone()),
-            AssistantContent::ToolCall(call) => parts.push(format!(
-                "[tool_call id={} name={} args={}]",
-                call.id, call.function.name, call.function.arguments
-            )),
-            AssistantContent::Reasoning(reasoning) => {
-                parts.push(format!("[reasoning] {reasoning:?}"));
+            AssistantContent::Text(text) => {
+                if !text.text.trim().is_empty() {
+                    text_parts.push(text.text.clone());
+                }
             }
-            AssistantContent::Image(_) => parts.push("[image]".into()),
+            AssistantContent::ToolCall(call) => {
+                tool_calls.push(json!({
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.function.name,
+                        // OpenAI requires `arguments` as a JSON-encoded string.
+                        "arguments": stringify_tool_arguments(&call.function.arguments),
+                    }
+                }));
+            }
+            AssistantContent::Reasoning(reasoning) => {
+                let display = reasoning.display_text();
+                if !display.trim().is_empty() {
+                    text_parts.push(format!("[reasoning] {display}"));
+                }
+            }
+            AssistantContent::Image(_) => text_parts.push("[image]".into()),
         }
     }
-    parts.join("\n")
+    if text_parts.is_empty() && tool_calls.is_empty() {
+        return None;
+    }
+    let content_value = if text_parts.is_empty() {
+        serde_json::Value::Null
+    } else {
+        json!(text_parts.join("\n"))
+    };
+    let mut msg = json!({
+        "role": "assistant",
+        "content": content_value,
+    });
+    if !tool_calls.is_empty() {
+        msg["tool_calls"] = json!(tool_calls);
+    }
+    Some(msg)
+}
+
+fn stringify_tool_arguments(args: &serde_json::Value) -> String {
+    match args {
+        serde_json::Value::String(s) => s.clone(),
+        other => serde_json::to_string(other).unwrap_or_else(|_| "{}".into()),
+    }
+}
+
+fn append_system_constraint_to_messages(messages: &mut Vec<serde_json::Value>, constraint: &str) {
+    let constraint = constraint.trim();
+    if constraint.is_empty() {
+        return;
+    }
+    if let Some(first) = messages.first_mut() {
+        if first.get("role").and_then(|r| r.as_str()) == Some("system") {
+            let existing = first
+                .get("content")
+                .and_then(|c| c.as_str())
+                .unwrap_or("")
+                .to_string();
+            if existing.is_empty() {
+                first["content"] = json!(constraint);
+            } else {
+                first["content"] = json!(format!("{existing}\n\n{constraint}"));
+            }
+            return;
+        }
+    }
+    messages.insert(
+        0,
+        json!({
+            "role": "system",
+            "content": constraint,
+        }),
+    );
 }
 
 #[cfg(test)]
@@ -995,12 +1063,18 @@ mod tests {
             additional_params: None,
             output_schema: None,
         };
-        let (system, prompt) = split_completion_request(&request);
-        assert_eq!(system.as_deref(), Some("You are Yazg preamble"));
-        assert!(prompt.starts_with("User:\nhi"), "prompt={prompt}");
+        let messages = build_openai_messages(&request);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[0]["content"], "You are Yazg preamble");
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[1]["content"], "hi");
         assert!(
-            !prompt.contains("System:") && !prompt.contains("You are Yazg preamble"),
-            "system leaked into user prompt: {prompt}"
+            messages
+                .iter()
+                .filter(|m| m["role"] == "user")
+                .all(|m| !m["content"].as_str().unwrap_or("").contains("You are Yazg preamble")),
+            "system leaked into user content: {messages:?}"
         );
     }
 
@@ -1028,8 +1102,66 @@ mod tests {
             additional_params: None,
             output_schema: None,
         };
-        let (system, _) = split_completion_request(&request);
-        assert_eq!(system.as_deref(), Some("Same system"));
+        let messages = build_openai_messages(&request);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[0]["content"], "Same system");
+    }
+
+    #[test]
+    fn assistant_tool_call_and_tool_result_roles() {
+        use rig::message::{Text, ToolCall, ToolFunction, ToolResult, ToolResultContent, UserContent};
+
+        let history = OneOrMany::many(vec![
+            Message::User {
+                content: OneOrMany::one(UserContent::text("list projects")),
+            },
+            Message::Assistant {
+                id: None,
+                content: OneOrMany::one(AssistantContent::ToolCall(ToolCall::new(
+                    "call-1".into(),
+                    ToolFunction::new("list_workspace".into(), json!({"scope": "projects"})),
+                ))),
+            },
+            Message::User {
+                content: OneOrMany::one(UserContent::ToolResult(ToolResult {
+                    id: "call-1".into(),
+                    call_id: None,
+                    content: OneOrMany::one(ToolResultContent::Text(Text::new("projects: []"))),
+                })),
+            },
+        ])
+        .expect("history");
+        let request = CompletionRequest {
+            model: None,
+            preamble: Some("You are Yazg".into()),
+            chat_history: history,
+            documents: Vec::new(),
+            tools: Vec::new(),
+            temperature: None,
+            max_tokens: None,
+            tool_choice: None,
+            additional_params: None,
+            output_schema: None,
+        };
+        let messages = build_openai_messages(&request);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[1]["content"], "list projects");
+        assert_eq!(messages[2]["role"], "assistant");
+        assert!(messages[2]["content"].is_null());
+        assert_eq!(messages[2]["tool_calls"][0]["id"], "call-1");
+        assert_eq!(
+            messages[2]["tool_calls"][0]["function"]["name"],
+            "list_workspace"
+        );
+        // arguments must be a JSON string, not an object
+        assert_eq!(
+            messages[2]["tool_calls"][0]["function"]["arguments"].as_str(),
+            Some(r#"{"scope":"projects"}"#)
+        );
+        assert_eq!(messages[3]["role"], "tool");
+        assert_eq!(messages[3]["tool_call_id"], "call-1");
+        assert_eq!(messages[3]["content"], "projects: []");
     }
 
     #[test]
