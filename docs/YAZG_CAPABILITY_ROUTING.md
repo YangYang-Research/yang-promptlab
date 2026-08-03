@@ -57,7 +57,8 @@ Agent Trace shows a **stage timeline** from `agents.log` plus STM from SQLite:
 
 - `capability_classify_request` / `capability_classify_response` (LLM #1)
 - `llm_request` / `llm_response` (LLM #2, capability tools only)
-- `completion_*` / `tool_*` when present
+- `tool_*` when present
+- (`completion_*` Rig hooks are logged but hidden in Trace — same turn as `llm_*`)
 - Info: capability, loaded tool count/names, tool_used, latency, `router=llm`
 
 Deleting a conversation in Assistant also deletes STM (`yazg-chat:<threadId>`). Trace only lists sessions still present in Assistant.

@@ -63,16 +63,18 @@ const LLM_WIRE_STAGES = new Set([
   "llm_request_retry_text_only",
 ]);
 
-/** Stages worth showing in the Trace timeline (pairs + singles). */
+/** Stages worth showing in the Trace timeline (pairs + singles).
+ *
+ * `completion_call` / `completion_response` are Rig hook mirrors of the same
+ * turn as `llm_request` / `llm_response` — hide them so the timeline is not
+ * duplicated.
+ */
 const TRACE_TIMELINE_STAGES = new Set([
   ...LLM_WIRE_STAGES,
   "capability_classify_request",
   "capability_classify_response",
-  "completion_call",
-  "completion_response",
   "tool_call_request",
   "tool_result_response",
-  "model_turn_finished",
 ]);
 
 export function isLlmWireStage(stage: string | null | undefined): boolean {
@@ -81,12 +83,14 @@ export function isLlmWireStage(stage: string | null | undefined): boolean {
 
 export function isTraceTimelineStage(stage: string | null | undefined): boolean {
   if (stage == null) return false;
+  if (stage.startsWith("completion_") || stage.startsWith("model_turn")) {
+    return false;
+  }
   if (TRACE_TIMELINE_STAGES.has(stage)) return true;
   return (
     stage.startsWith("capability_") ||
     stage.startsWith("llm_") ||
-    stage.startsWith("tool_") ||
-    stage.startsWith("completion_")
+    stage.startsWith("tool_")
   );
 }
 

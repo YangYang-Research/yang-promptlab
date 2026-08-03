@@ -9,6 +9,7 @@ import {
 import {
   Button,
   Card,
+  EmptyState,
   PageHeader,
   RefreshButton,
   SearchInput,
@@ -52,12 +53,36 @@ function formatTime(ts?: string | null): string {
   }
 }
 
-function sessionLabel(sessionId: string): string {
-  const title = yazgChatThreadTitle(sessionId);
+function formatRelative(ts?: string | null): string {
+  if (!ts) return "—";
+  try {
+    const then = new Date(ts).getTime();
+    const diff = Date.now() - then;
+    if (Number.isNaN(diff)) return formatTime(ts);
+    const mins = Math.floor(diff / 60_000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    return formatTime(ts);
+  } catch {
+    return ts;
+  }
+}
+
+function sessionParts(sessionId: string): { title: string; shortId: string } {
   const shortId = sessionId.startsWith("yazg-chat:")
     ? sessionId.slice("yazg-chat:".length)
     : sessionId;
-  return title ? `${title} · ${shortId}` : shortId;
+  const title = yazgChatThreadTitle(sessionId)?.trim() || "Untitled chat";
+  return { title, shortId };
+}
+
+function sessionLabel(sessionId: string): string {
+  const { title, shortId } = sessionParts(sessionId);
+  return `${title} · ${shortId}`;
 }
 
 function parseLogLines(content: string): OcsfEventDto[] {
@@ -112,18 +137,42 @@ function toStageEvent(event: OcsfEventDto): StageEventLike {
 function roleBadge(role: string): string {
   switch (role) {
     case "user":
-      return "USER";
+      return "User";
     case "assistant":
-      return "ASST";
+      return "Asst";
     case "tool":
-      return "TOOL";
+      return "Tool";
     case "observation":
-      return "OBS";
+      return "Obs";
     case "system":
-      return "SYS";
+      return "Sys";
     default:
-      return role.slice(0, 4).toUpperCase();
+      return role.slice(0, 4);
   }
+}
+
+function familyClass(family: string): string {
+  const key = family.toLowerCase();
+  if (key.startsWith("capability")) return "capability";
+  if (key.startsWith("llm")) return "llm";
+  if (key.startsWith("tool")) return "tool";
+  if (key.startsWith("completion")) return "completion";
+  return "other";
+}
+
+function PayloadBody({ text, defaultOpen = false }: { text: string; defaultOpen?: boolean }) {
+  const long = text.length > 480 || text.split("\n").length > 12;
+  if (!long) {
+    return <pre className="agent-trace-payload__body">{text}</pre>;
+  }
+  return (
+    <details className="agent-trace-payload__fold" open={defaultOpen}>
+      <summary>
+        Payload · {text.length.toLocaleString()} chars
+      </summary>
+      <pre className="agent-trace-payload__body">{text}</pre>
+    </details>
+  );
 }
 
 function StmEventCard({ event }: { event: AgentStmEventDto }) {
@@ -136,63 +185,61 @@ function StmEventCard({ event }: { event: AgentStmEventDto }) {
       : event.content;
 
   return (
-    <section
+    <article
       className={`agent-trace-payload agent-trace-payload--stm agent-trace-payload--role-${event.role}`}
     >
       <header className="agent-trace-payload__head">
         <span className="agent-trace-payload__badge">{roleBadge(event.role)}</span>
         <span className="agent-trace-payload__stage">
-          {event.memoryKey ? `${event.role} · ${event.memoryKey}` : event.role}
+          {event.memoryKey ? event.memoryKey : event.role}
         </span>
         <span className="agent-trace-payload__meta">
-          {event.agentId}
-          {event.createdAt ? ` · ${event.createdAt}` : ""}
+          {formatRelative(event.createdAt)}
         </span>
       </header>
-      <pre className="agent-trace-payload__body">{body}</pre>
-    </section>
+      <PayloadBody text={body} />
+    </article>
   );
 }
 
 function WirePair({ group }: { group: StageTraceGroup }) {
   if (group.kind !== "pair") return null;
+  const family = familyClass(group.family);
   return (
-    <article className="agent-trace-group">
+    <article className={`agent-trace-group agent-trace-group--${family}`}>
       <header className="agent-trace-group__head">
-        <strong>{group.family}</strong>
-        <span>
-          {stageLabel(group.request.stage, group.request.event.kind)} →{" "}
+        <span className={`agent-trace-group__family agent-trace-group__family--${family}`}>
+          {group.family}
+        </span>
+        <span className="agent-trace-group__stages">
+          {stageLabel(group.request.stage, group.request.event.kind)}
+          <span aria-hidden="true"> → </span>
           {stageLabel(group.response.stage, group.response.event.kind)}
+        </span>
+        <span className="agent-trace-group__time">
+          {formatRelative(
+            group.request.event.timestamp ?? group.response.event.timestamp,
+          )}
         </span>
       </header>
       <div className="agent-trace-group__grid">
         <section className="agent-trace-payload agent-trace-payload--req">
           <header className="agent-trace-payload__head">
-            <span className="agent-trace-payload__badge">REQ</span>
+            <span className="agent-trace-payload__badge">In</span>
             <span className="agent-trace-payload__stage">
               {stageLabel(group.request.stage, group.request.event.kind)}
             </span>
-            {group.request.event.timestamp ? (
-              <span className="agent-trace-payload__meta">
-                {formatTime(group.request.event.timestamp)}
-              </span>
-            ) : null}
           </header>
-          <pre className="agent-trace-payload__body">{group.request.pretty}</pre>
+          <PayloadBody text={group.request.pretty} defaultOpen />
         </section>
         <section className="agent-trace-payload agent-trace-payload--res">
           <header className="agent-trace-payload__head">
-            <span className="agent-trace-payload__badge">RES</span>
+            <span className="agent-trace-payload__badge">Out</span>
             <span className="agent-trace-payload__stage">
               {stageLabel(group.response.stage, group.response.event.kind)}
             </span>
-            {group.response.event.timestamp ? (
-              <span className="agent-trace-payload__meta">
-                {formatTime(group.response.event.timestamp)}
-              </span>
-            ) : null}
           </header>
-          <pre className="agent-trace-payload__body">{group.response.pretty}</pre>
+          <PayloadBody text={group.response.pretty} defaultOpen />
         </section>
       </div>
     </article>
@@ -203,12 +250,17 @@ function WireSingle({ group }: { group: StageTraceGroup }) {
   if (group.kind !== "single") return null;
   const { item } = group;
   const badge =
-    item.role === "request" ? "REQ" : item.role === "response" ? "RES" : "EVT";
+    item.role === "request" ? "In" : item.role === "response" ? "Out" : "Evt";
+  const family = familyClass(item.stage ?? item.event.kind);
   return (
-    <article className="agent-trace-group">
+    <article className={`agent-trace-group agent-trace-group--${family}`}>
       <header className="agent-trace-group__head">
-        <strong>{item.stage ? stageLabel(item.stage, item.event.kind) : item.event.kind}</strong>
-        <span>{item.event.timestamp ? formatTime(item.event.timestamp) : ""}</span>
+        <span className={`agent-trace-group__family agent-trace-group__family--${family}`}>
+          {item.stage ? stageLabel(item.stage, item.event.kind) : item.event.kind}
+        </span>
+        <span className="agent-trace-group__time">
+          {item.event.timestamp ? formatRelative(item.event.timestamp) : ""}
+        </span>
       </header>
       <section
         className={`agent-trace-payload agent-trace-payload--${
@@ -221,7 +273,7 @@ function WireSingle({ group }: { group: StageTraceGroup }) {
             {stageLabel(item.stage, item.event.kind)}
           </span>
         </header>
-        <pre className="agent-trace-payload__body">{item.pretty}</pre>
+        <PayloadBody text={item.pretty} defaultOpen />
       </section>
     </article>
   );
@@ -392,9 +444,11 @@ export function AgentTracePage() {
     const q = query.trim().toLowerCase();
     if (!q) return sessions;
     return sessions.filter((session) => {
-      const label = sessionLabel(session.sessionId).toLowerCase();
+      const { title, shortId } = sessionParts(session.sessionId);
       return (
-        session.sessionId.toLowerCase().includes(q) || label.includes(q)
+        session.sessionId.toLowerCase().includes(q) ||
+        title.toLowerCase().includes(q) ||
+        shortId.toLowerCase().includes(q)
       );
     });
   }, [sessions, query]);
@@ -415,6 +469,7 @@ export function AgentTracePage() {
     filteredSessions[0] ??
     null;
 
+  const selectedParts = selected ? sessionParts(selected.sessionId) : null;
   const pairCount = wireGroups.filter((g) => g.kind === "pair").length;
   const singleCount = wireGroups.filter((g) => g.kind === "single").length;
 
@@ -422,16 +477,21 @@ export function AgentTracePage() {
     <div className="agent-trace-page">
       <PageHeader
         title="Agent Trace"
-        description="Yazg conversations still in Assistant. Timeline = capability classify + LLM wire + tool/completion stages from agents.log; STM = SQLite short-term memory."
+        description="Inspect Yazg turns still live in Assistant — capability routing, LLM wire, tools, and STM."
         actions={
           <>
-            <label className="agent-trace-page__auto">
+            <label
+              className={`agent-trace-page__live${
+                autoRefresh ? " agent-trace-page__live--on" : ""
+              }`}
+            >
               <input
                 type="checkbox"
                 checked={autoRefresh}
                 onChange={(event) => setAutoRefresh(event.target.checked)}
               />
-              Auto-refresh
+              <span className="agent-trace-page__live-dot" aria-hidden="true" />
+              Live
             </label>
             <Button
               variant="secondary"
@@ -439,7 +499,7 @@ export function AgentTracePage() {
               onClick={() => void openLogsFolder()}
               disabled={!backendConnected}
             >
-              Open logs folder
+              Logs folder
             </Button>
             <RefreshButton
               onClick={() => {
@@ -455,134 +515,207 @@ export function AgentTracePage() {
       />
 
       {!backendConnected ? (
-        <Card className="detail-section">
-          <p className="text-muted">Connect the desktop backend to load STM from SQLite.</p>
+        <Card className="agent-trace-page__banner">
+          <EmptyState
+            title="Backend offline"
+            description="Connect the desktop backend to read STM from SQLite and pair stages from agents.log."
+          />
         </Card>
       ) : null}
 
       {error ? (
-        <Card className="detail-section">
-          <p className="text-danger">{error}</p>
+        <Card className="agent-trace-page__banner agent-trace-page__banner--error">
+          <p className="agent-trace-page__error">{error}</p>
         </Card>
       ) : null}
 
-      <div className="agent-trace-page__toolbar">
-        <SearchInput
-          value={query}
-          onChange={setQuery}
-          placeholder="Search title, conversation ID, or STM content…"
-        />
-        <span className="agent-trace-page__count text-muted text-sm">
-          STM · {filteredSessions.length} conversations
-          {selected ? ` · ${filteredEvents.length} events` : ""}
-          {selected && wireGroups.length > 0
-            ? ` · ${pairCount} pairs / ${singleCount} singles`
-            : ""}
-        </span>
-      </div>
-
       <div className="agent-trace-page__layout">
-        <Card className="detail-section agent-trace-page__list-card">
-          <h3 className="agent-trace-page__list-title">Conversations (STM)</h3>
+        <aside className="agent-trace-page__rail">
+          <div className="agent-trace-page__rail-head">
+            <div>
+              <p className="agent-trace-page__eyebrow">Sessions</p>
+              <h3 className="agent-trace-page__rail-title">Conversations</h3>
+            </div>
+            <span className="agent-trace-page__metric">
+              {filteredSessions.length}
+            </span>
+          </div>
+
+          <SearchInput
+            value={query}
+            onChange={setQuery}
+            placeholder="Filter by title or id…"
+          />
+
           {filteredSessions.length === 0 ? (
-            <p className="text-muted text-sm">
-              No Yazg STM sessions for live Assistant chats. Chat in Yazg to
-              append session events. <Link to="/yazg">Open Yazg</Link>
-            </p>
+            <EmptyState
+              title="No live traces"
+              description="Chat in Yazg to append STM. Deleted Assistant threads are pruned here."
+              action={
+                <Link className="btn btn--secondary btn--sm" to="/yazg">
+                  Open Yazg
+                </Link>
+              }
+            />
           ) : (
             <ul className="agent-trace-page__list">
               {filteredSessions.map((session) => {
                 const active = session.sessionId === selected?.sessionId;
+                const { title, shortId } = sessionParts(session.sessionId);
                 return (
-                  <li key={session.sessionId} className="agent-trace-page__list-row">
-                    <button
-                      type="button"
-                      className={`agent-trace-page__list-item agent-trace-page__list-item--conversation${
-                        active ? " agent-trace-page__list-item--active" : ""
+                  <li key={session.sessionId}>
+                    <div
+                      className={`agent-trace-page__session${
+                        active ? " agent-trace-page__session--active" : ""
                       }`}
-                      onClick={() => setSelectedSessionId(session.sessionId)}
                     >
-                      <span className="agent-trace-page__list-agent">
-                        {session.eventCount} evt
-                      </span>
-                      <span
-                        className="agent-trace-page__list-label"
-                        title={session.sessionId}
+                      <button
+                        type="button"
+                        className="agent-trace-page__session-main"
+                        onClick={() => setSelectedSessionId(session.sessionId)}
                       >
-                        {sessionLabel(session.sessionId)}
-                      </span>
-                      <span className="agent-trace-page__list-time">
-                        {formatTime(session.lastAt)}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="agent-trace-page__list-delete"
-                      title="Delete STM for this conversation"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void removeSession(session.sessionId);
-                      }}
-                    >
-                      Delete
-                    </button>
+                        <span className="agent-trace-page__session-title">
+                          {title}
+                        </span>
+                        <span
+                          className="agent-trace-page__session-id"
+                          title={session.sessionId}
+                        >
+                          {shortId}
+                        </span>
+                        <span className="agent-trace-page__session-meta">
+                          <span className="agent-trace-page__session-count">
+                            {session.eventCount} evt
+                          </span>
+                          <span>{formatRelative(session.lastAt)}</span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="agent-trace-page__session-delete"
+                        title="Delete STM for this conversation"
+                        onClick={() => void removeSession(session.sessionId)}
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </li>
                 );
               })}
             </ul>
           )}
-        </Card>
+        </aside>
 
-        <Card className="detail-section agent-trace-page__detail-card">
-          <h3 className="agent-trace-page__list-title">
-            {selected
-              ? `Trace · ${sessionLabel(selected.sessionId)}`
-              : "Trace detail"}
-          </h3>
-          {selected ? (
-            <div className="agent-trace-page__detail-stack">
-              <div className="agent-trace-page__wire">
-                <h4 className="agent-trace-page__list-title">
-                  Stage timeline ({wireGroups.length})
-                </h4>
-                <p className="text-muted text-sm agent-trace-page__hint">
-                  Capability classify → LLM wire → tool/completion (from agents.log).
-                </p>
-                {wireGroups.length === 0 ? (
-                  <p className="text-muted text-sm">
-                    No stage timeline pairs yet for this conversation. Send a
-                    new Yazg message, then refresh. (Older fully `[REDACTED]` log
-                    lines are skipped.)
-                  </p>
-                ) : (
-                  wireGroups.map((group) => (
-                    <TimelineGroup key={group.id} group={group} />
-                  ))
-                )}
-              </div>
-
-              <h4 className="agent-trace-page__list-title">STM events</h4>
-              {filteredEvents.length === 0 ? (
-                <p className="text-muted text-sm">No events in this session.</p>
-              ) : (
-                filteredEvents.map((event) => (
-                  <StmEventCard key={event.id} event={event} />
-                ))
-              )}
-
-              {ltm.length > 0 ? (
-                <details className="agent-trace-raw">
-                  <summary>LTM insights (extracted)</summary>
-                  <pre className="agent-trace-payload__body">
-                    {prettyJson(ltm)}
-                  </pre>
-                </details>
-              ) : null}
-            </div>
+        <section className="agent-trace-page__detail">
+          {!selected || !selectedParts ? (
+            <EmptyState
+              title="Select a conversation"
+              description="Pick a live Yazg session to inspect classify → LLM → tool stages and STM."
+            />
           ) : (
-            <p className="text-muted text-sm">Select a conversation.</p>
+            <>
+              <header className="agent-trace-page__detail-head">
+                <div className="agent-trace-page__detail-copy">
+                  <p className="agent-trace-page__eyebrow">Trace</p>
+                  <h3 className="agent-trace-page__detail-title">
+                    {selectedParts.title}
+                  </h3>
+                  <p
+                    className="agent-trace-page__detail-id"
+                    title={selected.sessionId}
+                  >
+                    {selected.sessionId}
+                  </p>
+                </div>
+                <dl className="agent-trace-page__stats">
+                  <div>
+                    <dt>Pairs</dt>
+                    <dd>{pairCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Singles</dt>
+                    <dd>{singleCount}</dd>
+                  </div>
+                  <div>
+                    <dt>STM</dt>
+                    <dd>{filteredEvents.length}</dd>
+                  </div>
+                  <div>
+                    <dt>Updated</dt>
+                    <dd>{formatRelative(selected.lastAt)}</dd>
+                  </div>
+                </dl>
+              </header>
+
+              <div className="agent-trace-page__detail-stack">
+                <section className="agent-trace-page__panel">
+                  <header className="agent-trace-page__panel-head">
+                    <div>
+                      <p className="agent-trace-page__eyebrow">agents.log</p>
+                      <h4 className="agent-trace-page__panel-title">
+                        Stage timeline
+                      </h4>
+                    </div>
+                    <span className="agent-trace-page__metric">
+                      {wireGroups.length}
+                    </span>
+                  </header>
+                  <p className="agent-trace-page__panel-hint">
+                    Capability classify, then the OpenAI-style LLM wire. Rig
+                    completion hooks are omitted — they duplicate the same turn.
+                  </p>
+                  {wireGroups.length === 0 ? (
+                    <EmptyState
+                      title="No stage pairs yet"
+                      description="Send a Yazg message, then refresh. Fully redacted older log lines are skipped."
+                    />
+                  ) : (
+                    <div className="agent-trace-page__timeline">
+                      {wireGroups.map((group) => (
+                        <TimelineGroup key={group.id} group={group} />
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="agent-trace-page__panel">
+                  <header className="agent-trace-page__panel-head">
+                    <div>
+                      <p className="agent-trace-page__eyebrow">SQLite</p>
+                      <h4 className="agent-trace-page__panel-title">
+                        Short-term memory
+                      </h4>
+                    </div>
+                    <span className="agent-trace-page__metric">
+                      {filteredEvents.length}
+                    </span>
+                  </header>
+                  {filteredEvents.length === 0 ? (
+                    <EmptyState
+                      title="Empty STM"
+                      description="No short-term memory rows for this session."
+                    />
+                  ) : (
+                    <div className="agent-trace-page__stm-list">
+                      {filteredEvents.map((event) => (
+                        <StmEventCard key={event.id} event={event} />
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                {ltm.length > 0 ? (
+                  <details className="agent-trace-raw">
+                    <summary>Long-term memory insights</summary>
+                    <pre className="agent-trace-payload__body">
+                      {prettyJson(ltm)}
+                    </pre>
+                  </details>
+                ) : null}
+              </div>
+            </>
           )}
-        </Card>
+        </section>
       </div>
     </div>
   );
