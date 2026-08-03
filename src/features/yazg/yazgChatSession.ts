@@ -1,4 +1,5 @@
 import { toAppError } from "@/shared/errors";
+import { deleteAgentStmSession } from "@/shared/ipc/agentMemory";
 import {
   yazgChat,
   yazgGenerateChatTitle,
@@ -281,6 +282,30 @@ export function deleteYazgChatThread(threadId: string) {
         : prev.activeThreadId;
     return { threads: remaining, activeThreadId };
   });
+  // Agent Trace lists SQLite STM by yazg-chat:<threadId>; clear it with the UI thread.
+  void deleteAgentStmSession(`yazg-chat:${threadId}`).catch(() => {
+    /* best-effort — Trace will still purge orphans on refresh */
+  });
+}
+
+/** Session ids still present in the Assistant chat store. */
+export function yazgChatSessionIds(): Set<string> {
+  return new Set(
+    getYazgChatSessionSnapshot().store.threads.map(
+      (thread) => `yazg-chat:${thread.id}`,
+    ),
+  );
+}
+
+export function yazgChatThreadTitle(sessionId: string): string | null {
+  const prefix = "yazg-chat:";
+  const threadId = sessionId.startsWith(prefix)
+    ? sessionId.slice(prefix.length)
+    : sessionId;
+  const thread = getYazgChatSessionSnapshot().store.threads.find(
+    (item) => item.id === threadId,
+  );
+  return thread?.title ?? null;
 }
 
 function appendYazgMessage(

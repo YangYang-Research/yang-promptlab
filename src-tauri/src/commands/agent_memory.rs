@@ -69,6 +69,18 @@ pub struct ListLtmRequest {
     pub limit: Option<usize>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteStmSessionRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteStmSessionResponse {
+    pub deleted: u64,
+}
+
 fn parse_scope_type(raw: &str) -> CommandResult<MemoryScopeType> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "global" => Ok(MemoryScopeType::Global),
@@ -142,6 +154,23 @@ pub async fn agent_memory_list_events(
             created_at: row.created_at,
         })
         .collect())
+}
+
+#[tauri::command]
+pub async fn agent_memory_delete_session(
+    state: State<'_, AppState>,
+    request: DeleteStmSessionRequest,
+) -> CommandResult<DeleteStmSessionResponse> {
+    let session_id = request.session_id.trim();
+    if session_id.is_empty() {
+        return Err(CommandError::invalid_input("session_id is required"));
+    }
+    let store = SqliteAgentMemoryStore::new(state.repositories());
+    let deleted = store
+        .stm_delete_session(session_id)
+        .await
+        .map_err(CommandError::internal)?;
+    Ok(DeleteStmSessionResponse { deleted })
 }
 
 #[tauri::command]

@@ -232,6 +232,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::environment::logs_open_folder,
             commands::agent_memory::agent_memory_list_sessions,
             commands::agent_memory::agent_memory_list_events,
+            commands::agent_memory::agent_memory_delete_session,
             commands::agent_memory::agent_memory_list_ltm,
             commands::db_health,
             commands::projects::project_create,

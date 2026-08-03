@@ -23,6 +23,8 @@ Response
 
 Greeting / knowledge → capability with **zero tools** → LLM #2 cannot call `analyze_endpoint`.
 
+Classifier input is **only the latest user message** — no conversation history.
+
 ## Capabilities
 
 | Capability   | Tools (current Yazg)                                      | Tool calling |
@@ -51,9 +53,14 @@ The registry is extensible (`CapabilityRegistry::register`) for plugins / MCP wi
 
 ## Logging / Agent Trace
 
+Agent Trace shows a **stage timeline** from `agents.log` plus STM from SQLite:
+
 - `capability_classify_request` / `capability_classify_response` (LLM #1)
 - `llm_request` / `llm_response` (LLM #2, capability tools only)
+- `completion_*` / `tool_*` when present
 - Info: capability, loaded tool count/names, tool_used, latency, `router=llm`
+
+Deleting a conversation in Assistant also deletes STM (`yazg-chat:<threadId>`). Trace only lists sessions still present in Assistant.
 
 ## Fallback
 

@@ -540,56 +540,33 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
     )
     .await;
 
-    // Capability routing: LLM #1 classifies capability (no tools), then loader
-    // injects only that capability's tools into LLM #2 (Yazg agent turn).
+    // Capability routing: LLM #1 classifies from the latest user message only
+    // (no chat history). Then loader injects that capability's tools into LLM #2.
     let route_started = std::time::Instant::now();
-    let history_snippets: Vec<String> = prior_history
-        .iter()
-        .filter_map(|m| match m {
-            Message::User { content } => Some(
-                content
-                    .iter()
-                    .filter_map(|c| match c {
-                        UserContent::Text(t) => Some(t.text.as_str()),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            ),
-            Message::Assistant { content, .. } => Some(
-                content
-                    .iter()
-                    .filter_map(|c| match c {
-                        AssistantContent::Text(t) => Some(t.text.as_str()),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            ),
-            _ => None,
-        })
-        .filter(|s| !s.trim().is_empty())
-        .collect();
+
+    let resolution = IntentRouter::new()
+        .resolve_with_llm(
+            request.llms.supervisor.as_ref(),
+            &RouteInput {
+                latest_user_message: request.goal.trim(),
+            },
+        )
+        .await;
 
     artifacts.events.push(AgentEvent::emit_kind(
         AgentId::Yazg,
         crate::types::AgentEventKind::Llm,
         crate::yazg_model::format_stage_payload(
             "capability_classify_request",
-            serde_json::json!({
-                "latest_user_message": request.goal.trim(),
-                "history_snippets": history_snippets.len(),
+            resolution.classifier_request.clone().unwrap_or_else(|| {
+                serde_json::json!({
+                    "latest_user_message": request.goal.trim(),
+                })
             }),
         ),
         conversation_id.clone(),
     ));
 
-    let resolution = IntentRouter::new()
-        .resolve_with_llm(request.llms.supervisor.as_ref(), &RouteInput {
-            latest_user_message: request.goal.trim(),
-            history_snippets: &history_snippets,
-        })
-        .await;
     let loaded = CapabilityToolLoader::new().load(&resolution);
     let route_ms = route_started.elapsed().as_millis();
 
@@ -599,10 +576,11 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         crate::yazg_model::format_stage_payload(
             "capability_classify_response",
             serde_json::json!({
+                "content": resolution.raw_classifier_output,
                 "capability": loaded.capability.as_str(),
                 "confidence": loaded.confidence,
                 "reason": loaded.reason,
-                "raw": resolution.raw_classifier_output,
+                "tool_calls": [],
                 "latency_ms": route_ms,
             }),
         ),

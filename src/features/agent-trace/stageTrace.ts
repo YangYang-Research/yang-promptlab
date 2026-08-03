@@ -50,6 +50,7 @@ const RESPONSE_FOR: Record<string, string> = {
   llm_request: "llm_response",
   llm_request_retry_text_only: "llm_response",
   tool_call_request: "tool_result_response",
+  capability_classify_request: "capability_classify_response",
 };
 
 const REQUEST_STAGES = new Set(Object.keys(RESPONSE_FOR));
@@ -62,12 +63,36 @@ const LLM_WIRE_STAGES = new Set([
   "llm_request_retry_text_only",
 ]);
 
+/** Stages worth showing in the Trace timeline (pairs + singles). */
+const TRACE_TIMELINE_STAGES = new Set([
+  ...LLM_WIRE_STAGES,
+  "capability_classify_request",
+  "capability_classify_response",
+  "completion_call",
+  "completion_response",
+  "tool_call_request",
+  "tool_result_response",
+  "model_turn_finished",
+]);
+
 export function isLlmWireStage(stage: string | null | undefined): boolean {
   return stage != null && LLM_WIRE_STAGES.has(stage);
 }
 
+export function isTraceTimelineStage(stage: string | null | undefined): boolean {
+  if (stage == null) return false;
+  if (TRACE_TIMELINE_STAGES.has(stage)) return true;
+  return (
+    stage.startsWith("capability_") ||
+    stage.startsWith("llm_") ||
+    stage.startsWith("tool_") ||
+    stage.startsWith("completion_")
+  );
+}
+
 function familyForStage(stage: string | null): string {
   if (!stage) return "event";
+  if (stage.startsWith("capability_")) return "Capability";
   if (stage.startsWith("llm_")) return "LLM";
   if (stage.startsWith("tool_")) return "Tool";
   if (stage.startsWith("completion_")) return "Completion";
@@ -213,15 +238,16 @@ function eventTimestamp(group: StageTraceGroup): string | undefined {
 function isBodyGroup(group: StageTraceGroup): boolean {
   if (group.kind === "pair") {
     return (
-      isLlmWireStage(group.request.stage) || isLlmWireStage(group.response.stage)
+      isTraceTimelineStage(group.request.stage) ||
+      isTraceTimelineStage(group.response.stage)
     );
   }
-  return isLlmWireStage(group.item.stage);
+  return isTraceTimelineStage(group.item.stage);
 }
 
 /**
  * Bucket Yazg stage events by conversation id, newest conversations first.
- * Detail groups keep request/response bodies only (LLM + tool).
+ * Detail groups keep capability / LLM / tool / completion timeline bodies.
  */
 export function groupByConversation(events: StageEventLike[]): ConversationTrace[] {
   const buckets = new Map<string, StageEventLike[]>();

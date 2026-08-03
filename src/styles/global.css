@@ -11157,9 +11157,35 @@ a:hover {
   grid-template-columns: 3.6rem minmax(0, 1fr) auto;
 }
 
+.agent-trace-page__list-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem;
+  align-items: stretch;
+}
+
+.agent-trace-page__list-delete {
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  padding: 0 0.55rem;
+  cursor: pointer;
+}
+
+.agent-trace-page__list-delete:hover {
+  color: var(--danger, #dc2626);
+  border-color: color-mix(in srgb, var(--danger, #dc2626) 45%, var(--border-subtle));
+}
+
 .agent-trace-page__list-item--conversation .agent-trace-page__list-label {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-family: var(--font-sans, inherit);
+  font-size: 0.75rem;
+}
+
+.agent-trace-page__hint {
+  margin: -0.35rem 0 0.5rem;
 }
 
 .agent-trace-page__list-item:hover {

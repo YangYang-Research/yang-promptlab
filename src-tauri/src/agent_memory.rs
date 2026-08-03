@@ -128,6 +128,18 @@ impl AgentMemoryStore for SqliteAgentMemoryStore {
             .collect())
     }
 
+    async fn stm_delete_session(&self, session_id: &str) -> Result<u64, String> {
+        let session_id = session_id.trim();
+        if session_id.is_empty() {
+            return Ok(0);
+        }
+        self.repos
+            .agent_short_term_memory()
+            .delete_by_session(session_id)
+            .await
+            .map_err(|err| err.to_string())
+    }
+
     async fn ltm_upsert(&self, entry: LtmWrite) -> Result<(), String> {
         self.repos
             .agent_long_term_memory()

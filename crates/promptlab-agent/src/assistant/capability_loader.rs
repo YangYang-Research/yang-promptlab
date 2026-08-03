@@ -79,6 +79,7 @@ impl CapabilityToolLoader {
             confidence: 1.0,
             reason: "direct".into(),
             raw_classifier_output: None,
+            classifier_request: None,
         })
     }
 }

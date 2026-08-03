@@ -3,6 +3,10 @@ import { Link } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
+  yazgChatSessionIds,
+  yazgChatThreadTitle,
+} from "@/features/yazg/yazgChatSession";
+import {
   Button,
   Card,
   PageHeader,
@@ -11,6 +15,7 @@ import {
 } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
 import {
+  deleteAgentStmSession,
   listAgentLtm,
   listAgentStmEvents,
   listAgentStmSessions,
@@ -27,7 +32,7 @@ import {
 
 import {
   groupStageEvents,
-  isLlmWireStage,
+  isTraceTimelineStage,
   prettyJson,
   stageLabel,
   type StageEventLike,
@@ -45,6 +50,14 @@ function formatTime(ts?: string | null): string {
   } catch {
     return ts;
   }
+}
+
+function sessionLabel(sessionId: string): string {
+  const title = yazgChatThreadTitle(sessionId);
+  const shortId = sessionId.startsWith("yazg-chat:")
+    ? sessionId.slice("yazg-chat:".length)
+    : sessionId;
+  return title ? `${title} · ${shortId}` : shortId;
 }
 
 function parseLogLines(content: string): OcsfEventDto[] {
@@ -145,13 +158,13 @@ function WirePair({ group }: { group: StageTraceGroup }) {
   if (group.kind !== "pair") return null;
   return (
     <article className="agent-trace-group">
-        <header className="agent-trace-group__head">
-          <strong>LLM wire</strong>
-          <span>
-            {stageLabel(group.request.stage, group.request.event.kind)} →{" "}
-            {stageLabel(group.response.stage, group.response.event.kind)}
-          </span>
-        </header>
+      <header className="agent-trace-group__head">
+        <strong>{group.family}</strong>
+        <span>
+          {stageLabel(group.request.stage, group.request.event.kind)} →{" "}
+          {stageLabel(group.response.stage, group.response.event.kind)}
+        </span>
+      </header>
       <div className="agent-trace-group__grid">
         <section className="agent-trace-payload agent-trace-payload--req">
           <header className="agent-trace-payload__head">
@@ -159,6 +172,11 @@ function WirePair({ group }: { group: StageTraceGroup }) {
             <span className="agent-trace-payload__stage">
               {stageLabel(group.request.stage, group.request.event.kind)}
             </span>
+            {group.request.event.timestamp ? (
+              <span className="agent-trace-payload__meta">
+                {formatTime(group.request.event.timestamp)}
+              </span>
+            ) : null}
           </header>
           <pre className="agent-trace-payload__body">{group.request.pretty}</pre>
         </section>
@@ -168,12 +186,50 @@ function WirePair({ group }: { group: StageTraceGroup }) {
             <span className="agent-trace-payload__stage">
               {stageLabel(group.response.stage, group.response.event.kind)}
             </span>
+            {group.response.event.timestamp ? (
+              <span className="agent-trace-payload__meta">
+                {formatTime(group.response.event.timestamp)}
+              </span>
+            ) : null}
           </header>
           <pre className="agent-trace-payload__body">{group.response.pretty}</pre>
         </section>
       </div>
     </article>
   );
+}
+
+function WireSingle({ group }: { group: StageTraceGroup }) {
+  if (group.kind !== "single") return null;
+  const { item } = group;
+  const badge =
+    item.role === "request" ? "REQ" : item.role === "response" ? "RES" : "EVT";
+  return (
+    <article className="agent-trace-group">
+      <header className="agent-trace-group__head">
+        <strong>{item.stage ? stageLabel(item.stage, item.event.kind) : item.event.kind}</strong>
+        <span>{item.event.timestamp ? formatTime(item.event.timestamp) : ""}</span>
+      </header>
+      <section
+        className={`agent-trace-payload agent-trace-payload--${
+          item.role === "response" ? "res" : "req"
+        }`}
+      >
+        <header className="agent-trace-payload__head">
+          <span className="agent-trace-payload__badge">{badge}</span>
+          <span className="agent-trace-payload__stage">
+            {stageLabel(item.stage, item.event.kind)}
+          </span>
+        </header>
+        <pre className="agent-trace-payload__body">{item.pretty}</pre>
+      </section>
+    </article>
+  );
+}
+
+function TimelineGroup({ group }: { group: StageTraceGroup }) {
+  if (group.kind === "pair") return <WirePair group={group} />;
+  return <WireSingle group={group} />;
 }
 
 export function AgentTracePage() {
@@ -207,10 +263,13 @@ export function AgentTracePage() {
         a.timestamp.localeCompare(b.timestamp),
       );
       const groups = groupStageEvents(merged.map(toStageEvent)).filter((g) => {
-        if (g.kind !== "pair") return false;
-        return (
-          isLlmWireStage(g.request.stage) || isLlmWireStage(g.response.stage)
-        );
+        if (g.kind === "pair") {
+          return (
+            isTraceTimelineStage(g.request.stage) ||
+            isTraceTimelineStage(g.response.stage)
+          );
+        }
+        return isTraceTimelineStage(g.item.stage);
       });
       setWireGroups(groups);
     } catch {
@@ -227,17 +286,27 @@ export function AgentTracePage() {
         prefix: "yazg-chat:",
         limit: 100,
       });
-      setSessions(rows);
-      if (rows.length === 0) {
+      const liveIds = yazgChatSessionIds();
+      const orphans = rows.filter((row) => !liveIds.has(row.sessionId));
+      if (orphans.length > 0) {
+        await Promise.all(
+          orphans.map((row) =>
+            deleteAgentStmSession(row.sessionId).catch(() => null),
+          ),
+        );
+      }
+      const live = rows.filter((row) => liveIds.has(row.sessionId));
+      setSessions(live);
+      if (live.length === 0) {
         setSelectedSessionId(null);
         setEvents([]);
         setLtm([]);
         setWireGroups([]);
       } else if (
         !selectedSessionId ||
-        !rows.some((row) => row.sessionId === selectedSessionId)
+        !live.some((row) => row.sessionId === selectedSessionId)
       ) {
-        setSelectedSessionId(rows[0]!.sessionId);
+        setSelectedSessionId(live[0]!.sessionId);
       }
     } catch (err) {
       setError(toAppError(err).message);
@@ -277,6 +346,30 @@ export function AgentTracePage() {
     }
   }
 
+  async function removeSession(sessionId: string) {
+    if (!backendConnected) return;
+    const confirmed = window.confirm(
+      `Delete STM for ${sessionLabel(sessionId)}?\nThis removes Agent Trace data for that conversation.`,
+    );
+    if (!confirmed) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await deleteAgentStmSession(sessionId);
+      if (selectedSessionId === sessionId) {
+        setSelectedSessionId(null);
+        setEvents([]);
+        setLtm([]);
+        setWireGroups([]);
+      }
+      await refreshSessions();
+    } catch (err) {
+      setError(toAppError(err).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     void refreshSessions();
   }, [backendConnected]);
@@ -298,9 +391,12 @@ export function AgentTracePage() {
   const filteredSessions = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return sessions;
-    return sessions.filter((session) =>
-      session.sessionId.toLowerCase().includes(q),
-    );
+    return sessions.filter((session) => {
+      const label = sessionLabel(session.sessionId).toLowerCase();
+      return (
+        session.sessionId.toLowerCase().includes(q) || label.includes(q)
+      );
+    });
   }, [sessions, query]);
 
   const filteredEvents = useMemo(() => {
@@ -319,11 +415,14 @@ export function AgentTracePage() {
     filteredSessions[0] ??
     null;
 
+  const pairCount = wireGroups.filter((g) => g.kind === "pair").length;
+  const singleCount = wireGroups.filter((g) => g.kind === "single").length;
+
   return (
     <div className="agent-trace-page">
       <PageHeader
         title="Agent Trace"
-        description="Yazg conversations from STM. LLM wire REQ/RES = body mapped to host chat/completions (llm_request / llm_response)."
+        description="Yazg conversations still in Assistant. Timeline = capability classify + LLM wire + tool/completion stages from agents.log; STM = SQLite short-term memory."
         actions={
           <>
             <label className="agent-trace-page__auto">
@@ -371,11 +470,14 @@ export function AgentTracePage() {
         <SearchInput
           value={query}
           onChange={setQuery}
-          placeholder="Search conversation ID or STM content…"
+          placeholder="Search title, conversation ID, or STM content…"
         />
         <span className="agent-trace-page__count text-muted text-sm">
           STM · {filteredSessions.length} conversations
           {selected ? ` · ${filteredEvents.length} events` : ""}
+          {selected && wireGroups.length > 0
+            ? ` · ${pairCount} pairs / ${singleCount} singles`
+            : ""}
         </span>
       </div>
 
@@ -384,15 +486,15 @@ export function AgentTracePage() {
           <h3 className="agent-trace-page__list-title">Conversations (STM)</h3>
           {filteredSessions.length === 0 ? (
             <p className="text-muted text-sm">
-              No Yazg STM sessions yet. Chat in Yazg to append session events to
-              SQLite. <Link to="/yazg">Open Yazg</Link>
+              No Yazg STM sessions for live Assistant chats. Chat in Yazg to
+              append session events. <Link to="/yazg">Open Yazg</Link>
             </p>
           ) : (
             <ul className="agent-trace-page__list">
               {filteredSessions.map((session) => {
                 const active = session.sessionId === selected?.sessionId;
                 return (
-                  <li key={session.sessionId}>
+                  <li key={session.sessionId} className="agent-trace-page__list-row">
                     <button
                       type="button"
                       className={`agent-trace-page__list-item agent-trace-page__list-item--conversation${
@@ -407,11 +509,22 @@ export function AgentTracePage() {
                         className="agent-trace-page__list-label"
                         title={session.sessionId}
                       >
-                        {session.sessionId}
+                        {sessionLabel(session.sessionId)}
                       </span>
                       <span className="agent-trace-page__list-time">
                         {formatTime(session.lastAt)}
                       </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="agent-trace-page__list-delete"
+                      title="Delete STM for this conversation"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void removeSession(session.sessionId);
+                      }}
+                    >
+                      Delete
                     </button>
                   </li>
                 );
@@ -423,24 +536,27 @@ export function AgentTracePage() {
         <Card className="detail-section agent-trace-page__detail-card">
           <h3 className="agent-trace-page__list-title">
             {selected
-              ? `STM events · ${selected.sessionId}`
-              : "STM events"}
+              ? `Trace · ${sessionLabel(selected.sessionId)}`
+              : "Trace detail"}
           </h3>
           {selected ? (
             <div className="agent-trace-page__detail-stack">
               <div className="agent-trace-page__wire">
                 <h4 className="agent-trace-page__list-title">
-                  LLM wire REQ / RES ({wireGroups.length})
+                  Stage timeline ({wireGroups.length})
                 </h4>
+                <p className="text-muted text-sm agent-trace-page__hint">
+                  Capability classify → LLM wire → tool/completion (from agents.log).
+                </p>
                 {wireGroups.length === 0 ? (
                   <p className="text-muted text-sm">
-                    No `llm_request` / `llm_response` pairs yet for this
-                    conversation. Send a new Yazg message after the mask fix,
-                    then refresh. (Older log lines may be fully `[REDACTED]`.)
+                    No stage timeline pairs yet for this conversation. Send a
+                    new Yazg message, then refresh. (Older fully `[REDACTED]` log
+                    lines are skipped.)
                   </p>
                 ) : (
                   wireGroups.map((group) => (
-                    <WirePair key={group.id} group={group} />
+                    <TimelineGroup key={group.id} group={group} />
                   ))
                 )}
               </div>

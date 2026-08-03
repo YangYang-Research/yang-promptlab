@@ -69,3 +69,9 @@ export function listAgentLtm(input: {
     },
   });
 }
+
+export function deleteAgentStmSession(sessionId: string): Promise<{ deleted: number }> {
+  return invokeCommand<{ deleted: number }>("agent_memory_delete_session", {
+    request: { sessionId },
+  });
+}

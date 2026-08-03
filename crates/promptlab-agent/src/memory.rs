@@ -182,6 +182,9 @@ pub trait AgentMemoryStore: Send + Sync {
         limit: usize,
     ) -> Result<Vec<StmSessionSummary>, String>;
 
+    /// Delete all STM rows for a session (e.g. when the Assistant conversation is removed).
+    async fn stm_delete_session(&self, session_id: &str) -> Result<u64, String>;
+
     async fn ltm_upsert(&self, entry: LtmWrite) -> Result<(), String>;
     async fn ltm_list(
         &self,

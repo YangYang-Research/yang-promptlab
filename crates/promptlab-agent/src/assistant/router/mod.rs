@@ -11,11 +11,10 @@ use tracing::{info, warn};
 
 use super::capability_registry::AssistantCapability;
 
-/// Router input (history is optional context; latest message is primary).
+/// Router input — classifier uses **only** the latest user message (no history).
 #[derive(Debug, Clone)]
 pub struct RouteInput<'a> {
     pub latest_user_message: &'a str,
-    pub history_snippets: &'a [String],
 }
 
 /// Result of intent routing (before tool-aware AI Runtime turn).
@@ -26,6 +25,8 @@ pub struct IntentResolution {
     pub reason: String,
     /// Raw classifier model text (for Agent Trace / debug).
     pub raw_classifier_output: Option<String>,
+    /// Full OpenAI-style request body sent to the classifier LLM.
+    pub classifier_request: Option<serde_json::Value>,
 }
 
 /// LLM-based capability router. Runs **before** the tool-calling agent turn.
@@ -38,6 +39,9 @@ impl IntentRouter {
     }
 
     /// Classify capability with a text-only LLM call (no tools bound).
+    ///
+    /// Only the latest user message is sent — conversation history is intentionally
+    /// omitted so routing stays focused on the current turn.
     pub async fn resolve_with_llm(
         &self,
         llm: &dyn PlannerLlm,
@@ -50,10 +54,23 @@ impl IntentRouter {
                 confidence: 1.0,
                 reason: "empty_message".into(),
                 raw_classifier_output: None,
+                classifier_request: None,
             };
         }
 
-        let user_prompt = build_classifier_user_prompt(latest, input.history_snippets);
+        let user_prompt = format!("{latest}\n");
+        let classifier_request = serde_json::json!({
+            "messages": [
+                { "role": "system", "content": CAPABILITY_CLASSIFIER_SYSTEM },
+                { "role": "user", "content": user_prompt },
+            ],
+            "model_params": {
+                "max_tokens": 1024,
+                "temperature": 0.2,
+                "tool_choice": null
+            },
+            "tools": []
+        });
         let started = std::time::Instant::now();
         let raw = match llm
             .complete_with_system(Some(CAPABILITY_CLASSIFIER_SYSTEM), &user_prompt)
@@ -67,6 +84,7 @@ impl IntentRouter {
                     confidence: 0.4,
                     reason: format!("classifier_llm_error:{err}"),
                     raw_classifier_output: None,
+                    classifier_request: Some(classifier_request),
                 };
             }
         };
@@ -80,6 +98,7 @@ impl IntentRouter {
         match parse_capability_response(&raw) {
             Some(mut resolution) => {
                 resolution.raw_classifier_output = Some(raw);
+                resolution.classifier_request = Some(classifier_request);
                 resolution
             }
             None => {
@@ -89,6 +108,7 @@ impl IntentRouter {
                     confidence: 0.45,
                     reason: "classifier_parse_failed".into(),
                     raw_classifier_output: Some(raw),
+                    classifier_request: Some(classifier_request),
                 }
             }
         }
@@ -118,29 +138,8 @@ Rules:
 - Prefer knowledge for conceptual "what is / explain" questions that do not need DB rows.
 - Prefer projects over workspace when the user names a project or asks to create one.
 - Prefer targets when the user asks about endpoints/targets.
-- Output a single JSON object, no markdown fences."##;
-
-fn build_classifier_user_prompt(latest: &str, history: &[String]) -> String {
-    let mut out = String::from(
-        "Return JSON: {\"capability\":\"<id>\",\"confidence\":0.0-1.0,\"reason\":\"short\"}\n\n",
-    );
-    if !history.is_empty() {
-        out.push_str("Recent conversation (oldest→newest, truncated):\n");
-        for (i, snip) in history.iter().rev().take(6).collect::<Vec<_>>().into_iter().rev().enumerate()
-        {
-            let line = truncate(snip.trim(), 160);
-            if line.is_empty() {
-                continue;
-            }
-            out.push_str(&format!("{}. {}\n", i + 1, line));
-        }
-        out.push('\n');
-    }
-    out.push_str("Latest user message:\n");
-    out.push_str(latest);
-    out.push('\n');
-    out
-}
+- Respond with a single JSON object only (no markdown fences), shape:
+  {"capability":"<id>","confidence":0.0-1.0,"reason":"short"}"##;
 
 #[derive(Debug, Deserialize)]
 struct ClassifierJson {
@@ -168,6 +167,7 @@ pub fn parse_capability_response(raw: &str) -> Option<IntentResolution> {
         confidence,
         reason,
         raw_classifier_output: None,
+        classifier_request: None,
     })
 }
 
@@ -294,7 +294,6 @@ mod tests {
                 &llm,
                 &RouteInput {
                     latest_user_message: "List projects",
-                    history_snippets: &[],
                 },
             )
             .await;
@@ -312,7 +311,6 @@ mod tests {
                 &llm,
                 &RouteInput {
                     latest_user_message: "hello",
-                    history_snippets: &[],
                 },
             )
             .await;
