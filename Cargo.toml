@@ -15,6 +15,7 @@ members = [
     "crates/promptlab-discovery",
     "crates/promptlab-endpoint-metadata",
     "crates/promptlab-agent",
+    "crates/promptlab-agenttrace",
     "crates/promptlab-target-profile",
     "crates/promptlab-harness",
     "crates/promptlab-runtime",
@@ -49,6 +50,7 @@ promptlab-core = { path = "crates/promptlab-core" }
 promptlab-discovery = { path = "crates/promptlab-discovery" }
 promptlab-endpoint-metadata = { path = "crates/promptlab-endpoint-metadata" }
 promptlab-agent = { path = "crates/promptlab-agent" }
+promptlab-agenttrace = { path = "crates/promptlab-agenttrace" }
 promptlab-target-profile = { path = "crates/promptlab-target-profile" }
 promptlab-storage = { path = "crates/promptlab-storage" }
 serde = { version = "1", features = ["derive"] }

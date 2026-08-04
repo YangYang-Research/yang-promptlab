@@ -1,5 +1,6 @@
 import { toAppError } from "@/shared/errors";
 import { deleteAgentStmSession } from "@/shared/ipc/agentMemory";
+import { deleteAgentTraceSession } from "@/shared/ipc/agentTrace";
 import {
   yazgChat,
   yazgGenerateChatTitle,
@@ -282,8 +283,12 @@ export function deleteYazgChatThread(threadId: string) {
         : prev.activeThreadId;
     return { threads: remaining, activeThreadId };
   });
-  // Agent Trace lists SQLite STM by yazg-chat:<threadId>; clear it with the UI thread.
-  void deleteAgentStmSession(`yazg-chat:${threadId}`).catch(() => {
+  // Agent Trace lists AgentTrace + STM by yazg-chat:<threadId>; clear both with the UI thread.
+  const sessionId = `yazg-chat:${threadId}`;
+  void deleteAgentStmSession(sessionId).catch(() => {
+    /* best-effort */
+  });
+  void deleteAgentTraceSession(sessionId).catch(() => {
     /* best-effort — Trace will still purge orphans on refresh */
   });
 }

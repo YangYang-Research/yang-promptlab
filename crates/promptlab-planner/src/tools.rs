@@ -44,6 +44,10 @@ pub struct ToolCall {
 pub struct LlmCompletion {
     pub content: Option<String>,
     pub tool_calls: Vec<ToolCall>,
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
 }
 
 impl LlmCompletion {
@@ -51,7 +55,15 @@ impl LlmCompletion {
         Self {
             content: Some(content.into()),
             tool_calls: Vec::new(),
+            input_tokens: 0,
+            output_tokens: 0,
         }
+    }
+
+    pub fn with_usage(mut self, input_tokens: u64, output_tokens: u64) -> Self {
+        self.input_tokens = input_tokens;
+        self.output_tokens = output_tokens;
+        self
     }
 
     pub fn primary_tool(&self) -> Option<&ToolCall> {

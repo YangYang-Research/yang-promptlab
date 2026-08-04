@@ -20,6 +20,7 @@ use tracing::{info, warn};
 
 use crate::types::{AgentEvent, AgentEventKind, AgentId};
 use crate::yazg_tools::SharedYazgState;
+use promptlab_agenttrace::{soft_end_span, soft_start_span, SpanEnd, SpanKind, SpanStart, TraceStatus};
 
 /// Default text when a completion is empty (also used for MaxTurns recovery).
 pub const EMPTY_FALLBACK_REPLY: &str =
@@ -157,10 +158,32 @@ impl CompletionModel for YazgModel {
         });
         self.emit_stage(
             AgentEventKind::Llm,
-            format_stage_payload("llm_request", request_body),
+            format_stage_payload("llm_request", request_body.clone()),
         )
         .await;
 
+        // AgentTrace: one llm span per completion (inputs = wire request).
+        if let Some(sink) = &self.stage_sink {
+            let mut guard = sink.lock().await;
+            let trace = guard.active_trace.clone();
+            drop(guard);
+            let span = soft_start_span(
+                trace.as_ref(),
+                SpanStart {
+                    name: "llm".into(),
+                    kind: SpanKind::Llm,
+                    parent_span_id: None,
+                    inputs: Some(request_body.clone()),
+                    attributes: std::collections::BTreeMap::new(),
+                },
+            )
+            .await;
+            if let Some(span) = span {
+                sink.lock().await.active_llm_span = Some(span);
+            }
+        }
+
+        let llm_started = std::time::Instant::now();
         let outcome = if tools.is_empty() {
             let raw = self
                 .llm
@@ -214,22 +237,64 @@ impl CompletionModel for YazgModel {
             tool_calls: outcome.tool_calls.clone(),
         };
 
+        let llm_latency_ms = llm_started.elapsed().as_millis() as f64;
+        let mut input_tokens = outcome.input_tokens;
+        let mut output_tokens = outcome.output_tokens;
+        if input_tokens == 0 && output_tokens == 0 {
+            // Fallback estimate when the provider omitted usage.
+            let req_chars = serde_json::to_string(&request_body)
+                .map(|s| s.len() as u64)
+                .unwrap_or(0);
+            let out_chars = serde_json::to_string(&raw)
+                .map(|s| s.len() as u64)
+                .unwrap_or(0);
+            input_tokens = (req_chars + 3) / 4;
+            output_tokens = (out_chars + 3) / 4;
+        }
+        let total_tokens = input_tokens.saturating_add(output_tokens);
+
+        let response_body = json!({
+            "content": raw.content,
+            "tool_calls": raw.tool_calls,
+            "usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
+            },
+        });
         self.emit_stage(
             AgentEventKind::Llm,
-            format_stage_payload(
-                "llm_response",
-                json!({
-                    "content": raw.content,
-                    "tool_calls": raw.tool_calls,
-                }),
-            ),
+            format_stage_payload("llm_response", response_body.clone()),
         )
         .await;
 
+        if let Some(sink) = &self.stage_sink {
+            let span = sink.lock().await.active_llm_span.take();
+            soft_end_span(
+                span.as_ref(),
+                SpanEnd {
+                    outputs: Some(response_body),
+                    status: TraceStatus::Ok,
+                    metrics: std::collections::BTreeMap::from([
+                        ("latency_ms".into(), llm_latency_ms),
+                        ("input_tokens".into(), input_tokens as f64),
+                        ("output_tokens".into(), output_tokens as f64),
+                        ("total_tokens".into(), total_tokens as f64),
+                    ]),
+                    attributes: std::collections::BTreeMap::new(),
+                },
+            )
+            .await;
+        }
+
         let choice = completion_to_assistant_content(&outcome)?;
+        let mut usage = Usage::new();
+        usage.input_tokens = input_tokens;
+        usage.output_tokens = output_tokens;
+        usage.total_tokens = total_tokens;
         Ok(CompletionResponse {
             choice,
-            usage: Usage::new(),
+            usage,
             raw_response: raw,
             message_id: None,
         })
@@ -1178,6 +1243,7 @@ mod tests {
                 name: "assistant_reply".into(),
                 arguments: json!({"message": "Hello!"}),
             }],
+            ..Default::default()
         };
         let cleaned = sanitize_completion(outcome, &tools);
         assert!(cleaned.tool_calls.is_empty());
@@ -1198,6 +1264,7 @@ mod tests {
                 name: "summary".into(),
                 arguments: json!({}),
             }],
+            ..Default::default()
         };
         let cleaned = sanitize_completion(outcome, &tools);
         assert_eq!(cleaned.tool_calls.len(), 1);
@@ -1218,6 +1285,7 @@ mod tests {
                 name: "hallucinated_tool".into(),
                 arguments: json!({}),
             }],
+            ..Default::default()
         };
         let cleaned = sanitize_completion(outcome, &tools);
         assert!(cleaned.tool_calls.is_empty());

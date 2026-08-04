@@ -1,8 +1,12 @@
+import type { ReactNode } from "react";
+
 import type { Severity } from "@/shared/types";
 import type { TargetScanStatusLabel } from "@/shared/targetScanContext";
 
+import { IconCheck, IconX } from "./Icons";
+
 type BadgeProps = {
-  children: string;
+  children: ReactNode;
   variant?: "default" | "success" | "warning" | "danger" | "info" | "muted";
   className?: string;
 };
@@ -39,6 +43,8 @@ export function StatusBadge({ status }: { status: string }) {
       : normalized === "paused" || normalized === "draft" || normalized === "pending"
         ? "warning"
       : normalized === "completed" ||
+          normalized === "ok" ||
+          normalized === "success" ||
           normalized === "installed" ||
           normalized === "registered" ||
           normalized === "verified" ||
@@ -52,7 +58,25 @@ export function StatusBadge({ status }: { status: string }) {
             ? "muted"
             : "default";
 
-  return <Badge variant={variant}>{status.replace(/_/g, " ")}</Badge>;
+  const label = status.replace(/_/g, " ");
+  if (variant === "success") {
+    return (
+      <Badge variant={variant} className="badge--with-icon">
+        <IconCheck className="badge__icon" />
+        {label}
+      </Badge>
+    );
+  }
+  if (variant === "danger") {
+    return (
+      <Badge variant={variant} className="badge--with-icon">
+        <IconX className="badge__icon" />
+        {label}
+      </Badge>
+    );
+  }
+
+  return <Badge variant={variant}>{label}</Badge>;
 }
 
 const findingStatusVariant: Record<

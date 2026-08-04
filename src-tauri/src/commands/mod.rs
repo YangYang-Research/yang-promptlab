@@ -8,6 +8,7 @@ use crate::state::AppState;
 
 pub mod app;
 pub mod agent_memory;
+pub mod agenttrace;
 pub mod attack;
 pub mod attack_catalog;
 pub mod auth;

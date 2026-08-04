@@ -43,6 +43,10 @@ use crate::yazg_tools::{
     ProjectDetailTool, RecommendTool, ReportDetailTool, ScanDetailTool, SharedYazgState,
     SummaryTool, TargetDetailTool, YazgLlms, YazgRunState, YazgSpecialistContext,
 };
+use promptlab_agenttrace::{
+    soft_end_span, soft_end_trace, soft_start_span, SharedAgentTrace, SpanEnd, SpanKind, SpanStart,
+    TraceStart, TraceStatus,
+};
 use promptlab_planner::PlannerLlm;
 
 const DEFAULT_MAX_TURNS: usize = 12;
@@ -236,6 +240,40 @@ impl AgentHook<YazgModel> for YazgAgentHook {
                     }),
                 )
                 .await;
+                {
+                    let mut guard = self.state.lock().await;
+                    let trace = guard.active_trace.clone();
+                    let parent = guard.active_llm_span.as_ref().map(|s| s.id().to_string());
+                    drop(guard);
+                    let span = soft_start_span(
+                        trace.as_ref(),
+                        SpanStart {
+                            name: format!("tool:{tool_name}"),
+                            kind: SpanKind::Tool,
+                            parent_span_id: parent,
+                            inputs: Some(serde_json::json!({
+                                "tool": tool_name,
+                                "tool_call_id": tool_call_id,
+                                "args": args_json,
+                            })),
+                            attributes: std::collections::BTreeMap::from([(
+                                "tool".into(),
+                                tool_name.to_string(),
+                            )]),
+                        },
+                    )
+                    .await;
+                    if let Some(span) = span {
+                        let key = tool_call_id
+                            .unwrap_or(internal_call_id)
+                            .to_string();
+                        self.state
+                            .lock()
+                            .await
+                            .active_tool_spans
+                            .insert(key, span);
+                    }
+                }
                 if count > 1 {
                     warn!(
                         tool = %tool_name,
@@ -361,6 +399,22 @@ impl AgentHook<YazgModel> for YazgAgentHook {
                     }),
                 )
                 .await;
+                {
+                    let key = tool_call_id
+                        .unwrap_or(internal_call_id)
+                        .to_string();
+                    let span = self.state.lock().await.active_tool_spans.remove(&key);
+                    soft_end_span(
+                        span.as_ref(),
+                        SpanEnd {
+                            outputs: Some(result_json),
+                            status: TraceStatus::Ok,
+                            metrics: std::collections::BTreeMap::new(),
+                            attributes: std::collections::BTreeMap::new(),
+                        },
+                    )
+                    .await;
+                }
                 // Append Finish nudge for every tool (workspace + specialist).
                 if !result.contains("Reply in natural language NOW")
                     && !result.contains("Write the final user-visible answer NOW")
@@ -453,6 +507,8 @@ pub struct YazgRequest {
     pub specialist: YazgSpecialistContext,
     pub llms: YazgLlms,
     pub max_turns: usize,
+    /// Optional AgentTrace store for tracing.
+    pub agent_trace: Option<SharedAgentTrace>,
 }
 
 impl YazgRequest {
@@ -466,6 +522,7 @@ impl YazgRequest {
             specialist: YazgSpecialistContext::default(),
             llms,
             max_turns: DEFAULT_MAX_TURNS,
+            agent_trace: None,
         }
     }
 
@@ -476,6 +533,11 @@ impl YazgRequest {
     ) -> Self {
         self.memory = store;
         self.memory_ctx = ctx;
+        self
+    }
+
+    pub fn with_agent_trace(mut self, store: Option<SharedAgentTrace>) -> Self {
+        self.agent_trace = store;
         self
     }
 
@@ -506,6 +568,37 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         let s = request.memory_ctx.session_id.trim();
         (!s.is_empty()).then(|| s.to_string())
     };
+
+    // AgentTrace: one trace per Yazg turn (soft-fail).
+    let active_trace = if let Some(flow) = request.agent_trace.as_ref() {
+        match flow.experiment("yazg").await {
+            Ok(exp) => {
+                let mut tags = std::collections::BTreeMap::new();
+                tags.insert("agent".into(), "yazg".into());
+                match exp
+                    .start_trace(TraceStart {
+                        name: "yazg_turn".into(),
+                        session_id: conversation_id.clone(),
+                        tags,
+                    })
+                    .await
+                {
+                    Ok(trace) => Some(trace),
+                    Err(err) => {
+                        warn!(error = %err, "agenttrace start_trace failed");
+                        None
+                    }
+                }
+            }
+            Err(err) => {
+                warn!(error = %err, "agenttrace experiment failed");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let mut artifacts = YazgArtifacts::default();
     artifacts.events.push(AgentEvent::emit_kind(
         AgentId::Yazg,
@@ -553,22 +646,54 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         )
         .await;
 
+    let classify_inputs = resolution.classifier_request.clone().unwrap_or_else(|| {
+        serde_json::json!({
+            "latest_user_message": request.goal.trim(),
+        })
+    });
+    let classify_span = soft_start_span(
+        active_trace.as_ref(),
+        SpanStart {
+            name: "capability_classify".into(),
+            kind: SpanKind::Capability,
+            parent_span_id: None,
+            inputs: Some(classify_inputs.clone()),
+            attributes: std::collections::BTreeMap::new(),
+        },
+    )
+    .await;
+
     artifacts.events.push(AgentEvent::emit_kind(
         AgentId::Yazg,
         crate::types::AgentEventKind::Llm,
-        crate::yazg_model::format_stage_payload(
-            "capability_classify_request",
-            resolution.classifier_request.clone().unwrap_or_else(|| {
-                serde_json::json!({
-                    "latest_user_message": request.goal.trim(),
-                })
-            }),
-        ),
+        crate::yazg_model::format_stage_payload("capability_classify_request", classify_inputs),
         conversation_id.clone(),
     ));
 
     let loaded = CapabilityToolLoader::new().load(&resolution);
     let route_ms = route_started.elapsed().as_millis();
+
+    soft_end_span(
+        classify_span.as_ref(),
+        SpanEnd {
+            outputs: Some(serde_json::json!({
+                "capability": loaded.capability.as_str(),
+                "confidence": (loaded.confidence * 100.0).round() / 100.0,
+                "reason": loaded.reason,
+                "content": resolution.raw_classifier_output,
+            })),
+            status: TraceStatus::Ok,
+            metrics: std::collections::BTreeMap::from([
+                ("latency_ms".into(), route_ms as f64),
+                ("confidence".into(), loaded.confidence as f64),
+            ]),
+            attributes: std::collections::BTreeMap::from([(
+                "capability".into(),
+                loaded.capability.as_str().to_string(),
+            )]),
+        },
+    )
+    .await;
 
     artifacts.events.push(AgentEvent::emit_kind(
         AgentId::Yazg,
@@ -616,6 +741,7 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         conversation_id: conversation_id.clone(),
         memory: request.memory.clone(),
         memory_ctx: request.memory_ctx.clone(),
+        active_trace: active_trace.clone(),
         ..Default::default()
     }));
     let specialist = Arc::new(request.specialist.clone());
@@ -916,6 +1042,8 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         usage_note,
         conversation_id,
     ));
+
+    soft_end_trace(active_trace.as_ref(), TraceStatus::Ok).await;
 
     Ok((artifacts, raw_output))
 }

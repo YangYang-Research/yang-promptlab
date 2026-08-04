@@ -24,13 +24,13 @@ use crate::recommend::RecommendAgent;
 use crate::summary::{SummaryAgent, SummaryRequest};
 use crate::tool_result::{ToolResult, TOOL_RESULT_CONTRACT};
 use crate::types::{AgentEvent, AgentId};
+use promptlab_agenttrace::{SpanHandle, TraceHandle};
 
 /// Appended to workspace tool descriptions (Prompting Guide: when-to-use lives in tool defs).
 const WHEN_NOT_WORKSPACE: &str = " Do not call when the latest user message needs no live workspace \
 data (conversation, identity, general knowledge, or simple reasoning without DB rows).";
 
 /// Shared mutable run state filled by tools and consumed after `agent.prompt`.
-#[derive(Default)]
 pub struct YazgRunState {
     pub artifacts: YazgArtifacts,
     pub last_tool: Option<String>,
@@ -45,6 +45,30 @@ pub struct YazgRunState {
     pub memory_ctx: MemoryContext,
     /// Tools invoked this turn (for LTM extraction).
     pub tools_used: Vec<String>,
+    /// Active AgentTrace turn handle.
+    pub active_trace: Option<TraceHandle>,
+    /// Open LLM span while a completion is in flight.
+    pub active_llm_span: Option<SpanHandle>,
+    /// Open tool spans keyed by tool_call_id.
+    pub active_tool_spans: HashMap<String, SpanHandle>,
+}
+
+impl Default for YazgRunState {
+    fn default() -> Self {
+        Self {
+            artifacts: YazgArtifacts::default(),
+            last_tool: None,
+            last_workspace_observation: None,
+            workspace_observations: Vec::new(),
+            conversation_id: None,
+            memory: None,
+            memory_ctx: MemoryContext::default(),
+            tools_used: Vec::new(),
+            active_trace: None,
+            active_llm_span: None,
+            active_tool_spans: HashMap::new(),
+        }
+    }
 }
 
 pub type SharedYazgState = Arc<Mutex<YazgRunState>>;

@@ -12,6 +12,7 @@ promptlab-planner = { workspace = true }
 promptlab-target-profile = { workspace = true }
 promptlab-judge = { workspace = true }
 promptlab-core = { workspace = true }
+promptlab-agenttrace = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

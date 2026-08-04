@@ -864,6 +864,7 @@ pub async fn yazg_chat_op(
         memory_ctx,
         Some(project_tools),
         Some(workspace_tools),
+        Some(state.agent_trace().clone()),
     )
     .await
     .map_err(map_agent_err)?;

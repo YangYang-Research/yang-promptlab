@@ -203,6 +203,7 @@ impl YazgSupervisor {
         memory_ctx: MemoryContext,
         project_tools: Option<Arc<dyn CreateProjectTools>>,
         workspace_tools: Option<Arc<dyn WorkspaceTools>>,
+        agent_trace: Option<promptlab_agenttrace::SharedAgentTrace>,
     ) -> AgentResult<YazgDelegation> {
         let goal = Self::build_goal(message, intent_hint);
         let mut specialist = YazgSpecialistContext::default().with_auth(auth_headers);
@@ -213,6 +214,7 @@ impl YazgSupervisor {
             .with_memory(memory, memory_ctx)
             .with_project_tools(project_tools)
             .with_workspace_tools(workspace_tools)
+            .with_agent_trace(agent_trace)
             .with_specialist(specialist);
         Self::run_yazg_turn(request).await
     }

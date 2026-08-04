@@ -52,6 +52,11 @@ const AgentTracePage = lazy(() =>
     default: m.AgentTracePage,
   })),
 );
+const AgentTraceDetailPage = lazy(() =>
+  import("@/features/agent-trace/AgentTraceDetailPage").then((m) => ({
+    default: m.AgentTraceDetailPage,
+  })),
+);
 const AIRuntimePage = lazy(() =>
   import("@/features/runtime/AIRuntimePage").then((m) => ({ default: m.AIRuntimePage })),
 );
@@ -226,6 +231,14 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <AgentTracePage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="agent-trace/:traceId"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <AgentTraceDetailPage />
               </Suspense>
             }
           />

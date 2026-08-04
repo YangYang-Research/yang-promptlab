@@ -52,14 +52,30 @@ pub struct CompletionOutcome {
     pub content: Option<String>,
     #[serde(default)]
     pub tool_calls: Vec<ToolCall>,
+    /// Prompt / input tokens for this completion (provider usage or estimate).
+    #[serde(default)]
+    pub input_tokens: u64,
+    /// Completion / output tokens for this completion (provider usage or estimate).
+    #[serde(default)]
+    pub output_tokens: u64,
 }
 
 impl CompletionOutcome {
     pub fn from_text(content: impl Into<String>) -> Self {
+        let content = content.into();
+        let output_tokens = crate::token_usage::estimate_tokens(&content);
         Self {
-            content: Some(content.into()),
+            content: Some(content),
             tool_calls: Vec::new(),
+            input_tokens: 0,
+            output_tokens,
         }
+    }
+
+    pub fn with_usage(mut self, input_tokens: u64, output_tokens: u64) -> Self {
+        self.input_tokens = input_tokens;
+        self.output_tokens = output_tokens;
+        self
     }
 }
 

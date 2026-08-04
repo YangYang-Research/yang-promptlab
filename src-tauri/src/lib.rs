@@ -159,6 +159,13 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                     .map_err(crate::error::CommandError::from)?,
             ));
 
+            let agent_trace_path = environment.root.join("agenttrace").join("agenttrace.db");
+            let agent_trace = tauri::async_runtime::block_on(promptlab_agenttrace::AgentTrace::open(
+                &agent_trace_path,
+            ))
+            .map_err(|err| crate::error::CommandError::internal(err.to_string()))?;
+            let agent_trace = std::sync::Arc::new(agent_trace);
+
             app.manage(AppState::new(
                 database,
                 environment,
@@ -173,6 +180,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 model_manager_arc,
                 model_provider,
                 model_catalog_meta,
+                agent_trace,
             ));
 
             let startup_state = app.state::<AppState>();
@@ -234,6 +242,10 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::agent_memory::agent_memory_list_events,
             commands::agent_memory::agent_memory_delete_session,
             commands::agent_memory::agent_memory_list_ltm,
+            commands::agenttrace::agenttrace_list_sessions,
+            commands::agenttrace::agenttrace_list_traces,
+            commands::agenttrace::agenttrace_get_trace,
+            commands::agenttrace::agenttrace_delete_session,
             commands::db_health,
             commands::projects::project_create,
             commands::projects::project_list,

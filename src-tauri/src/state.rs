@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use promptlab_auth::AuthEngineConfig;
+use promptlab_agenttrace::SharedAgentTrace;
 use promptlab_core::{EnvironmentPaths, EventBus, EventLogGuard, EventRing, LogGuard};
 use promptlab_harness::HarnessFactory;
 use promptlab_models::{BuiltinCatalogMeta, LocalModelManager};
@@ -33,6 +34,7 @@ pub struct AppState {
     runtime_model_testing_id: Arc<AsyncMutex<Option<String>>>,
     _log_guard: LogGuard,
     _event_log_guard: EventLogGuard,
+    agent_trace: SharedAgentTrace,
 }
 
 impl AppState {
@@ -51,6 +53,7 @@ impl AppState {
         model_manager: Arc<AsyncMutex<LocalModelManager>>,
         model_provider: promptlab_runtime::SharedModelProvider,
         model_catalog_meta: BuiltinCatalogMeta,
+        agent_trace: SharedAgentTrace,
     ) -> Self {
         let config_dir = environment.config.clone();
         Self {
@@ -72,6 +75,7 @@ impl AppState {
             runtime_model_testing_id: Arc::new(AsyncMutex::new(None)),
             _log_guard: log_guard,
             _event_log_guard: event_log_guard,
+            agent_trace,
         }
     }
 
@@ -186,5 +190,9 @@ impl AppState {
 
     pub fn plugins_dir(&self) -> PathBuf {
         self.environment.plugins.clone()
+    }
+
+    pub fn agent_trace(&self) -> &SharedAgentTrace {
+        &self.agent_trace
     }
 }

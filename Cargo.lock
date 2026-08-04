@@ -7247,6 +7247,7 @@ name = "promptlab-agent"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "promptlab-agenttrace",
  "promptlab-core",
  "promptlab-judge",
  "promptlab-models",
@@ -7259,6 +7260,21 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "promptlab-agenttrace"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -7331,6 +7347,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "promptlab-agent",
+ "promptlab-agenttrace",
  "promptlab-attack",
  "promptlab-auth",
  "promptlab-core",

@@ -36,6 +36,7 @@ promptlab-payload = { workspace = true }
 promptlab-plugin-host = { workspace = true }
 promptlab-target-profile = { workspace = true }
 promptlab-agent = { workspace = true }
+promptlab-agenttrace = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 time = { workspace = true }

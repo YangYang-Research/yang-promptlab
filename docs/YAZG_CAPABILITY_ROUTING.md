@@ -53,15 +53,15 @@ The registry is extensible (`CapabilityRegistry::register`) for plugins / MCP wi
 
 ## Logging / Agent Trace
 
-Agent Trace shows a **stage timeline** from `agents.log` plus STM from SQLite:
+Agent Trace reads **AgentTrace** spans (SQLite under `~/.promptlab/agenttrace/`), not `agents.log`:
 
-- `capability_classify_request` / `capability_classify_response` (LLM #1)
-- `llm_request` / `llm_response` (LLM #2, capability tools only)
-- `tool_*` when present
-- (`completion_*` Rig hooks are logged but hidden in Trace — same turn as `llm_*`)
-- Info: capability, loaded tool count/names, tool_used, latency, `router=llm`
+- One trace per Yazg turn
+- Spans: `capability_classify`, `llm`, `tool:*`
+- Dual-write to `agents.log` remains for low-level debugging
 
-Deleting a conversation in Assistant also deletes STM (`yazg-chat:<threadId>`). Trace only lists sessions still present in Assistant.
+See [AGENTTRACE.md](./AGENTTRACE.md).
+
+Deleting a conversation in Assistant also deletes AgentTrace rows + STM (`yazg-chat:<threadId>`). Trace only lists sessions still present in Assistant.
 
 ## Fallback
 

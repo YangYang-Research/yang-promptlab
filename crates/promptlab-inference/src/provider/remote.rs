@@ -358,7 +358,7 @@ impl RemoteProviderAdapter {
             ));
         }
         let content_for_usage = content.clone().unwrap_or_default();
-        record_provider_usage(
+        let (input_tokens, output_tokens) = record_provider_usage(
             parse_openai_usage(&value),
             &messages_prompt_estimate(&messages),
             &content_for_usage,
@@ -366,6 +366,8 @@ impl RemoteProviderAdapter {
         Ok(CompletionOutcome {
             content,
             tool_calls,
+            input_tokens,
+            output_tokens,
         })
     }
 
@@ -607,7 +609,7 @@ fn messages_prompt_estimate(messages: &[serde_json::Value]) -> String {
         .join("\n")
 }
 
-fn record_provider_usage(parsed: Option<(u64, u64)>, prompt_text: &str, output_text: &str) {
+fn record_provider_usage(parsed: Option<(u64, u64)>, prompt_text: &str, output_text: &str) -> (u64, u64) {
     let (input, output) = match parsed {
         Some(pair) => pair,
         None => (
@@ -616,6 +618,7 @@ fn record_provider_usage(parsed: Option<(u64, u64)>, prompt_text: &str, output_t
         ),
     };
     crate::token_usage::record_completion(input, output);
+    (input, output)
 }
 
 fn json_u64(value: &serde_json::Value, key: &str) -> Option<u64> {

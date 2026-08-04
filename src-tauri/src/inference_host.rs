@@ -522,6 +522,8 @@ impl PlannerLlm for HostYazgReactLlm {
                     arguments: call.arguments,
                 })
                 .collect(),
+            input_tokens: outcome.input_tokens,
+            output_tokens: outcome.output_tokens,
         })
     }
 
@@ -567,6 +569,8 @@ impl PlannerLlm for HostYazgReactLlm {
                     arguments: call.arguments,
                 })
                 .collect(),
+            input_tokens: outcome.input_tokens,
+            output_tokens: outcome.output_tokens,
         })
     }
 }
