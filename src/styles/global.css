@@ -11823,8 +11823,8 @@ a:hover {
 
 /*
  * Timeline marker: . | .
- * ::before = colored dot (never sits on a continuous line)
- * ::after  = connector segment from below this dot to above the next
+ * ::before = colored dot
+ * ::after  = line segment BELOW the dot (connector to next, or short tail on last)
  */
 .agent-trace-group::before {
   content: "";
@@ -11841,13 +11841,12 @@ a:hover {
   pointer-events: none;
 }
 
-.agent-trace-group:not(:last-child)::after {
+.agent-trace-group::after {
   content: "";
   position: absolute;
   top: calc(
     1.05rem + var(--trace-dot, 0.5rem) + var(--trace-gap, 0.22rem)
   );
-  bottom: calc(-0.85rem - var(--trace-gap, 0.22rem));
   left: calc(-1 * var(--trace-gutter, 1.25rem) / 2);
   z-index: 1;
   width: var(--trace-line, 2px);
@@ -11857,13 +11856,38 @@ a:hover {
   pointer-events: none;
 }
 
+/* Non-last: extend through the list gap to the next dot. */
+.agent-trace-group:not(:last-child)::after {
+  bottom: calc(-0.85rem - var(--trace-gap, 0.22rem));
+}
+
+/* Last: run the full remaining card height, fade near the bottom edge. */
+.agent-trace-group:last-child::after {
+  bottom: 0.85rem;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--accent) 42%, var(--border)) 0%,
+    color-mix(in srgb, var(--accent) 42%, var(--border)) 72%,
+    transparent 100%
+  );
+}
+
 .agent-trace-group--tool::before {
   background: var(--warning);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 18%, transparent);
 }
 
-.agent-trace-group--tool:not(:last-child)::after {
+.agent-trace-group--tool::after {
   background: color-mix(in srgb, var(--warning) 40%, var(--border));
+}
+
+.agent-trace-group--tool:last-child::after {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--warning) 40%, var(--border)) 0%,
+    color-mix(in srgb, var(--warning) 40%, var(--border)) 72%,
+    transparent 100%
+  );
 }
 
 .agent-trace-group--capability::before,
@@ -11878,8 +11902,17 @@ a:hover {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 18%, transparent);
 }
 
-.agent-trace-group--completion:not(:last-child)::after {
+.agent-trace-group--completion::after {
   background: color-mix(in srgb, var(--info) 40%, var(--border));
+}
+
+.agent-trace-group--completion:last-child::after {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--info) 40%, var(--border)) 0%,
+    color-mix(in srgb, var(--info) 40%, var(--border)) 72%,
+    transparent 100%
+  );
 }
 
 .agent-trace-group__head {
