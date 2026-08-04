@@ -561,13 +561,6 @@ function SpanCard({
       className={`agent-trace-group agent-trace-group--${family}`}
       open
     >
-      <span className="agent-trace-group__rail" aria-hidden="true">
-        <span className="agent-trace-group__rail-seg agent-trace-group__rail-seg--top" />
-        <span
-          className={`agent-trace-group__rail-dot agent-trace-group__rail-dot--${family}`}
-        />
-        <span className="agent-trace-group__rail-seg agent-trace-group__rail-seg--bottom" />
-      </span>
       <summary className="agent-trace-group__head">
         <span
           className={`agent-trace-group__family agent-trace-group__family--${family}`}
