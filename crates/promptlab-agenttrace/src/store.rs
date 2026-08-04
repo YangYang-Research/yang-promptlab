@@ -688,15 +688,15 @@ mod tests {
             })
             .await
             .unwrap();
-        let classify = soft_start_span(
+        let classify = crate::start_span!(
             Some(&trace),
             SpanStart {
-                name: "capability_classify".into(),
+                name: String::new(),
                 kind: SpanKind::Capability,
                 parent_span_id: None,
                 inputs: Some(serde_json::json!({"user":"hi"})),
                 attributes: BTreeMap::new(),
-            },
+            }
         )
         .await
         .unwrap();
@@ -710,15 +710,16 @@ mod tests {
             },
         )
         .await;
-        let llm = soft_start_span(
+        let llm = crate::start_span!(
             Some(&trace),
             SpanStart {
-                name: "llm".into(),
+                // Explicit override (closures / multi-span sites).
+                name: "llm_wire".into(),
                 kind: SpanKind::Llm,
                 parent_span_id: None,
                 inputs: Some(serde_json::json!({"messages":[]})),
                 attributes: BTreeMap::new(),
-            },
+            }
         )
         .await
         .unwrap();
@@ -747,7 +748,8 @@ mod tests {
 
         let detail = flow.get_trace(&listed[0].id).await.unwrap().unwrap();
         assert_eq!(detail.spans.len(), 2);
-        assert_eq!(detail.spans[0].name, "capability_classify");
+        assert_eq!(detail.spans[0].name, "start_end_list_get_delete");
+        assert_eq!(detail.spans[1].name, "llm_wire");
 
         let sessions = flow.list_sessions(Some("yazg"), 10).await.unwrap();
         assert_eq!(sessions.len(), 1);

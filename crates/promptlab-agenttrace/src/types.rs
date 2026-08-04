@@ -73,6 +73,8 @@ pub struct TraceStart {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpanStart {
+    /// Span / function name. Leave empty and use [`crate::start_span!`] to
+    /// auto-fill from the Rust caller function; set explicitly for closures/tools.
     pub name: String,
     pub kind: SpanKind,
     pub parent_span_id: Option<String>,

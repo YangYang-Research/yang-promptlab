@@ -16,6 +16,8 @@ export type ChatMessage = {
   events?: YazgAgentEventDto[];
   rawOutput?: unknown;
   intent?: string;
+  /** AgentTrace id for this Yazg reply (opens Trace detail). */
+  traceId?: string;
   at: number;
 };
 
@@ -325,6 +327,7 @@ function appendYazgMessage(
     events: message.events,
     rawOutput: message.rawOutput,
     intent: message.intent,
+    traceId: message.traceId,
     at: now,
   };
   // Apply reply + clear busy in one snapshot so the UI never sticks on "working…".
@@ -423,6 +426,7 @@ export async function sendYazgChatMessage(options: {
       events: response.events,
       rawOutput: response.rawOutput,
       intent: response.intent,
+      traceId: response.traceId?.trim() || undefined,
     });
 
     if (response.createdProject) {

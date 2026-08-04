@@ -7,6 +7,7 @@ import {
   Card,
   IconButton,
   IconEdit,
+  IconExternalLink,
   IconInfo,
   IconPlus,
   IconRobot,
@@ -19,10 +20,6 @@ import {
 } from "@/shared/components";
 import { useAiInferenceRoute } from "@/shared/hooks/useAiInferenceRoute";
 import { healthCheck } from "@/shared/ipc";
-import {
-  listAgentTraces,
-  type AgentTraceSummaryDto,
-} from "@/shared/ipc/agentTrace";
 import { isYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
 import { useToast } from "@/shared/notifications";
 import { useAppStore } from "@/app/store/AppStore";
@@ -65,8 +62,6 @@ export function YazgChatPage() {
   const [renameThreadId, setRenameThreadId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [infoThreadId, setInfoThreadId] = useState<string | null>(null);
-  const [infoTraces, setInfoTraces] = useState<AgentTraceSummaryDto[]>([]);
-  const [infoTracesLoading, setInfoTracesLoading] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -143,41 +138,12 @@ export function YazgChatPage() {
 
   const closeInfo = () => {
     setInfoThreadId(null);
-    setInfoTraces([]);
-    setInfoTracesLoading(false);
   };
 
   const infoThread = useMemo(
     () => store.threads.find((thread) => thread.id === infoThreadId) ?? null,
     [store.threads, infoThreadId],
   );
-
-  const infoSessionId = infoThread ? `yazg-chat:${infoThread.id}` : null;
-  const latestInfoTrace = infoTraces[0] ?? null;
-
-  useEffect(() => {
-    if (!infoThreadId || !backendConnected) {
-      setInfoTraces([]);
-      setInfoTracesLoading(false);
-      return;
-    }
-    const sessionId = `yazg-chat:${infoThreadId}`;
-    let cancelled = false;
-    setInfoTracesLoading(true);
-    void listAgentTraces({ experiment: "yazg", sessionId, limit: 20 })
-      .then((rows) => {
-        if (!cancelled) setInfoTraces(rows);
-      })
-      .catch(() => {
-        if (!cancelled) setInfoTraces([]);
-      })
-      .finally(() => {
-        if (!cancelled) setInfoTracesLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [backendConnected, infoThreadId]);
 
   const submitRename = () => {
     if (!renameThreadId) return;
@@ -333,9 +299,21 @@ export function YazgChatPage() {
                 className={`yazg-chat-bubble yazg-chat-bubble--${msg.role}`}
               >
                 <header className="yazg-chat-bubble__meta">
-                  {msg.role === "yazg" ? "Yazg" : "You"}
-                  {msg.intent ? (
-                    <span className="yazg-chat-bubble__intent">{msg.intent}</span>
+                  <span className="yazg-chat-bubble__meta-label">
+                    {msg.role === "yazg" ? "Yazg" : "You"}
+                    {msg.intent ? (
+                      <span className="yazg-chat-bubble__intent">{msg.intent}</span>
+                    ) : null}
+                  </span>
+                  {msg.role === "yazg" && msg.traceId ? (
+                    <Link
+                      className="yazg-chat-bubble__trace-link"
+                      to={`/agent-trace/${encodeURIComponent(msg.traceId)}`}
+                      title={`Open trace ${msg.traceId}`}
+                      aria-label="Open Agent Trace for this reply"
+                    >
+                      <IconExternalLink />
+                    </Link>
                   ) : null}
                 </header>
                 <YazgMarkdown className="yazg-chat-bubble__text yazg-chat-md" text={msg.text} />
@@ -444,38 +422,6 @@ export function YazgChatPage() {
             <div>
               <dt>Conversation ID</dt>
               <dd className="mono text-sm">{infoThread.id}</dd>
-            </div>
-            <div>
-              <dt>Trace ID</dt>
-              <dd>
-                {infoTracesLoading ? (
-                  <span className="text-muted text-sm">Loading…</span>
-                ) : latestInfoTrace && infoSessionId ? (
-                  <>
-                    <Link
-                      className="yazg-chat-page__info-link mono text-sm"
-                      to={`/agent-trace/${encodeURIComponent(latestInfoTrace.id)}`}
-                      onClick={closeInfo}
-                    >
-                      {latestInfoTrace.id}
-                    </Link>
-                    {infoTraces.length > 1 ? (
-                      <p className="yazg-chat-page__info-sub">
-                        Latest of {infoTraces.length} ·{" "}
-                        <Link
-                          className="yazg-chat-page__info-link"
-                          to={`/agent-trace?session=${encodeURIComponent(infoSessionId)}`}
-                          onClick={closeInfo}
-                        >
-                          Open all traces
-                        </Link>
-                      </p>
-                    ) : null}
-                  </>
-                ) : (
-                  <span className="text-muted text-sm">No traces yet</span>
-                )}
-              </dd>
             </div>
             <div>
               <dt>Created</dt>

@@ -102,6 +102,9 @@ pub struct YazgTurn {
     /// Raw agent `PromptResponse` (or equivalent engine payload) for UI.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_output: Option<serde_json::Value>,
+    /// AgentTrace id for this turn (links chat bubble → Trace detail).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
 }
 
 /// Host-facing payloads when the caller needs typed domain results.
@@ -204,6 +207,7 @@ impl YazgSupervisor {
         project_tools: Option<Arc<dyn CreateProjectTools>>,
         workspace_tools: Option<Arc<dyn WorkspaceTools>>,
         agent_trace: Option<promptlab_agenttrace::SharedAgentTrace>,
+        model_label: Option<String>,
     ) -> AgentResult<YazgDelegation> {
         let goal = Self::build_goal(message, intent_hint);
         let mut specialist = YazgSpecialistContext::default().with_auth(auth_headers);
@@ -215,6 +219,7 @@ impl YazgSupervisor {
             .with_project_tools(project_tools)
             .with_workspace_tools(workspace_tools)
             .with_agent_trace(agent_trace)
+            .with_model_label(model_label)
             .with_specialist(specialist);
         Self::run_yazg_turn(request).await
     }
@@ -267,6 +272,7 @@ impl YazgSupervisor {
                 verified: Some(true),
                 plan_summary: None,
                 raw_output: None,
+                trace_id: None,
             },
             outcome,
         })
@@ -317,6 +323,7 @@ impl YazgSupervisor {
                 verified: Some(true),
                 plan_summary: Some(plan_summary),
                 raw_output: None,
+                trace_id: None,
             },
             outcome,
         })
@@ -370,6 +377,7 @@ impl YazgSupervisor {
                         verified: None,
                         plan_summary: None,
                         raw_output: None,
+                        trace_id: None,
                     },
                     outcome,
                 });
@@ -401,6 +409,7 @@ impl YazgSupervisor {
                 verified: None,
                 plan_summary: None,
                 raw_output: None,
+                trace_id: None,
             },
             outcome,
         })
@@ -454,6 +463,7 @@ impl YazgSupervisor {
                 verified: None,
                 plan_summary: None,
                 raw_output: None,
+                trace_id: None,
             },
             outcome,
         })
@@ -516,6 +526,7 @@ impl YazgSupervisor {
                         verified: None,
                         plan_summary: None,
                         raw_output: None,
+                        trace_id: None,
                     },
                     outcome,
                 });
@@ -547,6 +558,7 @@ impl YazgSupervisor {
                 verified: None,
                 plan_summary: None,
                 raw_output: None,
+                trace_id: None,
             },
             outcome,
         })
@@ -673,6 +685,7 @@ impl YazgSupervisor {
             verified: profile.map(|p| p.is_verified()),
             plan_summary: None,
             raw_output: None,
+            trace_id: None,
         }
     }
 }
@@ -735,6 +748,7 @@ fn delegation_from_artifacts_with_raw(
         verified: verified.or(artifacts.analyze.as_ref().map(|_| true)),
         plan_summary: plan_summary.clone(),
         raw_output,
+        trace_id: artifacts.trace_id.clone(),
     };
 
     if let Some(project) = artifacts.created_project.clone() {

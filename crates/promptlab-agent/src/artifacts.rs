@@ -50,6 +50,8 @@ pub struct YazgArtifacts {
     pub workspace_inventory: Option<WorkspaceInventory>,
     pub final_reply: String,
     pub last_action: Option<YazgActionKind>,
+    /// AgentTrace id for this Yazg turn (when instrumentation is enabled).
+    pub trace_id: Option<String>,
 }
 
 /// Persist specialist outcomes into LTM after a Yazg turn.

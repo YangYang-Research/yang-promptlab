@@ -45,7 +45,7 @@ use crate::yazg_tools::{
 };
 use promptlab_agenttrace::{
     soft_end_span, soft_end_trace, soft_start_span, SharedAgentTrace, SpanEnd, SpanKind, SpanStart,
-    TraceStart, TraceStatus,
+    TraceHandle, TraceStart, TraceStatus,
 };
 use promptlab_planner::PlannerLlm;
 
@@ -245,7 +245,7 @@ impl AgentHook<YazgModel> for YazgAgentHook {
                     let trace = guard.active_trace.clone();
                     let parent = guard.active_llm_span.as_ref().map(|s| s.id().to_string());
                     drop(guard);
-                    let span = soft_start_span(
+                    let span = promptlab_agenttrace::start_span!(
                         trace.as_ref(),
                         SpanStart {
                             name: format!("tool:{tool_name}"),
@@ -260,7 +260,7 @@ impl AgentHook<YazgModel> for YazgAgentHook {
                                 "tool".into(),
                                 tool_name.to_string(),
                             )]),
-                        },
+                        }
                     )
                     .await;
                     if let Some(span) = span {
@@ -509,6 +509,8 @@ pub struct YazgRequest {
     pub max_turns: usize,
     /// Optional AgentTrace store for tracing.
     pub agent_trace: Option<SharedAgentTrace>,
+    /// Display name of the active inference model (written onto AgentTrace spans).
+    pub model_label: Option<String>,
 }
 
 impl YazgRequest {
@@ -523,6 +525,7 @@ impl YazgRequest {
             llms,
             max_turns: DEFAULT_MAX_TURNS,
             agent_trace: None,
+            model_label: None,
         }
     }
 
@@ -538,6 +541,13 @@ impl YazgRequest {
 
     pub fn with_agent_trace(mut self, store: Option<SharedAgentTrace>) -> Self {
         self.agent_trace = store;
+        self
+    }
+
+    pub fn with_model_label(mut self, model_label: Option<String>) -> Self {
+        self.model_label = model_label
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         self
     }
 
@@ -575,6 +585,9 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
             Ok(exp) => {
                 let mut tags = std::collections::BTreeMap::new();
                 tags.insert("agent".into(), "yazg".into());
+                if let Some(model) = request.model_label.as_deref() {
+                    tags.insert("model".into(), model.to_string());
+                }
                 match exp
                     .start_trace(TraceStart {
                         name: "yazg_turn".into(),
@@ -600,6 +613,7 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
     };
 
     let mut artifacts = YazgArtifacts::default();
+    artifacts.trace_id = active_trace.as_ref().map(|t| t.id().to_string());
     artifacts.events.push(AgentEvent::emit_kind(
         AgentId::Yazg,
         crate::types::AgentEventKind::Started,
@@ -651,15 +665,10 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
             "latest_user_message": request.goal.trim(),
         })
     });
-    let classify_span = soft_start_span(
+    let classify_span = capability_classify(
         active_trace.as_ref(),
-        SpanStart {
-            name: "capability_classify".into(),
-            kind: SpanKind::Capability,
-            parent_span_id: None,
-            inputs: Some(classify_inputs.clone()),
-            attributes: std::collections::BTreeMap::new(),
-        },
+        classify_inputs.clone(),
+        request.model_label.as_deref(),
     )
     .await;
 
@@ -742,11 +751,14 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         memory: request.memory.clone(),
         memory_ctx: request.memory_ctx.clone(),
         active_trace: active_trace.clone(),
+        model_label: request.model_label.clone(),
         ..Default::default()
     }));
     let specialist = Arc::new(request.specialist.clone());
     let context_block = capability_context_block(loaded.capability, specialist.as_ref());
-    let model = YazgModel::new(request.llms.supervisor.clone()).with_stage_sink(state.clone());
+    let model = YazgModel::new(request.llms.supervisor.clone())
+        .with_stage_sink(state.clone())
+        .with_model_label(request.model_label.clone());
 
     let base_preamble = match loaded.capability {
         AssistantCapability::Conversation => YAZG_CONVERSATION_PREAMBLE,
@@ -1198,6 +1210,29 @@ fn build_capability_tools(
         }));
     }
     out
+}
+
+/// AgentTrace span for capability routing — name auto-filled as `capability_classify`.
+async fn capability_classify(
+    trace: Option<&TraceHandle>,
+    inputs: serde_json::Value,
+    model_label: Option<&str>,
+) -> Option<promptlab_agenttrace::SpanHandle> {
+    let mut attributes = std::collections::BTreeMap::new();
+    if let Some(model) = model_label {
+        attributes.insert("model".into(), model.to_string());
+    }
+    promptlab_agenttrace::start_span!(
+        trace,
+        SpanStart {
+            name: String::new(),
+            kind: SpanKind::Capability,
+            parent_span_id: None,
+            inputs: Some(inputs),
+            attributes,
+        }
+    )
+    .await
 }
 
 fn map_tool_to_action(name: &str) -> Option<YazgActionKind> {

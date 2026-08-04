@@ -20,7 +20,7 @@ use tracing::{info, warn};
 
 use crate::types::{AgentEvent, AgentEventKind, AgentId};
 use crate::yazg_tools::SharedYazgState;
-use promptlab_agenttrace::{soft_end_span, soft_start_span, SpanEnd, SpanKind, SpanStart, TraceStatus};
+use promptlab_agenttrace::{soft_end_span, SpanEnd, SpanKind, SpanStart, TraceStatus};
 
 /// Default text when a completion is empty (also used for MaxTurns recovery).
 pub const EMPTY_FALLBACK_REPLY: &str =
@@ -45,6 +45,8 @@ pub struct YazgModel {
     llm: Arc<dyn PlannerLlm>,
     /// Optional sink for per-completion request/response stage events (UI Thinking).
     stage_sink: Option<SharedYazgState>,
+    /// Display name of the active inference model (AgentTrace).
+    model_label: Option<String>,
 }
 
 impl YazgModel {
@@ -52,11 +54,19 @@ impl YazgModel {
         Self {
             llm,
             stage_sink: None,
+            model_label: None,
         }
     }
 
     pub fn with_stage_sink(mut self, sink: SharedYazgState) -> Self {
         self.stage_sink = Some(sink);
+        self
+    }
+
+    pub fn with_model_label(mut self, model_label: Option<String>) -> Self {
+        self.model_label = model_label
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         self
     }
 
@@ -101,6 +111,7 @@ impl CompletionModel for YazgModel {
         Self {
             llm: Arc::new(UnsupportedLlm),
             stage_sink: None,
+            model_label: None,
         }
     }
 
@@ -140,7 +151,7 @@ impl CompletionModel for YazgModel {
 
         // Body mapped to HostYazgLlm → OpenAI chat/completions (messages[] + tools).
         // This is the LLM wire request Agent Trace should display (not Rig completion_call).
-        let request_body = json!({
+        let mut request_body = json!({
             "messages": messages,
             "model_params": {
                 "temperature": request.temperature,
@@ -156,6 +167,11 @@ impl CompletionModel for YazgModel {
                 }
             })).collect::<Vec<_>>(),
         });
+        if let Some(model) = self.model_label.as_deref() {
+            if let Some(obj) = request_body.as_object_mut() {
+                obj.insert("model".into(), json!(model));
+            }
+        }
         self.emit_stage(
             AgentEventKind::Llm,
             format_stage_payload("llm_request", request_body.clone()),
@@ -166,16 +182,25 @@ impl CompletionModel for YazgModel {
         if let Some(sink) = &self.stage_sink {
             let mut guard = sink.lock().await;
             let trace = guard.active_trace.clone();
+            let model_label = self
+                .model_label
+                .clone()
+                .or_else(|| guard.model_label.clone());
             drop(guard);
-            let span = soft_start_span(
+            let mut attributes = std::collections::BTreeMap::new();
+            if let Some(model) = model_label {
+                attributes.insert("model".into(), model);
+            }
+            let span = promptlab_agenttrace::start_span!(
                 trace.as_ref(),
                 SpanStart {
-                    name: "llm".into(),
+                    // Empty → macro fills with this Rust method name.
+                    name: String::new(),
                     kind: SpanKind::Llm,
                     parent_span_id: None,
                     inputs: Some(request_body.clone()),
-                    attributes: std::collections::BTreeMap::new(),
-                },
+                    attributes,
+                }
             )
             .await;
             if let Some(span) = span {

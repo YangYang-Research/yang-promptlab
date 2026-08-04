@@ -51,6 +51,8 @@ pub struct YazgRunState {
     pub active_llm_span: Option<SpanHandle>,
     /// Open tool spans keyed by tool_call_id.
     pub active_tool_spans: HashMap<String, SpanHandle>,
+    /// Display name of the active inference model (for AgentTrace spans).
+    pub model_label: Option<String>,
 }
 
 impl Default for YazgRunState {
@@ -67,6 +69,7 @@ impl Default for YazgRunState {
             active_trace: None,
             active_llm_span: None,
             active_tool_spans: HashMap::new(),
+            model_label: None,
         }
     }
 }

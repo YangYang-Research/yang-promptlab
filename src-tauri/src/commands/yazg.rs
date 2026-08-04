@@ -61,6 +61,8 @@ pub struct YazgChatResponse {
     pub verified: Option<bool>,
     pub plan_summary: Option<String>,
     pub created_project: Option<YazgCreatedProjectDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -787,6 +789,7 @@ fn turn_to_response(
             name: project.name,
             description: project.description,
         }),
+        trace_id: turn.trace_id,
     }
 }
 
@@ -817,6 +820,18 @@ pub async fn yazg_chat_op(
 
     let inference = state.inference_manager().lock().await;
     let runtime_ready = is_inference_ready(&inference);
+    let model_label = {
+        let name = inference.config().model.trim();
+        if name.is_empty() {
+            inference
+                .config()
+                .selected_model_id
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+        } else {
+            Some(name.to_string())
+        }
+    };
     drop(inference);
 
     if !runtime_ready {
@@ -865,6 +880,7 @@ pub async fn yazg_chat_op(
         Some(project_tools),
         Some(workspace_tools),
         Some(state.agent_trace().clone()),
+        model_label,
     )
     .await
     .map_err(map_agent_err)?;

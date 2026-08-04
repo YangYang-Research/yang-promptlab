@@ -39,6 +39,7 @@ export type YazgChatResponse = {
   verified?: boolean | null;
   planSummary?: string | null;
   createdProject?: YazgCreatedProjectDto | null;
+  traceId?: string | null;
 };
 
 export type YazgGenerateChatTitleRequest = {
