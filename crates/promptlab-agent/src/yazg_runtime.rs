@@ -578,7 +578,7 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
             serde_json::json!({
                 "content": resolution.raw_classifier_output,
                 "capability": loaded.capability.as_str(),
-                "confidence": loaded.confidence,
+                "confidence": (loaded.confidence * 100.0).round() / 100.0,
                 "reason": loaded.reason,
                 "tool_calls": [],
                 "latency_ms": route_ms,

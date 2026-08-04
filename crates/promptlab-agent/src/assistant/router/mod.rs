@@ -97,6 +97,17 @@ impl IntentRouter {
 
         match parse_capability_response(&raw) {
             Some(mut resolution) => {
+                if let Some(corrected) = correct_misrouted_capability(latest, resolution.capability)
+                {
+                    info!(
+                        from = %resolution.capability,
+                        to = %corrected,
+                        "yazg capability classifier corrected by heuristic"
+                    );
+                    resolution.capability = corrected;
+                    resolution.reason = format!("corrected:{};{}", corrected.as_str(), resolution.reason);
+                    resolution.confidence = resolution.confidence.max(0.85);
+                }
                 resolution.raw_classifier_output = Some(raw);
                 resolution.classifier_request = Some(classifier_request);
                 resolution
@@ -121,9 +132,9 @@ Do NOT call tools. Do NOT answer the user. Output JSON only.
 
 Capabilities:
 - conversation — greetings, small talk, identity, thanks, how-are-you; no workspace data needed
-- knowledge — general AI/security concepts (prompt injection, OWASP, architecture); no DB tools
-- workspace — inventory of which projects exist / workspace overview
-- projects — list/create/detail a specific project
+- knowledge — conceptual AI/security Q&A only (prompt injection, OWASP, architecture). No PromptLab DB rows.
+- workspace — inventory of which projects exist / workspace overview (no specific project name)
+- projects — list / create / detail a PromptLab workspace project (often a named project)
 - targets — list/detail targets or analyze a bound endpoint
 - scan — list/detail/start/stop scans
 - findings — findings / vulnerabilities
@@ -133,12 +144,22 @@ Capabilities:
 - runtime — AI runtime start/stop/status
 - settings — app settings / preferences
 
-Rules:
+Disambiguation (critical):
+- If the user asks for info/detail/list about a "project" (or "dự án") in PromptLab — including a project name like "AI" — choose projects, NOT knowledge.
+- knowledge is ONLY for abstract concepts that do not need workspace rows. Do not treat a named PromptLab project as a concept.
+- Prefer projects over workspace when a project is named or the user asks to create one.
 - Prefer conversation when unsure and no live workspace/runtime data is clearly required.
-- Prefer knowledge for conceptual "what is / explain" questions that do not need DB rows.
-- Prefer projects over workspace when the user names a project or asks to create one.
 - Prefer targets when the user asks about endpoints/targets.
-- Respond with a single JSON object only (no markdown fences), shape:
+
+Examples:
+- "hi" → conversation
+- "what is prompt injection?" → knowledge
+- "list projects" → projects
+- "cho tôi thông tin project AI" → projects
+- "project detail Foo" → projects
+- "start a scan" → scan
+
+Respond with a single JSON object only (no markdown fences), shape:
   {"capability":"<id>","confidence":0.0-1.0,"reason":"short"}"##;
 
 #[derive(Debug, Deserialize)]
@@ -223,6 +244,138 @@ fn truncate(s: &str, max: usize) -> String {
     format!("{cut}…")
 }
 
+/// Fix common LLM mistakes: workspace project asks routed to knowledge/conversation.
+fn correct_misrouted_capability(
+    latest: &str,
+    capability: AssistantCapability,
+) -> Option<AssistantCapability> {
+    if !matches!(
+        capability,
+        AssistantCapability::Knowledge | AssistantCapability::Conversation | AssistantCapability::Workspace
+    ) {
+        return None;
+    }
+    if looks_like_promptlab_project_request(latest) {
+        return Some(AssistantCapability::Projects);
+    }
+    None
+}
+
+fn looks_like_promptlab_project_request(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    let has_project_word = lower.contains("project")
+        || lower.contains("projects")
+        || lower.contains("dự án")
+        || lower.contains("du an");
+    if !has_project_word {
+        return false;
+    }
+    // Pure conceptual questions stay on knowledge.
+    if is_conceptual_only(&lower) {
+        return false;
+    }
+    // Explicit PromptLab project actions / lookups.
+    const ACTION_MARKERS: &[&str] = &[
+        "thông tin",
+        "thong tin",
+        "chi tiết",
+        "chi tiet",
+        "detail",
+        "details",
+        "info",
+        "information",
+        "list",
+        "show",
+        "get",
+        "open",
+        "create",
+        "new",
+        "tạo",
+        "tao",
+        "xem",
+        "cho tôi",
+        "cho toi",
+        "về project",
+        "ve project",
+        "about project",
+    ];
+    if ACTION_MARKERS.iter().any(|m| lower.contains(m)) {
+        return true;
+    }
+    // "project <Name>" / "<Name> project" style (name is not a concept word).
+    named_project_mention(&lower)
+}
+
+fn is_conceptual_only(lower: &str) -> bool {
+    const CONCEPT_MARKERS: &[&str] = &[
+        "what is",
+        "what's",
+        "whats",
+        "explain",
+        "define",
+        "definition",
+        "how does",
+        "why is",
+        "là gì",
+        "la gi",
+        "giải thích",
+        "giai thich",
+        "nghĩa là",
+        "nghia la",
+        "concept",
+        "theory",
+        "methodology",
+        "best practice",
+        "owasp",
+        "prompt injection",
+    ];
+    CONCEPT_MARKERS.iter().any(|m| lower.contains(m))
+        && !lower.contains("thông tin project")
+        && !lower.contains("thong tin project")
+        && !lower.contains("project detail")
+        && !lower.contains("list project")
+}
+
+fn named_project_mention(lower: &str) -> bool {
+    // project <token> where token is not a concept filler
+    const STOP: &[&str] = &[
+        "management",
+        "planning",
+        "plan",
+        "lifecycle",
+        "methodology",
+        "manager",
+        "based",
+        "in",
+        "a",
+        "an",
+        "the",
+        "my",
+        "our",
+        "this",
+        "that",
+        "of",
+        "for",
+        "on",
+        "to",
+        "và",
+        "va",
+        "của",
+        "cua",
+    ];
+    for (idx, _) in lower.match_indices("project") {
+        let after = lower[idx + "project".len()..].trim_start();
+        let token = after
+            .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
+            .next()
+            .unwrap_or("");
+        if !token.is_empty() && !STOP.contains(&token) && token != "s" {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,6 +432,28 @@ mod tests {
     #[test]
     fn unknown_capability_is_none() {
         assert!(parse_capability_response(r#"{"capability":"aliens"}"#).is_none());
+    }
+
+    #[test]
+    fn corrects_project_info_misrouted_to_knowledge() {
+        assert_eq!(
+            correct_misrouted_capability(
+                "cho tôi thông tin project AI",
+                AssistantCapability::Knowledge
+            ),
+            Some(AssistantCapability::Projects)
+        );
+        assert_eq!(
+            correct_misrouted_capability(
+                "what is prompt injection?",
+                AssistantCapability::Knowledge
+            ),
+            None
+        );
+        assert_eq!(
+            correct_misrouted_capability("list projects", AssistantCapability::Conversation),
+            Some(AssistantCapability::Projects)
+        );
     }
 
     #[tokio::test]
