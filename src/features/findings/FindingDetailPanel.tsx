@@ -252,7 +252,7 @@ function JudgeScoreSummary({
                   <th scope="col">Role</th>
                   <th scope="col">Confidence</th>
                   <th scope="col">Weight</th>
-                  <th scope="col">conf × w</th>
+                  <th scope="col">Conf × W</th>
                 </tr>
               </thead>
               <tbody>

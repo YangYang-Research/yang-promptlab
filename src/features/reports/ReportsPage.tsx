@@ -124,7 +124,7 @@ export function ReportsPage() {
     },
     {
       key: "generated",
-      header: "Last generated",
+      header: "Last Generated",
       width: "170px",
       render: (row: ScanExportRow) =>
         row.lastGeneratedAt ? new Date(row.lastGeneratedAt).toLocaleString() : "—",

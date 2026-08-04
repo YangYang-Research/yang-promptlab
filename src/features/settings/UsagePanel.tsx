@@ -119,7 +119,7 @@ export function UsagePanel({
             <table className="settings-usage__table">
               <thead>
                 <tr>
-                  <th scope="col">Agent / sub-agent</th>
+                  <th scope="col">Agent / Sub-Agent</th>
                   <th scope="col">Input</th>
                   <th scope="col">Output</th>
                   <th scope="col">Calls</th>
