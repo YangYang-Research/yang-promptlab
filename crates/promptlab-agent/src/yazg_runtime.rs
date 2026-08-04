@@ -649,6 +649,16 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
 
     // Capability routing: LLM #1 classifies from the latest user message only
     // (no chat history). Then loader injects that capability's tools into LLM #2.
+    // Span must wrap the LLM call — start before resolve, end after.
+    let classify_inputs = serde_json::json!({
+        "latest_user_message": request.goal.trim(),
+    });
+    let classify_span = capability_classify(
+        active_trace.as_ref(),
+        classify_inputs.clone(),
+        request.model_label.as_deref(),
+    )
+    .await;
     let route_started = std::time::Instant::now();
 
     let resolution = IntentRouter::new()
@@ -660,17 +670,8 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         )
         .await;
 
-    let classify_inputs = resolution.classifier_request.clone().unwrap_or_else(|| {
-        serde_json::json!({
-            "latest_user_message": request.goal.trim(),
-        })
-    });
-    let classify_span = capability_classify(
-        active_trace.as_ref(),
-        classify_inputs.clone(),
-        request.model_label.as_deref(),
-    )
-    .await;
+    let classify_inputs = resolution.classifier_request.clone().unwrap_or(classify_inputs);
+    let route_ms = route_started.elapsed().as_millis();
 
     artifacts.events.push(AgentEvent::emit_kind(
         AgentId::Yazg,
@@ -680,7 +681,6 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
     ));
 
     let loaded = CapabilityToolLoader::new().load(&resolution);
-    let route_ms = route_started.elapsed().as_millis();
 
     soft_end_span(
         classify_span.as_ref(),

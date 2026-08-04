@@ -35,6 +35,54 @@ export function IconList({ className }: IconProps) {
   );
 }
 
+/** Hierarchical span / file-tree mark. */
+export function IconTree({ className }: IconProps) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path
+        d="M4 3.5h4.5v3H4zM9.5 11.5H14v3H9.5zM9.5 7H14v3H9.5z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.25 6.5v6.5h3.25M6.25 8.5H9.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Vertical execution / timeline mark. */
+export function IconTimeline({ className }: IconProps) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path
+        d="M5 3.5v11"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <circle cx="5" cy="5" r="1.6" fill="currentColor" />
+      <circle cx="5" cy="9" r="1.6" fill="currentColor" />
+      <circle cx="5" cy="13" r="1.6" fill="currentColor" />
+      <path
+        d="M8 5h5.5M8 9h5.5M8 13h4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function IconDiscovery({ className }: IconProps) {
   return (
     <svg className={className} width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">

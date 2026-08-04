@@ -11379,59 +11379,547 @@ a:hover {
 
 .agent-trace-page__timeline {
   position: relative;
-  padding-left: 0.85rem;
+  padding-left: 0;
 }
 
-.agent-trace-page__timeline::before {
+.agent-trace-details-layout {
+  display: grid;
+  grid-template-columns: minmax(14rem, 17.5rem) minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.agent-trace-breakdown {
+  position: sticky;
+  top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.85rem 0.75rem 0.9rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-surface) 96%, var(--bg-elevated));
+  box-shadow: var(--shadow);
+  max-height: min(70vh, 42rem);
+  overflow: auto;
+}
+
+.agent-trace-breakdown__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0 0.1rem 0.4rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.agent-trace-breakdown__title {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  text-wrap: balance;
+}
+
+.agent-trace-breakdown__hint {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.agent-trace-breakdown__head .view-mode-toggle {
+  flex-shrink: 0;
+}
+
+.agent-trace-breakdown__head .icon-btn--sm {
+  width: 1.65rem;
+  height: 1.65rem;
+}
+
+.agent-trace-gantt {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  padding-top: 0.15rem;
+}
+
+.agent-trace-gantt__axis,
+.agent-trace-gantt__row {
+  display: grid;
+  grid-template-columns: 1.15rem minmax(0, 1fr) 3.75rem;
+  align-items: center;
+  column-gap: 0.45rem;
+}
+
+.agent-trace-gantt__axis {
+  min-height: 1.15rem;
+  padding-bottom: 0.15rem;
+}
+
+.agent-trace-gantt__gutter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.agent-trace-gantt__axis-track {
+  position: relative;
+  height: 1.15rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.agent-trace-gantt__tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 0.65rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.agent-trace-gantt__tick:first-child {
+  transform: translateX(0);
+}
+
+.agent-trace-gantt__dur-col {
+  display: block;
+}
+
+.agent-trace-gantt__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.agent-trace-gantt__row {
+  min-height: 2rem;
+  padding: 0.12rem 0.2rem;
+  border-radius: calc(var(--radius-sm) - 1px);
+  transition: background 0.15s var(--ease-out);
+}
+
+.agent-trace-gantt__row--selected {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.agent-trace-gantt__row:hover:not(.agent-trace-gantt__row--selected) {
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+}
+
+.agent-trace-gantt__track {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 1.7rem;
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background:
+    repeating-linear-gradient(
+      to right,
+      transparent,
+      transparent calc(20% - 1px),
+      color-mix(in srgb, var(--border) 55%, transparent) calc(20% - 1px),
+      color-mix(in srgb, var(--border) 55%, transparent) 20%
+    );
+  background-color: color-mix(in srgb, var(--bg-elevated) 55%, transparent);
+  cursor: pointer;
+  text-align: left;
+}
+
+.agent-trace-gantt__track:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.agent-trace-gantt__bar {
+  position: absolute;
+  top: 0.2rem;
+  bottom: 0.2rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 2.5rem;
+  max-width: 100%;
+  padding: 0 0.55rem 0 0.45rem;
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--accent) 82%, #1e3a5f);
+  color: #f4f7fb;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  transition: transform 0.12s var(--ease-out);
+}
+
+.agent-trace-gantt__bar--tool {
+  background: color-mix(in srgb, var(--warning) 78%, #5a3a12);
+}
+
+.agent-trace-gantt__track:active .agent-trace-gantt__bar {
+  transform: scale(0.985);
+}
+
+.agent-trace-gantt__bar-dot {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.9);
+  flex-shrink: 0;
+}
+
+.agent-trace-gantt__bar-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.agent-trace-gantt__dur {
+  justify-self: end;
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.agent-trace-tree,
+.agent-trace-tree__children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.agent-trace-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-top: 0.15rem;
+}
+
+.agent-trace-tree__children {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-left: 0.5rem;
+  padding-left: 0;
+}
+
+.agent-trace-tree__node {
+  position: relative;
+}
+
+/*
+ * File-tree rails on each branch node:
+ *  ::before = vertical trunk (full height for non-last; stop at row mid for last)
+ *  ::after  = horizontal stub into the row
+ */
+.agent-trace-tree__node--branch {
+  --tree-rail: color-mix(in srgb, var(--border) 92%, transparent);
+  --tree-elbow-y: 0.85rem; /* half of row min-height (1.7rem) */
+  padding-left: 1rem;
+}
+
+.agent-trace-tree__node--branch::before {
   content: "";
   position: absolute;
-  top: 0.35rem;
-  bottom: 0.35rem;
-  left: 0.15rem;
+  left: 0;
+  top: 0;
+  bottom: 0;
   width: 1px;
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--accent) 45%, transparent),
-    var(--border-subtle) 35%,
-    transparent
-  );
+  background: var(--tree-rail);
+}
+
+/* Non-last: overlap 1px into next sibling so the trunk reads continuous. */
+.agent-trace-tree__node--branch:not(.agent-trace-tree__node--last)::before {
+  bottom: -1px;
+}
+
+.agent-trace-tree__node--branch.agent-trace-tree__node--last::before {
+  bottom: auto;
+  height: var(--tree-elbow-y);
+}
+
+.agent-trace-tree__node--branch::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--tree-elbow-y);
+  width: 0.85rem;
+  height: 1px;
+  background: var(--tree-rail);
+}
+
+.agent-trace-tree__row {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  align-items: center;
+  column-gap: 0.2rem;
+  min-height: 1.7rem;
+  border-radius: calc(var(--radius-sm) - 1px);
+  transition: background 0.15s var(--ease-out);
+}
+
+.agent-trace-tree__row--selected {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.agent-trace-tree__row:hover:not(.agent-trace-tree__row--selected) {
+  background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+}
+
+.agent-trace-tree__toggle,
+.agent-trace-tree__toggle-spacer {
+  width: 1rem;
+  height: 1rem;
+  justify-self: center;
+}
+
+.agent-trace-tree__toggle {
+  position: relative;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 0.15s var(--ease-out);
+}
+
+.agent-trace-tree__toggle:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.agent-trace-tree__toggle:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.agent-trace-tree__toggle::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.32rem;
+  height: 0.32rem;
+  border-right: 1.5px solid var(--text-muted);
+  border-bottom: 1.5px solid var(--text-muted);
+  transform: translate(-65%, -60%) rotate(-45deg);
+  transition: transform 0.15s var(--ease-out);
+}
+
+.agent-trace-tree__toggle--open::before {
+  transform: translate(-40%, -70%) rotate(45deg);
+}
+
+.agent-trace-tree__label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  width: 100%;
+  padding: 0.28rem 0.45rem 0.28rem 0.15rem;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 1px);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.agent-trace-tree__label:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.agent-trace-tree__dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 1px;
+  background: var(--text-subtle);
+  flex-shrink: 0;
+}
+
+.agent-trace-tree__dot--agent,
+.agent-trace-tree__dot--capability,
+.agent-trace-tree__dot--llm {
+  background: var(--accent);
+}
+
+.agent-trace-tree__dot--tool {
+  background: var(--warning);
+}
+
+.agent-trace-tree__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.agent-trace-tree__name--root {
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+
+.agent-trace-tree__count {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.agent-trace-details-layout__timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.agent-trace-details-layout__timeline-head {
+  padding: 0 0.15rem;
+}
+
+@media (max-width: 900px) {
+  .agent-trace-details-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-trace-breakdown {
+    position: static;
+    max-height: none;
+  }
 }
 
 .agent-trace-group {
+  --trace-rail-width: 2px;
+  --trace-dot-size: 0.5rem;
+  --trace-rail-gap: 0.2rem;
   position: relative;
+  display: grid;
+  grid-template-columns: 0.875rem minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 0.7rem;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+/* Dot + segment rail: . | . — line never runs through the dot. */
+.agent-trace-group__rail {
+  grid-column: 1;
+  grid-row: 1 / -1;
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
-  padding-left: 0.35rem;
+  align-items: center;
+  width: 0.875rem;
+  pointer-events: none;
 }
 
-.agent-trace-group::before {
-  content: "";
-  position: absolute;
-  top: 0.55rem;
-  left: -0.78rem;
-  width: 0.45rem;
-  height: 0.45rem;
+.agent-trace-group__rail-seg {
+  flex: 1 1 auto;
+  width: var(--trace-rail-width);
+  min-height: 0.35rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 45%, var(--border-subtle));
+}
+
+.agent-trace-group__rail-seg--top {
+  flex: 0 0 1.05rem;
+  min-height: 1.05rem;
+}
+
+.agent-trace-group__rail-dot {
+  flex: 0 0 auto;
+  width: var(--trace-dot-size);
+  height: var(--trace-dot-size);
+  margin: var(--trace-rail-gap) 0;
   border-radius: 999px;
   background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
-.agent-trace-group--tool::before {
+.agent-trace-group__rail-dot--tool {
   background: var(--warning);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 18%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 22%, transparent);
 }
 
-.agent-trace-group--completion::before {
+.agent-trace-group__rail-dot--capability,
+.agent-trace-group__rail-dot--llm,
+.agent-trace-group__rail-dot--agent {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.agent-trace-group__rail-dot--completion {
   background: var(--info);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 18%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 22%, transparent);
+}
+
+.agent-trace-group:first-child .agent-trace-group__rail-seg--top {
+  visibility: hidden;
+}
+
+.agent-trace-group:last-child .agent-trace-group__rail-seg--bottom {
+  visibility: hidden;
+}
+
+.agent-trace-group:not(:last-child) .agent-trace-group__rail-seg--bottom {
+  margin-bottom: calc(-0.85rem - var(--trace-rail-gap));
 }
 
 .agent-trace-group__head {
+  grid-column: 2;
+  grid-row: 1;
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 0.35rem 0.65rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.agent-trace-group:not([open]) > .agent-trace-group__head {
+  border-radius: var(--radius-sm);
+}
+
+.agent-trace-group__head::-webkit-details-marker {
+  display: none;
+}
+
+.agent-trace-group__head::before {
+  content: "";
+  width: 0.4rem;
+  height: 0.4rem;
+  border-right: 1.5px solid var(--text-muted);
+  border-bottom: 1.5px solid var(--text-muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.agent-trace-group[open] > .agent-trace-group__head::before {
+  transform: rotate(45deg);
 }
 
 .agent-trace-group__family {
@@ -11456,52 +11944,53 @@ a:hover {
 }
 
 .agent-trace-group__family--llm,
-.agent-trace-group__family--capability {
+.agent-trace-group__family--capability,
+.agent-trace-group__family--agent {
   background: var(--accent-muted);
   color: var(--accent);
 }
 
 .agent-trace-group__stages {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  min-width: 0;
   color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.8125rem;
 }
 
 .agent-trace-group__time {
   margin-left: auto;
-  color: var(--text-subtle);
-  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
+}
+
+.agent-trace-group__body {
+  grid-column: 2;
+  grid-row: 2;
+  padding: 0 0.9rem 0.9rem;
+  border: 1px solid var(--border-subtle);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
 }
 
 .agent-trace-group__grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: 1fr;
   gap: 0.65rem;
-}
-
-@media (max-width: 1100px) {
-  .agent-trace-group__grid {
-    grid-template-columns: 1fr;
-  }
+  padding-top: 0.75rem;
 }
 
 .agent-trace-payload {
   min-width: 0;
   padding: 0.55rem 0.6rem;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
-}
-
-.agent-trace-payload--req {
-  border-color: color-mix(in srgb, var(--accent) 32%, var(--border-subtle));
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
-}
-
-.agent-trace-payload--res {
-  border-color: color-mix(in srgb, var(--success) 32%, var(--border-subtle));
-  background: color-mix(in srgb, var(--success) 6%, transparent);
 }
 
 .agent-trace-payload--stm.agent-trace-payload--role-user {
@@ -11520,10 +12009,26 @@ a:hover {
 .agent-trace-payload__head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 0.35rem 0.55rem;
   margin-bottom: 0.4rem;
   font-size: 0.72rem;
+}
+
+.agent-trace-payload__actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+}
+
+.agent-trace-payload__actions .icon-btn--sm {
+  width: 1.55rem;
+  height: 1.55rem;
+}
+
+.agent-trace-payload__meta {
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
 }
 
 .agent-trace-payload__badge {
@@ -11550,12 +12055,6 @@ a:hover {
   font-family: var(--font-mono);
   font-weight: 600;
   color: var(--text);
-}
-
-.agent-trace-payload__meta {
-  margin-left: auto;
-  color: var(--text-subtle);
-  font-variant-numeric: tabular-nums;
 }
 
 .agent-trace-payload__fold {
@@ -11586,18 +12085,21 @@ a:hover {
 
 .agent-trace-payload__body {
   margin: 0;
-  padding: 0.55rem 0.6rem;
+  padding: 0.7rem 0.8rem;
   max-height: 22rem;
   overflow: auto;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  line-height: 1.45;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--bg-app) 78%, transparent);
-  border: 1px solid var(--border-subtle);
-  border-radius: calc(var(--radius-sm) - 2px);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
 }
 
 .agent-trace-raw {
@@ -11853,9 +12355,25 @@ a:hover {
 }
 
 .agent-trace-io-fold__fn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--text);
+}
+
+.agent-trace-io-fold__fn-name {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.agent-trace-io-fold__fn-suffix {
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .agent-trace-io-fold__summary::-webkit-details-marker {

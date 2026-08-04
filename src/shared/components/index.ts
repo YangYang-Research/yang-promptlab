@@ -33,8 +33,11 @@ export {
   IconStatus,
   IconStop,
   IconTable,
+  IconTimeline,
   IconTrash,
+  IconTree,
   IconWarning,
+  IconCopy,
 } from "./Icons";
 export { IconButton } from "./IconButton";
 export { RefreshButton } from "./RefreshButton";
