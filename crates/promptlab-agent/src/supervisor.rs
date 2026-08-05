@@ -109,6 +109,9 @@ pub struct YazgTurn {
     /// AgentTrace id for this turn (links chat bubble → Trace detail).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
+    /// Mutating tool awaiting human approval (HILT). Present instead of applying the write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_action: Option<crate::hilt::HiltPendingAction>,
 }
 
 /// Host-facing payloads when the caller needs typed domain results.
@@ -277,6 +280,7 @@ impl YazgSupervisor {
                 verified: Some(true),
                 plan_summary: None,
                 raw_output: None,
+                pending_action: None,
                 trace_id: None,
             },
             outcome,
@@ -329,6 +333,7 @@ impl YazgSupervisor {
                 verified: Some(true),
                 plan_summary: Some(plan_summary),
                 raw_output: None,
+                pending_action: None,
                 trace_id: None,
             },
             outcome,
@@ -384,6 +389,7 @@ impl YazgSupervisor {
                         verified: None,
                         plan_summary: None,
                         raw_output: None,
+                        pending_action: None,
                         trace_id: None,
                     },
                     outcome,
@@ -417,6 +423,7 @@ impl YazgSupervisor {
                 verified: None,
                 plan_summary: None,
                 raw_output: None,
+                pending_action: None,
                 trace_id: None,
             },
             outcome,
@@ -472,6 +479,7 @@ impl YazgSupervisor {
                 verified: None,
                 plan_summary: None,
                 raw_output: None,
+                pending_action: None,
                 trace_id: None,
             },
             outcome,
@@ -536,6 +544,7 @@ impl YazgSupervisor {
                         verified: None,
                         plan_summary: None,
                         raw_output: None,
+                        pending_action: None,
                         trace_id: None,
                     },
                     outcome,
@@ -569,6 +578,7 @@ impl YazgSupervisor {
                 verified: None,
                 plan_summary: None,
                 raw_output: None,
+                pending_action: None,
                 trace_id: None,
             },
             outcome,
@@ -697,6 +707,7 @@ impl YazgSupervisor {
             verified: profile.map(|p| p.is_verified()),
             plan_summary: None,
             raw_output: None,
+            pending_action: None,
             trace_id: None,
         }
     }
@@ -725,7 +736,16 @@ fn delegation_from_artifacts_with_raw(
         | Some(YazgActionKind::ListReports)
         | Some(YazgActionKind::ReportDetail) => SupervisorIntent::ListWorkspace,
         Some(YazgActionKind::Finish) | None => {
-            if artifacts.created_project.is_some() {
+            if artifacts.pending_action.is_some() {
+                match artifacts
+                    .pending_action
+                    .as_ref()
+                    .map(|p| p.tool.as_str())
+                {
+                    Some("create_project") => SupervisorIntent::CreateProject,
+                    _ => SupervisorIntent::Chat,
+                }
+            } else if artifacts.created_project.is_some() {
                 SupervisorIntent::CreateProject
             } else if artifacts.workspace_inventory.is_some() {
                 SupervisorIntent::ListWorkspace
@@ -764,8 +784,23 @@ fn delegation_from_artifacts_with_raw(
         verified: verified.or(artifacts.analyze.as_ref().map(|_| true)),
         plan_summary: plan_summary.clone(),
         raw_output,
+        pending_action: None,
         trace_id: artifacts.trace_id.clone(),
     };
+
+    if let Some(pending) = artifacts.pending_action.clone() {
+        let mut turn = turn;
+        turn.intent = match pending.tool.as_str() {
+            "create_project" => SupervisorIntent::CreateProject,
+            _ => turn.intent,
+        };
+        turn.action = Some(pending.tool.clone());
+        if turn.reply.trim().is_empty() {
+            turn.reply = pending.pending_user_reply();
+        }
+        turn.pending_action = Some(pending);
+        return YazgDelegation::Chat { turn };
+    }
 
     if let Some(project) = artifacts.created_project.clone() {
         let mut turn = turn;

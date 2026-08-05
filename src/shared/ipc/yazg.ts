@@ -31,6 +31,18 @@ export type YazgCreatedProjectDto = {
   description?: string | null;
 };
 
+export type YazgHiltPendingActionDto = {
+  id: string;
+  tool: string;
+  kind: "create" | "update" | "delete" | string;
+  args: unknown;
+  summary: string;
+  /** Unix epoch ms when the pending action was created. */
+  createdAtMs: number;
+  /** Unix epoch ms when the pending action expires (auto-deny). */
+  expiresAtMs: number;
+};
+
 export type YazgChatResponse = {
   reply: string;
   intent: string;
@@ -41,6 +53,8 @@ export type YazgChatResponse = {
   verified?: boolean | null;
   planSummary?: string | null;
   createdProject?: YazgCreatedProjectDto | null;
+  /** Mutating tool awaiting Approve / Deny (HILT). */
+  pendingAction?: YazgHiltPendingActionDto | null;
   traceId?: string | null;
 };
 
@@ -53,6 +67,11 @@ export type YazgGenerateChatTitleResponse = {
   title: string;
 };
 
+export type YazgResolveHiltRequest = {
+  actionId: string;
+  decision: "approve" | "deny" | "expire";
+};
+
 export function yazgChat(request: YazgChatRequest): Promise<YazgChatResponse> {
   return invokeCommand<YazgChatResponse>("yazg_chat", { request });
 }
@@ -63,4 +82,10 @@ export function yazgGenerateChatTitle(
   return invokeCommand<YazgGenerateChatTitleResponse>("yazg_generate_chat_title", {
     request,
   });
+}
+
+export function yazgResolveHilt(
+  request: YazgResolveHiltRequest,
+): Promise<YazgChatResponse> {
+  return invokeCommand<YazgChatResponse>("yazg_resolve_hilt", { request });
 }

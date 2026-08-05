@@ -29,17 +29,63 @@ import {
   deleteYazgChatThread,
   getYazgChatSessionSnapshot,
   renameYazgChatThread,
+  resolveYazgHiltAction,
   selectYazgChatThread,
   sendYazgChatMessage,
   setYazgChatHostHooks,
   startNewYazgChat,
   subscribeYazgChatSession,
 } from "./yazgChatSession";
+import type { YazgHiltPendingActionDto } from "@/shared/ipc/yazg";
 
 function previewText(text: string, max = 72): string {
   const trimmed = text.trim().replace(/\s+/g, " ");
   if (trimmed.length <= max) return trimmed;
   return `${trimmed.slice(0, max - 1)}…`;
+}
+
+function formatHiltRemaining(ms: number): string {
+  const totalSec = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function HiltCountdownBar({
+  pending,
+  onExpire,
+}: {
+  pending: YazgHiltPendingActionDto;
+  onExpire: () => void;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  const expiredRef = useRef(false);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const total = Math.max(1, pending.expiresAtMs - pending.createdAtMs);
+  const left = Math.max(0, pending.expiresAtMs - now);
+  const pct = Math.min(100, Math.max(0, (left / total) * 100));
+
+  useEffect(() => {
+    if (left > 0 || expiredRef.current) return;
+    expiredRef.current = true;
+    onExpire();
+  }, [left, onExpire]);
+
+  return (
+    <div className="yazg-hilt-card__ttl" aria-label={`Expires in ${formatHiltRemaining(left)}`}>
+      <div className="yazg-hilt-card__ttl-meta">
+        <span>Expires in {formatHiltRemaining(left)}</span>
+      </div>
+      <div className="yazg-hilt-card__ttl-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)}>
+        <div className="yazg-hilt-card__ttl-fill" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
 }
 
 export function YazgChatPage() {
@@ -319,6 +365,72 @@ export function YazgChatPage() {
                   ) : null}
                 </header>
                 <YazgMarkdown className="yazg-chat-bubble__text yazg-chat-md" text={msg.text} />
+                {msg.role === "yazg" && msg.pendingAction && !msg.hiltDecision ? (
+                  <div className="yazg-hilt-card" role="group" aria-label="Confirm action">
+                    <p className="yazg-hilt-card__summary">{msg.pendingAction.summary}</p>
+                    <p className="yazg-hilt-card__meta text-muted text-sm">
+                      {msg.pendingAction.kind} · {msg.pendingAction.tool}
+                    </p>
+                    <div className="yazg-hilt-card__actions">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={!backendConnected || busy}
+                        onClick={() => {
+                          if (!activeThread) return;
+                          void resolveYazgHiltAction({
+                            threadId: activeThread.id,
+                            messageId: msg.id,
+                            actionId: msg.pendingAction!.id,
+                            decision: "deny",
+                            backendConnected,
+                          });
+                        }}
+                      >
+                        Deny
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        disabled={!backendConnected || busy}
+                        onClick={() => {
+                          if (!activeThread) return;
+                          void resolveYazgHiltAction({
+                            threadId: activeThread.id,
+                            messageId: msg.id,
+                            actionId: msg.pendingAction!.id,
+                            decision: "approve",
+                            backendConnected,
+                          });
+                        }}
+                      >
+                        Approve
+                      </Button>
+                    </div>
+                    <HiltCountdownBar
+                      pending={msg.pendingAction}
+                      onExpire={() => {
+                        if (!activeThread) return;
+                        void resolveYazgHiltAction({
+                          threadId: activeThread.id,
+                          messageId: msg.id,
+                          actionId: msg.pendingAction!.id,
+                          decision: "expire",
+                          backendConnected,
+                        });
+                      }}
+                    />
+                  </div>
+                ) : null}
+                {msg.role === "yazg" && msg.hiltDecision ? (
+                  <p className="yazg-hilt-card__resolved text-muted text-sm">
+                    {msg.hiltDecision === "approve"
+                      ? "Approved"
+                      : msg.hiltDecision === "expire"
+                        ? "Expired"
+                        : "Denied"}
+                  </p>
+                ) : null}
               </article>
             ))}
             {activePending ? (

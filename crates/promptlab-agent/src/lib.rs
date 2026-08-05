@@ -32,6 +32,7 @@ pub mod create_project;
 pub mod endpoint_recovery;
 pub mod error;
 pub mod generate_prompt;
+pub mod hilt;
 pub mod judge_coordinator;
 pub mod judge_workers;
 pub mod list_workspace;
@@ -71,6 +72,9 @@ pub use create_project::{CreateProjectTools, CreatedProject};
 pub use error::{AgentError, AgentResult};
 pub use generate_prompt::{
     GeneratePromptAgent, GeneratePromptAgentOutcome, TechniquePromptContext,
+};
+pub use hilt::{
+    is_mutating_tool, mutation_kind_for_tool, HiltMutationKind, HiltPendingAction, HILT_TTL_SECS,
 };
 pub use judge_coordinator::{JudgeCoordinatorAgent, JudgeCoordinatorAgentOutcome};
 pub use judge_workers::{

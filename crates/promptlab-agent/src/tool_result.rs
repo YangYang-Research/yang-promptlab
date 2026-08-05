@@ -40,6 +40,8 @@ impl ToolErrorClass {
 pub enum ToolStatus {
     Ok,
     Error,
+    /// Mutating tool proposed a change; waiting for human approval (HILT).
+    PendingApproval,
 }
 
 /// Standard tool observation contract for Yazg workspace tools.
@@ -72,6 +74,25 @@ impl ToolResult {
             retryable: None,
             candidates: None,
             hints: None,
+        }
+    }
+
+    /// Mutating tool: side effect NOT applied. User must approve in the UI.
+    pub fn pending_approval(
+        tool: &str,
+        data: impl Serialize,
+        message: impl Into<String>,
+        hints: Vec<String>,
+    ) -> Self {
+        Self {
+            status: ToolStatus::PendingApproval,
+            tool: tool.to_string(),
+            data: Some(serde_json::to_value(data).unwrap_or(Value::Null)),
+            error_class: None,
+            message: Some(message.into()),
+            retryable: Some(false),
+            candidates: None,
+            hints: Some(hints),
         }
     }
 
@@ -158,6 +179,10 @@ impl ToolResult {
         self.status == ToolStatus::Ok
     }
 
+    pub fn is_pending_approval(&self) -> bool {
+        self.status == ToolStatus::PendingApproval
+    }
+
     pub fn is_error(&self) -> bool {
         self.status == ToolStatus::Error
     }
@@ -212,7 +237,7 @@ fn candidate_bullet(v: &Value) -> Option<String> {
 }
 
 /// One-line note appended to workspace tool descriptions.
-pub const TOOL_RESULT_CONTRACT: &str = " Returns JSON {status:ok|error, tool, data?, error_class?, message?, candidates?, hints?, retryable?}.";
+pub const TOOL_RESULT_CONTRACT: &str = " Returns JSON {status:ok|error|pending_approval, tool, data?, error_class?, message?, candidates?, hints?, retryable?}.";
 
 #[cfg(test)]
 mod tests {

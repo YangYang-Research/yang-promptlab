@@ -4,7 +4,9 @@ import { deleteAgentTraceSession } from "@/shared/ipc/agentTrace";
 import {
   yazgChat,
   yazgGenerateChatTitle,
+  yazgResolveHilt,
   type YazgAgentEventDto,
+  type YazgHiltPendingActionDto,
   type YazgIntent,
 } from "@/shared/ipc/yazg";
 import { assertYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
@@ -20,6 +22,10 @@ export type ChatMessage = {
   action?: string;
   /** AgentTrace id for this Yazg reply (opens Trace detail). */
   traceId?: string;
+  /** Mutating tool awaiting Approve / Deny (HILT). Cleared after resolve. */
+  pendingAction?: YazgHiltPendingActionDto;
+  /** Set after the user resolves a HILT card on this message. */
+  hiltDecision?: "approve" | "deny" | "expire";
   at: number;
 };
 
@@ -132,6 +138,8 @@ function loadStore(): ChatStore {
           updatedAt: typeof thread.updatedAt === "number" ? thread.updatedAt : Date.now(),
           messages: thread.messages.map((msg) => ({
             ...msg,
+            // HILT pending lives in an in-memory host store — drop stale cards.
+            pendingAction: undefined,
             at: typeof msg.at === "number" ? msg.at : Date.now(),
           })),
         }))
@@ -331,6 +339,8 @@ function appendYazgMessage(
     intent: message.intent,
     action: message.action,
     traceId: message.traceId,
+    pendingAction: message.pendingAction,
+    hiltDecision: message.hiltDecision,
     at: now,
   };
   // Apply reply + clear busy in one snapshot so the UI never sticks on "working…".
@@ -431,6 +441,7 @@ export async function sendYazgChatMessage(options: {
       intent: response.intent,
       action: response.action?.trim() || undefined,
       traceId: response.traceId?.trim() || undefined,
+      pendingAction: response.pendingAction ?? undefined,
     });
 
     if (response.createdProject) {
@@ -475,5 +486,87 @@ export async function sendYazgChatMessage(options: {
         pendingThreadId: null,
       });
     }
+  }
+}
+
+/**
+ * Approve or deny a pending mutating tool (HILT). Clears the card on the
+ * originating message and appends a follow-up Yazg reply.
+ */
+export async function resolveYazgHiltAction(options: {
+  threadId: string;
+  messageId: string;
+  actionId: string;
+  decision: "approve" | "deny" | "expire";
+  backendConnected: boolean;
+}): Promise<void> {
+  if (state.busy) return;
+
+  const yazg = await assertYazgAgentLive(options.backendConnected);
+  if (!yazg.live) {
+    hostHooks.notify?.(yazg.message, "error");
+    return;
+  }
+
+  setState({
+    ...state,
+    busy: true,
+    pendingThreadId: options.threadId,
+  });
+
+  try {
+    const response = await yazgResolveHilt({
+      actionId: options.actionId,
+      decision: options.decision,
+    });
+
+    // Mark the originating card as resolved before appending the follow-up.
+    updateThread(options.threadId, (thread) => ({
+      ...thread,
+      updatedAt: Date.now(),
+      messages: thread.messages.map((msg) =>
+        msg.id === options.messageId
+          ? {
+              ...msg,
+              pendingAction: undefined,
+              hiltDecision: options.decision,
+            }
+          : msg,
+      ),
+    }));
+
+    appendYazgMessage(options.threadId, {
+      text: response.reply?.trim()
+        ? response.reply
+        : options.decision === "approve"
+          ? "Action approved."
+          : "Action cancelled.",
+      events: response.events,
+      rawOutput: response.rawOutput,
+      intent: response.intent,
+      action: response.action?.trim() || undefined,
+      traceId: response.traceId?.trim() || undefined,
+      hiltDecision: options.decision,
+    });
+
+    if (response.createdProject) {
+      hostHooks.refresh?.();
+      hostHooks.notify?.(
+        `Created project "${response.createdProject.name}"`,
+        "success",
+      );
+    } else if (options.decision === "deny") {
+      hostHooks.notify?.("Action cancelled", "success");
+    } else if (options.decision === "expire") {
+      hostHooks.notify?.("Approval expired (15 min)", "error");
+    }
+  } catch (err) {
+    const messageText = toAppError(err).message;
+    hostHooks.notify?.(messageText, "error");
+    setState({
+      ...state,
+      busy: false,
+      pendingThreadId: null,
+    });
   }
 }

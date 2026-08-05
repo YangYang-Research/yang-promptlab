@@ -10267,6 +10267,68 @@ a:hover {
   color: var(--text);
 }
 
+.yazg-hilt-card {
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg));
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.yazg-hilt-card__summary {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.yazg-hilt-card__meta {
+  margin: 0;
+  text-transform: lowercase;
+}
+
+.yazg-hilt-card__actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.35rem;
+}
+
+.yazg-hilt-card__ttl {
+  margin-top: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.yazg-hilt-card__ttl-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.yazg-hilt-card__ttl-track {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+  overflow: hidden;
+}
+
+.yazg-hilt-card__ttl-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.25s linear;
+}
+
+.yazg-hilt-card__resolved {
+  margin: 0.5rem 0 0;
+  font-style: italic;
+}
+
 .yazg-chat-md {
   white-space: normal;
   display: flex;

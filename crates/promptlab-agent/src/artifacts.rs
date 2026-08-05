@@ -4,6 +4,7 @@ use crate::analyze_endpoint::AnalyzeEndpointAgentOutcome;
 use crate::attack_plan::AttackPlanAgentOutcome;
 use crate::create_project::CreatedProject;
 use crate::generate_prompt::GeneratePromptAgentOutcome;
+use crate::hilt::HiltPendingAction;
 use crate::judge_coordinator::JudgeCoordinatorAgentOutcome;
 use crate::list_workspace::WorkspaceInventory;
 use crate::memory::{
@@ -73,6 +74,9 @@ pub struct YazgArtifacts {
     pub summary: Option<SummaryAgentOutcome>,
     pub judge: Option<JudgeCoordinatorAgentOutcome>,
     pub created_project: Option<CreatedProject>,
+    /// Mutating tool awaiting human approval (HILT). Mutually exclusive with
+    /// `created_project` for the same tool call.
+    pub pending_action: Option<HiltPendingAction>,
     pub workspace_inventory: Option<WorkspaceInventory>,
     pub final_reply: String,
     pub last_action: Option<YazgActionKind>,

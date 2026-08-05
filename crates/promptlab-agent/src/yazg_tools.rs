@@ -14,7 +14,6 @@ use tokio::sync::Mutex;
 
 use crate::analyze_endpoint::AnalyzeEndpointAgent;
 use crate::attack_plan::AttackPlanAgent;
-use crate::create_project::{CreateProjectTools, CreatedProject};
 use crate::generate_prompt::{GeneratePromptAgent, TechniquePromptContext};
 use crate::judge_coordinator::JudgeCoordinatorAgent;
 use crate::list_workspace::{clamp_findings_limit, WorkspaceInventory, WorkspaceTools};
@@ -1283,7 +1282,7 @@ impl Tool for ReportDetailTool {
 }
 
 pub struct CreateProjectTool {
-    pub tools: Arc<dyn CreateProjectTools>,
+    pub tools: Arc<dyn WorkspaceTools>,
     pub state: SharedYazgState,
 }
 
@@ -1295,8 +1294,12 @@ impl Tool for CreateProjectTool {
 
     fn description(&self) -> String {
         format!(
-            "Create a workspace project in the local database. Requires a project name. \
-             Optional description. Do NOT ask for a scan target.{TOOL_RESULT_CONTRACT}"
+            "Propose creating a workspace project. Requires name; optional description. \
+             Mutating: returns status=pending_approval — nothing is written until the user \
+             Approves in chat. Always call this tool for create requests; never infer from \
+             chat history alone. Checks list_workspace first — returns error if the name exists. \
+             After pending_approval: one short natural sentence that it is waiting for approval \
+             (match user language). One sentence only.{TOOL_RESULT_CONTRACT}"
         )
     }
 
@@ -1337,34 +1340,84 @@ impl Tool for CreateProjectTool {
             .description
             .as_deref()
             .map(str::trim)
-            .filter(|s| !s.is_empty());
-        let project = self
-            .tools
-            .create_project(name, description)
-            .await
-            .map_err(YazgToolError)?;
-        let created = CreatedProject {
-            id: project.id.clone(),
-            name: project.name.clone(),
-            description: project.description.clone(),
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+
+        if let Ok(inv) = self.tools.list_workspace().await {
+            if inv.find_project(name).is_some() {
+                let candidates: Vec<serde_json::Value> = inv
+                    .projects
+                    .iter()
+                    .map(|p| json!({ "id": p.id, "name": p.name }))
+                    .collect();
+                let observation = ToolResult::error(
+                    "create_project",
+                    crate::tool_result::ToolErrorClass::Validation,
+                    format!("Project \"{name}\" already exists in the workspace"),
+                    Some(candidates),
+                    Some(vec![
+                        "Tell the user the project name is taken; do not propose creating it again"
+                            .into(),
+                    ]),
+                )
+                .to_json_string();
+                record_workspace_tool(
+                    &self.state,
+                    "create_project",
+                    crate::artifacts::YazgActionKind::CreateProject,
+                    observation.clone(),
+                    format!("create_project duplicate: {name}"),
+                    Some(inv),
+                    &args_json(&args),
+                )
+                .await;
+                return Ok(observation);
+            }
+        }
+
+        let pending_args = json!({
+            "name": name,
+            "description": description,
+        });
+        let summary = match description.as_deref() {
+            Some(d) => format!("Create project \"{name}\" — {d}"),
+            None => format!("Create project \"{name}\""),
         };
-        let observation = ToolResult::ok("create_project", &created).to_json_string();
+        let pending = crate::hilt::HiltPendingAction::new(
+            "create_project",
+            crate::hilt::HiltMutationKind::Create,
+            pending_args,
+            summary.clone(),
+        );
+        let observation = ToolResult::pending_approval(
+            "create_project",
+            &pending,
+            format!(
+                "status=pending_approval for project \"{name}\" — reply in one natural sentence \
+                 that it is waiting for the user's approval."
+            ),
+            vec![
+                "One sentence only; match the user's language".into(),
+                format!("Example: Project {name} đang chờ phê duyệt"),
+            ],
+        )
+        .to_json_string();
         record_workspace_tool(
             &self.state,
             "create_project",
             crate::artifacts::YazgActionKind::CreateProject,
             observation.clone(),
-            format!("Created project {}", created.name),
+            format!("HILT pending: {summary}"),
             None,
             &args_json(&args),
         )
         .await;
         let mut guard = self.state.lock().await;
-        guard.artifacts.events.push(AgentEvent::completed(
+        guard.artifacts.events.push(AgentEvent::info(
             AgentId::CreateProject,
-            format!("Created project {}", created.name),
+            format!("HILT: {summary}"),
         ));
-        guard.artifacts.created_project = Some(created);
+        guard.artifacts.pending_action = Some(pending);
         Ok(observation)
     }
 }

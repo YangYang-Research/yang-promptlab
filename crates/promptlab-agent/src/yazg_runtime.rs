@@ -899,6 +899,7 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
     artifacts.events.append(&mut run_state.artifacts.events);
     artifacts.workspace_inventory = run_state.artifacts.workspace_inventory.take();
     artifacts.created_project = run_state.artifacts.created_project.take();
+    artifacts.pending_action = run_state.artifacts.pending_action.take();
     artifacts.analyze = run_state.artifacts.analyze.take();
     artifacts.plan = run_state.artifacts.plan.take();
     artifacts.generate_prompt = run_state.artifacts.generate_prompt.take();
@@ -970,6 +971,7 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
             || artifacts.generate_prompt.is_some()
             || artifacts.judge.is_some()
             || artifacts.created_project.is_some()
+            || artifacts.pending_action.is_some()
         {
             artifacts.events.push(AgentEvent::emit_kind(
                 AgentId::Yazg,
@@ -1182,11 +1184,13 @@ fn build_capability_tools(
         }
     }
     if allowed.contains("create_project") {
-        if let Some(tools) = request.project_tools.clone() {
-            out.push(Box::new(CreateProjectTool {
-                tools,
-                state: state.clone(),
-            }));
+        if request.project_tools.is_some() {
+            if let Some(tools) = request.workspace_tools.clone() {
+                out.push(Box::new(CreateProjectTool {
+                    tools,
+                    state: state.clone(),
+                }));
+            }
         }
     }
     if allowed.contains("attack_plan") {

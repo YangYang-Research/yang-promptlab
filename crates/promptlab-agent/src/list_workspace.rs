@@ -221,6 +221,44 @@ pub fn extract_requested_project_name(goal: &str) -> Option<String> {
     Some(token.to_string())
 }
 
+/// Extract project name from create intents: "tạo project tên BBBBB", "create project X".
+pub fn extract_create_project_name(goal: &str) -> Option<String> {
+    let lower = goal.to_lowercase();
+    const PREFIXES: &[&str] = &[
+        "tạo project tên ",
+        "tao project ten ",
+        "tạo project ",
+        "tao project ",
+        "create project named ",
+        "create project name ",
+        "create project ",
+        "tạo dự án ",
+        "tao du an ",
+    ];
+    for prefix in PREFIXES {
+        if let Some(idx) = lower.find(prefix) {
+            let rest = goal[idx + prefix.len()..].trim();
+            let token = rest
+                .split_whitespace()
+                .next()?
+                .trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_');
+            if !token.is_empty() {
+                return Some(token.to_string());
+            }
+        }
+    }
+    None
+}
+
+pub fn is_create_project_goal(goal: &str) -> bool {
+    let lower = goal.to_lowercase();
+    lower.contains("tạo project")
+        || lower.contains("tao project")
+        || lower.contains("create project")
+        || lower.contains("tạo dự án")
+        || lower.contains("tao du an")
+}
+
 /// Project detail: metadata + targets + scans (no finding rows).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

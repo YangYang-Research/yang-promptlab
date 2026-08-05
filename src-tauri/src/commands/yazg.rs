@@ -1,14 +1,15 @@
 //! Yazg supervisor chat IPC (ReAct).
 
 use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
 
 use promptlab_agent::{
-    AgentEvent, CreateProjectTools, CreatedProject, MemoryContext, SupervisorIntent,
+    AgentEvent, CreateProjectTools, CreatedProject, HiltPendingAction, MemoryContext, SupervisorIntent,
     WorkspaceFindingSummary, WorkspaceInventory, WorkspaceProjectSummary, WorkspaceReportSummary,
     WorkspaceScanSummary, WorkspaceTargetSummary, WorkspaceTools, WorkspaceTotals, YazgDelegation,
     YazgSupervisor, YazgTurn, FindingDetail, FindingList, ProjectDetail, ReportDetail, ReportList,
     ScanDetail, ScanList, TargetDetail, TargetList, DEFAULT_FINDINGS_LIMIT, MAX_FINDINGS_LIMIT,
-    MAX_REPORT_PREVIEW_CHARS, clamp_findings_limit,
+    MAX_REPORT_PREVIEW_CHARS, clamp_findings_limit, is_mutating_tool,
 };
 use promptlab_storage::{
     CreateProject, FindingRepository, ProjectRepository, ReportRepository, ScanRepository,
@@ -18,8 +19,8 @@ use promptlab_target_profile::TargetProfile;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::Arc;
 use tauri::State;
+use tokio::sync::Mutex as TokioMutex;
 
 use crate::agent_memory::SqliteAgentMemoryStore;
 use crate::error::{CommandError, CommandResult};
@@ -52,6 +53,18 @@ pub struct YazgCreatedProjectDto {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct YazgHiltPendingActionDto {
+    pub id: String,
+    pub tool: String,
+    pub kind: String,
+    pub args: Value,
+    pub summary: String,
+    pub created_at_ms: u64,
+    pub expires_at_ms: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct YazgChatResponse {
     pub reply: String,
     pub intent: String,
@@ -64,6 +77,9 @@ pub struct YazgChatResponse {
     pub verified: Option<bool>,
     pub plan_summary: Option<String>,
     pub created_project: Option<YazgCreatedProjectDto>,
+    /// Mutating tool awaiting Approve / Deny in the chat UI (HILT).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_action: Option<YazgHiltPendingActionDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
 }
@@ -828,6 +844,18 @@ fn event_dto(event: AgentEvent) -> AgentEventDto {
     }
 }
 
+fn hilt_pending_dto(pending: HiltPendingAction) -> YazgHiltPendingActionDto {
+    YazgHiltPendingActionDto {
+        id: pending.id,
+        tool: pending.tool,
+        kind: pending.kind.as_str().into(),
+        args: pending.args,
+        summary: pending.summary,
+        created_at_ms: pending.created_at_ms,
+        expires_at_ms: pending.expires_at_ms,
+    }
+}
+
 fn turn_to_response(
     turn: YazgTurn,
     created_project: Option<CreatedProject>,
@@ -861,6 +889,7 @@ fn turn_to_response(
             name: project.name,
             description: project.description,
         }),
+        pending_action: turn.pending_action.map(hilt_pending_dto),
         trace_id: turn.trace_id,
     }
 }
@@ -986,7 +1015,24 @@ pub async fn yazg_chat_op(
         | YazgDelegation::Judged { turn, .. }
         | YazgDelegation::ExecutedAttack { turn, .. } => (turn, None),
     };
-    Ok(turn_to_response(turn, created_project))
+    let response = turn_to_response(turn, created_project);
+    if let Some(pending) = response.pending_action.as_ref() {
+        remember_hilt_pending(HiltPendingAction {
+            id: pending.id.clone(),
+            tool: pending.tool.clone(),
+            kind: match pending.kind.as_str() {
+                "update" => promptlab_agent::HiltMutationKind::Update,
+                "delete" => promptlab_agent::HiltMutationKind::Delete,
+                _ => promptlab_agent::HiltMutationKind::Create,
+            },
+            args: pending.args.clone(),
+            summary: pending.summary.clone(),
+            created_at_ms: pending.created_at_ms,
+            expires_at_ms: pending.expires_at_ms,
+        })
+        .await;
+    }
+    Ok(response)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1114,4 +1160,172 @@ pub async fn yazg_generate_chat_title(
     request: YazgGenerateChatTitleRequest,
 ) -> CommandResult<YazgGenerateChatTitleResponse> {
     yazg_generate_chat_title_op(state.inner(), request).await
+}
+
+// ─── HILT (human-in-the-loop) for mutating tools ─────────────────────────────
+
+fn hilt_store() -> &'static TokioMutex<HashMap<String, HiltPendingAction>> {
+    static STORE: OnceLock<TokioMutex<HashMap<String, HiltPendingAction>>> = OnceLock::new();
+    STORE.get_or_init(|| TokioMutex::new(HashMap::new()))
+}
+
+async fn remember_hilt_pending(pending: HiltPendingAction) {
+    let mut store = hilt_store().lock().await;
+    prune_expired_hilt(&mut store);
+    store.insert(pending.id.clone(), pending);
+}
+
+fn prune_expired_hilt(store: &mut HashMap<String, HiltPendingAction>) {
+    store.retain(|_, pending| !pending.is_expired());
+}
+
+async fn take_hilt_pending(action_id: &str) -> Option<HiltPendingAction> {
+    let mut store = hilt_store().lock().await;
+    // Keep the requested id even if expired so deny/expire can still clear it;
+    // prune everything else.
+    let requested = store.remove(action_id);
+    prune_expired_hilt(&mut store);
+    requested
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct YazgResolveHiltRequest {
+    pub action_id: String,
+    /// `approve` | `deny`
+    pub decision: String,
+}
+
+pub async fn yazg_resolve_hilt_op(
+    state: &AppState,
+    request: YazgResolveHiltRequest,
+) -> CommandResult<YazgChatResponse> {
+    let action_id = request.action_id.trim();
+    if action_id.is_empty() {
+        return Err(CommandError::invalid_input("actionId is required"));
+    }
+    let decision = request.decision.trim().to_lowercase();
+    let pending = take_hilt_pending(action_id).await.ok_or_else(|| {
+        CommandError::invalid_input(format!(
+            "no pending HILT action for id `{action_id}` (already resolved or expired)"
+        ))
+    })?;
+
+    if !is_mutating_tool(&pending.tool) {
+        return Err(CommandError::invalid_input(format!(
+            "tool `{}` is not a mutating HILT tool",
+            pending.tool
+        )));
+    }
+
+    let expired = pending.is_expired();
+    if decision == "deny"
+        || decision == "reject"
+        || decision == "cancel"
+        || decision == "expire"
+        || expired
+    {
+        let auto_expired = expired && decision != "deny" && decision != "reject" && decision != "cancel";
+        let reply = if auto_expired || decision == "expire" {
+            format!("Hết hạn 15 phút — đã tự hủy: {}.", pending.summary)
+        } else {
+            format!("Cancelled: {}.", pending.summary)
+        };
+        return Ok(YazgChatResponse {
+            reply,
+            intent: pending.tool.clone(),
+            action: Some(pending.tool.clone()),
+            events: vec![AgentEventDto {
+                agent: "yazg".into(),
+                kind: "info".into(),
+                message: format!(
+                    "{}:{}",
+                    if auto_expired || decision == "expire" {
+                        "hilt_expired"
+                    } else {
+                        "hilt_denied"
+                    },
+                    pending.id
+                ),
+            }],
+            raw_output: None,
+            verified: None,
+            plan_summary: None,
+            created_project: None,
+            pending_action: None,
+            trace_id: None,
+        });
+    }
+
+    if decision != "approve" && decision != "accept" && decision != "confirm" {
+        // Put it back so the user can retry with a valid decision.
+        remember_hilt_pending(pending).await;
+        return Err(CommandError::invalid_input(
+            "decision must be `approve` or `deny`",
+        ));
+    }
+
+    match pending.tool.as_str() {
+        "create_project" => {
+            let name = pending
+                .args
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    CommandError::invalid_input("pending create_project is missing name")
+                })?;
+            let description = pending
+                .args
+                .get("description")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let tools = HostCreateProjectTools {
+                repos: state.repositories(),
+            };
+            let created = tools
+                .create_project(name, description)
+                .await
+                .map_err(CommandError::invalid_input)?;
+            Ok(YazgChatResponse {
+                reply: format!(
+                    "Created project \"{}\" (id={}).",
+                    created.name, created.id
+                ),
+                intent: "create_project".into(),
+                action: Some("create_project".into()),
+                events: vec![AgentEventDto {
+                    agent: "yazg".into(),
+                    kind: "completed".into(),
+                    message: format!("hilt_approved:{}", pending.id),
+                }],
+                raw_output: None,
+                verified: None,
+                plan_summary: None,
+                created_project: Some(YazgCreatedProjectDto {
+                    id: created.id,
+                    name: created.name,
+                    description: created.description,
+                }),
+                pending_action: None,
+                trace_id: None,
+            })
+        }
+        other => {
+            // Future mutating tools land here. Put pending back? No — unknown tool.
+            Err(CommandError::invalid_input(format!(
+                "HILT resolve not implemented for tool `{other}`"
+            )))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn yazg_resolve_hilt(
+    state: State<'_, AppState>,
+    request: YazgResolveHiltRequest,
+) -> CommandResult<YazgChatResponse> {
+    yazg_resolve_hilt_op(state.inner(), request).await
 }

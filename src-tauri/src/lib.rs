@@ -322,6 +322,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::target_profile::planner_generate_from_profile,
             commands::yazg::yazg_chat,
             commands::yazg::yazg_generate_chat_title,
+            commands::yazg::yazg_resolve_hilt,
             commands::scan_recommendations::scan_recommendations_generate,
             commands::project_summary::project_summary_generate,
             commands::planner::attack_planner_adjust,
