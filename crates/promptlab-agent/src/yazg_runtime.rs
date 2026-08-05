@@ -34,7 +34,8 @@ use crate::memory::{
 use crate::types::{AgentEvent, AgentId};
 use crate::yazg_model::{format_stage_payload, YazgModel};
 use crate::assistant::{
-    AssistantCapability, CapabilityToolLoader, IntentRouter, LoadedCapabilityTools, RouteInput,
+    AssistantCapability, CapabilityToolLoader, IntentResolution, IntentRouter,
+    LoadedCapabilityTools, RouteInput,
 };
 use crate::yazg_prompts::{YAZG_CONVERSATION_PREAMBLE, YAZG_KNOWLEDGE_PREAMBLE, YAZG_PREAMBLE};
 use crate::yazg_tools::{
@@ -516,6 +517,10 @@ pub struct YazgRequest {
     pub agent_trace: Option<SharedAgentTrace>,
     /// Display name of the active inference model (written onto AgentTrace spans).
     pub model_label: Option<String>,
+    /// Skip capability router and bind this capability's tools (or none for Conversation).
+    pub forced_capability: Option<crate::assistant::capability_registry::AssistantCapability>,
+    /// Do not append the goal as a user STM row (internal follow-up turns).
+    pub skip_user_stm: bool,
 }
 
 impl YazgRequest {
@@ -531,6 +536,8 @@ impl YazgRequest {
             max_turns: DEFAULT_MAX_TURNS,
             agent_trace: None,
             model_label: None,
+            forced_capability: None,
+            skip_user_stm: false,
         }
     }
 
@@ -573,6 +580,19 @@ impl YazgRequest {
 
     pub fn with_max_turns(mut self, max_turns: usize) -> Self {
         self.max_turns = max_turns.max(1);
+        self
+    }
+
+    pub fn with_forced_capability(
+        mut self,
+        capability: crate::assistant::capability_registry::AssistantCapability,
+    ) -> Self {
+        self.forced_capability = Some(capability);
+        self
+    }
+
+    pub fn with_skip_user_stm(mut self, skip: bool) -> Self {
+        self.skip_user_stm = skip;
         self
     }
 }
@@ -626,22 +646,24 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         conversation_id.clone(),
     ));
 
-    remember_stm(
-        request.memory.as_deref(),
-        &request.memory_ctx,
-        StmWrite {
-            agent_id: AgentId::Yazg,
-            role: StmRole::User,
-            memory_key: Some("message".into()),
-            content: request.goal.clone(),
-            content_json: Some(serde_json::json!({
-                "event": "user_message",
-                "session_id": request.memory_ctx.session_id,
-            })),
-            importance: 0.7,
-        },
-    )
-    .await;
+    if !request.skip_user_stm {
+        remember_stm(
+            request.memory.as_deref(),
+            &request.memory_ctx,
+            StmWrite {
+                agent_id: AgentId::Yazg,
+                role: StmRole::User,
+                memory_key: Some("message".into()),
+                content: request.goal.clone(),
+                content_json: Some(serde_json::json!({
+                    "event": "user_message",
+                    "session_id": request.memory_ctx.session_id,
+                })),
+                importance: 0.7,
+            },
+        )
+        .await;
+    }
 
     // STM → prior chat turns (messages[]), never into system prompt.
     // LTM conversation.* stays out of the prompt; durable facts are for retrieval, not transcript.
@@ -666,14 +688,24 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
     .await;
     let route_started = std::time::Instant::now();
 
-    let resolution = IntentRouter::new()
-        .resolve_with_llm(
-            request.llms.supervisor.as_ref(),
-            &RouteInput {
-                latest_user_message: request.goal.trim(),
-            },
-        )
-        .await;
+    let resolution = if let Some(cap) = request.forced_capability {
+        IntentResolution {
+            capability: cap,
+            confidence: 1.0,
+            reason: "forced_capability".into(),
+            raw_classifier_output: None,
+            classifier_request: Some(classify_inputs.clone()),
+        }
+    } else {
+        IntentRouter::new()
+            .resolve_with_llm(
+                request.llms.supervisor.as_ref(),
+                &RouteInput {
+                    latest_user_message: request.goal.trim(),
+                },
+            )
+            .await
+    };
 
     let mut classify_inputs = resolution.classifier_request.clone().unwrap_or(classify_inputs);
     if let Some(model) = request.model_label.as_deref() {

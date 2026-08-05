@@ -74,7 +74,8 @@ pub use generate_prompt::{
     GeneratePromptAgent, GeneratePromptAgentOutcome, TechniquePromptContext,
 };
 pub use hilt::{
-    is_mutating_tool, mutation_kind_for_tool, HiltMutationKind, HiltPendingAction, HILT_TTL_SECS,
+    build_hilt_followup_goal, is_mutating_tool, mutation_kind_for_tool, HiltMutationKind,
+    HiltPendingAction, HILT_TTL_SECS,
 };
 pub use judge_coordinator::{JudgeCoordinatorAgent, JudgeCoordinatorAgentOutcome};
 pub use judge_workers::{

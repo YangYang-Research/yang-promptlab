@@ -5,7 +5,7 @@ use std::sync::{Arc, OnceLock};
 
 use promptlab_agent::{
     AgentEvent, CreateProjectTools, CreatedProject, HiltPendingAction, MemoryContext, SupervisorIntent,
-    WorkspaceFindingSummary, WorkspaceInventory, WorkspaceProjectSummary, WorkspaceReportSummary,
+    ToolResult, WorkspaceFindingSummary, WorkspaceInventory, WorkspaceProjectSummary, WorkspaceReportSummary,
     WorkspaceScanSummary, WorkspaceTargetSummary, WorkspaceTools, WorkspaceTotals, YazgDelegation,
     YazgSupervisor, YazgTurn, FindingDetail, FindingList, ProjectDetail, ReportDetail, ReportList,
     ScanDetail, ScanList, TargetDetail, TargetList, DEFAULT_FINDINGS_LIMIT, MAX_FINDINGS_LIMIT,
@@ -1192,8 +1192,128 @@ async fn take_hilt_pending(action_id: &str) -> Option<HiltPendingAction> {
 #[serde(rename_all = "camelCase")]
 pub struct YazgResolveHiltRequest {
     pub action_id: String,
-    /// `approve` | `deny`
+    /// `approve` | `deny` | `expire`
     pub decision: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
+fn hilt_decision_label(decision: &str, expired: bool) -> &'static str {
+    if expired || decision == "expire" {
+        "expire"
+    } else if decision == "approve" || decision == "accept" || decision == "confirm" {
+        "approve"
+    } else {
+        "deny"
+    }
+}
+
+fn hilt_static_fallback(
+    pending: &HiltPendingAction,
+    decision: &str,
+    created_project: Option<&CreatedProject>,
+) -> YazgChatResponse {
+    let reply = match decision {
+        "approve" => {
+            if let Some(created) = created_project {
+                format!("Created project \"{}\" (id={}).", created.name, created.id)
+            } else {
+                format!("Approved: {}.", pending.summary)
+            }
+        }
+        "expire" => format!("Hết hạn 15 phút — đã tự hủy: {}.", pending.summary),
+        _ => format!("Cancelled: {}.", pending.summary),
+    };
+    YazgChatResponse {
+        reply,
+        intent: pending.tool.clone(),
+        action: Some(pending.tool.clone()),
+        events: vec![AgentEventDto {
+            agent: "yazg".into(),
+            kind: if decision == "approve" {
+                "completed".into()
+            } else {
+                "info".into()
+            },
+            message: format!("hilt_{decision}:{}", pending.id),
+        }],
+        raw_output: None,
+        verified: None,
+        plan_summary: None,
+        created_project: created_project.map(|project| YazgCreatedProjectDto {
+            id: project.id.clone(),
+            name: project.name.clone(),
+            description: project.description.clone(),
+        }),
+        pending_action: None,
+        trace_id: None,
+    }
+}
+
+async fn run_hilt_followup_turn(
+    state: &AppState,
+    pending: HiltPendingAction,
+    decision: &str,
+    tool_observation: Option<String>,
+    created_project: Option<CreatedProject>,
+    session_id: Option<String>,
+) -> CommandResult<YazgChatResponse> {
+    let inference = state.inference_manager().lock().await;
+    let runtime_ready = is_inference_ready(&inference);
+    let model_label = {
+        let name = inference.config().model.trim();
+        if name.is_empty() {
+            inference
+                .config()
+                .selected_model_id
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+        } else {
+            Some(name.to_string())
+        }
+    };
+    drop(inference);
+
+    if !runtime_ready {
+        return Ok(hilt_static_fallback(
+            &pending,
+            decision,
+            created_project.as_ref(),
+        ));
+    }
+
+    let hosts = YazgHostLlms::from_app(
+        state.data_dir().to_path_buf(),
+        state.inference_manager().clone(),
+        state.model_manager().clone(),
+        state.model_provider().clone(),
+        state.runtime_manager().clone(),
+    );
+    let llms = hosts.into_yazg_llms();
+    let memory: Arc<dyn promptlab_agent::AgentMemoryStore> =
+        Arc::new(SqliteAgentMemoryStore::new(state.repositories()));
+    let session_id = session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("yazg-chat:assistant")
+        .to_string();
+    let memory_ctx = MemoryContext::new(session_id);
+
+    let turn = YazgSupervisor::hilt_followup(
+        &pending,
+        decision,
+        tool_observation.as_deref(),
+        llms,
+        Some(memory),
+        memory_ctx,
+        Some(state.agent_trace().clone()),
+        model_label,
+    )
+    .await
+    .map_err(map_agent_err)?;
+
+    Ok(turn_to_response(turn, created_project))
 }
 
 pub async fn yazg_resolve_hilt_op(
@@ -1204,7 +1324,7 @@ pub async fn yazg_resolve_hilt_op(
     if action_id.is_empty() {
         return Err(CommandError::invalid_input("actionId is required"));
     }
-    let decision = request.decision.trim().to_lowercase();
+    let decision_raw = request.decision.trim().to_lowercase();
     let pending = take_hilt_pending(action_id).await.ok_or_else(|| {
         CommandError::invalid_input(format!(
             "no pending HILT action for id `{action_id}` (already resolved or expired)"
@@ -1219,46 +1339,21 @@ pub async fn yazg_resolve_hilt_op(
     }
 
     let expired = pending.is_expired();
-    if decision == "deny"
-        || decision == "reject"
-        || decision == "cancel"
-        || decision == "expire"
-        || expired
-    {
-        let auto_expired = expired && decision != "deny" && decision != "reject" && decision != "cancel";
-        let reply = if auto_expired || decision == "expire" {
-            format!("Hết hạn 15 phút — đã tự hủy: {}.", pending.summary)
-        } else {
-            format!("Cancelled: {}.", pending.summary)
-        };
-        return Ok(YazgChatResponse {
-            reply,
-            intent: pending.tool.clone(),
-            action: Some(pending.tool.clone()),
-            events: vec![AgentEventDto {
-                agent: "yazg".into(),
-                kind: "info".into(),
-                message: format!(
-                    "{}:{}",
-                    if auto_expired || decision == "expire" {
-                        "hilt_expired"
-                    } else {
-                        "hilt_denied"
-                    },
-                    pending.id
-                ),
-            }],
-            raw_output: None,
-            verified: None,
-            plan_summary: None,
-            created_project: None,
-            pending_action: None,
-            trace_id: None,
-        });
+    let decision = hilt_decision_label(&decision_raw, expired);
+
+    if decision == "deny" || decision == "expire" {
+        return run_hilt_followup_turn(
+            state,
+            pending,
+            decision,
+            None,
+            None,
+            request.session_id,
+        )
+        .await;
     }
 
-    if decision != "approve" && decision != "accept" && decision != "confirm" {
-        // Put it back so the user can retry with a valid decision.
+    if decision != "approve" {
         remember_hilt_pending(pending).await;
         return Err(CommandError::invalid_input(
             "decision must be `approve` or `deny`",
@@ -1289,36 +1384,28 @@ pub async fn yazg_resolve_hilt_op(
                 .create_project(name, description)
                 .await
                 .map_err(CommandError::invalid_input)?;
-            Ok(YazgChatResponse {
-                reply: format!(
-                    "Created project \"{}\" (id={}).",
-                    created.name, created.id
-                ),
-                intent: "create_project".into(),
-                action: Some("create_project".into()),
-                events: vec![AgentEventDto {
-                    agent: "yazg".into(),
-                    kind: "completed".into(),
-                    message: format!("hilt_approved:{}", pending.id),
-                }],
-                raw_output: None,
-                verified: None,
-                plan_summary: None,
-                created_project: Some(YazgCreatedProjectDto {
-                    id: created.id,
-                    name: created.name,
-                    description: created.description,
+            let observation = ToolResult::ok(
+                "create_project",
+                serde_json::json!({
+                    "id": created.id,
+                    "name": created.name,
+                    "description": created.description,
                 }),
-                pending_action: None,
-                trace_id: None,
-            })
+            )
+            .to_json_string();
+            run_hilt_followup_turn(
+                state,
+                pending,
+                "approve",
+                Some(observation),
+                Some(created),
+                request.session_id,
+            )
+            .await
         }
-        other => {
-            // Future mutating tools land here. Put pending back? No — unknown tool.
-            Err(CommandError::invalid_input(format!(
-                "HILT resolve not implemented for tool `{other}`"
-            )))
-        }
+        other => Err(CommandError::invalid_input(format!(
+            "HILT resolve not implemented for tool `{other}`"
+        ))),
     }
 }
 

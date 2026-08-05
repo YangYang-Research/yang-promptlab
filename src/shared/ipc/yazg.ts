@@ -70,6 +70,7 @@ export type YazgGenerateChatTitleResponse = {
 export type YazgResolveHiltRequest = {
   actionId: string;
   decision: "approve" | "deny" | "expire";
+  sessionId?: string | null;
 };
 
 export function yazgChat(request: YazgChatRequest): Promise<YazgChatResponse> {

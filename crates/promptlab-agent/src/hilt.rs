@@ -90,6 +90,35 @@ impl HiltPendingAction {
     }
 }
 
+/// Internal goal for the post-HILT conversation turn (not shown in chat as a user message).
+pub fn build_hilt_followup_goal(
+    pending: &HiltPendingAction,
+    decision: &str,
+    tool_observation: Option<&str>,
+) -> String {
+    match decision {
+        "approve" => format!(
+            "[HILT follow-up — internal] The user approved: {}. Tool result JSON:\n{}\n\n\
+             Reply in one short natural sentence confirming the outcome. Match the language \
+             used in this chat. Do not call tools.",
+            pending.summary,
+            tool_observation.unwrap_or("{}")
+        ),
+        "expire" => format!(
+            "[HILT follow-up — internal] The approval window expired for: {}. Nothing was \
+             written to the database. Reply in one short natural sentence. Match chat language. \
+             Do not call tools.",
+            pending.summary
+        ),
+        _ => format!(
+            "[HILT follow-up — internal] The user denied or cancelled: {}. Nothing was written \
+             to the database. Reply in one short natural sentence. Match chat language. Do not \
+             call tools.",
+            pending.summary
+        ),
+    }
+}
+
 /// True for tools that write / update / delete workspace state.
 /// Extend this list when new mutating tools are added.
 pub fn is_mutating_tool(tool_name: &str) -> bool {

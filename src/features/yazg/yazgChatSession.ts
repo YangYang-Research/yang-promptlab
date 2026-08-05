@@ -518,6 +518,7 @@ export async function resolveYazgHiltAction(options: {
     const response = await yazgResolveHilt({
       actionId: options.actionId,
       decision: options.decision,
+      sessionId: `yazg-chat:${options.threadId}`,
     });
 
     // Mark the originating card as resolved before appending the follow-up.

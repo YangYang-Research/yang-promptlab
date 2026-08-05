@@ -22,7 +22,9 @@ use crate::generate_prompt::{
 };
 use crate::judge_coordinator::JudgeCoordinatorAgentOutcome;
 use crate::list_workspace::WorkspaceTools;
-use crate::memory::{AgentMemoryStore, MemoryContext};
+use crate::memory::{AgentMemoryStore, MemoryContext, remember_stm, StmRole, StmWrite};
+use crate::assistant::AssistantCapability;
+use crate::hilt::{build_hilt_followup_goal, HiltPendingAction};
 use crate::artifacts::{YazgActionKind, YazgArtifacts};
 use crate::recommend::{RecommendAgent, RecommendAgentOutcome};
 use crate::yazg_runtime::{run_yazg, YazgRequest};
@@ -229,6 +231,91 @@ impl YazgSupervisor {
             .with_model_label(model_label)
             .with_specialist(specialist);
         Self::run_yazg_turn(request).await
+    }
+
+    /// Post-HILT conversation turn: model replies after approve/deny/expire.
+    pub async fn hilt_followup(
+        pending: &HiltPendingAction,
+        decision: &str,
+        tool_observation: Option<&str>,
+        llms: YazgLlms,
+        memory: Option<Arc<dyn AgentMemoryStore>>,
+        memory_ctx: MemoryContext,
+        agent_trace: Option<promptlab_agenttrace::SharedAgentTrace>,
+        model_label: Option<String>,
+    ) -> AgentResult<YazgTurn> {
+        if let Some(obs) = tool_observation {
+            remember_stm(
+                memory.as_deref(),
+                &memory_ctx,
+                StmWrite {
+                    agent_id: AgentId::Yazg,
+                    role: StmRole::Observation,
+                    memory_key: Some(pending.tool.clone()),
+                    content: obs.to_string(),
+                    content_json: Some(serde_json::json!({
+                        "event": "hilt_resolved",
+                        "decision": decision,
+                        "pending_id": pending.id,
+                    })),
+                    importance: 0.75,
+                },
+            )
+            .await;
+        } else {
+            remember_stm(
+                memory.as_deref(),
+                &memory_ctx,
+                StmWrite {
+                    agent_id: AgentId::Yazg,
+                    role: StmRole::Observation,
+                    memory_key: Some(pending.tool.clone()),
+                    content: format!("HILT {decision}: {}", pending.summary),
+                    content_json: Some(serde_json::json!({
+                        "event": "hilt_resolved",
+                        "decision": decision,
+                        "pending_id": pending.id,
+                        "summary": pending.summary,
+                    })),
+                    importance: 0.75,
+                },
+            )
+            .await;
+        }
+
+        let goal = build_hilt_followup_goal(pending, decision, tool_observation);
+        let request = YazgRequest::new(goal, llms)
+            .with_memory(memory, memory_ctx)
+            .with_max_turns(4)
+            .with_agent_trace(agent_trace)
+            .with_model_label(model_label)
+            .with_forced_capability(AssistantCapability::Conversation)
+            .with_skip_user_stm(true);
+
+        let delegation = Self::run_yazg_turn(request).await?;
+        let mut turn = match delegation {
+            YazgDelegation::Chat { turn } => turn,
+            YazgDelegation::AnalyzedEndpoint { turn, .. }
+            | YazgDelegation::Planned { turn, .. }
+            | YazgDelegation::GeneratedPrompt { turn, .. }
+            | YazgDelegation::Recommended { turn, .. }
+            | YazgDelegation::Summarized { turn, .. }
+            | YazgDelegation::Judged { turn, .. }
+            | YazgDelegation::CreatedProject { turn, .. }
+            | YazgDelegation::ExecutedAttack { turn, .. } => turn,
+        };
+
+        if decision == "approve" {
+            turn.intent = match pending.tool.as_str() {
+                "create_project" => SupervisorIntent::CreateProject,
+                _ => SupervisorIntent::Chat,
+            };
+            turn.action = Some(pending.tool.clone());
+        } else {
+            turn.action = Some(pending.tool.clone());
+        }
+
+        Ok(turn)
     }
 
     /// Wizard Verification AI step: probe already captured.
