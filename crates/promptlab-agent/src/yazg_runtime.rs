@@ -243,7 +243,11 @@ impl AgentHook<YazgModel> for YazgAgentHook {
                 {
                     let mut guard = self.state.lock().await;
                     let trace = guard.active_trace.clone();
-                    let parent = guard.active_llm_span.as_ref().map(|s| s.id().to_string());
+                    let parent = guard
+                        .active_llm_span
+                        .as_ref()
+                        .map(|s| s.id().to_string())
+                        .or_else(|| guard.parent_llm_span_id.clone());
                     drop(guard);
                     let span = promptlab_agenttrace::start_span!(
                         trace.as_ref(),
@@ -407,6 +411,7 @@ impl AgentHook<YazgModel> for YazgAgentHook {
                     soft_end_span(
                         span.as_ref(),
                         SpanEnd {
+                            inputs: None,
                             outputs: Some(result_json),
                             status: TraceStatus::Ok,
                             metrics: std::collections::BTreeMap::new(),
@@ -670,13 +675,21 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         )
         .await;
 
-    let classify_inputs = resolution.classifier_request.clone().unwrap_or(classify_inputs);
+    let mut classify_inputs = resolution.classifier_request.clone().unwrap_or(classify_inputs);
+    if let Some(model) = request.model_label.as_deref() {
+        if let Some(obj) = classify_inputs.as_object_mut() {
+            obj.insert("model".into(), serde_json::json!(model));
+        }
+    }
     let route_ms = route_started.elapsed().as_millis();
 
     artifacts.events.push(AgentEvent::emit_kind(
         AgentId::Yazg,
         crate::types::AgentEventKind::Llm,
-        crate::yazg_model::format_stage_payload("capability_classify_request", classify_inputs),
+        crate::yazg_model::format_stage_payload(
+            "capability_classify_request",
+            classify_inputs.clone(),
+        ),
         conversation_id.clone(),
     ));
 
@@ -685,6 +698,8 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
     soft_end_span(
         classify_span.as_ref(),
         SpanEnd {
+            // Replace the start-time stub with the full classifier wire request.
+            inputs: Some(classify_inputs.clone()),
             outputs: Some(serde_json::json!({
                 "capability": loaded.capability.as_str(),
                 "confidence": (loaded.confidence * 100.0).round() / 100.0,

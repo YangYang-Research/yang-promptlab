@@ -34,6 +34,8 @@ export type YazgCreatedProjectDto = {
 export type YazgChatResponse = {
   reply: string;
   intent: string;
+  /** Actual tool that produced the reply; `intent` is a coarse category. */
+  action?: string | null;
   events: YazgAgentEventDto[];
   rawOutput?: unknown;
   verified?: boolean | null;

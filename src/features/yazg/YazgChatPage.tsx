@@ -301,8 +301,10 @@ export function YazgChatPage() {
                 <header className="yazg-chat-bubble__meta">
                   <span className="yazg-chat-bubble__meta-label">
                     {msg.role === "yazg" ? "Yazg" : "You"}
-                    {msg.intent ? (
-                      <span className="yazg-chat-bubble__intent">{msg.intent}</span>
+                    {(msg.action ?? msg.intent) ? (
+                      <span className="yazg-chat-bubble__intent">
+                        {msg.action ?? msg.intent}
+                      </span>
                     ) : null}
                   </span>
                   {msg.role === "yazg" && msg.traceId ? (

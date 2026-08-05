@@ -603,6 +603,10 @@ impl SpanHandle {
 
     pub async fn end(&self, end: SpanEnd) -> Result<()> {
         let ended = now_rfc3339();
+        let inputs = end
+            .inputs
+            .as_ref()
+            .and_then(|v| serde_json::to_string(v).ok());
         let outputs = end
             .outputs
             .as_ref()
@@ -620,21 +624,41 @@ impl SpanHandle {
             .unwrap_or_default();
         attrs.extend(end.attributes);
         let attrs_json = serde_json::to_string(&attrs).unwrap_or_else(|_| "{}".into());
-        sqlx::query(
-            r#"
-            UPDATE at_spans
-            SET status = ?, ended_at = ?, outputs_json = ?, metrics_json = ?, attributes_json = ?
-            WHERE id = ?
-            "#,
-        )
-        .bind(end.status.as_str())
-        .bind(&ended)
-        .bind(&outputs)
-        .bind(&metrics)
-        .bind(&attrs_json)
-        .bind(&self.span_id)
-        .execute(&self.flow.pool)
-        .await?;
+        if let Some(inputs_json) = inputs {
+            sqlx::query(
+                r#"
+                UPDATE at_spans
+                SET status = ?, ended_at = ?, inputs_json = ?, outputs_json = ?,
+                    metrics_json = ?, attributes_json = ?
+                WHERE id = ?
+                "#,
+            )
+            .bind(end.status.as_str())
+            .bind(&ended)
+            .bind(&inputs_json)
+            .bind(&outputs)
+            .bind(&metrics)
+            .bind(&attrs_json)
+            .bind(&self.span_id)
+            .execute(&self.flow.pool)
+            .await?;
+        } else {
+            sqlx::query(
+                r#"
+                UPDATE at_spans
+                SET status = ?, ended_at = ?, outputs_json = ?, metrics_json = ?, attributes_json = ?
+                WHERE id = ?
+                "#,
+            )
+            .bind(end.status.as_str())
+            .bind(&ended)
+            .bind(&outputs)
+            .bind(&metrics)
+            .bind(&attrs_json)
+            .bind(&self.span_id)
+            .execute(&self.flow.pool)
+            .await?;
+        }
         Ok(())
     }
 }
@@ -703,6 +727,7 @@ mod tests {
         soft_end_span(
             Some(&classify),
             SpanEnd {
+                inputs: None,
                 outputs: Some(serde_json::json!({"capability":"conversation"})),
                 status: TraceStatus::Ok,
                 metrics: BTreeMap::from([("latency_ms".into(), 12.0)]),
@@ -726,6 +751,7 @@ mod tests {
         soft_end_span(
             Some(&llm),
             SpanEnd {
+                inputs: None,
                 outputs: Some(serde_json::json!({"content":"hello"})),
                 status: TraceStatus::Ok,
                 metrics: BTreeMap::new(),

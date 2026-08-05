@@ -86,6 +86,11 @@ pub struct SpanStart {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SpanEnd {
+    /// Replaces the inputs recorded at span start. Use when the full wire
+    /// request is only known after the call returns (e.g. capability routing,
+    /// where the span must open before the LLM call for correct timing).
+    #[serde(default)]
+    pub inputs: Option<Value>,
     #[serde(default)]
     pub outputs: Option<Value>,
     pub status: TraceStatus,

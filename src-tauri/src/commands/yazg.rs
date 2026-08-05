@@ -55,6 +55,9 @@ pub struct YazgCreatedProjectDto {
 pub struct YazgChatResponse {
     pub reply: String,
     pub intent: String,
+    /// Actual tool that produced the reply (`intent` is a coarse category).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
     pub events: Vec<AgentEventDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_output: Option<Value>,
@@ -526,36 +529,47 @@ impl WorkspaceTools for HostWorkspaceTools {
         project: Option<&str>,
         name: Option<&str>,
     ) -> Result<TargetDetail, String> {
-        let target = if let Some(id) = target_id.map(str::trim).filter(|s| !s.is_empty()) {
-            self.repos
-                .targets()
-                .get(id)
-                .await
-                .map_err(|e| e.to_string())?
-        } else {
-            let project_key = project
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| {
-                    "target_detail requires target_id or project+name".to_string()
-                })?;
-            let name_key = name
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| "target_detail name is required when using project".to_string())?;
-            let project = self.resolve_project(project_key).await?;
-            let targets = self
-                .repos
-                .targets()
-                .list_by_project(&project.id)
-                .await
-                .map_err(|e| e.to_string())?;
-            let lower = name_key.to_lowercase();
-            targets
-                .into_iter()
-                .find(|t| t.name.to_lowercase() == lower || t.name.to_lowercase().contains(&lower))
-                .ok_or_else(|| format!("target not found: {name_key} in project {}", project.name))?
+        let id_key = target_id.map(str::trim).filter(|s| !s.is_empty());
+        let name_key = name.map(str::trim).filter(|s| !s.is_empty());
+        let project_key = project.map(str::trim).filter(|s| !s.is_empty());
+
+        // Models routinely pass a host/name in `target_id`, so an id miss falls
+        // back to name/host matching instead of hard-failing.
+        let mut target = match id_key {
+            Some(id) => self.repos.targets().get(id).await.ok(),
+            None => None,
         };
+
+        if target.is_none() {
+            let lookup = name_key.or(id_key).ok_or_else(|| {
+                "target_detail requires target_id or project+name".to_string()
+            })?;
+            let candidates = match project_key {
+                Some(key) => {
+                    let project = self.resolve_project(key).await?;
+                    self.repos
+                        .targets()
+                        .list_by_project(&project.id)
+                        .await
+                        .map_err(|e| e.to_string())?
+                }
+                None => self
+                    .repos
+                    .targets()
+                    .list_all()
+                    .await
+                    .map_err(|e| e.to_string())?,
+            };
+            target = match_target(&candidates, lookup);
+            if target.is_none() {
+                return Err(match project_key {
+                    Some(key) => format!("target not found: {lookup} in project {key}"),
+                    None => format!("target not found: {lookup}"),
+                });
+            }
+        }
+
+        let target = target.ok_or_else(|| "target not found".to_string())?;
 
         let project_name = self
             .repos
@@ -565,6 +579,22 @@ impl WorkspaceTools for HostWorkspaceTools {
             .map(|p| p.name)
             .unwrap_or_else(|_| target.project_id.clone());
 
+        let descriptor = parse_json_blob(&target.descriptor_json);
+        let profile = parse_json_blob(&target.profile_json);
+        let endpoint = descriptor
+            .as_ref()
+            .and_then(extract_endpoint)
+            .or_else(|| profile.as_ref().and_then(extract_endpoint));
+        let host = endpoint
+            .as_deref()
+            .and_then(host_from_endpoint)
+            .or_else(|| Some(target.name.clone()));
+        let verified = profile
+            .as_ref()
+            .and_then(|p| p.get("verification"))
+            .and_then(|v| v.get("verified"))
+            .and_then(|v| v.as_bool());
+
         Ok(TargetDetail {
             target: WorkspaceTargetSummary {
                 id: target.id,
@@ -573,8 +603,9 @@ impl WorkspaceTools for HostWorkspaceTools {
                 target_type: target.target_type,
             },
             project_name,
-            profile_summary: summarize_json_blob(&target.profile_json, 600),
-            descriptor_summary: Some(summarize_json_blob(&target.descriptor_json, 400)),
+            endpoint,
+            host,
+            verified,
         })
     }
 
@@ -673,46 +704,86 @@ impl WorkspaceTools for HostWorkspaceTools {
     }
 }
 
-fn summarize_json_blob(raw: &str, max_chars: usize) -> String {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return "-".into();
+/// Resolve a target by id, exact name, host, or substring — in that order, so a
+/// host like `10.100.109.76` still finds its target.
+fn match_target(
+    candidates: &[promptlab_storage::Target],
+    lookup: &str,
+) -> Option<promptlab_storage::Target> {
+    let key = lookup.trim();
+    if key.is_empty() {
+        return None;
     }
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
-        let mut bits = Vec::new();
-        if let Some(obj) = value.as_object() {
-            for key in [
-                "provider",
-                "framework",
-                "baseUrl",
-                "base_url",
-                "url",
-                "fullUrl",
-                "endpoint",
-                "model",
-                "name",
-                "verified",
-            ] {
-                if let Some(v) = obj.get(key) {
-                    bits.push(format!("{key}={}", compact_json_value(v)));
-                }
-            }
-        }
-        if !bits.is_empty() {
-            let joined = bits.join(", ");
-            return clip_text(&joined, max_chars).0;
-        }
-        return clip_text(&value.to_string(), max_chars).0;
+    if let Some(t) = candidates.iter().find(|t| t.id == key) {
+        return Some(t.clone());
     }
-    clip_text(trimmed, max_chars).0
+    let lower = key.to_lowercase();
+    if let Some(t) = candidates
+        .iter()
+        .find(|t| t.name.to_lowercase() == lower)
+    {
+        return Some(t.clone());
+    }
+    // Match against the host inside the descriptor/profile endpoint.
+    if let Some(t) = candidates.iter().find(|t| {
+        [t.descriptor_json.as_str(), t.profile_json.as_str()]
+            .iter()
+            .filter_map(|raw| parse_json_blob(raw))
+            .filter_map(|v| extract_endpoint(&v))
+            .any(|endpoint| {
+                host_from_endpoint(&endpoint)
+                    .map(|host| host.to_lowercase() == lower)
+                    .unwrap_or(false)
+            })
+    }) {
+        return Some(t.clone());
+    }
+    candidates
+        .iter()
+        .find(|t| {
+            let n = t.name.to_lowercase();
+            n.contains(&lower) || lower.contains(&n)
+        })
+        .cloned()
 }
 
-fn compact_json_value(v: &serde_json::Value) -> String {
-    match v {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Number(n) => n.to_string(),
-        other => other.to_string(),
+fn parse_json_blob(raw: &str) -> Option<serde_json::Value> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "{}" {
+        return None;
+    }
+    serde_json::from_str(trimmed).ok()
+}
+
+fn extract_endpoint(value: &serde_json::Value) -> Option<String> {
+    let obj = value.as_object()?;
+    for key in ["fullUrl", "full_url", "baseUrl", "base_url", "url", "endpoint", "host"] {
+        if let Some(s) = obj.get(key).and_then(|v| v.as_str()) {
+            let s = s.trim();
+            if !s.is_empty() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn host_from_endpoint(endpoint: &str) -> Option<String> {
+    let raw = endpoint.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let without_scheme = raw.split_once("://").map(|(_, rest)| rest).unwrap_or(raw);
+    let authority = without_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(without_scheme);
+    let host = authority.rsplit_once('@').map(|(_, h)| h).unwrap_or(authority);
+    let host = host.split(':').next().unwrap_or(host).trim();
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
     }
 }
 
@@ -780,6 +851,7 @@ fn turn_to_response(
             SupervisorIntent::CreateProject => "create_project".into(),
             SupervisorIntent::ListWorkspace => "list_workspace".into(),
         },
+        action: turn.action,
         events: turn.events.into_iter().map(event_dto).collect(),
         raw_output,
         verified: turn.verified,

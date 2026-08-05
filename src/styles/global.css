@@ -11861,15 +11861,9 @@ a:hover {
   bottom: calc(-0.85rem - var(--trace-gap, 0.22rem));
 }
 
-/* Last: run the full remaining card height, fade near the bottom edge. */
+/* Last: no trailing segment below the final dot. */
 .agent-trace-group:last-child::after {
-  bottom: 0.85rem;
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--accent) 42%, var(--border)) 0%,
-    color-mix(in srgb, var(--accent) 42%, var(--border)) 72%,
-    transparent 100%
-  );
+  display: none;
 }
 
 .agent-trace-group--tool::before {
@@ -11879,15 +11873,6 @@ a:hover {
 
 .agent-trace-group--tool::after {
   background: color-mix(in srgb, var(--warning) 40%, var(--border));
-}
-
-.agent-trace-group--tool:last-child::after {
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--warning) 40%, var(--border)) 0%,
-    color-mix(in srgb, var(--warning) 40%, var(--border)) 72%,
-    transparent 100%
-  );
 }
 
 .agent-trace-group--capability::before,
@@ -11904,15 +11889,6 @@ a:hover {
 
 .agent-trace-group--completion::after {
   background: color-mix(in srgb, var(--info) 40%, var(--border));
-}
-
-.agent-trace-group--completion:last-child::after {
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--info) 40%, var(--border)) 0%,
-    color-mix(in srgb, var(--info) 40%, var(--border)) 72%,
-    transparent 100%
-  );
 }
 
 .agent-trace-group__head {

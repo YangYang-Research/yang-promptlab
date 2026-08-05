@@ -49,6 +49,8 @@ pub struct YazgRunState {
     pub active_trace: Option<TraceHandle>,
     /// Open LLM span while a completion is in flight.
     pub active_llm_span: Option<SpanHandle>,
+    /// Last closed LLM span — parent for tool spans (tools run after completion returns).
+    pub parent_llm_span_id: Option<String>,
     /// Open tool spans keyed by tool_call_id.
     pub active_tool_spans: HashMap<String, SpanHandle>,
     /// Display name of the active inference model (for AgentTrace spans).
@@ -68,6 +70,7 @@ impl Default for YazgRunState {
             tools_used: Vec::new(),
             active_trace: None,
             active_llm_span: None,
+            parent_llm_span_id: None,
             active_tool_spans: HashMap::new(),
             model_label: None,
         }
@@ -347,7 +350,7 @@ async fn record_workspace_tool(
     ));
     guard.artifacts.events.push(AgentEvent::completed(
         AgentId::ListWorkspace,
-        format!("{event_msg} | obs={obs_snip}"),
+        format!("{tool_name}: {event_msg} | obs={obs_snip}"),
     ));
     guard.workspace_observations.push(observation.clone());
     guard.last_workspace_observation = Some(observation);
@@ -368,11 +371,19 @@ impl Tool for ListWorkspaceTool {
 
     fn description(&self) -> String {
         format!(
-            "List all projects with aggregate counts only (targets/scans/findings totals). \
-             Use when the user wants a workspace inventory / which projects exist. \
-             Do not use for one named project's overview (project_detail), targets \
-             (list_targets), findings, scans, or reports.{TOOL_RESULT_CONTRACT}\
-             {WHEN_NOT_WORKSPACE}"
+            "List EVERY project in the workspace with aggregate counts only \
+             (targets/scans/findings totals). Takes no arguments and cannot filter. \
+             \
+             USE ONLY WHEN: no project is named and the user wants the whole inventory — \
+             \"which projects exist\", \"list projects\", \"workspace overview\", \
+             \"có những dự án nào\". \
+             \
+             DO NOT USE WHEN: the message names a specific project — \"project AI\", \
+             \"dự án AI\", \"thông tin project X\", \"project detail X\". Call \
+             project_detail(project=<name>) instead; returning the full list for a named \
+             project is a wrong answer. \
+             Also not for targets (list_targets), findings, scans, or reports.\
+             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
         )
     }
 
@@ -427,9 +438,13 @@ impl Tool for ProjectDetailTool {
 
     fn description(&self) -> String {
         format!(
-            "Return one project's metadata, targets, and scans (no finding rows). \
-             Use when the user asks about a specific project by exact id or name. \
-             Prefer this over list_workspace for named-project questions. \
+            "Return ONE project's metadata, targets, and scans (no finding rows). \
+             \
+             USE WHENEVER a project is named or implied — \"thông tin project AI\", \
+             \"project AI\", \"dự án AI\", \"chi tiết project X\", \"project detail X\". \
+             This is the correct tool for any single-project question; always prefer it \
+             over list_workspace once a name appears in the message. \
+             \
              `project` must be a real workspace project id/name — not the assistant's name. \
              On miss: status=error error_class=not_found with candidates[]. Do not invent.\
              {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
@@ -442,7 +457,11 @@ impl Tool for ProjectDetailTool {
             "properties": {
                 "project": {
                     "type": "string",
-                    "description": "Exact project id or name"
+                    "description": "The project's own id or name ONLY — never the whole \
+                     phrase. Strip labels like \"project\"/\"dự án\" and any request verbs. \
+                     From \"thông tin project AI\" or \"dự án AI\" pass \"AI\"; from \
+                     \"project detail WebApp\" pass \"WebApp\". Value must equal the stored \
+                     project name/id, so no surrounding words, quotes or punctuation."
                 }
             },
             "required": ["project"],
@@ -1013,8 +1032,12 @@ impl Tool for TargetDetailTool {
     fn description(&self) -> String {
         format!(
             "Get one target by target_id, or by project + name. \
-             Use when the user asks for detail/profile of a specific target. \
-             Returns type and clipped profile/descriptor summary. \
+             target_id also accepts a target name or host (e.g. an IP) — it is \
+             resolved by id, then name, then host. \
+             Use when the user asks for detail of a specific target. \
+             Returns only name, endpoint, host and verified. A bare host/IP is \
+             only part of a target — always report the endpoint. Report just \
+             those fields; never invent headers, templates or capabilities. \
              On miss: status=error error_class=not_found with candidates[].\
              {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
         )
@@ -1024,9 +1047,12 @@ impl Tool for TargetDetailTool {
         json!({
             "type": "object",
             "properties": {
-                "target_id": { "type": "string" },
+                "target_id": {
+                    "type": "string",
+                    "description": "Target id, or its name/host (resolved as a fallback)"
+                },
                 "project": { "type": "string", "description": "Project id or name (with name)" },
-                "name": { "type": "string", "description": "Target name when resolving via project" }
+                "name": { "type": "string", "description": "Target name or host when resolving via project" }
             },
             "additionalProperties": false
         })

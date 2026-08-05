@@ -41,18 +41,46 @@ export function conversationLabel(sessionId?: string | null): {
   return { id, title };
 }
 
-export function prettyJson(value: unknown): string {
+/**
+ * Recursively parse embedded JSON strings so nested payloads (e.g. the
+ * capability classifier's `content` field, which is a stringified JSON blob)
+ * render as fully-expanded, readable JSON instead of an escaped one-liner.
+ */
+function expandEmbeddedJson(value: unknown, depth = 0): unknown {
+  if (depth > 6) return value;
   if (typeof value === "string") {
-    try {
-      return JSON.stringify(JSON.parse(value), null, 2);
-    } catch {
-      return value;
+    const trimmed = value.trim();
+    if (
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+      try {
+        return expandEmbeddedJson(JSON.parse(trimmed), depth + 1);
+      } catch {
+        return value;
+      }
     }
+    return value;
   }
+  if (Array.isArray(value)) {
+    return value.map((item) => expandEmbeddedJson(item, depth + 1));
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value)) {
+      out[key] = expandEmbeddedJson(val, depth + 1);
+    }
+    return out;
+  }
+  return value;
+}
+
+export function prettyJson(value: unknown): string {
+  const expanded = expandEmbeddedJson(value);
   try {
-    return JSON.stringify(value, null, 2);
+    return JSON.stringify(expanded, null, 2);
   } catch {
-    return String(value);
+    return typeof expanded === "string" ? expanded : String(expanded);
   }
 }
 

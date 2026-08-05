@@ -181,6 +181,7 @@ impl CompletionModel for YazgModel {
         // AgentTrace: one llm span per completion (inputs = wire request).
         if let Some(sink) = &self.stage_sink {
             let mut guard = sink.lock().await;
+            guard.parent_llm_span_id = None;
             let trace = guard.active_trace.clone();
             let model_label = self
                 .model_label
@@ -294,10 +295,18 @@ impl CompletionModel for YazgModel {
         .await;
 
         if let Some(sink) = &self.stage_sink {
-            let span = sink.lock().await.active_llm_span.take();
+            let span = {
+                let mut guard = sink.lock().await;
+                let span = guard.active_llm_span.take();
+                if let Some(ref handle) = span {
+                    guard.parent_llm_span_id = Some(handle.id().to_string());
+                }
+                span
+            };
             soft_end_span(
                 span.as_ref(),
                 SpanEnd {
+                    inputs: None,
                     outputs: Some(response_body),
                     status: TraceStatus::Ok,
                     metrics: std::collections::BTreeMap::from([

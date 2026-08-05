@@ -94,6 +94,10 @@ impl SupervisorIntent {
 pub struct YazgTurn {
     pub reply: String,
     pub intent: SupervisorIntent,
+    /// Actual tool / action that produced this reply. `intent` collapses every
+    /// workspace tool into `list_workspace`, so the UI needs the real name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
     pub events: Vec<AgentEvent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verified: Option<bool>,
@@ -268,6 +272,7 @@ impl YazgSupervisor {
             turn: YazgTurn {
                 reply: format_analyze_success(&outcome.verification),
                 intent: SupervisorIntent::AnalyzeEndpoint,
+                action: Some("analyze_endpoint".into()),
                 events,
                 verified: Some(true),
                 plan_summary: None,
@@ -319,6 +324,7 @@ impl YazgSupervisor {
             turn: YazgTurn {
                 reply: format!("Attack plan generated.\n{plan_summary}"),
                 intent: SupervisorIntent::AttackPlan,
+                action: Some("attack_plan".into()),
                 events,
                 verified: Some(true),
                 plan_summary: Some(plan_summary),
@@ -373,6 +379,7 @@ impl YazgSupervisor {
                             outcome.content.chars().count()
                         ),
                         intent: SupervisorIntent::GeneratePrompt,
+                action: Some("generate_prompt".into()),
                         events,
                         verified: None,
                         plan_summary: None,
@@ -405,6 +412,7 @@ impl YazgSupervisor {
                     outcome.content.chars().count()
                 ),
                 intent: SupervisorIntent::GeneratePrompt,
+                action: Some("generate_prompt".into()),
                 events,
                 verified: None,
                 plan_summary: None,
@@ -459,6 +467,7 @@ impl YazgSupervisor {
                     outcome.bundle.recommendations.len()
                 ),
                 intent: SupervisorIntent::Recommend,
+                action: Some("recommend".into()),
                 events,
                 verified: None,
                 plan_summary: None,
@@ -522,6 +531,7 @@ impl YazgSupervisor {
                             outcome.bundle.highlights.len()
                         ),
                         intent: SupervisorIntent::Summary,
+                action: Some("summary".into()),
                         events,
                         verified: None,
                         plan_summary: None,
@@ -554,6 +564,7 @@ impl YazgSupervisor {
                     outcome.bundle.highlights.len()
                 ),
                 intent: SupervisorIntent::Summary,
+                action: Some("summary".into()),
                 events,
                 verified: None,
                 plan_summary: None,
@@ -681,6 +692,7 @@ impl YazgSupervisor {
         YazgTurn {
             reply,
             intent: SupervisorIntent::Chat,
+                action: Some("chat".into()),
             events: vec![AgentEvent::info(AgentId::Yazg, "Offline chat (AI Runtime offline)")],
             verified: profile.map(|p| p.is_verified()),
             plan_summary: None,
@@ -744,6 +756,10 @@ fn delegation_from_artifacts_with_raw(
     let turn = YazgTurn {
         reply: artifacts.final_reply.clone(),
         intent,
+        action: artifacts
+            .last_action
+            .filter(|action| *action != YazgActionKind::Finish)
+            .map(|action| action.as_str().to_string()),
         events: artifacts.events.clone(),
         verified: verified.or(artifacts.analyze.as_ref().map(|_| true)),
         plan_summary: plan_summary.clone(),
@@ -754,6 +770,7 @@ fn delegation_from_artifacts_with_raw(
     if let Some(project) = artifacts.created_project.clone() {
         let mut turn = turn;
         turn.intent = SupervisorIntent::CreateProject;
+        turn.action = Some("create_project".into());
         if turn.reply.trim().is_empty() {
             turn.reply = format!(
                 "Created project \"{}\" (id={}).",

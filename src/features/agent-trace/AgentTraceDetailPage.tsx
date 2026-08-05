@@ -629,6 +629,40 @@ type TraceBreakdownMeta = {
 };
 
 /**
+ * Infer parent links when backend did not persist them (older traces: LLM span
+ * closes before the tool hook runs, so tool spans were stored as roots).
+ */
+function resolveSpanParentIds(spans: AgentTraceSpanDto[]): Map<string, string | null> {
+  const byId = new Map(spans.map((s) => [s.id, s]));
+  const parentById = new Map<string, string | null>();
+
+  for (const span of spans) {
+    const explicit = span.parentSpanId?.trim() || "";
+    parentById.set(
+      span.id,
+      explicit && byId.has(explicit) ? explicit : null,
+    );
+  }
+
+  const sorted = [...spans].sort((a, b) =>
+    a.startedAt.localeCompare(b.startedAt),
+  );
+  let lastLlmId: string | null = null;
+  for (const span of sorted) {
+    const family = kindClass(span.kind);
+    if (family === "llm") {
+      lastLlmId = span.id;
+      continue;
+    }
+    if (family === "tool" && lastLlmId && parentById.get(span.id) == null) {
+      parentById.set(span.id, lastLlmId);
+    }
+  }
+
+  return parentById;
+}
+
+/**
  * Forest for one Yazg turn:
  *   yazg_turn (trace wall-clock)
  *     └── yazg (agent entry → nested span calls)
@@ -640,10 +674,11 @@ function buildBreakdownForest(
   trace: TraceBreakdownMeta,
 ): BreakdownNode[] {
   const byId = new Map(spans.map((s) => [s.id, s]));
+  const parentById = resolveSpanParentIds(spans);
   const children = new Map<string, AgentTraceSpanDto[]>();
 
   for (const span of spans) {
-    const parent = span.parentSpanId?.trim() || "";
+    const parent = parentById.get(span.id)?.trim() || "";
     if (!parent || !byId.has(parent)) continue;
     const list = children.get(parent) ?? [];
     list.push(span);
@@ -662,7 +697,7 @@ function buildBreakdownForest(
 
   const roots = spans
     .filter((s) => {
-      const parent = s.parentSpanId?.trim() || "";
+      const parent = parentById.get(s.id)?.trim() || "";
       return !parent || !byId.has(parent);
     })
     .map(nodeFromSpan);

@@ -552,41 +552,62 @@ impl TargetList {
     }
 }
 
-/// One target with a clipped profile summary (not full JSON dump).
+/// One target, curated down to the fields that identify and locate it.
+///
+/// `name` is only the host (e.g. an IP); `endpoint` is the real target. Request
+/// templates, header maps, field mappings and verification transcripts are
+/// deliberately excluded — they dominated the model's output budget and pushed
+/// later targets out of the final reply.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TargetDetail {
     pub target: WorkspaceTargetSummary,
     pub project_name: String,
-    pub profile_summary: String,
+    /// Full endpoint URL — the actual target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub descriptor_summary: Option<String>,
+    pub endpoint: Option<String>,
+    /// Host portion only — never the whole target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified: Option<bool>,
 }
 
 impl TargetDetail {
     pub fn to_observation(&self) -> String {
         let t = &self.target;
-        format!(
-            "target_detail OK — {} (`{}`) project={} type={}\nprofile: {}\ndescriptor: {}",
-            t.name,
-            t.id,
-            self.project_name,
-            t.target_type,
-            self.profile_summary,
-            self.descriptor_summary.as_deref().unwrap_or("-")
-        )
+        let mut lines = vec![format!(
+            "target_detail OK — {} project={}",
+            t.name, self.project_name
+        )];
+        if let Some(endpoint) = self.endpoint.as_deref() {
+            lines.push(format!("endpoint: {endpoint}"));
+        }
+        if let Some(host) = self.host.as_deref() {
+            lines.push(format!("host: {host} (host only — not the full target)"));
+        }
+        if let Some(verified) = self.verified {
+            lines.push(format!("verified: {verified}"));
+        }
+        lines.push(
+            "Report name, endpoint and verified only. Do not invent other fields.".into(),
+        );
+        lines.join("\n")
     }
 
     pub fn compact_user_reply(&self) -> String {
-        format!(
-            "### Target {}\n\n- **Id:** `{}`\n- **Project:** {}\n- **Type:** {}\n- **Profile:** {}\n- **Descriptor:** {}",
-            self.target.name,
-            self.target.id,
-            self.project_name,
-            self.target.target_type,
-            self.profile_summary,
-            self.descriptor_summary.as_deref().unwrap_or("-")
-        )
+        let mut out = format!("### Target {}\n\n", self.target.name);
+        out.push_str(&format!("- **Project:** {}\n", self.project_name));
+        if let Some(endpoint) = self.endpoint.as_deref() {
+            out.push_str(&format!("- **Endpoint:** `{endpoint}`\n"));
+        }
+        if let Some(host) = self.host.as_deref() {
+            out.push_str(&format!("- **Host:** `{host}`\n"));
+        }
+        if let Some(verified) = self.verified {
+            out.push_str(&format!("- **Verified:** {verified}\n"));
+        }
+        out
     }
 }
 

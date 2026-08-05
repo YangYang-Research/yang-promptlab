@@ -16,6 +16,8 @@ export type ChatMessage = {
   events?: YazgAgentEventDto[];
   rawOutput?: unknown;
   intent?: string;
+  /** Actual tool behind the reply; preferred over the coarse `intent`. */
+  action?: string;
   /** AgentTrace id for this Yazg reply (opens Trace detail). */
   traceId?: string;
   at: number;
@@ -327,6 +329,7 @@ function appendYazgMessage(
     events: message.events,
     rawOutput: message.rawOutput,
     intent: message.intent,
+    action: message.action,
     traceId: message.traceId,
     at: now,
   };
@@ -426,6 +429,7 @@ export async function sendYazgChatMessage(options: {
       events: response.events,
       rawOutput: response.rawOutput,
       intent: response.intent,
+      action: response.action?.trim() || undefined,
       traceId: response.traceId?.trim() || undefined,
     });
 

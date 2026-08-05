@@ -36,6 +36,32 @@ pub enum YazgActionKind {
     Finish,
 }
 
+impl YazgActionKind {
+    /// Tool / action name as shown in the chat action badge.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AnalyzeEndpoint => "analyze_endpoint",
+            Self::AttackPlan => "attack_plan",
+            Self::GeneratePrompt => "generate_prompt",
+            Self::Recommend => "recommend",
+            Self::Summary => "summary",
+            Self::Judge => "judge",
+            Self::CreateProject => "create_project",
+            Self::ListWorkspace => "list_workspace",
+            Self::ProjectDetail => "project_detail",
+            Self::ListScan => "list_scan",
+            Self::ScanDetail => "scan_detail",
+            Self::ListFindings => "list_findings",
+            Self::FindingDetail => "finding_detail",
+            Self::ListTargets => "list_targets",
+            Self::TargetDetail => "target_detail",
+            Self::ListReports => "list_reports",
+            Self::ReportDetail => "report_detail",
+            Self::Finish => "finish",
+        }
+    }
+}
+
 /// Typed outputs collected during a Yazg turn.
 #[derive(Debug, Clone, Default)]
 pub struct YazgArtifacts {
