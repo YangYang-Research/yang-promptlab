@@ -9,6 +9,7 @@ export type AppInfoResponse = {
   name: string;
   version: string;
   identifier: string;
+  platform: string;
 };
 
 export function healthCheck(): Promise<HealthResponse> {

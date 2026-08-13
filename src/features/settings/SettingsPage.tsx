@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ask } from "@tauri-apps/plugin-dialog";
 
@@ -7,6 +7,7 @@ import { Button, Card, PageHeader, RefreshButton, Select, Badge } from "@/shared
 import type { AppSettings } from "@/app/store/types";
 import { toAppError } from "@/shared/errors";
 import { clearAllAppData } from "@/shared/ipc/app";
+import { getAppInfo } from "@/shared/ipc";
 
 import { EnvironmentsPanel } from "./EnvironmentsPanel";
 import { JudgeRoleWeightsPanel } from "./JudgeRoleWeightsPanel";
@@ -75,6 +76,85 @@ function clearBrowserAppStorage() {
     window.localStorage.removeItem(key);
   }
   window.sessionStorage.removeItem("promptlab:scan-wizard");
+}
+
+function detectClientPlatform(): string {
+  if (typeof navigator === "undefined") return "Unknown";
+  const platform = navigator.platform || "";
+  const ua = navigator.userAgent || "";
+
+  if (/Mac/i.test(platform) || /Mac OS X/i.test(ua)) {
+    const match = ua.match(/Mac OS X (\d+[._]\d+(?:[._]\d+)?)/);
+    return match ? `macOS ${match[1].replace(/_/g, ".")}` : "macOS";
+  }
+  if (/Win/i.test(platform) || /Windows/i.test(ua)) {
+    if (/Windows NT 10\.0/.test(ua)) return "Windows 10/11";
+    if (/Windows NT 6\.3/.test(ua)) return "Windows 8.1";
+    if (/Windows NT 6\.2/.test(ua)) return "Windows 8";
+    if (/Windows NT 6\.1/.test(ua)) return "Windows 7";
+    return "Windows";
+  }
+  if (/Linux/i.test(platform) || /Linux/i.test(ua)) {
+    return "Linux";
+  }
+  return platform || "Unknown";
+}
+
+function AboutPanel({
+  backendConnected,
+  backendVersion,
+}: {
+  backendConnected: boolean;
+  backendVersion: string;
+}) {
+  const [platform, setPlatform] = useState(() => detectClientPlatform());
+  const version = backendVersion || "0.1.0";
+
+  useEffect(() => {
+    let cancelled = false;
+    getAppInfo()
+      .then((info) => {
+        if (!cancelled && info.platform) setPlatform(info.platform);
+      })
+      .catch(() => {
+        if (!cancelled) setPlatform(detectClientPlatform());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <SettingsSection
+      title="Application"
+      description="Build and connection details for this installation."
+    >
+      <Card>
+        <dl className="about-list">
+          <div>
+            <dt>Application</dt>
+            <dd>PromptLab</dd>
+          </div>
+          <div>
+            <dt>Version</dt>
+            <dd>v{version}</dd>
+          </div>
+          <div>
+            <dt>Backend</dt>
+            <dd>
+              {backendConnected
+                ? `Rust - Connected (v${version})`
+                : "Mock mode — Tauri IPC unavailable"}
+            </dd>
+          </div>
+          <div>
+            <dt>Platform</dt>
+            <dd>{platform}</dd>
+          </div>
+        </dl>
+      </Card>
+    </SettingsSection>
+  );
 }
 
 function ClearAllDataCard({ backendConnected }: { backendConnected: boolean }) {
@@ -298,31 +378,10 @@ export function SettingsPage() {
 
           {activeTab === "about" && (
             <div className="settings-tab-panel settings-sections">
-              <SettingsSection
-                title="Application"
-                description="Build and connection details for this installation."
-              >
-                <Card>
-                  <dl className="about-list">
-                    <div>
-                      <dt>Application</dt>
-                      <dd>PromptLab Desktop v0.1.0</dd>
-                    </div>
-                    <div>
-                      <dt>Backend</dt>
-                      <dd>
-                        {backendConnected
-                          ? `Connected (v${backendVersion})`
-                          : "Mock mode — Tauri IPC unavailable"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Platform</dt>
-                      <dd>Offline-first AI Security Testing Platform</dd>
-                    </div>
-                  </dl>
-                </Card>
-              </SettingsSection>
+              <AboutPanel
+                backendConnected={backendConnected}
+                backendVersion={backendVersion}
+              />
             </div>
           )}
         </div>
