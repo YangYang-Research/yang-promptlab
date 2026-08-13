@@ -33,6 +33,8 @@ export type Project = {
   updatedAt: string;
   targetCount: number;
   findingCount: number;
+  /** Persisted health score 0–100; `null` = N/A (not scored yet). */
+  healthScore: number | null;
   owner: string;
 };
 

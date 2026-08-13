@@ -109,6 +109,10 @@ export function mapProjects(
     updatedAt: p.updated_at,
     targetCount: targetCounts.get(p.id) ?? 0,
     findingCount: findingCounts.get(p.id) ?? 0,
+    healthScore:
+      typeof p.health_score === "number" && Number.isFinite(p.health_score)
+        ? Math.max(0, Math.min(100, Math.round(p.health_score)))
+        : null,
     owner: "",
   }));
 }

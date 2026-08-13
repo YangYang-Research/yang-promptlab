@@ -2,6 +2,7 @@
 
 pub mod auth_models;
 pub mod error;
+pub mod health_score;
 pub mod models;
 pub mod pool;
 pub mod repositories;
@@ -9,6 +10,7 @@ pub mod util;
 
 pub use auth_models::*;
 pub use error::{map_sqlx_error, StorageResultExt};
+pub use health_score::compute_health_score;
 pub use models::*;
 pub use pool::Database;
 pub use repositories::{

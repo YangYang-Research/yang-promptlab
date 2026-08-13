@@ -95,3 +95,50 @@ export function severityCountSeries(findings: Finding[]): SeverityCountSlice[] {
     count: counts[severity],
   }));
 }
+
+/** Severity risk weights — mirrors `Severity::risk_weight` in promptlab-report. */
+const SEVERITY_RISK_WEIGHT: Record<Severity, number> = {
+  info: 1,
+  low: 2,
+  medium: 4,
+  high: 8,
+  critical: 16,
+};
+
+export type ProjectSecurityScoreInput = {
+  findings: Finding[];
+  /** Targets belonging to the project. */
+  targetCount: number;
+  /** True when at least one finished attack scan exists for the project. */
+  hasScanned: boolean;
+};
+
+/**
+ * Project health score 0–100 (higher is healthier).
+ * Prefer the persisted `Project.healthScore` from the backend; this helper mirrors
+ * `promptlab_storage::compute_health_score` for unit tests / offline checks.
+ */
+export function computeProjectSecurityScore(
+  input: ProjectSecurityScoreInput,
+): number | null {
+  if (input.targetCount === 0 || !input.hasScanned) return null;
+  if (input.findings.length === 0) return 100;
+
+  let rawRisk = 0;
+  for (const finding of input.findings) {
+    rawRisk += SEVERITY_RISK_WEIGHT[finding.severity] ?? 1;
+  }
+  const maxRisk = input.findings.length * SEVERITY_RISK_WEIGHT.critical;
+  const riskPct = Math.min(100, (rawRisk / maxRisk) * 100);
+  return Math.round(100 - riskPct);
+}
+
+export type ProjectScoreTone = "excellent" | "good" | "fair" | "poor" | "na";
+
+export function projectScoreTone(score: number | null): ProjectScoreTone {
+  if (score == null) return "na";
+  if (score >= 75) return "excellent";
+  if (score >= 50) return "good";
+  if (score >= 25) return "fair";
+  return "poor";
+}

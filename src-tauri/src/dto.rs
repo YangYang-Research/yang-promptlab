@@ -32,6 +32,8 @@ pub struct ProjectDto {
     pub name: String,
     pub description: Option<String>,
     pub summary: Option<serde_json::Value>,
+    /// Persisted health score 0–100; `null` when not yet scored.
+    pub health_score: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -43,6 +45,7 @@ impl From<Project> for ProjectDto {
             name: p.name,
             description: p.description,
             summary: json_opt(p.summary_json),
+            health_score: p.health_score,
             created_at: ts(p.created_at),
             updated_at: ts(p.updated_at),
         }

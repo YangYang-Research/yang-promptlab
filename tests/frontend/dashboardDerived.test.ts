@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { deriveActivity, deriveAttackRuns } from "@/shared/dashboardDerived";
 import type { Finding, Project, ScanRun, Target } from "@/shared/types";
-import { severityCountSeries } from "@/shared/stats";
+import { severityCountSeries, computeProjectSecurityScore } from "@/shared/stats";
 
 function finding(id: string, discoveredAt: string): Finding {
   return {
@@ -122,6 +122,7 @@ describe("deriveActivity", () => {
         updatedAt: "2026-06-01T00:00:00.000Z",
         targetCount: 1,
         findingCount: 2,
+        healthScore: null,
         owner: "",
       },
     ];
@@ -184,5 +185,64 @@ describe("severityCountSeries", () => {
       { severity: "low", label: "Low", count: 0 },
       { severity: "info", label: "Info", count: 0 },
     ]);
+  });
+});
+
+describe("computeProjectSecurityScore", () => {
+  it("returns null when there are no targets", () => {
+    expect(
+      computeProjectSecurityScore({
+        findings: [],
+        targetCount: 0,
+        hasScanned: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null when targets exist but nothing has been scanned", () => {
+    expect(
+      computeProjectSecurityScore({
+        findings: [],
+        targetCount: 2,
+        hasScanned: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("returns 100 when scanned with no findings", () => {
+    expect(
+      computeProjectSecurityScore({
+        findings: [],
+        targetCount: 1,
+        hasScanned: true,
+      }),
+    ).toBe(100);
+  });
+
+  it("returns 0 when every finding is critical", () => {
+    expect(
+      computeProjectSecurityScore({
+        findings: [
+          { ...finding("a", "2026-07-01T08:00:00.000Z"), severity: "critical" },
+          { ...finding("b", "2026-07-01T09:00:00.000Z"), severity: "critical" },
+        ],
+        targetCount: 1,
+        hasScanned: true,
+      }),
+    ).toBe(0);
+  });
+
+  it("scores a mixed severity set between 0 and 100", () => {
+    // raw = 16+8+1 = 25, max = 3*16 = 48 → risk ≈ 52% → score ≈ 48
+    const score = computeProjectSecurityScore({
+      findings: [
+        { ...finding("a", "2026-07-01T08:00:00.000Z"), severity: "critical" },
+        { ...finding("b", "2026-07-01T09:00:00.000Z"), severity: "high" },
+        { ...finding("c", "2026-07-01T10:00:00.000Z"), severity: "info" },
+      ],
+      targetCount: 1,
+      hasScanned: true,
+    });
+    expect(score).toBe(48);
   });
 });

@@ -7,6 +7,8 @@ export type ProjectDto = {
   description: string | null;
   /** Persisted AI/fallback project summary JSON when present. */
   summary?: Record<string, unknown> | null;
+  /** Persisted health score 0–100; `null` when not yet scored. */
+  health_score?: number | null;
   created_at: string;
   updated_at: string;
 };

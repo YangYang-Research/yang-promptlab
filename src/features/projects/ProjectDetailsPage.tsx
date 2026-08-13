@@ -37,7 +37,10 @@ import {
   wizardResumeInputFromSession,
 } from "@/features/scans/wizardState";
 import { targetDisplayType } from "@/features/scans/targetProfile";
-import { severityCountSeries } from "@/shared/stats";
+import {
+  projectScoreTone,
+  severityCountSeries,
+} from "@/shared/stats";
 import { buildTargetScanContext, countAttackScans, formatTargetTimestamp } from "@/shared/targetScanContext";
 import { isWizardSessionOrphaned, resolveTargetScanAction } from "@/shared/targetScanAction";
 import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
@@ -48,6 +51,7 @@ import type { Severity, ScanRun, Target } from "@/shared/types";
 
 import { EditProjectModal } from "./EditProjectModal";
 import { ProjectSummaryPanel } from "./ProjectSummaryPanel";
+import { ScoreGaugeChart } from "./ScoreGaugeChart";
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
 
@@ -137,6 +141,9 @@ export function ProjectDetailsPage() {
       })),
     [projectFindings],
   );
+
+  const securityScore = project?.healthScore ?? null;
+  const scoreTone = projectScoreTone(securityScore);
 
   const handleDeleteTarget = useCallback(
     async (target: Target) => {
@@ -469,10 +476,17 @@ export function ProjectDetailsPage() {
           </div>
         </Card>
 
-        <Card className="detail-section project-details__security-overview">
-          <h2 className="detail-section__title">Security Overview</h2>
-          <SeverityDoughnutChart data={severitySlices} size={176} />
-        </Card>
+        <div className="project-details__insights-aside">
+          <Card className="detail-section project-details__security-overview">
+            <h2 className="detail-section__title">Security Overview</h2>
+            <SeverityDoughnutChart data={severitySlices} size={176} />
+          </Card>
+
+          <Card className="detail-section project-details__scoring">
+            <h2 className="detail-section__title">Health Score</h2>
+            <ScoreGaugeChart score={securityScore} tone={scoreTone} size={160} />
+          </Card>
+        </div>
       </section>
 
       <section className="project-details__summary" aria-label="Project summary">

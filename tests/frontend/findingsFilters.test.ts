@@ -12,6 +12,8 @@ const project: Project = {
   updatedAt: "2026-01-01T00:00:00Z",
   targetCount: 1,
   findingCount: 1,
+  healthScore: null,
+  owner: "",
 };
 
 const scan: ScanRun = {

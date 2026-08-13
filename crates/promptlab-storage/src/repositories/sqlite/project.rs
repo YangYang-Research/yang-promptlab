@@ -63,18 +63,23 @@ impl ProjectRepository for SqliteProjectRepository {
         let name = input.name.unwrap_or(existing.name);
         let description = input.description.or(existing.description);
         let summary_json = input.summary_json.or(existing.summary_json);
+        let health_score = match input.health_score {
+            Some(value) => value,
+            None => existing.health_score,
+        };
         let updated_at = now();
 
         let result = sqlx::query(
             r#"
             UPDATE projects
-            SET name = ?, description = ?, summary_json = ?, updated_at = ?
+            SET name = ?, description = ?, summary_json = ?, health_score = ?, updated_at = ?
             WHERE id = ?
             "#,
         )
         .bind(&name)
         .bind(&description)
         .bind(&summary_json)
+        .bind(health_score)
         .bind(updated_at)
         .bind(id)
         .execute(&self.pool)

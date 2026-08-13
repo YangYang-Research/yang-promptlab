@@ -8,8 +8,8 @@ use promptlab_attack::AttackCategory;
 use promptlab_models::LocalModelManager;
 use promptlab_runtime::SharedModelProvider;
 use promptlab_storage::{
-    CreateScan, FindingRepository, ProjectRepository, Repositories,
-    ScanRepository, TargetRepository, UpdateScan,
+    compute_health_score, CreateScan, FindingRepository, ProjectRepository, Repositories,
+    ScanRepository, TargetRepository, UpdateProject, UpdateScan,
 };
 use tauri::async_runtime::Mutex as AsyncMutex;
 use tauri::{AppHandle, State};
@@ -355,6 +355,47 @@ async fn run_scan_job(
             },
         )
         .await;
+
+    if final_status == "completed" {
+        match repos.findings().list_by_project(&project_id).await {
+            Ok(findings) => {
+                let score = compute_health_score(&findings);
+                if let Err(err) = repos
+                    .projects()
+                    .update(
+                        &project_id,
+                        UpdateProject {
+                            health_score: Some(Some(score)),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                {
+                    warn!(
+                        scan_id = %scan_id,
+                        project_id = %project_id,
+                        error = %err,
+                        "failed to persist project health score"
+                    );
+                } else {
+                    info!(
+                        scan_id = %scan_id,
+                        project_id = %project_id,
+                        health_score = score,
+                        "project health score updated"
+                    );
+                }
+            }
+            Err(err) => {
+                warn!(
+                    scan_id = %scan_id,
+                    project_id = %project_id,
+                    error = %err,
+                    "failed to load findings for health score"
+                );
+            }
+        }
+    }
 
     let snapshot = progress.lock().ok().map(|guard| guard.clone());
     if let Some(snapshot) = snapshot {

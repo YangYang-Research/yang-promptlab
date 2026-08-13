@@ -12,6 +12,8 @@ pub struct Project {
     pub name: String,
     pub description: Option<String>,
     pub summary_json: Option<String>,
+    /// Persisted health score 0–100 after a completed scan; `None` = N/A.
+    pub health_score: Option<i64>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -180,6 +182,8 @@ pub struct UpdateProject {
     pub name: Option<String>,
     pub description: Option<String>,
     pub summary_json: Option<String>,
+    /// When `Some`, replaces the stored health score (`None` inside clears it).
+    pub health_score: Option<Option<i64>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

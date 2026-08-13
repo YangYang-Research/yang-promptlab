@@ -7853,8 +7853,115 @@ a:hover {
   align-items: start;
 }
 
+.project-details__insights-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-width: 0;
+}
+
 .project-details__security-overview .category-doughnut {
   margin-top: 0.25rem;
+}
+
+.project-details__scoring > .detail-section__title {
+  margin-bottom: 0.4rem;
+}
+
+.project-details__scoring.card {
+  padding-block: 1.125rem;
+}
+
+.score-gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.1rem 0.5rem 0;
+  color: var(--text);
+}
+
+.score-gauge__chart {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.score-gauge__chart svg {
+  display: block;
+  overflow: visible;
+}
+
+.score-gauge__arc {
+  transition: stroke-dasharray 0.45s ease;
+}
+
+.score-gauge__center {
+  position: absolute;
+  left: 50%;
+  bottom: 0.1rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.15rem;
+  transform: translateX(-50%);
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  pointer-events: none;
+}
+
+.score-gauge__value {
+  font-size: 1.8125rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: currentColor;
+}
+
+.score-gauge__max {
+  font-size: 0.78125rem;
+  font-weight: 500;
+  color: var(--text-subtle);
+}
+
+.score-gauge__na {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--text-muted);
+}
+
+.score-gauge__scale {
+  display: flex;
+  justify-content: space-between;
+  width: min(100%, 160px);
+  padding: 0 0.25rem;
+  font-size: 0.65625rem;
+  font-weight: 500;
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.score-gauge--excellent {
+  color: var(--severity-low);
+}
+
+.score-gauge--good {
+  color: var(--severity-medium);
+}
+
+.score-gauge--fair {
+  color: var(--severity-high);
+}
+
+.score-gauge--poor {
+  color: var(--severity-critical);
+}
+
+.score-gauge--na {
+  color: var(--text-muted);
 }
 
 .project-details__summary {
