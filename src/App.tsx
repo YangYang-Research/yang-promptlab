@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { AppRouter } from "@/app/router/AppRouter";
 import { useAppStore } from "@/app/store/AppStore";
+import { BrandMark } from "@/shared/components/BrandMark";
 import { getAppInfo, healthCheck } from "@/shared/ipc";
 import { createLogger } from "@/shared/logging";
 import { toAppError } from "@/shared/errors";
@@ -57,10 +58,7 @@ function AppBootstrap() {
     return (
       <div className="boot-screen">
         <div className="boot-screen__logo" aria-hidden="true">
-          <svg viewBox="0 0 48 48" width="48" height="48">
-            <rect width="48" height="48" rx="12" fill="#2dd4bf" />
-            <path d="M12 30l6-12 6 7 6-14 6 19" stroke="#042f2e" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <BrandMark size={56} />
         </div>
         <h1 className="boot-screen__title">PromptLab</h1>
         <div className="page-loader__spinner" />

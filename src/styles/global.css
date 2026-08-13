@@ -43,6 +43,8 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
   --focus-ring: 0 0 0 3px var(--accent-muted);
+  --brand-mark-bg: var(--accent);
+  --brand-mark-fg: #042f2e;
   --z-sidebar: 10;
   --z-topbar: 20;
   --z-dropdown: 100;
@@ -91,6 +93,8 @@
   --shadow-elevated: 0 12px 40px color-mix(in srgb, #18181b 12%, transparent);
 
   --focus-ring: 0 0 0 3px var(--accent-muted);
+  --brand-mark-bg: #09090b;
+  --brand-mark-fg: var(--accent);
 }
 
 * {
@@ -268,6 +272,34 @@ a:hover {
   gap: 0.75rem;
   padding: 1rem 1rem 0.75rem;
   min-height: 56px;
+}
+
+.sidebar--collapsed .sidebar__brand {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.sidebar__logo {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.brand-mark {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 28%;
+  background: var(--brand-mark-bg);
+}
+
+.brand-mark__glyph {
+  width: 72%;
+  height: 72%;
+  background: var(--brand-mark-fg);
+  -webkit-mask: var(--brand-mark-mask) center / contain no-repeat;
+  mask: var(--brand-mark-mask) center / contain no-repeat;
 }
 
 .sidebar__brand-text {

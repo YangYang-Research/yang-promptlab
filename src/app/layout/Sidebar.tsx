@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import { navItems } from "@/app/router/nav";
+import { BrandMark } from "@/shared/components/BrandMark";
 
 import { NavIcon } from "./NavIcon";
 
@@ -58,10 +59,7 @@ export function Sidebar() {
     <aside className={`sidebar ${collapsed ? "sidebar--collapsed" : ""}`}>
       <div className="sidebar__brand">
         <div className="sidebar__logo" aria-hidden="true">
-          <svg viewBox="0 0 32 32" width="28" height="28">
-            <rect width="32" height="32" rx="8" fill="#2dd4bf" />
-            <path d="M8 20l4-8 4 5 4-9 4 12" stroke="#042f2e" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <BrandMark size={32} />
         </div>
         {!collapsed && (
           <div className="sidebar__brand-text">
