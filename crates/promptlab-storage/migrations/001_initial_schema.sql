@@ -1,5 +1,5 @@
 -- PromptLab consolidated schema (fresh installs).
--- Includes core tables, agent memory, and mutator settings.
+-- Includes core tables, agent memory, mutator settings, and project health_score.
 
 PRAGMA foreign_keys = ON;
 
@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS projects (
     name         TEXT NOT NULL,
     description  TEXT,
     summary_json TEXT,
+    -- 0–100 health score after a completed attack scan; NULL = not yet scored.
+    health_score INTEGER,
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL
 );
