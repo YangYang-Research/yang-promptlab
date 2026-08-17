@@ -61,7 +61,7 @@ tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 async-trait = "0.1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros", "uuid", "time", "json"] }
-time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
+time = { version = "0.3", features = ["serde", "formatting", "parsing", "local-offset"] }
 uuid = { version = "1", features = ["v4", "v7", "serde"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "charset", "socks"] }

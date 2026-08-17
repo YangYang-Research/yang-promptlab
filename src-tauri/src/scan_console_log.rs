@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
+use time::{OffsetDateTime, UtcOffset};
 use url::Url;
 
 use crate::events::ScanProgressEvent;
@@ -99,14 +99,23 @@ fn sanitize_scan_id(scan_id: &str) -> Option<&str> {
     Some(scan_id)
 }
 
+fn format_console_stamp(timestamp: &str) -> String {
+    let Ok(parsed) = OffsetDateTime::parse(timestamp, &Rfc3339) else {
+        return "--:--:--".into();
+    };
+    // Attack Console is shown to the operator — use the host's local timezone, not UTC.
+    let local = match UtcOffset::current_local_offset() {
+        Ok(offset) => parsed.to_offset(offset),
+        Err(_) => parsed,
+    };
+    let Ok(desc) = time::format_description::parse("[hour]:[minute]:[second]") else {
+        return "--:--:--".into();
+    };
+    local.format(&desc).unwrap_or_else(|_| "--:--:--".into())
+}
+
 fn format_console_line(event: &ScanProgressEvent) -> String {
-    let stamp = OffsetDateTime::parse(&event.timestamp, &Rfc3339)
-        .ok()
-        .and_then(|t| {
-            t.format(&time::format_description::parse("[hour]:[minute]:[second]").ok()?)
-                .ok()
-        })
-        .unwrap_or_else(|| "--:--:--".into());
+    let stamp = format_console_stamp(&event.timestamp);
 
     let mut parts = vec![format!("[{stamp}]"), event.message.clone()];
 
@@ -158,6 +167,25 @@ fn short_finding_id(id: &str) -> String {
 mod tests {
     use super::*;
     use crate::events::{ScanProgressEvent, ScanProgressLevel};
+
+    #[test]
+    fn console_stamp_uses_local_offset_not_utc_hour() {
+        // Fixed UTC instant: 15:58:09Z → local hour differs when offset != 0.
+        let stamp = format_console_stamp("2026-08-17T15:58:09Z");
+        assert_ne!(stamp, "--:--:--");
+        if let Ok(offset) = UtcOffset::current_local_offset() {
+            if offset != UtcOffset::UTC {
+                assert_ne!(
+                    stamp, "15:58:09",
+                    "expected local wall clock, got UTC stamp under offset {offset}"
+                );
+            }
+        }
+        assert!(
+            stamp.chars().filter(|c| *c == ':').count() == 2,
+            "unexpected stamp format: {stamp}"
+        );
+    }
 
     #[test]
     fn append_and_read_scan_console_log() {

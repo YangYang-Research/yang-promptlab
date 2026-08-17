@@ -115,6 +115,44 @@ pick_tool!(
     "Adapt payload strategy after reflect says retry."
 );
 
+/// One LLM turn only: either a single tool pick or plain-text Finish.
+/// A second tool turn deadlocks — the host stops `rx.recv()` after the first pick
+/// while the tool awaits a oneshot reply that never comes.
+const PICK_MAX_TURNS: usize = 1;
+
+async fn await_first_pick(
+    mut rx: mpsc::Receiver<ActionPick>,
+    prompt_fut: impl std::future::Future<Output = Result<String, rig::completion::PromptError>>,
+) -> Result<(String, AttackPickAction), String> {
+    tokio::pin!(prompt_fut);
+
+    tokio::select! {
+        biased;
+        Some(pick) = rx.recv() => {
+            let action = pick.action;
+            let _ = pick.reply.send("acknowledged — host will execute".into());
+            // Drop the agent future immediately. Awaiting it after a pick can deadlock
+            // if the model issues another tool call (tool waits on oneshot; we no longer recv).
+            drop(prompt_fut);
+            // Close the pick channel so any late tool call fails fast instead of hanging.
+            drop(rx);
+            Ok(("(orchestrator)".into(), action))
+        }
+        result = &mut prompt_fut => {
+            match result {
+                Ok(text) => {
+                    let mut thought = text.trim().to_string();
+                    if thought.is_empty() {
+                        thought = "finish".into();
+                    }
+                    Ok((thought, AttackPickAction::Finish))
+                }
+                Err(err) => Err(err.to_string()),
+            }
+        }
+    }
+}
+
 /// Ask the orchestrator LLM to pick the next agentic action (one tool call), or Finish on text.
 pub async fn pick_agentic_action(
     llm: Arc<dyn PlannerLlm>,
@@ -122,7 +160,7 @@ pub async fn pick_agentic_action(
     step: usize,
     max_steps: usize,
 ) -> Result<(String, AttackPickAction), String> {
-    let (tx, mut rx) = mpsc::channel::<ActionPick>(1);
+    let (tx, rx) = mpsc::channel::<ActionPick>(1);
     let tools: Vec<Box<dyn rig::tool::ToolDyn>> = vec![
         Box::new(GeneratePickTool { tx: tx.clone() }),
         Box::new(AttackPickTool { tx: tx.clone() }),
@@ -141,47 +179,15 @@ or reply with plain text (no tool) to finish. Never invent HTTP results.";
         .preamble(preamble)
         .temperature(0.1)
         .max_tokens(256)
-        .default_max_turns(2)
+        .default_max_turns(PICK_MAX_TURNS)
         .tools(tools)
         .build();
 
     let goal = format!(
         "{transcript}\nOrchestrator step {step}/{max_steps}. Call one tool or finish with plain text."
     );
-    let prompt_fut = agent.prompt(goal).max_turns(2).into_future();
-    tokio::pin!(prompt_fut);
-
-    let mut picked: Option<AttackPickAction> = None;
-    let mut thought = String::from("(orchestrator)");
-    loop {
-        tokio::select! {
-            biased;
-            Some(pick) = rx.recv() => {
-                picked = Some(pick.action);
-                let _ = pick.reply.send("acknowledged — host will execute".into());
-                // Drain/cancel remaining agent work by dropping — wait briefly for prompt.
-                let _ = prompt_fut.await;
-                break;
-            }
-            result = &mut prompt_fut => {
-                match result {
-                    Ok(text) => {
-                        thought = text.trim().to_string();
-                        if thought.is_empty() {
-                            thought = "finish".into();
-                        }
-                    }
-                    Err(err) => return Err(err.to_string()),
-                }
-                break;
-            }
-        }
-    }
-
-    Ok((
-        thought,
-        picked.unwrap_or(AttackPickAction::Finish),
-    ))
+    let prompt_fut = agent.prompt(goal).max_turns(PICK_MAX_TURNS).into_future();
+    await_first_pick(rx, prompt_fut).await
 }
 
 pick_tool!(
@@ -210,7 +216,7 @@ pub async fn pick_sequential_action(
     step: usize,
     max_steps: usize,
 ) -> Result<(String, AttackPickAction), String> {
-    let (tx, mut rx) = mpsc::channel::<ActionPick>(1);
+    let (tx, rx) = mpsc::channel::<ActionPick>(1);
     let tools: Vec<Box<dyn rig::tool::ToolDyn>> = vec![
         Box::new(SeqGeneratePickTool { tx: tx.clone() }),
         Box::new(SeqAttackPickTool { tx: tx.clone() }),
@@ -227,44 +233,13 @@ or reply with plain text (no tool) to finish.";
         .preamble(preamble)
         .temperature(0.1)
         .max_tokens(256)
-        .default_max_turns(2)
+        .default_max_turns(PICK_MAX_TURNS)
         .tools(tools)
         .build();
 
     let goal = format!(
         "{transcript}\nOrchestrator step {step}/{max_steps}. Call one tool or finish with plain text."
     );
-    let prompt_fut = agent.prompt(goal).max_turns(2).into_future();
-    tokio::pin!(prompt_fut);
-
-    let mut picked: Option<AttackPickAction> = None;
-    let mut thought = String::from("(orchestrator)");
-    loop {
-        tokio::select! {
-            biased;
-            Some(pick) = rx.recv() => {
-                picked = Some(pick.action);
-                let _ = pick.reply.send("acknowledged — host will execute".into());
-                let _ = prompt_fut.await;
-                break;
-            }
-            result = &mut prompt_fut => {
-                match result {
-                    Ok(text) => {
-                        thought = text.trim().to_string();
-                        if thought.is_empty() {
-                            thought = "finish".into();
-                        }
-                    }
-                    Err(err) => return Err(err.to_string()),
-                }
-                break;
-            }
-        }
-    }
-
-    Ok((
-        thought,
-        picked.unwrap_or(AttackPickAction::Finish),
-    ))
+    let prompt_fut = agent.prompt(goal).max_turns(PICK_MAX_TURNS).into_future();
+    await_first_pick(rx, prompt_fut).await
 }
