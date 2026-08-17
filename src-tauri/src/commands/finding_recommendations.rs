@@ -21,8 +21,9 @@ use crate::inference_host::{is_inference_ready, HostFindingRecommendLlm};
 use crate::state::AppState;
 
 const EVIDENCE_RECOMMENDATIONS_KEY: &str = "recommendations";
-/// Bump when the finding-remediation system prompt changes so stale caches regenerate.
-const FINDING_REMEDIATION_PROMPT_VERSION: &str = "finding-remediation-v1";
+/// Bump when the finding-remediation system prompt / input shape changes so stale caches regenerate.
+const FINDING_REMEDIATION_PROMPT_VERSION: &str = "finding-remediation-v3";
+const EVIDENCE_EXCERPT_CHARS: usize = 480;
 
 #[derive(Debug, Deserialize)]
 pub struct FindingRecommendationsRequest {
@@ -154,18 +155,6 @@ pub async fn finding_recommendations_generate_op(
 }
 
 fn finding_remediation_input(finding: &Finding) -> FindingRemediationInput {
-    let evidence = finding
-        .evidence_json
-        .as_deref()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-        .map(|mut value| {
-            // Recommendations cache is write-side metadata; do not feed it back into the LLM.
-            if let Some(obj) = value.as_object_mut() {
-                obj.remove(EVIDENCE_RECOMMENDATIONS_KEY);
-            }
-            value
-        });
-
     FindingRemediationInput {
         finding_id: finding.id.clone(),
         title: finding.title.clone(),
@@ -176,8 +165,59 @@ fn finding_remediation_input(finding: &Finding) -> FindingRemediationInput {
             .unwrap_or_else(|| "unknown".into()),
         description: finding.description.clone(),
         status: finding.status.clone(),
-        evidence,
+        // Metadata-only evidence (payload / confidence / verdict) — no HTTP bodies.
+        evidence: slim_finding_evidence(finding.evidence_json.as_deref()),
     }
+}
+
+fn slim_finding_evidence(raw: Option<&str>) -> Option<serde_json::Value> {
+    let value: serde_json::Value = serde_json::from_str(raw?).ok()?;
+    let obj = value.as_object()?;
+    let mut slim = serde_json::Map::new();
+
+    // Metadata-only evidence for the LLM — no HTTP response bodies.
+    if let Some(payload) = string_field(obj, &["payload"]) {
+        slim.insert(
+            "payload".into(),
+            serde_json::Value::String(truncate(&payload, EVIDENCE_EXCERPT_CHARS)),
+        );
+    }
+    if let Some(confidence) = obj.get("confidence").cloned() {
+        slim.insert("confidence".into(), confidence);
+    }
+    if let Some(verdict) = string_field(obj, &["verdict"]) {
+        slim.insert("verdict".into(), serde_json::Value::String(verdict));
+    }
+
+    if slim.is_empty() {
+        None
+    } else {
+        Some(serde_json::Value::Object(slim))
+    }
+}
+
+fn string_field(obj: &serde_json::Map<String, serde_json::Value>, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Some(value) = obj.get(*key) {
+            if let Some(text) = value.as_str() {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn truncate(value: &str, max_chars: usize) -> String {
+    let count = value.chars().count();
+    if count <= max_chars {
+        return value.to_string();
+    }
+    let mut out: String = value.chars().take(max_chars.saturating_sub(1)).collect();
+    out.push('…');
+    out
 }
 
 fn fallback_finding_recommendations(finding: &Finding) -> AttackRecommendationsBundle {

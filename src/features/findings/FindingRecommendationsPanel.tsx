@@ -23,18 +23,27 @@ type FindingRecommendationsPanelProps = {
   finding: Pick<Finding, "id" | "category" | "severity" | "title" | "status" | "description">;
   /** `section` includes the Recommendations heading (Finding Details). */
   variant?: "section" | "embedded";
+  /** Heading for `embedded` variant (default: Recommendation). */
+  embeddedTitle?: string;
   className?: string;
   /** When false, hide the Re-recommend action (e.g. report Detailed findings). */
   showReRecommend?: boolean;
   enabled?: boolean;
+  /**
+   * Queue priority for Report Details (list index, top = 0).
+   * Lower values run first under the shared finding-recommend queue.
+   */
+  queueOrder?: number;
 };
 
 export function FindingRecommendationsPanel({
   finding,
   variant = "section",
+  embeddedTitle = "Recommendation",
   className,
   showReRecommend = true,
   enabled = true,
+  queueOrder = 0,
 }: FindingRecommendationsPanelProps) {
   const [recommendations, setRecommendations] = useState<FindingRecommendationDto[]>([]);
   const [overview, setOverview] = useState<string | null>(null);
@@ -61,7 +70,7 @@ export function FindingRecommendationsPanel({
     setLoading(true);
     setError(null);
 
-    void generateFindingRecommendations(finding.id, force)
+    void generateFindingRecommendations(finding.id, { force, order: queueOrder })
       .then((response) => {
         if (requestId !== requestIdRef.current) return;
         fetchedRef.current = fetchKey;
@@ -182,7 +191,12 @@ export function FindingRecommendationsPanel({
         className={["finding-rec", "finding-rec--embedded", className].filter(Boolean).join(" ")}
         data-state={loading && empty ? "loading" : error ? "error" : empty ? "empty" : "ready"}
       >
-        {sourceBadge ? <div className="finding-rec__embedded-badge">{sourceBadge}</div> : null}
+        <header className="finding-rec__embedded-header">
+          <span className="report-native__evidence-label finding-rec__embedded-title">
+            {embeddedTitle}
+          </span>
+          {sourceBadge ? <div className="finding-rec__embedded-badge">{sourceBadge}</div> : null}
+        </header>
         {body}
       </div>
     );

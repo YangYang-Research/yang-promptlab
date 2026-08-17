@@ -401,11 +401,11 @@ export function ReportDetailsPage() {
                       <pre>{evidence.payload?.trim() || "—"}</pre>
                     </div>
                     <div>
-                      <span className="report-native__evidence-label">Recommendation</span>
                       <FindingRecommendationsPanel
                         finding={finding}
                         variant="embedded"
                         showReRecommend={false}
+                        queueOrder={index}
                       />
                     </div>
                   </div>

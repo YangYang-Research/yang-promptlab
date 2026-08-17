@@ -194,11 +194,12 @@ Reply with a single compact JSON object only - no markdown, no prose:
 
 Rules:
 - overview: exactly one sentence (under 200 characters) about this finding only (title/category/severity) and what successful remediation looks like.
-- Provide 3 to 5 remediation steps ordered by priority (most urgent first). Each item must be a concrete fix for this finding: input/output controls, policy/guardrail changes, architecture changes, monitoring/detection, and verification.
+- Provide 3 remediation steps ordered by priority (most urgent first). Each item must be a concrete fix for this finding: input/output controls, policy/guardrail changes, architecture changes, monitoring/detection, or verification.
 - Descriptions must be implementation-oriented (what to change, where, and how to validate). Avoid generic scan-level advice.
-- Ground every recommendation in the provided finding fields (title, category, severity, description, and evidence when present). Do not invent endpoints, payloads, or impacts that are not supported by the input.
+- Ground every recommendation in the provided finding fields (title, category, severity, description, status, and evidence payload/confidence/verdict when present). Do not invent endpoints, response bodies, or impacts that are not supported by the input.
 - Never set action to retry_scan or start_attack; always use null / omit operational CTAs.
-- Keep titles under 80 characters; descriptions under 320 characters each."#
+- Keep titles under 80 characters; descriptions under 220 characters each.
+- Always include priority on every recommendation item (critical|high|medium|low|info)."#
     }
 
     pub fn finding_remediation_recommend_user(finding_json: &str) -> String {

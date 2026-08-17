@@ -60,7 +60,8 @@ struct LlmRecommendationsResponse {
 struct LlmRecommendationItem {
     title: String,
     description: String,
-    priority: String,
+    #[serde(default)]
+    priority: Option<String>,
     #[serde(default)]
     action: Option<String>,
 }
@@ -162,7 +163,7 @@ pub fn parse_attack_recommendations(raw: &str) -> PlannerResult<AttackRecommenda
         out.push(AttackRecommendation {
             title: title.into(),
             description: description.into(),
-            priority: normalize_priority(&item.priority),
+            priority: normalize_priority(item.priority.as_deref().unwrap_or("medium")),
             action: normalize_action(item.action.as_deref()),
         });
     }

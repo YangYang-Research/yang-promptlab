@@ -717,7 +717,7 @@ impl PlannerLlm for HostFindingRecommendLlm {
             "recommend",
             Some(PromptRegistry::finding_remediation_recommend_system()),
             prompt,
-            2048,
+            3072,
             0.15,
         )
         .await
