@@ -48,9 +48,6 @@ struct StoredRecommendations {
     recommendations: Vec<AttackRecommendationDto>,
     #[serde(default)]
     generated_at: String,
-    /// Hash of scan status + findings + categories; invalidates stale cache.
-    #[serde(default)]
-    input_fingerprint: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -78,14 +75,9 @@ pub async fn scan_recommendations_generate_op(
         .await
         .map_err(crate::error::CommandError::from)?;
 
-    let input_fingerprint =
-        scan_recommendations_fingerprint(&scan, &request.attack_categories, &findings);
-
     if !request.force {
         if let Some(mut cached) = load_stored_recommendations(scan.playbook_json.as_deref()) {
-            if !cached.input_fingerprint.is_empty()
-                && cached.input_fingerprint == input_fingerprint
-            {
+            if cached.source == "ai" {
                 if cached.generated_at.trim().is_empty() {
                     cached.generated_at = scan
                         .updated_at
@@ -98,8 +90,7 @@ pub async fn scan_recommendations_generate_op(
                         generated_at: cached.generated_at.clone(),
                     };
                     if let Err(err) =
-                        persist_recommendations(&repos, &request.scan_id, &backfill, &input_fingerprint)
-                            .await
+                        persist_recommendations(&repos, &request.scan_id, &backfill).await
                     {
                         warn!(
                             scan_id = %request.scan_id,
@@ -236,14 +227,18 @@ pub async fn scan_recommendations_generate_op(
         generated_at,
     };
 
-    if let Err(err) =
-        persist_recommendations(&repos, &request.scan_id, &response, &input_fingerprint).await
-    {
-        warn!(
-            scan_id = %request.scan_id,
-            error = %err,
-            "failed to persist scan recommendations"
-        );
+    let existing = load_stored_recommendations(scan.playbook_json.as_deref());
+    let should_persist = response.source == "ai"
+        || request.force
+        || existing.as_ref().map(|s| s.source != "ai").unwrap_or(true);
+    if should_persist {
+        if let Err(err) = persist_recommendations(&repos, &request.scan_id, &response).await {
+            warn!(
+                scan_id = %request.scan_id,
+                error = %err,
+                "failed to persist scan recommendations"
+            );
+        }
     }
 
     Ok(response)
@@ -253,7 +248,6 @@ async fn persist_recommendations(
     repos: &promptlab_storage::Repositories,
     scan_id: &str,
     response: &ScanRecommendationsResponse,
-    input_fingerprint: &str,
 ) -> Result<(), String> {
     let scan = repos
         .scans()
@@ -275,7 +269,6 @@ async fn persist_recommendations(
         source: response.source.clone(),
         recommendations: response.recommendations.clone(),
         generated_at: response.generated_at.clone(),
-        input_fingerprint: input_fingerprint.to_string(),
     };
     playbook[PLAYBOOK_RECOMMENDATIONS_KEY] =
         serde_json::to_value(stored).map_err(|e| e.to_string())?;
@@ -293,48 +286,6 @@ async fn persist_recommendations(
         .map_err(|e| e.to_string())?;
 
     Ok(())
-}
-
-fn scan_recommendations_fingerprint(
-    scan: &promptlab_storage::Scan,
-    attack_categories: &[String],
-    findings: &[Finding],
-) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    scan.id.hash(&mut hasher);
-    scan.status.to_ascii_lowercase().hash(&mut hasher);
-    scan.name.hash(&mut hasher);
-    scan.target_id.as_deref().unwrap_or("").hash(&mut hasher);
-
-    let mut categories: Vec<&str> = attack_categories.iter().map(String::as_str).collect();
-    categories.sort_unstable();
-    for category in categories {
-        category.hash(&mut hasher);
-    }
-
-    let mut finding_keys: Vec<_> = findings
-        .iter()
-        .map(|f| {
-            (
-                f.id.as_str(),
-                f.severity.to_ascii_lowercase(),
-                f.category.as_deref().unwrap_or(""),
-                f.title.as_str(),
-            )
-        })
-        .collect();
-    finding_keys.sort_unstable();
-    for (id, severity, category, title) in finding_keys {
-        id.hash(&mut hasher);
-        severity.hash(&mut hasher);
-        category.hash(&mut hasher);
-        title.hash(&mut hasher);
-    }
-
-    format!("{:016x}", hasher.finish())
 }
 
 fn load_stored_recommendations(playbook_json: Option<&str>) -> Option<StoredRecommendations> {

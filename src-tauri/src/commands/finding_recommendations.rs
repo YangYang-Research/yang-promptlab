@@ -1,8 +1,8 @@
 //! AI-backed remediation recommendations for a single finding.
 //!
 //! Uses a dedicated finding-remediation system prompt (not scan Recommendations).
-//! Cache lives in finding `evidence_json.recommendations`; regenerate on fingerprint
-//! miss or `force`, with rule-based fallback when AI is unavailable.
+//! Stored in finding `evidence_json.recommendations`: reuse when `source=ai`;
+//! if missing or `fallback`, retry AI on load and persist a successful result.
 
 use promptlab_report::{
     data::StorageFindingRow, generate_recommendations, recommendation_for, Severity,
@@ -21,14 +21,12 @@ use crate::inference_host::{is_inference_ready, HostFindingRecommendLlm};
 use crate::state::AppState;
 
 const EVIDENCE_RECOMMENDATIONS_KEY: &str = "recommendations";
-/// Bump when the finding-remediation system prompt / input shape changes so stale caches regenerate.
-const FINDING_REMEDIATION_PROMPT_VERSION: &str = "finding-remediation-v3";
 const EVIDENCE_EXCERPT_CHARS: usize = 480;
 
 #[derive(Debug, Deserialize)]
 pub struct FindingRecommendationsRequest {
     pub finding_id: String,
-    /// When true, regenerate and overwrite any cached recommendations in finding evidence.
+    /// When true, regenerate and overwrite recommendations stored on the finding.
     #[serde(default)]
     pub force: bool,
 }
@@ -47,9 +45,6 @@ struct StoredFindingRecommendations {
     recommendations: Vec<FindingRecommendationDto>,
     #[serde(default)]
     generated_at: String,
-    /// Hash of finding fields that should invalidate stale remediation advice.
-    #[serde(default)]
-    input_fingerprint: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,18 +66,16 @@ pub async fn finding_recommendations_generate_op(
         .await
         .map_err(crate::error::CommandError::from)?;
 
-    let input_fingerprint = finding_recommendations_fingerprint(&finding);
-
+    // DB is source of truth only for successful AI results.
+    // Fallback (or missing) always retries AI on load unless force already requested regen.
     if !request.force {
-        if let Some(cached) = load_stored_recommendations(finding.evidence_json.as_deref()) {
-            if !cached.input_fingerprint.is_empty()
-                && cached.input_fingerprint == input_fingerprint
-            {
+        if let Some(stored) = load_stored_recommendations(finding.evidence_json.as_deref()) {
+            if stored.source == "ai" {
                 return Ok(FindingRecommendationsResponse {
-                    source: cached.source,
-                    overview: cached.overview,
-                    recommendations: cached.recommendations,
-                    generated_at: cached.generated_at,
+                    source: stored.source,
+                    overview: stored.overview,
+                    recommendations: stored.recommendations,
+                    generated_at: stored.generated_at,
                 });
             }
         }
@@ -141,14 +134,20 @@ pub async fn finding_recommendations_generate_op(
         generated_at,
     };
 
-    if let Err(err) =
-        persist_recommendations(&repos, &finding, &response, &input_fingerprint).await
-    {
-        warn!(
-            finding_id = %request.finding_id,
-            error = %err,
-            "failed to persist finding recommendations"
-        );
+    // Persist AI always. Persist fallback only when nothing better is stored (or force).
+    let existing = load_stored_recommendations(finding.evidence_json.as_deref());
+    let should_persist = response.source == "ai"
+        || request.force
+        || existing.as_ref().map(|s| s.source != "ai").unwrap_or(true);
+
+    if should_persist {
+        if let Err(err) = persist_recommendations(&repos, &finding, &response).await {
+            warn!(
+                finding_id = %request.finding_id,
+                error = %err,
+                "failed to persist finding recommendations"
+            );
+        }
     }
 
     Ok(response)
@@ -278,26 +277,6 @@ fn fallback_finding_recommendations(finding: &Finding) -> AttackRecommendationsB
     }
 }
 
-fn finding_recommendations_fingerprint(finding: &Finding) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    finding.id.hash(&mut hasher);
-    finding.title.hash(&mut hasher);
-    finding.severity.to_ascii_lowercase().hash(&mut hasher);
-    finding
-        .category
-        .as_deref()
-        .unwrap_or("")
-        .to_ascii_lowercase()
-        .hash(&mut hasher);
-    finding.description.as_deref().unwrap_or("").hash(&mut hasher);
-    finding.status.to_ascii_lowercase().hash(&mut hasher);
-    FINDING_REMEDIATION_PROMPT_VERSION.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
-}
-
 fn load_stored_recommendations(evidence_json: Option<&str>) -> Option<StoredFindingRecommendations> {
     let raw = evidence_json?;
     let evidence: serde_json::Value = serde_json::from_str(raw).ok()?;
@@ -313,7 +292,6 @@ async fn persist_recommendations(
     repos: &promptlab_storage::Repositories,
     finding: &Finding,
     response: &FindingRecommendationsResponse,
-    input_fingerprint: &str,
 ) -> Result<(), String> {
     let mut evidence = match finding.evidence_json.as_deref() {
         Some(raw) => serde_json::from_str::<serde_json::Value>(raw)
@@ -329,7 +307,6 @@ async fn persist_recommendations(
         source: response.source.clone(),
         recommendations: response.recommendations.clone(),
         generated_at: response.generated_at.clone(),
-        input_fingerprint: input_fingerprint.to_string(),
     };
     evidence[EVIDENCE_RECOMMENDATIONS_KEY] =
         serde_json::to_value(stored).map_err(|e| e.to_string())?;
