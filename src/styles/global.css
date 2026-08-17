@@ -44,7 +44,7 @@
 
   --focus-ring: 0 0 0 3px var(--accent-muted);
   --brand-mark-bg: var(--accent);
-  --brand-mark-fg: #042f2e;
+  --brand-mark-fg: #ffffff;
   --z-sidebar: 10;
   --z-topbar: 20;
   --z-dropdown: 100;
@@ -292,14 +292,18 @@ a:hover {
   flex-shrink: 0;
   border-radius: 28%;
   background: var(--brand-mark-bg);
+  -webkit-mask:
+    var(--brand-mark-mask) center / 72% no-repeat,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    var(--brand-mark-mask) center / 72% no-repeat,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
 }
 
 .brand-mark__glyph {
-  width: 72%;
-  height: 72%;
-  background: var(--brand-mark-fg);
-  -webkit-mask: var(--brand-mark-mask) center / contain no-repeat;
-  mask: var(--brand-mark-mask) center / contain no-repeat;
+  display: none;
 }
 
 .sidebar__brand-text {
