@@ -7482,6 +7482,10 @@ a:hover {
   gap: 0.75rem;
 }
 
+.report-native__finding-anchor {
+  scroll-margin-top: 1.25rem;
+}
+
 .report-native__finding h3 {
   margin: 0.75rem 0 0.35rem;
   font-size: 1rem;
@@ -7505,7 +7509,7 @@ a:hover {
 }
 
 .report-native__traffic {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
 }
 
 .report-native__recommendation {
@@ -7521,6 +7525,30 @@ a:hover {
 .report-native__recommendation span {
   color: var(--text-muted);
   font-size: 0.875rem;
+}
+
+.finding-rec--embedded {
+  margin-top: 0.375rem;
+}
+
+.finding-rec__embedded-badge {
+  margin-bottom: 0.5rem;
+}
+
+.finding-rec--embedded .scan-rec__list {
+  margin: 0;
+}
+
+.finding-rec--embedded .scan-rec__item-title {
+  font-size: 0.875rem;
+}
+
+.finding-details__recommendations .scan-rec__overview,
+.finding-details__recommendations .scan-rec__item-desc,
+.finding-details__recommendations .scan-rec__list,
+.report-native__finding .finding-rec--embedded .scan-rec__list {
+  max-width: none;
+  width: 100%;
 }
 
 .report-native__meta code,
@@ -7557,8 +7585,7 @@ a:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .report-native__grid,
-  .report-native__traffic {
+  .report-native__grid {
     grid-template-columns: 1fr;
   }
 
@@ -8185,7 +8212,11 @@ a:hover {
 .scan-details__recommendations .scan-rec__overview,
 .scan-details__recommendations .scan-rec__item-desc,
 .scan-details__recommendations .scan-rec__list,
-.scan-details__recommendations .scan-rec__skeleton--lead {
+.scan-details__recommendations .scan-rec__skeleton--lead,
+.report-native__executive .scan-rec__overview,
+.report-native__executive .scan-rec__item-desc,
+.report-native__executive .scan-rec__list,
+.report-native__executive .scan-rec__skeleton--lead {
   max-width: none;
   width: 100%;
 }

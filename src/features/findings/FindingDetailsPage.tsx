@@ -24,6 +24,7 @@ import { useToast } from "@/shared/notifications";
 import type { Finding } from "@/shared/types";
 
 import { FindingDetailPanel } from "./FindingDetailPanel";
+import { FindingRecommendationsPanel } from "./FindingRecommendationsPanel";
 import { UpdateFindingStatusModal } from "./UpdateFindingStatusModal";
 import { complianceRefsFor } from "./complianceRefs";
 import { parseFindingEvidence } from "./findingEvidence";
@@ -323,6 +324,12 @@ export function FindingDetailsPage() {
               </span>
             </Button>
           </div>
+        </Card>
+      </section>
+
+      <section className="finding-details__recommendations" aria-label="Recommendations">
+        <Card className="detail-section finding-details__panel">
+          <FindingRecommendationsPanel finding={finding} variant="section" />
         </Card>
       </section>
     </div>

@@ -1,12 +1,16 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import { parseFindingEvidence, formatHttpRequest, formatHttpResponse } from "@/features/findings/findingEvidence";
+import { FindingRecommendationsPanel } from "@/features/findings/FindingRecommendationsPanel";
+import { parseAttackPlaybook } from "@/features/scans/scanPlaybook";
+import { ScanRecommendationsPanel } from "@/features/scans/ScanRecommendationsPanel";
 import {
   Badge,
   Button,
   Card,
+  DataTable,
   EmptyState,
   FindingStatusBadge,
   PageHeader,
@@ -15,6 +19,7 @@ import {
   StatCard,
   StatusBadge,
 } from "@/shared/components";
+import { getScan, type ScanDetailDto } from "@/shared/ipc";
 import { useToast } from "@/shared/notifications";
 import { severityCounts } from "@/shared/stats";
 import type { Finding, Severity } from "@/shared/types";
@@ -25,7 +30,6 @@ import {
   reportExportLabel,
   type ReportExportFormat,
 } from "./reportDownloads";
-import { recommendationFor } from "./findingRecommendation";
 
 const EXPORT_FORMATS: ReportExportFormat[] = ["html", "pdf", "sarif", "csv"];
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
@@ -51,11 +55,26 @@ function riskLabel(score: number): string {
   return "No detected risk";
 }
 
+function confidencePercent(confidence: number): number {
+  return Math.round(confidence > 1 ? confidence : confidence * 100);
+}
+
+function scrollToFindingDetail(findingId: string) {
+  const el = document.getElementById(`finding-${findingId}`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+  // Keep deep-linkable hash without relying on window scroll for nested overflow.
+  window.history.replaceState(null, "", `#finding-${findingId}`);
+}
+
+type FindingSummaryRow = Finding & { no: number };
+
 export function ReportDetailsPage() {
   const { reportId = "" } = useParams();
   const { reports, scans, findings, projects, targets, loading, actions } = useAppStore();
   const { notify } = useToast();
   const [busyFormat, setBusyFormat] = useState<ReportExportFormat | null>(null);
+  const [scanDetail, setScanDetail] = useState<ScanDetailDto | null>(null);
 
   const report = reports.find((item) => item.id === reportId);
   const scan = scans.find((item) => item.id === report?.scanId);
@@ -65,8 +84,89 @@ export function ReportDetailsPage() {
     () => (report?.scanId ? findings.filter((finding) => finding.scanId === report.scanId) : []),
     [findings, report?.scanId],
   );
+  const playbook = useMemo(
+    () => parseAttackPlaybook(scanDetail?.playbook),
+    [scanDetail?.playbook],
+  );
+  const recommendationsRevision = useMemo(
+    () =>
+      `${scan?.status ?? "unknown"}|${reportFindings
+        .map((finding) => `${finding.id}:${finding.severity}:${finding.title}`)
+        .sort()
+        .join(",")}`,
+    [scan?.status, reportFindings],
+  );
+
+  useEffect(() => {
+    const scanId = report?.scanId;
+    if (!scanId) {
+      setScanDetail(null);
+      return;
+    }
+    let cancelled = false;
+    void getScan(scanId)
+      .then((detail) => {
+        if (!cancelled) setScanDetail(detail);
+      })
+      .catch(() => {
+        if (!cancelled) setScanDetail(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [report?.scanId]);
+
   const counts = useMemo(() => severityCounts(reportFindings), [reportFindings]);
   const riskScore = useMemo(() => computeRiskScore(reportFindings), [reportFindings]);
+  const summaryRows = useMemo<FindingSummaryRow[]>(
+    () => reportFindings.map((finding, index) => ({ ...finding, no: index + 1 })),
+    [reportFindings],
+  );
+  const summaryColumns = useMemo(
+    () => [
+      {
+        key: "no",
+        header: "No",
+        width: "56px",
+        render: (row: FindingSummaryRow) => row.no,
+      },
+      {
+        key: "finding",
+        header: "Finding",
+        render: (row: FindingSummaryRow) => (
+          <a
+            className="link"
+            href={`#finding-${row.id}`}
+            onClick={(event) => {
+              event.preventDefault();
+              scrollToFindingDetail(row.id);
+            }}
+          >
+            {row.title}
+          </a>
+        ),
+      },
+      {
+        key: "severity",
+        header: "Severity",
+        width: "110px",
+        render: (row: FindingSummaryRow) => <SeverityBadge severity={row.severity} />,
+      },
+      {
+        key: "confidence",
+        header: "Confidence",
+        width: "100px",
+        render: (row: FindingSummaryRow) => `${confidencePercent(row.confidence)}%`,
+      },
+      {
+        key: "status",
+        header: "Status",
+        width: "120px",
+        render: (row: FindingSummaryRow) => <FindingStatusBadge status={row.status} />,
+      },
+    ],
+    [],
+  );
 
   async function handleExport(format: ReportExportFormat) {
     if (!report?.scanId) return;
@@ -191,18 +291,25 @@ export function ReportDetailsPage() {
       </section>
 
       <section className="report-native__grid">
-        <Card className="detail-section">
-          <h2 className="detail-section__title">Executive summary</h2>
-          <p>
-            The scan identified <strong>{reportFindings.length}</strong> findings across the
-            assessed target. The current risk level is <strong>{riskLabel(riskScore)}</strong>,
-            including <strong>{counts.critical}</strong> critical and{" "}
-            <strong>{counts.high}</strong> high-severity findings.
-          </p>
-          <p className="text-muted">
-            Prioritize confirmed critical and high findings, apply mitigations, then re-run the
-            scan to verify remediation.
-          </p>
+        <Card className="detail-section report-native__executive">
+          {report.scanId ? (
+            <ScanRecommendationsPanel
+              title="Executive summary"
+              scanId={report.scanId}
+              attackCategories={playbook?.categories ?? []}
+              enabled={!loading && Boolean(report.scanId)}
+              variant="details"
+              showReRecommend={false}
+              projectId={report.projectId}
+              targetId={scan?.targetId}
+              revision={recommendationsRevision}
+            />
+          ) : (
+            <>
+              <h2 className="detail-section__title">Executive summary</h2>
+              <p className="text-muted">No linked scan for this report.</p>
+            </>
+          )}
         </Card>
 
         <Card className="detail-section">
@@ -215,6 +322,23 @@ export function ReportDetailsPage() {
               </div>
             ))}
           </div>
+        </Card>
+      </section>
+
+      <section className="reports-section" aria-label="Findings summary">
+        <div className="reports-section__header">
+          <div>
+            <h2 className="reports-section__title">Summary</h2>
+            <span className="text-muted text-sm">{reportFindings.length} findings</span>
+          </div>
+        </div>
+        <Card padding="none">
+          <DataTable
+            columns={summaryColumns}
+            rows={summaryRows}
+            keyField="id"
+            emptyMessage="No findings"
+          />
         </Card>
       </section>
 
@@ -235,19 +359,22 @@ export function ReportDetailsPage() {
           </Card>
         ) : (
           <div className="report-native__findings">
-            {reportFindings.map((finding) => {
+            {reportFindings.map((finding, index) => {
               const evidence = parseFindingEvidence(finding);
-              const recommendation = recommendationFor(finding.category);
-              const confidencePct = Math.round(
-                finding.confidence > 1 ? finding.confidence : finding.confidence * 100,
-              );
+              const confidencePct = confidencePercent(finding.confidence);
               const endpoint =
                 evidence.requestUrl ??
                 (finding.targetUrl || null);
 
               return (
-                <Card key={finding.id} className="report-native__finding">
+                <div
+                  key={finding.id}
+                  id={`finding-${finding.id}`}
+                  className="report-native__finding-anchor"
+                >
+                <Card className="report-native__finding">
                   <div className="row-actions">
+                    <Badge variant="muted">#{index + 1}</Badge>
                     <SeverityBadge severity={finding.severity} />
                     <FindingStatusBadge status={finding.status} />
                     <Badge variant="muted">{finding.category.replace(/_/g, " ")}</Badge>
@@ -275,10 +402,11 @@ export function ReportDetailsPage() {
                     </div>
                     <div>
                       <span className="report-native__evidence-label">Recommendation</span>
-                      <p className="report-native__recommendation">
-                        <strong>{recommendation.title}</strong>
-                        <span>{recommendation.description}</span>
-                      </p>
+                      <FindingRecommendationsPanel
+                        finding={finding}
+                        variant="embedded"
+                        showReRecommend={false}
+                      />
                     </div>
                   </div>
 
@@ -293,6 +421,7 @@ export function ReportDetailsPage() {
                     </div>
                   </div>
                 </Card>
+                </div>
               );
             })}
           </div>

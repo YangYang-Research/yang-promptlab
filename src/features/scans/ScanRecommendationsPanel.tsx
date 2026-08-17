@@ -33,6 +33,10 @@ type ScanRecommendationsPanelProps = {
   /** When false, skip loading (e.g. non-attack / draft scans). */
   enabled?: boolean;
   className?: string;
+  /** Section heading — defaults to Recommendations. */
+  title?: string;
+  /** When false, hide the Re-recommend action (e.g. report Executive summary). */
+  showReRecommend?: boolean;
   /** `details` uses the Scan Details editorial layout; `wizard` keeps the compact step-6 style. */
   variant?: "wizard" | "details";
   /** Required for Retry Scan / Start Attack navigation from Scan Details. */
@@ -53,6 +57,8 @@ export function ScanRecommendationsPanel({
   attackCategories = [],
   enabled = true,
   className,
+  title = "Recommendations",
+  showReRecommend = true,
   variant = "wizard",
   projectId,
   targetId,
@@ -169,7 +175,7 @@ export function ScanRecommendationsPanel({
         data-state={loading && empty ? "loading" : error ? "error" : empty ? "empty" : "ready"}
       >
         <header className="scan-rec__header">
-          <h2 className="scan-rec__title">Recommendations</h2>
+          <h2 className="scan-rec__title">{title}</h2>
           {sourceBadge}
         </header>
 
@@ -221,19 +227,21 @@ export function ScanRecommendationsPanel({
               ) : (
                 <span />
               )}
-              <Button
-                variant="primary"
-                size="sm"
-                type="button"
-                className="project-summary__action"
-                onClick={() => load(true)}
-                disabled={loading}
-              >
-                <span className="btn__content">
-                  <IconAi className="btn__icon" aria-hidden />
-                  {loading ? "Re-recommending…" : "Re-recommend"}
-                </span>
-              </Button>
+              {showReRecommend ? (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  type="button"
+                  className="project-summary__action"
+                  onClick={() => load(true)}
+                  disabled={loading}
+                >
+                  <span className="btn__content">
+                    <IconAi className="btn__icon" aria-hidden />
+                    {loading ? "Re-recommending…" : "Re-recommend"}
+                  </span>
+                </Button>
+              ) : null}
             </div>
           </>
         )}
@@ -244,7 +252,7 @@ export function ScanRecommendationsPanel({
   return (
     <div className={["wizard-results__recommendations", className].filter(Boolean).join(" ")}>
       <div className="wizard-results__recommendations-header">
-        <h4 className="wizard-results__recommendations-title">Recommendations</h4>
+        <h4 className="wizard-results__recommendations-title">{title}</h4>
         {sourceBadge}
       </div>
 

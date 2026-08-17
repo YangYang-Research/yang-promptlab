@@ -63,6 +63,16 @@ export {
   type ScanConsoleTailDto,
 } from "./client";
 export {
+  generateScanRecommendations,
+  type AttackRecommendationDto,
+  type ScanRecommendationsResponse,
+} from "./scanRecommendations";
+export {
+  generateFindingRecommendations,
+  type FindingRecommendationDto,
+  type FindingRecommendationsResponse,
+} from "./findingRecommendations";
+export {
   listModels,
   browseModels,
   installModel,

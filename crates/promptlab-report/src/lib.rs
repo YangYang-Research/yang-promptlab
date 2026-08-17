@@ -21,7 +21,7 @@ pub use formatters::{
     formatter_for, CsvFormatter, HtmlFormatter, JsonFormatter, PdfFormatter, ReportFormatter,
     SarifFormatter,
 };
-pub use recommendations::{compliance_refs_for, generate_recommendations};
+pub use recommendations::{compliance_refs_for, generate_recommendations, recommendation_for};
 pub use sarif_import::{
     parse_sarif_findings, parse_sarif_import, ImportedSarifFinding, SarifImportBundle,
     SarifRunContext,
