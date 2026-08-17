@@ -33,6 +33,11 @@ const FindingDetailsPage = lazy(() =>
 const ReportsPage = lazy(() =>
   import("@/features/reports/ReportsPage").then((m) => ({ default: m.ReportsPage })),
 );
+const ReportDetailsPage = lazy(() =>
+  import("@/features/reports/ReportDetailsPage").then((m) => ({
+    default: m.ReportDetailsPage,
+  })),
+);
 const ModelsPage = lazy(() =>
   import("@/features/models/ModelsPage").then((m) => ({ default: m.ModelsPage })),
 );
@@ -175,6 +180,14 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <ReportsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="reports/:reportId"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <ReportDetailsPage />
               </Suspense>
             }
           />

@@ -9,10 +9,10 @@ use promptlab_models::LocalModelManager;
 use promptlab_runtime::SharedModelProvider;
 use promptlab_storage::{
     compute_health_score, CreateScan, FindingRepository, ProjectRepository, Repositories,
-    ScanRepository, TargetRepository, UpdateProject, UpdateScan,
+    ReportRepository, ScanRepository, TargetRepository, UpdateProject, UpdateScan,
 };
 use tauri::async_runtime::Mutex as AsyncMutex;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
 
@@ -20,6 +20,7 @@ use crate::commands::scan_execution::{
     run_target_profile_attack_scan, scan_attack_requests_total, scan_progress_total,
     scan_testcases_total, ScanExecutionConfig, ScanPacingCache, TargetProfileScanContext,
 };
+use crate::commands::domain::report_generate_op;
 use promptlab_target_profile::PayloadStrategy;
 use serde::Serialize;
 use crate::events::{emit_app_data_changed, ScanProgressEmitter};
@@ -48,6 +49,59 @@ fn is_restartable_scan_status(status: &str) -> bool {
 
 fn is_interrupted_scan_status(status: &str) -> bool {
     matches!(status, "running" | "paused" | "pending")
+}
+
+async fn ensure_default_html_report(app: &AppHandle, project_id: &str, scan_id: &str) {
+    let Some(state) = app.try_state::<AppState>() else {
+        warn!(scan_id = %scan_id, "app state unavailable; default report was not generated");
+        return;
+    };
+
+    let existing = match state
+        .repositories()
+        .reports()
+        .list_by_project(project_id)
+        .await
+    {
+        Ok(reports) => reports,
+        Err(err) => {
+            warn!(
+                scan_id = %scan_id,
+                project_id = %project_id,
+                error = %err,
+                "failed to check existing reports; skipping automatic report generation"
+            );
+            return;
+        }
+    };
+
+    if existing.iter().any(|report| {
+        report.scan_id.as_deref() == Some(scan_id) && report.format.eq_ignore_ascii_case("html")
+    }) {
+        return;
+    }
+
+    match report_generate_op(
+        state.inner(),
+        project_id.to_string(),
+        scan_id.to_string(),
+        Some("html".into()),
+        Some("technical".into()),
+    )
+    .await
+    {
+        Ok(report) => {
+            info!(scan_id = %scan_id, report_id = %report.id, "default HTML report generated");
+        }
+        Err(err) => {
+            warn!(
+                scan_id = %scan_id,
+                project_id = %project_id,
+                error = %err,
+                "failed to generate default HTML report"
+            );
+        }
+    }
 }
 
 async fn mark_scan_interrupted(
@@ -395,6 +449,8 @@ async fn run_scan_job(
                 );
             }
         }
+
+        ensure_default_html_report(&app, &project_id, &scan_id).await;
     }
 
     let snapshot = progress.lock().ok().map(|guard| guard.clone());

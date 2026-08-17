@@ -211,6 +211,7 @@ fn finding_evidence_json(
     url: &str,
     method: Option<&str>,
     body_template: Option<&str>,
+    request_headers: &std::collections::HashMap<String, String>,
     attempt: &PayloadAttempt,
     verdict_summary: &str,
     verdict_confidence: f32,
@@ -224,11 +225,13 @@ fn finding_evidence_json(
         "request": {
             "url": url,
             "method": method.unwrap_or("POST"),
+            "headers": request_headers,
             "body": attempt.mutated_content,
             "body_template": body_template,
         },
         "response": {
             "status": attempt.response.status,
+            "headers": attempt.response.headers,
             "body": attempt.response.body,
             "duration_ms": attempt.response.duration_ms,
             "normalized": attempt.response.normalized.judge_text(),
@@ -441,6 +444,7 @@ struct CategoryJudgeEnv<'a> {
     endpoint_url: &'a str,
     method: Option<&'a str>,
     body_template: Option<&'a str>,
+    request_headers: &'a std::collections::HashMap<String, String>,
     provider: Option<&'a str>,
     judge: &'a promptlab_judge::JudgeEngine,
     plugin_manager: &'a Arc<AsyncMutex<promptlab_plugin_host::PluginManager>>,
@@ -560,6 +564,7 @@ async fn judge_single_attempt(
                     env.endpoint_url,
                     env.method,
                     env.body_template,
+                    env.request_headers,
                     &attempt,
                     &verdict.summary,
                     verdict.confidence,
@@ -1161,6 +1166,7 @@ pub async fn run_category_on_endpoint(
     let body_template = endpoint_metadata
         .as_ref()
         .map(|meta| body_template_from_metadata(meta));
+    let request_headers = ctx.target.headers.clone();
     let judge_env = CategoryJudgeEnv {
         repos,
         scan_id,
@@ -1171,6 +1177,7 @@ pub async fn run_category_on_endpoint(
         endpoint_url: &endpoint.url,
         method: endpoint.method.as_deref(),
         body_template: body_template.as_deref(),
+        request_headers: &request_headers,
         provider: None,
         judge: &judge,
         plugin_manager: &plugin_manager,
@@ -1275,6 +1282,7 @@ pub async fn run_category_on_target_profile(
         repos,
     )
     .await?;
+    let request_headers = ctx.target.headers.clone();
     let judge_env = CategoryJudgeEnv {
         repos,
         scan_id,
@@ -1285,6 +1293,7 @@ pub async fn run_category_on_target_profile(
         endpoint_url: &url,
         method: Some(profile.method.as_str()),
         body_template: Some(profile.request_template.as_str()),
+        request_headers: &request_headers,
         provider: Some(profile.provider.as_str()),
         judge: &judge,
         plugin_manager: &plugin_manager,

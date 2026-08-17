@@ -53,8 +53,10 @@ export type ParsedFindingEvidence = {
   payloadId: string | null;
   requestUrl: string | null;
   requestMethod: string | null;
+  requestHeaders: Record<string, string>;
   requestBody: string | null;
   responseStatus: number | null;
+  responseHeaders: Record<string, string>;
   responseBody: string | null;
   responseExcerpt: string | null;
   explanation: string | null;
@@ -332,6 +334,101 @@ export function sanitizeResponseBody(raw: string | null): string | null {
   return prettyJsonIfPossible(trimmed);
 }
 
+function parseHeaderMap(value: unknown): Record<string, string> {
+  const record = asRecord(value);
+  if (!record) return {};
+  const headers: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    if (typeof entry === "string" && key.trim()) {
+      headers[key] = entry;
+    } else if (typeof entry === "number" || typeof entry === "boolean") {
+      headers[key] = String(entry);
+    }
+  }
+  return headers;
+}
+
+function hasHeader(headers: Record<string, string>, name: string): boolean {
+  const needle = name.toLowerCase();
+  return Object.keys(headers).some((key) => key.toLowerCase() === needle);
+}
+
+function redactHeaderValue(name: string, value: string): string {
+  const key = name.toLowerCase();
+  if (
+    key === "authorization" ||
+    key === "proxy-authorization" ||
+    key === "cookie" ||
+    key === "set-cookie" ||
+    key.includes("api-key") ||
+    key.includes("apikey") ||
+    key.includes("token")
+  ) {
+    return "[REDACTED]";
+  }
+  return value;
+}
+
+function formatHeaderBlock(headers: Record<string, string>): string[] {
+  return Object.entries(headers)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, value]) => `${name}: ${redactHeaderValue(name, value)}`);
+}
+
+function parseRequestUrl(url: string | null): {
+  host: string | null;
+  pathWithQuery: string;
+} {
+  if (!url?.trim()) {
+    return { host: null, pathWithQuery: "/" };
+  }
+  try {
+    const parsed = new URL(url);
+    const pathWithQuery = `${parsed.pathname || "/"}${parsed.search}`;
+    const host = parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname;
+    return { host, pathWithQuery };
+  } catch {
+    return { host: null, pathWithQuery: url };
+  }
+}
+
+/** Render a wire-style HTTP request from finding evidence. */
+export function formatHttpRequest(evidence: ParsedFindingEvidence): string {
+  const method = (evidence.requestMethod ?? "POST").trim().toUpperCase() || "POST";
+  const { host, pathWithQuery } = parseRequestUrl(evidence.requestUrl);
+  const headers = { ...evidence.requestHeaders };
+  if (host && !hasHeader(headers, "Host")) {
+    headers.Host = host;
+  }
+  if (evidence.requestBody?.trim() && !hasHeader(headers, "Content-Type")) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const lines = [`${method} ${pathWithQuery} HTTP/1.1`, ...formatHeaderBlock(headers)];
+  const body = evidence.requestBody?.trim();
+  if (body) {
+    lines.push("", body);
+  }
+  return lines.join("\n");
+}
+
+/** Render a wire-style HTTP response from finding evidence. */
+export function formatHttpResponse(evidence: ParsedFindingEvidence): string {
+  const status = evidence.responseStatus;
+  const statusLine =
+    status == null || status === 0
+      ? "HTTP/1.1 000"
+      : `HTTP/1.1 ${status}`;
+  const lines = [statusLine, ...formatHeaderBlock(evidence.responseHeaders)];
+  const body = (evidence.responseBody ?? evidence.responseExcerpt)?.trim();
+  if (body) {
+    lines.push("", body);
+  } else if (status == null && Object.keys(evidence.responseHeaders).length === 0) {
+    return "—";
+  }
+  return lines.join("\n");
+}
+
 export function parseFindingEvidence(
   finding: Pick<Finding, "evidence"> & { description?: string },
   weights: JudgeRoleWeights = DEFAULT_JUDGE_ROLE_WEIGHTS,
@@ -374,8 +471,10 @@ export function parseFindingEvidence(
     payloadId: asString(obj?.payload_id) ?? asString(obj?.payloadId),
     requestUrl: asString(request?.url) ?? asString(obj?.endpoint),
     requestMethod: asString(request?.method),
+    requestHeaders: parseHeaderMap(request?.headers),
     requestBody,
     responseStatus: asNumber(response?.status) ?? asNumber(obj?.response_status),
+    responseHeaders: parseHeaderMap(response?.headers),
     responseBody: sanitizeResponseBody(
       asString(response?.body) ??
         asString(obj?.response_body) ??
