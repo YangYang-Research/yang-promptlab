@@ -101,6 +101,37 @@ pub async fn generate_attack_recommendations_with_llm(
     parse_attack_recommendations(&raw)
 }
 
+/// Input for per-finding remediation recommendations (Finding Details).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FindingRemediationInput {
+    pub finding_id: String,
+    pub title: String,
+    pub severity: String,
+    pub category: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<serde_json::Value>,
+}
+
+/// Generate fix-oriented recommendations for a single finding using the finding-specific prompt.
+pub async fn generate_finding_recommendations_with_llm(
+    finding: &FindingRemediationInput,
+    llm: &dyn PlannerLlm,
+) -> PlannerResult<AttackRecommendationsBundle> {
+    let finding_json = serde_json::to_string(finding)
+        .map_err(|e| PlannerError::Llm(format!("failed to serialize finding: {e}")))?;
+    let prompt = PromptRegistry::finding_remediation_recommend_user(&finding_json);
+    let raw = llm.complete(&prompt).await?;
+    let mut bundle = parse_attack_recommendations(&raw)?;
+    // Finding remediation never carries scan operational CTAs.
+    for item in &mut bundle.recommendations {
+        item.action = None;
+    }
+    Ok(bundle)
+}
+
 pub fn parse_attack_recommendations(raw: &str) -> PlannerResult<AttackRecommendationsBundle> {
     let json_str = extract_json_object(raw)?;
     let parsed: LlmRecommendationsResponse = serde_json::from_str(&json_str)

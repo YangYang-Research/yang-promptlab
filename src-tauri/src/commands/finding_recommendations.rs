@@ -1,26 +1,28 @@
 //! AI-backed remediation recommendations for a single finding.
 //!
-//! Mirrors scan recommendations: cache in DB (finding `evidence_json.recommendations`),
-//! regenerate on fingerprint miss or `force`, with rule-based fallback when AI is unavailable.
+//! Uses a dedicated finding-remediation system prompt (not scan Recommendations).
+//! Cache lives in finding `evidence_json.recommendations`; regenerate on fingerprint
+//! miss or `force`, with rule-based fallback when AI is unavailable.
 
-use promptlab_agent::RecommendAgent;
 use promptlab_report::{
-    recommendation_for, generate_recommendations, data::StorageFindingRow, Severity,
+    data::StorageFindingRow, generate_recommendations, recommendation_for, Severity,
 };
 use promptlab_storage::{Finding, FindingRepository, UpdateFinding};
 use promptlab_target_profile::{
-    build_attack_results_summary, generate_attack_recommendations_with_llm, AttackRecommendation,
-    AttackRecommendationsBundle, FindingSummaryInput,
+    generate_finding_recommendations_with_llm, AttackRecommendation, AttackRecommendationsBundle,
+    FindingRemediationInput,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tracing::warn;
 
 use crate::error::CommandResult;
-use crate::inference_host::{is_inference_ready, YazgHostLlms};
+use crate::inference_host::{is_inference_ready, HostFindingRecommendLlm};
 use crate::state::AppState;
 
 const EVIDENCE_RECOMMENDATIONS_KEY: &str = "recommendations";
+/// Bump when the finding-remediation system prompt changes so stale caches regenerate.
+const FINDING_REMEDIATION_PROMPT_VERSION: &str = "finding-remediation-v1";
 
 #[derive(Debug, Deserialize)]
 pub struct FindingRecommendationsRequest {
@@ -85,50 +87,28 @@ pub async fn finding_recommendations_generate_op(
         }
     }
 
-    let category = finding
-        .category
-        .clone()
-        .unwrap_or_else(|| "unknown".into());
-    let summary_input = FindingSummaryInput {
-        title: finding.title.clone(),
-        severity: finding.severity.clone(),
-        category: category.clone(),
-        description: finding.description.clone(),
-    };
-    let mut summary = build_attack_results_summary("completed", &[category.clone()], &[summary_input]);
-    summary.scan_name = Some(format!("Finding: {}", finding.title));
+    let remediation_input = finding_remediation_input(&finding);
 
     let bundle = {
         let inference = state.inference_manager().lock().await;
         if is_inference_ready(&inference) {
             drop(inference);
-            let hosts = YazgHostLlms::from_app(
+            let llm = HostFindingRecommendLlm::new(
                 state.data_dir().to_path_buf(),
                 state.inference_manager().clone(),
                 state.model_manager().clone(),
                 state.model_provider().clone(),
                 state.runtime_manager().clone(),
             );
-            match RecommendAgent::run(&summary, &hosts.recommend).await {
-                Ok(outcome) => Some(("ai", strip_operational_actions(outcome.bundle))),
+            match generate_finding_recommendations_with_llm(&remediation_input, &llm).await {
+                Ok(bundle) => Some(("ai", bundle)),
                 Err(err) => {
                     warn!(
                         finding_id = %request.finding_id,
                         error = %err,
-                        "AI finding recommendations failed; trying direct LLM then fallback"
+                        "AI finding recommendations failed; using rule-based fallback"
                     );
-                    match generate_attack_recommendations_with_llm(&summary, &hosts.recommend).await
-                    {
-                        Ok(bundle) => Some(("ai", strip_operational_actions(bundle))),
-                        Err(llm_err) => {
-                            warn!(
-                                finding_id = %request.finding_id,
-                                error = %llm_err,
-                                "direct LLM finding recommendations failed; using rule-based fallback"
-                            );
-                            None
-                        }
-                    }
+                    None
                 }
             }
         } else {
@@ -173,15 +153,31 @@ pub async fn finding_recommendations_generate_op(
     Ok(response)
 }
 
-fn strip_operational_actions(mut bundle: AttackRecommendationsBundle) -> AttackRecommendationsBundle {
-    bundle.recommendations.retain(|item| {
-        let action = item.action.as_deref().unwrap_or("").trim().to_ascii_lowercase();
-        action.is_empty() || action == "null"
-    });
-    for item in &mut bundle.recommendations {
-        item.action = None;
+fn finding_remediation_input(finding: &Finding) -> FindingRemediationInput {
+    let evidence = finding
+        .evidence_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .map(|mut value| {
+            // Recommendations cache is write-side metadata; do not feed it back into the LLM.
+            if let Some(obj) = value.as_object_mut() {
+                obj.remove(EVIDENCE_RECOMMENDATIONS_KEY);
+            }
+            value
+        });
+
+    FindingRemediationInput {
+        finding_id: finding.id.clone(),
+        title: finding.title.clone(),
+        severity: finding.severity.clone(),
+        category: finding
+            .category
+            .clone()
+            .unwrap_or_else(|| "unknown".into()),
+        description: finding.description.clone(),
+        status: finding.status.clone(),
+        evidence,
     }
-    bundle
 }
 
 fn fallback_finding_recommendations(finding: &Finding) -> AttackRecommendationsBundle {
@@ -207,7 +203,6 @@ fn fallback_finding_recommendations(finding: &Finding) -> AttackRecommendationsB
         action: None,
     }];
 
-    // Category architectural guidance from the report engine, when distinct.
     for rec in generate_recommendations(std::slice::from_ref(&report_finding)) {
         if recommendations
             .iter()
@@ -259,6 +254,7 @@ fn finding_recommendations_fingerprint(finding: &Finding) -> String {
         .hash(&mut hasher);
     finding.description.as_deref().unwrap_or("").hash(&mut hasher);
     finding.status.to_ascii_lowercase().hash(&mut hasher);
+    FINDING_REMEDIATION_PROMPT_VERSION.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
 

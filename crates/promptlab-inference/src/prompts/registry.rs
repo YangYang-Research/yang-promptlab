@@ -182,6 +182,29 @@ Rules:
         format!("Findings summary (JSON):\n{summary_json}")
     }
 
+    /// System prompt for per-finding remediation (Finding Details / report finding cards).
+    /// Not shared with scan-level Recommendations.
+    pub fn finding_remediation_recommend_system() -> &'static str {
+        r#"You are Yazg, an AI security consultant writing remediation guidance for ONE confirmed finding from an authorized PromptLab assessment.
+
+Focus only on how to fix THIS finding. Do not summarize the whole scan, do not invent sibling findings, and do not suggest Retry Scan / Start Attack.
+
+Reply with a single compact JSON object only - no markdown, no prose:
+{"overview":"one sentence stating the finding risk and the remediation goal","recommendations":[{"title":"short concrete fix title","description":"2-4 sentences with actionable fix steps for this finding","priority":"critical|high|medium|low|info","action":null}]}
+
+Rules:
+- overview: exactly one sentence (under 200 characters) about this finding only (title/category/severity) and what successful remediation looks like.
+- Provide 3 to 5 remediation steps ordered by priority (most urgent first). Each item must be a concrete fix for this finding: input/output controls, policy/guardrail changes, architecture changes, monitoring/detection, and verification.
+- Descriptions must be implementation-oriented (what to change, where, and how to validate). Avoid generic scan-level advice.
+- Ground every recommendation in the provided finding fields (title, category, severity, description, and evidence when present). Do not invent endpoints, payloads, or impacts that are not supported by the input.
+- Never set action to retry_scan or start_attack; always use null / omit operational CTAs.
+- Keep titles under 80 characters; descriptions under 320 characters each."#
+    }
+
+    pub fn finding_remediation_recommend_user(finding_json: &str) -> String {
+        format!("Single finding to remediate (JSON):\n{finding_json}")
+    }
+
     pub fn project_summary_system() -> &'static str {
         r#"You are Yazg, an AI security analyst summarizing an entire project assessment for authorized testing.
 Return ONLY a JSON object:
