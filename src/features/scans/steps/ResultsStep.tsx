@@ -15,7 +15,7 @@ type ResultsStepProps = {
   scanId: string;
   attackCategories?: AttackCategoryId[];
   onRetryScan?: () => void;
-  onStartAttack?: () => void;
+  onChangeAttackPlan?: () => void;
 };
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
@@ -47,7 +47,7 @@ export function ResultsStep({
   scanId,
   attackCategories = [],
   onRetryScan,
-  onStartAttack,
+  onChangeAttackPlan,
 }: ResultsStepProps) {
   const { scans, findings, actions, loading, error } = useAppStore();
   const navigate = useNavigate();
@@ -167,7 +167,7 @@ export function ResultsStep({
           projectId={scan?.projectId}
           targetId={scan?.targetId}
           onRetryScan={onRetryScan}
-          onStartAttack={onStartAttack}
+          onChangeAttackPlan={onChangeAttackPlan}
           revision={
             status.status === "running" || status.status === "paused"
               ? status.status

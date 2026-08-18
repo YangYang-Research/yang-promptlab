@@ -27,7 +27,7 @@ import { pauseScan, resumeScan, stopScan, deleteScan } from "@/shared/ipc";
 import { toAppError } from "@/shared/errors/AppError";
 import { useToast } from "@/shared/notifications";
 import { formatDurationMs, formatTimestamp } from "@/features/scans/scanDetailsHelpers";
-import { isLiveScanStatus, isRetryableScanStatus, resolveScanNavigationStatus, resolveScanOpenPath, clearWizardSessionIfReferencesScan } from "@/features/scans/wizardState";
+import { isLiveScanStatus, isRetryableScanStatus, resolveScanNavigationStatus, resolveScanOpenPath, buildScanChangePlanUrl, clearWizardSessionIfReferencesScan } from "@/features/scans/wizardState";
 import type { ScanRun } from "@/shared/types";
 
 import { NewScanChooserModal } from "./NewScanChooserModal";
@@ -192,6 +192,16 @@ export function ScansPage() {
         },
       ];
 
+      if (isRetryableScanStatus(effectiveScanStatus(scan))) {
+        items.push({
+          id: "change-plan",
+          label: "Change Attack Plan",
+          icon: scanOpenActionIcon("Change Attack Plan"),
+          onClick: () =>
+            navigate(buildScanChangePlanUrl(scan.projectId, scan.id, scan.targetId)),
+        });
+      }
+
       if (scan.status === "running") {
         items.push({
           id: "pause",
@@ -235,7 +245,7 @@ export function ScansPage() {
 
       return items;
     },
-    [controlPending, deletingScanId, effectiveScanStatus, handleDeleteScan, openScanAction, runControl],
+    [controlPending, deletingScanId, effectiveScanStatus, handleDeleteScan, navigate, openScanAction, runControl],
   );
 
   const tableColumns = useMemo(

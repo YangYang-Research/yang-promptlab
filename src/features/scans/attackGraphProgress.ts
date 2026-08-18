@@ -34,6 +34,9 @@ export function resolveAttackGraphStates(
   const failed = new Set(
     (status.categories_failed ?? []).map((id) => id.trim().toLowerCase()),
   );
+  const succeeded = new Set(
+    (status.categories_succeeded ?? []).map((id) => id.trim().toLowerCase()),
+  );
   const activeId = categoryIdFromCurrentTest(status.current_test);
   const activeIndex = activeId ? categories.indexOf(activeId) : -1;
 
@@ -42,7 +45,11 @@ export function resolveAttackGraphStates(
       states.set(category, "failed");
       return;
     }
-    if (index < categoriesCompleted) {
+    if (
+      succeeded.has(category) ||
+      succeeded.has(category.replace(/_/g, " ")) ||
+      (succeeded.size === 0 && index < categoriesCompleted)
+    ) {
       states.set(category, "done");
       return;
     }

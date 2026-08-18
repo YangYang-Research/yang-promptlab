@@ -36,6 +36,7 @@ use crate::commands::generator::{
 use crate::events::ScanProgressEmitter;
 use crate::inference_host::{is_inference_ready, YazgHostLlms};
 use crate::jobs::{bump_scan_progress, ScanProgress};
+use crate::scan_playbook::persist_scan_playbook_state;
 use crate::session_auth::AttackRuntime;
 
 pub struct ScanExecutionConfig {
@@ -164,14 +165,15 @@ fn set_scan_phase(
     retry: Option<u32>,
 ) {
     if let Ok(mut state) = progress.lock() {
-        state.push_phase_with_category(phase, test);
-        state.current_phase = Some(phase.into());
-        if let Some(label) = test {
-            state.current_test = Some(label.into());
-        }
-        state.current_attempt = attempt;
-        state.current_retry = retry;
+        state.apply_phase(phase, test, attempt, retry);
     }
+}
+
+fn phase_trail_has(trail: &[String], phase: &str) -> bool {
+    trail.iter().any(|entry| {
+        let key = entry.split('|').next().unwrap_or(entry).trim();
+        key.eq_ignore_ascii_case(phase)
+    })
 }
 
 fn category_payload_map(
@@ -521,7 +523,7 @@ pub struct TargetProfileScanContext<'a> {
     pub job_controls: Option<crate::jobs::ScanJobControls>,
     pub progress: Arc<Mutex<ScanProgress>>,
     pub emitter: ScanProgressEmitter,
-    /// When true (default), skip categories already counted in `categories_completed`.
+    /// When true (default), skip categories already in `categories_succeeded`.
     /// Set false for manual "retry failed only" jobs that pass only failed categories.
     pub skip_completed_categories: bool,
     /// Survives across categories and host auto-retries within one scan job.
@@ -550,6 +552,12 @@ async fn wait_pipeline_warmup(
     emitter: &ScanProgressEmitter,
 ) {
     if warmup_secs == 0 {
+        // Retry/Resume skip the delay but still keep Preparing as the first trail stage.
+        if let Ok(mut state) = progress.lock() {
+            if !phase_trail_has(state.phase_trail.as_slice(), "preparing") {
+                state.phase_trail.insert(0, "preparing".into());
+            }
+        }
         bump_scan_progress(progress, 1);
         return;
     }
@@ -667,14 +675,19 @@ pub async fn run_target_profile_attack_scan(
         .unwrap_or(0);
     let mut had_error = false;
 
-    let categories_completed = ctx
-        .progress
-        .lock()
-        .map(|state| state.categories_completed as usize)
-        .unwrap_or(0);
-
     for (category_index, category) in ctx.categories.iter().enumerate() {
-        if ctx.skip_completed_categories && category_index < categories_completed {
+        let skip = ctx.skip_completed_categories
+            && ctx
+                .progress
+                .lock()
+                .ok()
+                .map(|state| state.should_skip_category(category.as_str(), category_index))
+                .unwrap_or(false);
+        if skip {
+            ctx.emitter.info(format!(
+                "Skipping succeeded category {}",
+                category.display_name()
+            ));
             continue;
         }
         if ctx.cancel.load(Ordering::Relaxed) {
@@ -697,23 +710,30 @@ pub async fn run_target_profile_attack_scan(
         .await;
 
         if ctx.paused.load(Ordering::Relaxed) {
+            persist_scan_progress_now(&ctx).await;
+            break;
+        }
+
+        let cancelled = ctx.cancel.load(Ordering::Relaxed);
+        if cancelled && category_checkpoint_present(&ctx) {
+            persist_scan_progress_now(&ctx).await;
             break;
         }
 
         match outcome {
             Ok(category_result) => {
                 findings_total += category_result.findings.len() as u64;
-                record_category_success(
-                    &ctx.progress,
-                    findings_total,
-                    category,
-                    ctx.skip_completed_categories,
-                );
+                record_category_success(&ctx.progress, findings_total, category);
             }
             Err(err) => {
                 had_error = true;
-                record_category_failure(&ctx, *category, &err, ctx.skip_completed_categories);
+                record_category_failure(&ctx, *category, &err);
             }
+        }
+        persist_scan_progress_now(&ctx).await;
+
+        if cancelled {
+            break;
         }
     }
 
@@ -781,7 +801,7 @@ pub async fn run_target_profile_attack_scan(
             match outcome {
                 Ok(category_result) => {
                     findings_total += category_result.findings.len() as u64;
-                    record_category_success(&ctx.progress, findings_total, &category, false);
+                    record_category_success(&ctx.progress, findings_total, &category);
                     ctx.emitter.info(format!(
                         "{} recovered on auto-retry {attempt}/{MAX_CATEGORY_AUTO_RETRIES}",
                         category.display_name()
@@ -789,7 +809,7 @@ pub async fn run_target_profile_attack_scan(
                 }
                 Err(err) => {
                     had_error = true;
-                    record_category_failure(&ctx, category, &err, false);
+                    record_category_failure(&ctx, category, &err);
                     if attempt >= MAX_CATEGORY_AUTO_RETRIES {
                         ctx.emitter.error(format!(
                             "{} still failing after {MAX_CATEGORY_AUTO_RETRIES} auto-retries",
@@ -798,6 +818,7 @@ pub async fn run_target_profile_attack_scan(
                     }
                 }
             }
+            persist_scan_progress_now(&ctx).await;
         }
 
         if !retried_any {
@@ -823,6 +844,39 @@ enum CategoryPassKind {
     AutoRetry { attempt: u32 },
 }
 
+fn category_checkpoint_present(ctx: &TargetProfileScanContext<'_>) -> bool {
+    ctx.job_controls
+        .as_ref()
+        .and_then(|controls| {
+            controls
+                .batch_checkpoint
+                .lock()
+                .ok()
+                .map(|guard| guard.is_some())
+        })
+        .unwrap_or(false)
+}
+
+async fn persist_scan_progress_now(ctx: &TargetProfileScanContext<'_>) {
+    let snapshot = ctx.progress.lock().ok().map(|guard| guard.clone());
+    let checkpoint = ctx.job_controls.as_ref().and_then(|controls| {
+        controls
+            .batch_checkpoint
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+    });
+    if let Some(progress) = snapshot.as_ref() {
+        let _ = persist_scan_playbook_state(
+            ctx.repos,
+            ctx.scan_id,
+            Some(progress),
+            Some(checkpoint.as_ref()),
+        )
+        .await;
+    }
+}
+
 fn parse_category_id(id: &str) -> Option<AttackCategory> {
     AttackCategory::all()
         .iter()
@@ -834,15 +888,11 @@ fn record_category_success(
     progress: &Arc<Mutex<ScanProgress>>,
     findings_total: u64,
     category: &AttackCategory,
-    bump_completed: bool,
 ) {
     let id = category.as_str();
     if let Ok(mut state) = progress.lock() {
         state.findings = findings_total;
-        if bump_completed {
-            state.categories_completed = state.categories_completed.saturating_add(1);
-        }
-        state.categories_failed.retain(|c| c != id);
+        state.mark_category_success(id);
     }
 }
 
@@ -850,19 +900,12 @@ fn record_category_failure(
     ctx: &TargetProfileScanContext<'_>,
     category: AttackCategory,
     err: &str,
-    bump_completed: bool,
 ) {
     let category_label = category.display_name();
     ctx.emitter
         .error(format!("{category_label} failed: {err}"));
     if let Ok(mut state) = ctx.progress.lock() {
-        if bump_completed {
-            state.categories_completed = state.categories_completed.saturating_add(1);
-        }
-        let id = category.as_str().to_string();
-        if !state.categories_failed.iter().any(|c| c == &id) {
-            state.categories_failed.push(id);
-        }
+        state.mark_category_failure(category.as_str());
     }
 }
 

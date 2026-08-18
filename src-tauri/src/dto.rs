@@ -381,6 +381,8 @@ pub struct ScanStatusDto {
     #[serde(default)]
     pub categories_failed: Vec<String>,
     #[serde(default)]
+    pub categories_succeeded: Vec<String>,
+    #[serde(default)]
     pub attacks_completed: u64,
     #[serde(default)]
     pub attacks_total: u64,

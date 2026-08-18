@@ -28,14 +28,14 @@ function status(partial: Partial<ScanStatusDto>): ScanStatusDto {
 }
 
 describe("executionStrategySteps", () => {
-  it("returns sequential generate → attack → judge outline", () => {
+  it("returns sequential preparing → generate → attack → judge outline", () => {
     const steps = executionStrategySteps({
       executionStrategy: "sequential",
       reflectionEnabled: false,
       adaptivePlanning: false,
       maxAttempts: 1,
     });
-    expect(steps.map((step) => step.id)).toEqual(["generate", "attack", "judge"]);
+    expect(steps.map((step) => step.id)).toEqual(["preparing", "generate", "attack", "judge"]);
   });
 
   it("includes reflection and retry for agentic plans", () => {
@@ -46,6 +46,7 @@ describe("executionStrategySteps", () => {
       maxAttempts: 3,
     });
     expect(steps.map((step) => step.id)).toEqual([
+      "preparing",
       "generate",
       "attack",
       "judge",
@@ -65,7 +66,7 @@ describe("resolveExecutionTrail", () => {
       }),
     );
     expect(trail.map((step) => step.label)).toEqual([
-      "Generate",
+      "Generate · Payload",
       "Attack",
       "Recover",
       "Attack",
@@ -95,7 +96,7 @@ describe("resolveExecutionTrail", () => {
       }),
     );
     expect(trail.map((step) => step.label)).toEqual([
-      "Generate",
+      "Generate · Payload",
       "Attack · Prompt Injection",
       "Judge · Prompt Injection",
       "Attack · Jailbreak",
@@ -112,6 +113,53 @@ describe("resolveExecutionTrail", () => {
         }),
       ),
     ).toEqual(["generate", "attack|Jailbreak", "recover"]);
+  });
+
+  it("keeps preparing as the first pipeline stage", () => {
+    const trail = resolveExecutionTrail(
+      status({
+        phase_trail: ["preparing", "generate", "attack|Jailbreak"],
+        current_phase: "attack",
+        current_test: "Jailbreak",
+      }),
+    );
+    expect(trail.map((step) => step.label)).toEqual([
+      "Preparing",
+      "Generate · Payload",
+      "Attack · Jailbreak",
+    ]);
+
+    expect(
+      resolvePhaseTrail(
+        status({
+          phase_trail: [],
+          current_phase: "preparing",
+          current_test: "loading attack monitor",
+        }),
+      ),
+    ).toEqual(["preparing"]);
+  });
+
+  it("does not append a second Generate when the next category starts", () => {
+    expect(
+      resolvePhaseTrail(
+        status({
+          phase_trail: [
+            "preparing",
+            "generate",
+            "attack|Prompt Injection",
+            "judge|Prompt Injection",
+          ],
+          current_phase: "generate",
+          current_test: "Jailbreak",
+        }),
+      ),
+    ).toEqual([
+      "preparing",
+      "generate",
+      "attack|Prompt Injection",
+      "judge|Prompt Injection",
+    ]);
   });
 
   it("marks the whole trail done when scan completed", () => {

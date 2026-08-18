@@ -50,7 +50,9 @@ import {
 import { ScanRecommendationsPanel } from "@/features/scans/ScanRecommendationsPanel";
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
 import {
+  buildScanChangePlanUrl,
   buildScanProgressUrl,
+  buildScanRetryUrl,
   buildScanWizardUrl,
   clearWizardSessionIfReferencesScan,
   isLiveScanStatus,
@@ -441,19 +443,32 @@ export function ScanDetailsPage() {
               </Button>
             )}
             {showRetryScan && (
-              <Button
-                variant="primary"
-                onClick={() =>
-                  navigate(
-                    buildScanWizardUrl(scan!.projectId, scan!.targetId ?? undefined, {
-                      scanId: scan!.id,
-                      step: 4,
-                    }),
-                  )
-                }
-              >
-                Retry Scan
-              </Button>
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    navigate(
+                      buildScanChangePlanUrl(
+                        scan!.projectId,
+                        scan!.id,
+                        scan!.targetId,
+                      ),
+                    )
+                  }
+                >
+                  Change Attack Plan
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() =>
+                    navigate(
+                      buildScanRetryUrl(scan!.projectId, scan!.id, scan!.targetId),
+                    )
+                  }
+                >
+                  Retry Scan
+                </Button>
+              </>
             )}
             {showViewScan && (
               <Button

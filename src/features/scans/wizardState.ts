@@ -351,7 +351,17 @@ export function buildScanProgressUrl(
   return buildScanWizardUrl(projectId, targetId ?? undefined, { scanId, step: 5 });
 }
 
+/** Continue the failed/stopped scan from the last incomplete stage (step 5). */
 export function buildScanRetryUrl(
+  projectId: string,
+  scanId: string,
+  targetId?: string | null,
+): string {
+  return `${buildScanProgressUrl(projectId, scanId, targetId)}&autoStart=1`;
+}
+
+/** Re-open Attack Plan (step 4) to change categories before launching again. */
+export function buildScanChangePlanUrl(
   projectId: string,
   scanId: string,
   targetId?: string | null,
@@ -359,13 +369,13 @@ export function buildScanRetryUrl(
   return buildScanWizardUrl(projectId, targetId ?? undefined, { scanId, step: 4 });
 }
 
-/** Open wizard submit step and auto-restart the attack once hydrated. */
+/** @deprecated Prefer buildScanRetryUrl — Retry Scan continues from the failed stage. */
 export function buildScanStartAttackUrl(
   projectId: string,
   scanId: string,
   targetId?: string | null,
 ): string {
-  return `${buildScanRetryUrl(projectId, scanId, targetId)}&autoStart=1`;
+  return buildScanRetryUrl(projectId, scanId, targetId);
 }
 
 export function resolveScanNavigationStatus(

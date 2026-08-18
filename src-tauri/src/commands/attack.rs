@@ -139,13 +139,7 @@ fn update_scan_phase(
         return;
     };
     if let Ok(mut state) = progress.lock() {
-        state.push_phase_with_category(phase, test);
-        state.current_phase = Some(phase.into());
-        if let Some(label) = test {
-            state.current_test = Some(label.into());
-        }
-        state.current_attempt = attempt;
-        state.current_retry = retry;
+        state.apply_phase(phase, test, attempt, retry);
     }
 }
 
@@ -249,6 +243,35 @@ fn finding_evidence_json(
         }
     }
     value
+}
+
+fn evidence_payload_id(evidence_json: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(evidence_json)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("payload_id")
+                .and_then(|id| id.as_str())
+                .map(str::to_string)
+        })
+}
+
+async fn finding_already_recorded(
+    repos: &Repositories,
+    scan_id: &str,
+    payload_id: &str,
+) -> bool {
+    match repos.findings().list_by_scan(scan_id).await {
+        Ok(findings) => findings.iter().any(|finding| {
+            finding
+                .evidence_json
+                .as_deref()
+                .and_then(evidence_payload_id)
+                .as_deref()
+                == Some(payload_id)
+        }),
+        Err(_) => false,
+    }
 }
 
 fn severity_str(severity: FindingSeverity) -> &'static str {
@@ -544,52 +567,54 @@ async fn judge_single_attempt(
 
     if verdict.vulnerable {
         accum.successes += 1;
-        let severity = verdict
-            .severity
-            .map(judge_severity_str)
-            .or_else(|| eval.severity.map(severity_str))
-            .unwrap_or("medium");
-        let finding = env
-            .repos
-            .findings()
-            .create(CreateFinding {
-                scan_id: env.scan_id.to_string(),
-                project_id: env.project_id.to_string(),
-                target_id: env.target_id.clone(),
-                title: format!("{}: {}", env.category.display_name(), attempt.payload_name),
-                severity: severity.to_string(),
-                category: Some(env.category_name.into()),
-                description: Some(verdict.summary.clone()),
-                evidence_json: Some(finding_evidence_json(
-                    env.endpoint_url,
-                    env.method,
-                    env.body_template,
-                    env.request_headers,
-                    &attempt,
-                    &verdict.summary,
-                    verdict.confidence,
-                    if verdict.evidence.is_empty() {
-                        &eval.indicators
-                    } else {
-                        &verdict.evidence
-                    },
-                    &judge_json,
-                    env.provider,
-                )),
-                status: None,
-            })
-            .await
-            .map_err(CommandError::from)?;
-        let finding_dto = FindingDto::from(finding);
-        accum.created_findings.push(finding_dto.clone());
-        if let Some(emitter) = env.progress {
-            emitter.detailed(
-                ScanProgressLevel::Info,
-                emitter
-                    .event(ScanProgressLevel::Info, "Saved finding")
-                    .endpoint(env.endpoint_url)
-                    .finding_id(&finding_dto.id),
-            );
+        if !finding_already_recorded(env.repos, env.scan_id, &attempt.payload_id).await {
+            let severity = verdict
+                .severity
+                .map(judge_severity_str)
+                .or_else(|| eval.severity.map(severity_str))
+                .unwrap_or("medium");
+            let finding = env
+                .repos
+                .findings()
+                .create(CreateFinding {
+                    scan_id: env.scan_id.to_string(),
+                    project_id: env.project_id.to_string(),
+                    target_id: env.target_id.clone(),
+                    title: format!("{}: {}", env.category.display_name(), attempt.payload_name),
+                    severity: severity.to_string(),
+                    category: Some(env.category_name.into()),
+                    description: Some(verdict.summary.clone()),
+                    evidence_json: Some(finding_evidence_json(
+                        env.endpoint_url,
+                        env.method,
+                        env.body_template,
+                        env.request_headers,
+                        &attempt,
+                        &verdict.summary,
+                        verdict.confidence,
+                        if verdict.evidence.is_empty() {
+                            &eval.indicators
+                        } else {
+                            &verdict.evidence
+                        },
+                        &judge_json,
+                        env.provider,
+                    )),
+                    status: None,
+                })
+                .await
+                .map_err(CommandError::from)?;
+            let finding_dto = FindingDto::from(finding);
+            accum.created_findings.push(finding_dto.clone());
+            if let Some(emitter) = env.progress {
+                emitter.detailed(
+                    ScanProgressLevel::Info,
+                    emitter
+                        .event(ScanProgressLevel::Info, "Saved finding")
+                        .endpoint(env.endpoint_url)
+                        .finding_id(&finding_dto.id),
+                );
+            }
         }
     }
 
@@ -876,6 +901,34 @@ async fn park_at_batch_checkpoint(
     wait_if_job_paused(controls).await;
 }
 
+async fn persist_interrupt_checkpoint(
+    controls: &ScanJobControls,
+    checkpoint: ScanBatchCheckpoint,
+    repos: &Repositories,
+    scan_id: &str,
+    progress_state: Option<&Arc<Mutex<ScanProgress>>>,
+) {
+    let checkpoint_for_db = checkpoint.clone();
+    *controls.batch_checkpoint.lock().unwrap() = Some(checkpoint);
+
+    let progress_snapshot = progress_state.and_then(|progress_state| {
+        progress_state.lock().ok().map(|progress| progress.clone())
+    });
+
+    if let Some(progress) = progress_snapshot.as_ref() {
+        let _ = persist_scan_playbook_state(
+            repos,
+            scan_id,
+            Some(progress),
+            Some(Some(&checkpoint_for_db)),
+        )
+        .await;
+    } else {
+        let _ = persist_scan_playbook_state(repos, scan_id, None, Some(Some(&checkpoint_for_db)))
+            .await;
+    }
+}
+
 async fn execute_category_then_judge(
     executor: AttackExecutor<crate::plugin_transport::PluginAwareTransport>,
     category: AttackCategory,
@@ -889,7 +942,19 @@ async fn execute_category_then_judge(
         let (attempts, judge_start) = if let Some(ctrl) = env.job_controls {
             let restored_checkpoint = {
                 let mut guard = ctrl.batch_checkpoint.lock().unwrap();
-                guard.take()
+                let matches_category = match guard.as_ref() {
+                    Some(ScanBatchCheckpoint::PendingJudge { category, .. })
+                    | Some(ScanBatchCheckpoint::JudgingPartial { category, .. }) => {
+                        category == &category_label
+                            || category.eq_ignore_ascii_case(&category_label)
+                    }
+                    None => false,
+                };
+                if matches_category {
+                    guard.take()
+                } else {
+                    None
+                }
             };
             if let Some(checkpoint) = restored_checkpoint {
                 match checkpoint {
@@ -911,6 +976,19 @@ async fn execute_category_then_judge(
                 )
                 .await?;
                 if ctrl.cancel.load(Ordering::Relaxed) {
+                    if !collected.is_empty() {
+                        persist_interrupt_checkpoint(
+                            ctrl,
+                            ScanBatchCheckpoint::PendingJudge {
+                                category: category_label.to_string(),
+                                attempts: collected.clone(),
+                            },
+                            env.repos,
+                            env.scan_id,
+                            env.progress_state,
+                        )
+                        .await;
+                    }
                     return Ok(category_result_from_accum(&accum));
                 }
                 if ctrl.pause_requested.load(Ordering::Relaxed) {
@@ -990,6 +1068,18 @@ async fn execute_category_then_judge(
             if let Some(ctrl) = env.job_controls {
                 wait_if_job_paused(ctrl).await;
                 if ctrl.cancel.load(Ordering::Relaxed) {
+                    persist_interrupt_checkpoint(
+                        ctrl,
+                        ScanBatchCheckpoint::JudgingPartial {
+                            category: category_label.to_string(),
+                            attempts: attempts.clone(),
+                            next_judge_index: seq,
+                        },
+                        env.repos,
+                        env.scan_id,
+                        env.progress_state,
+                    )
+                    .await;
                     return Ok(category_result_from_accum(&accum));
                 }
             }

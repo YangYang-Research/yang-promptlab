@@ -16,6 +16,8 @@ export function scanOpenActionIcon(label: string): ReactNode {
       return <IconProgress />;
     case "Retry Scan":
       return <IconRefresh />;
+    case "Change Attack Plan":
+      return <IconArrowRight />;
     default:
       return <IconExternalLink />;
   }

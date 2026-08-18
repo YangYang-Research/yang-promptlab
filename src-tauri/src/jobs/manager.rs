@@ -14,12 +14,17 @@ pub struct ScanProgress {
     pub current_test: Option<String>,
     pub completed: u64,
     pub total: u64,
-    /// Attack-plan categories fully finished (attack + judge) in the current scan.
+    /// Count of categories that finished attack + judge successfully.
+    /// Equals `categories_succeeded.len()` on current runs; legacy playbooks may
+    /// still count failed slots here.
     #[serde(default)]
     pub categories_completed: u64,
-    /// Category ids that finished with an error (still counted in categories_completed).
+    /// Category ids that finished with an error (not counted in `categories_succeeded`).
     #[serde(default)]
     pub categories_failed: Vec<String>,
+    /// Category ids that finished attack + judge successfully. Used to skip on Retry Scan.
+    #[serde(default)]
+    pub categories_succeeded: Vec<String>,
     pub findings: u64,
     pub started_at: Option<String>,
     #[serde(default)]
@@ -58,6 +63,7 @@ impl ScanProgress {
             total,
             categories_completed: 0,
             categories_failed: Vec::new(),
+            categories_succeeded: Vec::new(),
             findings: 0,
             started_at: Some(
                 OffsetDateTime::now_utc()
@@ -106,6 +112,19 @@ impl ScanProgress {
         if phase_key.is_empty() {
             return;
         }
+        // Preparing / Generate run once for the whole scan. Later categories (and
+        // Retry continue) must not append a second Generate node.
+        if matches!(phase_key.as_str(), "preparing" | "generate")
+            && self.phase_trail.iter().any(|entry| {
+                entry
+                    .split('|')
+                    .next()
+                    .unwrap_or(entry)
+                    .eq_ignore_ascii_case(&phase_key)
+            })
+        {
+            return;
+        }
         let entry = match category.map(str::trim).filter(|s| !s.is_empty()) {
             Some(cat) if matches!(phase_key.as_str(), "attack" | "judge") => {
                 format!("{phase_key}|{cat}")
@@ -122,6 +141,38 @@ impl ScanProgress {
         }
     }
 
+    /// Update live phase + trail. Does not rewind current_phase to a singleton
+    /// stage (preparing/generate) that already ran.
+    pub fn apply_phase(
+        &mut self,
+        phase: &str,
+        category: Option<&str>,
+        attempt: Option<u32>,
+        retry: Option<u32>,
+    ) {
+        let phase_key = phase.trim().to_ascii_lowercase();
+        let singleton = matches!(phase_key.as_str(), "preparing" | "generate");
+        let already = self.phase_trail.iter().any(|entry| {
+            entry
+                .split('|')
+                .next()
+                .unwrap_or(entry)
+                .eq_ignore_ascii_case(&phase_key)
+        });
+        self.push_phase_with_category(phase, category);
+        if singleton && already {
+            return;
+        }
+        if !phase_key.is_empty() {
+            self.current_phase = Some(phase_key);
+        }
+        if let Some(label) = category.map(str::trim).filter(|s| !s.is_empty()) {
+            self.current_test = Some(label.to_string());
+        }
+        self.current_attempt = attempt;
+        self.current_retry = retry;
+    }
+
     /// Map finished HTTP requests to enabled test cases (ceil), capped at total.
     pub fn sync_testcases_completed(&mut self) {
         if self.attacks_total == 0 || self.testcases_total == 0 {
@@ -130,6 +181,36 @@ impl ScanProgress {
         let scaled = self.attacks_completed.saturating_mul(self.testcases_total);
         let completed = (scaled + self.attacks_total - 1) / self.attacks_total;
         self.testcases_completed = completed.min(self.testcases_total);
+    }
+
+    /// Skip this category on continue/retry. Failed and never-started categories are rerun.
+    pub fn should_skip_category(&self, category_id: &str, index: usize) -> bool {
+        if self.categories_succeeded.iter().any(|id| id == category_id) {
+            return true;
+        }
+        if self.categories_failed.iter().any(|id| id == category_id) {
+            return false;
+        }
+        if !self.categories_succeeded.is_empty() {
+            return false;
+        }
+        (index as u64) < self.categories_completed
+    }
+
+    pub fn mark_category_success(&mut self, category_id: &str) {
+        self.categories_failed.retain(|id| id != category_id);
+        if !self.categories_succeeded.iter().any(|id| id == category_id) {
+            self.categories_succeeded.push(category_id.to_string());
+        }
+        self.categories_completed = self.categories_succeeded.len() as u64;
+    }
+
+    pub fn mark_category_failure(&mut self, category_id: &str) {
+        self.categories_succeeded.retain(|id| id != category_id);
+        if !self.categories_failed.iter().any(|id| id == category_id) {
+            self.categories_failed.push(category_id.to_string());
+        }
+        self.categories_completed = self.categories_succeeded.len() as u64;
     }
 }
 
@@ -326,6 +407,59 @@ mod tests {
         progress.attacks_completed = 1200;
         progress.sync_testcases_completed();
         assert_eq!(progress.testcases_completed, 12);
+    }
+
+    #[test]
+    fn skip_succeeded_and_rerun_failed_in_the_middle() {
+        let mut progress = ScanProgress::new(3);
+        progress.mark_category_success("prompt_injection");
+        progress.mark_category_failure("jailbreak");
+        progress.mark_category_success("system_prompt_extraction");
+
+        assert!(progress.should_skip_category("prompt_injection", 0));
+        assert!(!progress.should_skip_category("jailbreak", 1));
+        assert!(progress.should_skip_category("system_prompt_extraction", 2));
+        assert_eq!(progress.categories_completed, 2);
+        assert_eq!(
+            progress.categories_succeeded,
+            vec!["prompt_injection", "system_prompt_extraction"]
+        );
+        assert_eq!(progress.categories_failed, vec!["jailbreak"]);
+    }
+
+    #[test]
+    fn generate_phase_appears_once_in_the_trail() {
+        let mut progress = ScanProgress::new(4);
+        progress.apply_phase("preparing", None, None, None);
+        progress.apply_phase("generate", Some("all categories"), None, None);
+        progress.apply_phase("attack", Some("Prompt Injection"), Some(1), None);
+        progress.apply_phase("judge", Some("Prompt Injection"), Some(1), None);
+        progress.apply_phase("generate", Some("all categories"), None, None);
+        progress.apply_phase("attack", Some("Jailbreak"), Some(1), None);
+
+        assert_eq!(
+            progress.phase_trail,
+            vec![
+                "preparing",
+                "generate",
+                "attack|Prompt Injection",
+                "judge|Prompt Injection",
+                "attack|Jailbreak",
+            ]
+        );
+        assert_eq!(progress.current_phase.as_deref(), Some("attack"));
+        assert_eq!(progress.current_test.as_deref(), Some("Jailbreak"));
+    }
+
+    #[test]
+    fn legacy_skip_uses_completed_cursor_when_succeeded_empty() {
+        let mut progress = ScanProgress::new(3);
+        progress.categories_completed = 3;
+        progress.categories_failed = vec!["jailbreak".into()];
+
+        assert!(progress.should_skip_category("prompt_injection", 0));
+        assert!(!progress.should_skip_category("jailbreak", 1));
+        assert!(progress.should_skip_category("system_prompt_extraction", 2));
     }
 
     #[test]

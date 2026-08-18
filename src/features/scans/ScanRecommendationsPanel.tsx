@@ -3,8 +3,8 @@ import { useNavigate } from "react-router-dom";
 
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import {
+  buildScanChangePlanUrl,
   buildScanRetryUrl,
-  buildScanStartAttackUrl,
 } from "@/features/scans/wizardState";
 import { Badge, Button, YazgBadge } from "@/shared/components";
 import { IconAi } from "@/shared/components/Icons";
@@ -39,12 +39,12 @@ type ScanRecommendationsPanelProps = {
   showReRecommend?: boolean;
   /** `details` uses the Scan Details editorial layout; `wizard` keeps the compact step-6 style. */
   variant?: "wizard" | "details";
-  /** Required for Retry Scan / Start Attack navigation from Scan Details. */
+  /** Required for Retry Scan / Change Attack Plan navigation from Scan Details. */
   projectId?: string;
   targetId?: string | null;
   /** In-wizard overrides (avoid full navigation). */
   onRetryScan?: () => void;
-  onStartAttack?: () => void;
+  onChangeAttackPlan?: () => void;
   /**
    * When scan status / findings change, remount reload so the backend can
    * regenerate if its fingerprint is stale.
@@ -63,7 +63,7 @@ export function ScanRecommendationsPanel({
   projectId,
   targetId,
   onRetryScan,
-  onStartAttack,
+  onChangeAttackPlan,
   revision = "",
 }: ScanRecommendationsPanelProps) {
   const navigate = useNavigate();
@@ -134,25 +134,25 @@ export function ScanRecommendationsPanel({
     navigate(buildScanRetryUrl(projectId, scanId, targetId));
   }
 
-  function handleStartAttack() {
-    if (onStartAttack) {
-      onStartAttack();
+  function handleChangeAttackPlan() {
+    if (onChangeAttackPlan) {
+      onChangeAttackPlan();
       return;
     }
     if (!projectId) return;
-    navigate(buildScanStartAttackUrl(projectId, scanId, targetId));
+    navigate(buildScanChangePlanUrl(projectId, scanId, targetId));
   }
 
   function renderActionButtons(item: AttackRecommendationDto) {
     if (!isActionRecommendation(item)) return null;
-    if (!onRetryScan && !onStartAttack && !projectId) return null;
+    if (!onRetryScan && !onChangeAttackPlan && !projectId) return null;
     return (
       <div className="scan-rec__actions">
         <Button variant="primary" size="sm" onClick={handleRetryScan}>
           Retry Scan
         </Button>
-        <Button variant="secondary" size="sm" onClick={handleStartAttack}>
-          Start Attack
+        <Button variant="secondary" size="sm" onClick={handleChangeAttackPlan}>
+          Change Attack Plan
         </Button>
       </div>
     );

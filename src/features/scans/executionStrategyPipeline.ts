@@ -32,7 +32,7 @@ const PHASE_META: Record<string, { label: string; description: string }> = {
     description: "Warm up the attack monitor before the first probe",
   },
   generate: {
-    label: "Generate",
+    label: "Generate · Payload",
     description: "Build or load payloads for the active category",
   },
   attack: {
@@ -71,6 +71,11 @@ export function executionStrategySteps(
   if (plan.executionStrategy === "sequential") {
     return [
       {
+        id: "preparing",
+        label: PHASE_META.preparing.label,
+        description: PHASE_META.preparing.description,
+      },
+      {
         id: "generate",
         label: PHASE_META.generate.label,
         description: PHASE_META.generate.description,
@@ -89,6 +94,11 @@ export function executionStrategySteps(
   }
 
   const steps: ExecutionStrategyStep[] = [
+    {
+      id: "preparing",
+      label: PHASE_META.preparing.label,
+      description: PHASE_META.preparing.description,
+    },
     {
       id: "generate",
       label: PHASE_META.generate.label,
@@ -190,6 +200,15 @@ export function resolvePhaseTrail(status: ScanStatusDto | null | undefined): str
     return trail;
   }
 
+  // Preparing / Generate are scan-level stages — don't append a second node when
+  // Retry or the next category briefly reports current_phase=generate.
+  if (
+    (current === "preparing" || current === "generate") &&
+    trail.some((entry) => parsePhaseTrailEntry(entry).phase === current)
+  ) {
+    return trail;
+  }
+
   if (
     (current === "attack" || current === "judge") &&
     status.current_test?.trim()
@@ -203,7 +222,7 @@ export function resolvePhaseTrail(status: ScanStatusDto | null | undefined): str
 
 /**
  * Live pipeline: only stages that have actually run, in order.
- * Example: Generate → Attack · Jailbreak → Recover → Attack · Jailbreak → Judge · Jailbreak
+ * Example: Generate · Payload → Attack · Jailbreak → Recover → Attack · Jailbreak → Judge · Jailbreak
  */
 export function resolveExecutionTrail(
   status: ScanStatusDto | null | undefined,

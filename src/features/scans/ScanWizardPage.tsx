@@ -128,7 +128,7 @@ export function ScanWizardPage() {
   const [scanSubmitError, setScanSubmitError] = useState<string | null>(null);
   const [persistingTarget, setPersistingTarget] = useState(false);
   const [startingScan, setStartingScan] = useState(false);
-  const [consoleResetKey, setConsoleResetKey] = useState(0);
+  const [consoleResetKey] = useState(0);
   const [plannerGenerating, setPlannerGenerating] = useState(false);
   const [plannerReplanning, setPlannerReplanning] = useState(false);
   const [plannerError, setPlannerError] = useState<string | null>(null);
@@ -1339,7 +1339,7 @@ export function ScanWizardPage() {
     const activityLabel = options?.retryFailedOnly
       ? "Retrying failed categories…"
       : options?.restart
-        ? "Restarting attack…"
+        ? "Continuing attack…"
         : "Starting attack…";
     logWizardEvent({
       activityName: "wizard_attack_start",
@@ -1371,9 +1371,6 @@ export function ScanWizardPage() {
       });
       await actions.refresh();
       updateSession({ submittedScanId: result.scan_id, currentStep: 5 });
-      if (options?.restart && !options?.retryFailedOnly) {
-        setConsoleResetKey((key) => key + 1);
-      }
       logWizardEvent({
         activityName: "wizard_attack_started",
         message: options?.retryFailedOnly
@@ -1386,7 +1383,7 @@ export function ScanWizardPage() {
         options?.retryFailedOnly
           ? "Retrying failed categories"
           : options?.restart
-            ? "Attack restarted"
+            ? "Continuing scan from last incomplete stage"
             : "Attack started in the background",
         "success",
       );
@@ -1410,6 +1407,10 @@ export function ScanWizardPage() {
   async function handleRetryScan() {
     if (!store.savedTarget || !session.attackPlan) return;
     await submitScanJob({ restart: true });
+  }
+
+  function handleChangeAttackPlan() {
+    updateSession({ currentStep: 4, submittedScanId: null });
   }
 
   async function handleRetryFailedCategories() {
@@ -1609,11 +1610,9 @@ export function ScanWizardPage() {
             scanId={session.submittedScanId}
             attackCategories={session.attackPlan?.categories}
             onRetryScan={() => {
-              updateSession({ currentStep: 4 });
-            }}
-            onStartAttack={() => {
               void handleRetryScan();
             }}
+            onChangeAttackPlan={handleChangeAttackPlan}
           />
         ) : (
           <p className="text-muted">Submit a scan in step 5 to review results.</p>
@@ -1766,13 +1765,22 @@ export function ScanWizardPage() {
               </Button>
             )}
             {showRetryScan && (
-              <Button
-                variant="primary"
-                disabled={startingScan}
-                onClick={() => void handleRetryScan()}
-              >
-                {startingScan ? "Retrying…" : "Retry Attack"}
-              </Button>
+              <>
+                <Button
+                  variant="secondary"
+                  disabled={startingScan}
+                  onClick={handleChangeAttackPlan}
+                >
+                  Change Attack Plan
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={startingScan}
+                  onClick={() => void handleRetryScan()}
+                >
+                  {startingScan ? "Retrying…" : "Retry Scan"}
+                </Button>
+              </>
             )}
             {showDone && (
               <Button variant="primary" onClick={handleCancel}>

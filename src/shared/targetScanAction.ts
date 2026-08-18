@@ -140,7 +140,7 @@ export function resolveTargetScanAction(
     latestAttack &&
     (latestAttack.status === "failed" || latestAttack.status === "cancelled")
   ) {
-    return { kind: "retry", scanId: latestAttack.id, step: 4 };
+    return { kind: "retry", scanId: latestAttack.id, step: 5 };
   }
 
   if (activeSession && isWizardSetupIncomplete(activeSession, targetId, projectId)) {

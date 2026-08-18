@@ -73,7 +73,7 @@ export function ExecutionStrategyPipeline({
         </p>
       ) : (
         <p className="text-sm text-muted">
-          Stages appear as the attack runs — e.g. Generate → Attack · Jailbreak → Judge · Jailbreak.
+          Stages appear as the attack runs — e.g. Preparing → Generate · Payload → Attack · Jailbreak → Judge · Jailbreak.
         </p>
       )}
 

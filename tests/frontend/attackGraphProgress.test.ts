@@ -127,4 +127,29 @@ describe("attack graph progress", () => {
     expect(states.get("jailbreak")).toBe("failed");
     expect(states.get("system_prompt_extraction")).toBe("pending");
   });
+
+  it("marks later succeeded categories done when a middle category failed", () => {
+    const states = resolveAttackGraphStates([...categories], {
+      scan_id: "scan-1",
+      status: "failed",
+      progress_percent: 80,
+      completed: 24,
+      total: 30,
+      categories_completed: 2,
+      categories_failed: ["jailbreak"],
+      categories_succeeded: ["prompt_injection", "system_prompt_extraction"],
+      findings_count: 2,
+      current_endpoint: null,
+      current_test: null,
+      current_phase: null,
+      started_at: null,
+      agent_mode: false,
+      current_attempt: null,
+      current_retry: null,
+    });
+
+    expect(states.get("prompt_injection")).toBe("done");
+    expect(states.get("jailbreak")).toBe("failed");
+    expect(states.get("system_prompt_extraction")).toBe("done");
+  });
 });

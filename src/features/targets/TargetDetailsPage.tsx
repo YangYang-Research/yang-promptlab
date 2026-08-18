@@ -19,13 +19,16 @@ import {
   PageHeader,
   PageLoadingSkeleton,
   Pagination,
+  scanOpenActionIcon,
   StatusBadge,
   TargetScanStatusBadge,
 } from "@/shared/components";
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import { targetDisplayType } from "@/features/scans/targetProfile";
 import {
+  buildScanChangePlanUrl,
   buildScanProgressUrl,
+  buildScanRetryUrl,
   buildScanWizardUrl,
   clearWizardSession,
   peekWizardSession,
@@ -206,6 +209,18 @@ export function TargetDetailsPage() {
       });
     }
 
+    if (scanAction.kind === "retry") {
+      items.push({
+        id: "change-plan",
+        label: "Change Attack Plan",
+        icon: scanOpenActionIcon("Change Attack Plan"),
+        onClick: () =>
+          navigate(
+            buildScanChangePlanUrl(target.projectId, scanAction.scanId, target.id),
+          ),
+      });
+    }
+
     // Keep New Scan available when primary CTA is Progress / Retry — not while
     // the target is still Pending (Continue Setup is the only path).
     if (
@@ -270,10 +285,7 @@ export function TargetDetailsPage() {
             label: "Retry Scan",
             onClick: () =>
               navigate(
-                buildScanWizardUrl(target.projectId, target.id, {
-                  step: scanAction.step,
-                  scanId: scanAction.scanId,
-                }),
+                buildScanRetryUrl(target.projectId, scanAction.scanId, target.id),
               ),
           }
         : scanAction?.kind === "setup" || target.status === "pending"

@@ -28,7 +28,7 @@ use crate::session_auth::{build_attack_runtime_parts, fallback_attack_runtime, s
 use crate::commands::target_profile::parse_target_profile;
 use crate::dto::{ScanStartDto, ScanStatusDto};
 use crate::error::{CommandError, CommandResult};
-use crate::jobs::{ScanBatchCheckpoint, ScanJobManager, ScanProgress};
+use crate::jobs::{ScanJobManager, ScanProgress};
 use crate::scan_console_log;
 use crate::scan_playbook::{
     checkpoint_from_playbook, persist_playbook_progress, persist_scan_playbook_state,
@@ -45,6 +45,35 @@ fn parse_category(value: &str) -> Option<AttackCategory> {
 
 fn is_restartable_scan_status(status: &str) -> bool {
     matches!(status, "failed" | "cancelled" | "stopped" | "completed")
+}
+
+fn prepare_restored_progress(mut restored: ScanProgress) -> ScanProgress {
+    restored.status = "running".into();
+    restored.pause_pending = false;
+    restored.current_phase = None;
+    restored.current_attempt = None;
+    restored.current_retry = None;
+    restored.current_endpoint = None;
+    restored.current_test = None;
+    restored
+}
+
+/// Populate `categories_succeeded` from legacy playbooks that only stored a completed cursor.
+fn backfill_succeeded_categories(progress: &mut ScanProgress, category_ids: &[String]) {
+    if !progress.categories_succeeded.is_empty() {
+        return;
+    }
+    for (index, id) in category_ids.iter().enumerate() {
+        if progress.categories_failed.iter().any(|failed| failed == id) {
+            continue;
+        }
+        if (index as u64) < progress.categories_completed {
+            progress.categories_succeeded.push(id.clone());
+        }
+    }
+    if !progress.categories_succeeded.is_empty() {
+        progress.categories_completed = progress.categories_succeeded.len() as u64;
+    }
 }
 
 fn is_interrupted_scan_status(status: &str) -> bool {
@@ -120,7 +149,7 @@ async fn mark_scan_interrupted(
             progress.insert("current_endpoint".into(), serde_json::Value::Null);
             progress.insert("current_test".into(), serde_json::Value::Null);
         }
-        obj.remove("batch_checkpoint");
+        // Keep batch_checkpoint so Retry Scan can resume judge mid-category.
     }
 
     repos
@@ -220,6 +249,7 @@ fn progress_to_dto(scan_id: &str, progress: &ScanProgress) -> ScanStatusDto {
         total: progress.total,
         categories_completed: progress.categories_completed,
         categories_failed: progress.categories_failed.clone(),
+        categories_succeeded: progress.categories_succeeded.clone(),
         attacks_completed: progress.attacks_completed,
         attacks_total: progress.attacks_total,
         testcases_completed: progress.testcases_completed,
@@ -454,8 +484,26 @@ async fn run_scan_job(
     }
 
     let snapshot = progress.lock().ok().map(|guard| guard.clone());
+    let checkpoint = job_controls.as_ref().and_then(|controls| {
+        controls
+            .batch_checkpoint
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+    });
     if let Some(snapshot) = snapshot {
-        let _ = persist_scan_playbook_state(&repos, &scan_id, Some(&snapshot), Some(None)).await;
+        let clear_checkpoint = final_status == "completed";
+        let _ = persist_scan_playbook_state(
+            &repos,
+            &scan_id,
+            Some(&snapshot),
+            Some(if clear_checkpoint {
+                None
+            } else {
+                checkpoint.as_ref()
+            }),
+        )
+        .await;
     }
 
     jobs.remove(&scan_id);
@@ -572,14 +620,8 @@ pub async fn scan_start_op(
             }
         }
 
-        let mut restored = progress;
-        restored.status = "running".into();
-        restored.pause_pending = false;
-        restored.current_phase = None;
-        restored.current_attempt = None;
-        restored.current_retry = None;
-        restored.current_endpoint = None;
-        restored.current_test = None;
+        let mut restored = prepare_restored_progress(progress);
+        backfill_succeeded_categories(&mut restored, &playbook_categories);
         seeded_progress = Some(restored);
     } else {
         job_categories = categories
@@ -652,6 +694,7 @@ pub async fn scan_start_op(
     };
 
     let mut clear_console_log = false;
+    let mut continue_from_progress = false;
     let scan = if let Some(draft_id) = draft_scan_id.filter(|id| !id.trim().is_empty()) {
         let existing = repos
             .scans()
@@ -664,11 +707,16 @@ pub async fn scan_start_op(
 
         let is_draft = existing.status == crate::commands::wizard_scan::WIZARD_SCAN_STATUS;
         let is_restart = is_restartable_scan_status(&existing.status);
+        let existing_progress = progress_from_playbook(existing.playbook_json.as_deref());
+        let running_without_job = !is_draft
+            && existing.status == "running"
+            && !state.jobs().contains(&draft_id);
+        continue_from_progress = !retry_failed_only
+            && existing_progress.is_some()
+            && (is_restart || running_without_job);
         clear_console_log = !retry_failed_only
-            && (is_restart
-                || (!is_draft
-                    && existing.status == "running"
-                    && !state.jobs().contains(&draft_id)));
+            && !continue_from_progress
+            && (is_restart || running_without_job);
         if is_restart || retry_failed_only {
             execution_config.pipeline_warmup_secs = 0;
         }
@@ -693,7 +741,17 @@ pub async fn scan_start_op(
             warn!(scan_id = %draft_id, "restarting scan marked running without active job");
         }
 
-        let clear_progress = is_restart && !retry_failed_only;
+        if continue_from_progress {
+            if seeded_progress.is_none() {
+                if let Some(progress) = existing_progress {
+                    let mut restored = prepare_restored_progress(progress);
+                    backfill_succeeded_categories(&mut restored, &playbook_categories);
+                    seeded_progress = Some(restored);
+                }
+            }
+        }
+
+        let clear_progress = is_restart && !retry_failed_only && !continue_from_progress;
         let playbook = merge_scan_execution_playbook(
             existing.playbook_json.as_deref(),
             &mut execution_playbook,
@@ -705,9 +763,11 @@ pub async fn scan_start_op(
             name: Some(scan_name.clone()),
             status: Some("running".into()),
             playbook_json: Some(playbook),
-            started_at: Some(Some(OffsetDateTime::now_utc())),
             ..Default::default()
         };
+        if !continue_from_progress && !retry_failed_only {
+            update.started_at = Some(Some(OffsetDateTime::now_utc()));
+        }
         if is_restart || retry_failed_only {
             update.completed_at = Some(None);
         }
@@ -761,7 +821,8 @@ pub async fn scan_start_op(
     let cancel = Arc::new(AtomicBool::new(false));
     let paused = Arc::new(AtomicBool::new(false));
     let pause_requested = Arc::new(AtomicBool::new(false));
-    let batch_checkpoint = Arc::new(Mutex::new(None::<ScanBatchCheckpoint>));
+    let restored_checkpoint = checkpoint_from_playbook(scan.playbook_json.as_deref());
+    let batch_checkpoint = Arc::new(Mutex::new(restored_checkpoint));
     let progress_state = if let Some(mut seeded) = seeded_progress {
         if seeded.total == 0 {
             seeded.total = total.max(1);
@@ -818,6 +879,11 @@ pub async fn scan_start_op(
             "Retrying failed categories only: {}",
             failed_labels.join(", ")
         ));
+    } else if continue_from_progress {
+        let emitter = ScanProgressEmitter::new(app.clone(), scan.id.clone());
+        emitter.info(
+            "Continuing scan from last incomplete stage (skipping succeeded categories)",
+        );
     }
 
     tauri::async_runtime::spawn(async move {
@@ -853,6 +919,7 @@ pub async fn scan_start_op(
         total_units = total,
         agentic = agentic,
         retry_failed_only,
+        continue_from_progress,
         "scan started in background"
     );
     Ok(ScanStartDto {
@@ -974,6 +1041,7 @@ async fn spawn_resumed_scan_job(
     progress_state.testcases_total = testcases_total;
     progress_state.completed = progress_state.completed.min(progress_state.total);
     progress_state.sync_testcases_completed();
+    backfill_succeeded_categories(&mut progress_state, &params.categories);
 
     let checkpoint = checkpoint_from_playbook(Some(playbook_json));
     let target_id = scan
@@ -1116,6 +1184,7 @@ async fn scan_status_from_db(
         total: 0,
         categories_completed: 0,
         categories_failed: Vec::new(),
+        categories_succeeded: Vec::new(),
         attacks_completed: 0,
         attacks_total: 0,
         testcases_completed: 0,
@@ -1343,6 +1412,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn backfill_succeeded_from_legacy_completed_cursor() {
+        let mut progress = ScanProgress::new(3);
+        progress.categories_completed = 3;
+        progress.categories_failed = vec!["jailbreak".into()];
+        backfill_succeeded_categories(
+            &mut progress,
+            &[
+                "prompt_injection".into(),
+                "jailbreak".into(),
+                "system_prompt_extraction".into(),
+            ],
+        );
+        assert_eq!(
+            progress.categories_succeeded,
+            vec!["prompt_injection", "system_prompt_extraction"]
+        );
+        assert_eq!(progress.categories_completed, 2);
+        assert!(progress.should_skip_category("prompt_injection", 0));
+        assert!(!progress.should_skip_category("jailbreak", 1));
+        assert!(progress.should_skip_category("system_prompt_extraction", 2));
+    }
+
+    #[test]
     fn restartable_scan_statuses_include_terminal_states() {
         assert!(is_restartable_scan_status("failed"));
         assert!(is_restartable_scan_status("cancelled"));
@@ -1391,5 +1483,33 @@ mod tests {
             execution["wizard_snapshot"],
             serde_json::json!({ "step": 4 })
         );
+    }
+
+    #[test]
+    fn merge_scan_execution_playbook_keeps_progress_on_continue() {
+        let existing = serde_json::json!({
+            "wizard": { "step": 4 },
+            "progress": {
+                "status": "failed",
+                "categories_completed": 2,
+                "categories_succeeded": ["prompt_injection"],
+                "categories_failed": ["jailbreak"]
+            },
+            "batch_checkpoint": { "kind": "pending_judge" }
+        });
+        let mut execution = serde_json::json!({
+            "profile": "standard",
+            "categories": ["prompt_injection"]
+        });
+
+        let merged = merge_scan_execution_playbook(
+            Some(&existing.to_string()),
+            &mut execution,
+            false,
+        );
+
+        assert!(merged.get("progress").is_some());
+        assert!(merged.get("batch_checkpoint").is_some());
+        assert_eq!(merged["wizard"], serde_json::json!({ "step": 4 }));
     }
 }

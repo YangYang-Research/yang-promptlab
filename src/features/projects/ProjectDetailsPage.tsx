@@ -30,7 +30,9 @@ import {
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import { NewScanChooserModal } from "@/features/scans/NewScanChooserModal";
 import {
+  buildScanChangePlanUrl,
   buildScanProgressUrl,
+  buildScanRetryUrl,
   buildScanWizardUrl,
   clearWizardSession,
   peekWizardSession,
@@ -619,12 +621,14 @@ function TargetActionsDropdown({
         label: "Retry Scan",
         icon: <IconRefresh />,
         onClick: () =>
-          onNavigate(
-            buildScanWizardUrl(projectId, target.id, {
-              step: action.step,
-              scanId: action.scanId,
-            }),
-          ),
+          onNavigate(buildScanRetryUrl(projectId, action.scanId, target.id)),
+      });
+      scanItems.push({
+        id: "change-plan",
+        label: "Change Attack Plan",
+        icon: <IconArrowRight />,
+        onClick: () =>
+          onNavigate(buildScanChangePlanUrl(projectId, action.scanId, target.id)),
       });
     } else if (action.kind !== "view_report") {
       scanItems.push({

@@ -109,6 +109,7 @@ export type ScanStatusDto = {
   total: number;
   categories_completed?: number;
   categories_failed?: string[];
+  categories_succeeded?: string[];
   attacks_completed?: number;
   attacks_total?: number;
   testcases_completed?: number;
