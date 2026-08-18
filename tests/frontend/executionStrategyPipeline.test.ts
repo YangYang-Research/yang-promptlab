@@ -54,6 +54,24 @@ describe("executionStrategySteps", () => {
       "retry",
     ]);
   });
+
+  it("still shows reflection for agentic even when LLM reflection is off", () => {
+    const steps = executionStrategySteps({
+      executionStrategy: "agentic",
+      reflectionEnabled: false,
+      adaptivePlanning: false,
+      maxAttempts: 3,
+    });
+    expect(steps.map((step) => step.id)).toContain("reflection");
+    expect(steps.map((step) => step.id)).not.toEqual(
+      executionStrategySteps({
+        executionStrategy: "sequential",
+        reflectionEnabled: false,
+        adaptivePlanning: false,
+        maxAttempts: 1,
+      }).map((step) => step.id),
+    );
+  });
 });
 
 describe("resolveExecutionTrail", () => {
@@ -81,6 +99,25 @@ describe("resolveExecutionTrail", () => {
       "done",
       "active",
     ]);
+  });
+
+  it("shows reflection as its own live stage for agentic runs", () => {
+    const trail = resolveExecutionTrail(
+      status({
+        agent_mode: true,
+        phase_trail: ["generate", "attack|Jailbreak", "judge|Jailbreak", "reflection"],
+        current_phase: "reflection",
+        current_test: "Jailbreak",
+      }),
+    );
+    expect(trail.map((step) => step.label)).toEqual([
+      "Preparing",
+      "Generate · Payload",
+      "Attack · Jailbreak",
+      "Judge · Jailbreak",
+      "Reflection",
+    ]);
+    expect(trail[trail.length - 1]?.state).toBe("active");
   });
 
   it("labels attack and judge stages with category names from the trail", () => {

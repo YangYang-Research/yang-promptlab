@@ -6,6 +6,7 @@ import {
 } from "@/features/scans/attackPlan";
 import {
   executionPipelineLiveDetail,
+  executionStrategySteps,
   phaseLabel,
   resolveExecutionTrail,
   type ExecutionStepState,
@@ -30,6 +31,7 @@ export function ExecutionStrategyPipeline({
   status = null,
   compact = false,
 }: ExecutionStrategyPipelineProps) {
+  const plannedSteps = useMemo(() => executionStrategySteps(attackPlan), [attackPlan]);
   const liveTrail = useMemo(() => resolveExecutionTrail(status), [status]);
   const liveDetail = executionPipelineLiveDetail(status);
   const hasLiveStatus = Boolean(status && status.status !== "draft");
@@ -72,9 +74,28 @@ export function ExecutionStrategyPipeline({
             : "Waiting for the first pipeline stage…"}
         </p>
       ) : (
-        <p className="text-sm text-muted">
-          Stages appear as the attack runs — e.g. Preparing → Generate · Payload → Attack · Jailbreak → Judge · Jailbreak.
-        </p>
+        <ol
+          className={`wizard-execution-pipeline${compact ? " wizard-execution-pipeline--compact" : ""}`}
+        >
+          {plannedSteps.map((step, index) => (
+            <li
+              key={step.id}
+              className="wizard-execution-pipeline__step wizard-execution-pipeline__step--pending"
+            >
+              <span className="wizard-execution-pipeline__marker" aria-hidden>
+                {index + 1}
+              </span>
+              <div className="wizard-execution-pipeline__body">
+                <span className="wizard-execution-pipeline__label">{step.label}</span>
+                {!compact ? (
+                  <span className="wizard-execution-pipeline__description text-sm text-muted">
+                    {step.description}
+                  </span>
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ol>
       )}
 
       {!compact && liveDetail && (

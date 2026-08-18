@@ -267,7 +267,7 @@ describe("attack plan preview", () => {
       maxAttempts: 3,
     });
     expect(preview.estimatedRequests).toBe(base.estimatedRequests * 3);
-    expect(formatExecutionStrategySummary(preview)).toBe("Agentic");
+    expect(formatExecutionStrategySummary(preview)).toBe("Agentic · Reflection · 3 attempts");
   });
 
   it("scales request estimate with maximum payload budget", () => {

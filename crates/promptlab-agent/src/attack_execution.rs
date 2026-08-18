@@ -339,7 +339,7 @@ impl AgenticAttackExecutionAgent {
                call recover to adjust pacing, then attack again with the same payloads.\n\
              - Do not recover solely because successful responses were slow.\n\
              - Never recover before the first attack observation; never recover twice without a new unhealthy attack.\n\
-             - After a healthy attack, call reflect when reflection is enabled (else finish or adapt/retry).\n\
+             - After a healthy attack, always call reflect before finish, adapt, or the next generate.\n\
              - If reflect says retry and attempts remain, call adapt when adaptive_planning is on, then generate again.\n\
              - Stop with a plain-text final reply when done (confirmed finding, no retry, cancel, or max attempts).\n\
              - Never invent HTTP results — only use observations.\n",
@@ -426,37 +426,21 @@ impl AgenticAttackExecutionAgent {
                 )
             };
             // Hard-gate: recover only when unhealthy; never Finish before attack;
-            // never re-attack after high-confidence findings for this attempt.
-            let action = if last_obs.high_confidence_vuln
-                && attacked_for_attempt == Some(attempt)
-                && attempt > 0
-            {
-                if reflected_for_attempt != Some(attempt) {
-                    ExecAction::Reflect
-                } else {
-                    ExecAction::Finish
-                }
-            } else if needs_recover && recoveries_used < MAX_ENDPOINT_RECOVERIES {
-                ExecAction::Recover
-            } else if matches!(action, ExecAction::Recover)
-                || (matches!(action, ExecAction::Finish) && attacked_for_attempt.is_none())
-            {
-                policy_next_action(
-                    request,
-                    attempt,
-                    max_attempts,
-                    generated_for_attempt,
-                    attacked_for_attempt,
-                    reflected_for_attempt,
-                    adapted_after_attempt,
-                    last_reflection.as_ref(),
-                    needs_recover,
-                    recoveries_used,
-                    &last_obs,
-                )
-            } else {
-                action
-            };
+            // never skip Reflection after an attack (LLM often Finish/Generate like sequential).
+            let action = coerce_exec_action(
+                action,
+                request,
+                attempt,
+                max_attempts,
+                generated_for_attempt,
+                attacked_for_attempt,
+                reflected_for_attempt,
+                adapted_after_attempt,
+                last_reflection.as_ref(),
+                needs_recover,
+                recoveries_used,
+                &last_obs,
+            );
 
             emit_and_record(
                 tools,
@@ -480,6 +464,11 @@ impl AgenticAttackExecutionAgent {
                     if next_attempt > max_attempts {
                         stopped_reason = "max_attempts".into();
                         break;
+                    }
+                    if next_attempt > attempt && attempt > 0 {
+                        tools
+                            .set_phase("retry", next_attempt, attempt)
+                            .await;
                     }
                     attempt = next_attempt;
                     let retry = attempt.saturating_sub(1);
@@ -768,9 +757,7 @@ impl AgenticAttackExecutionAgent {
                         continue;
                     }
                     let retry = attempt.saturating_sub(1);
-                    if request.reflection_enabled {
-                        tools.set_phase("reflection", attempt, retry).await;
-                    }
+                    tools.set_phase("reflection", attempt, retry).await;
                     let refl_req = ReflectionRequest {
                         category: request.category.clone(),
                         attempt,
@@ -1053,6 +1040,59 @@ impl AgenticAttackExecutionAgent {
     }
 }
 
+fn coerce_exec_action(
+    action: ExecAction,
+    request: &AttackExecutionRequest,
+    attempt: u32,
+    max_attempts: u32,
+    generated_for_attempt: Option<u32>,
+    attacked_for_attempt: Option<u32>,
+    reflected_for_attempt: Option<u32>,
+    adapted_after_attempt: Option<u32>,
+    last_reflection: Option<&ReflectionOutcome>,
+    needs_recover: bool,
+    recoveries_used: u32,
+    last_obs: &AttackAttemptObservation,
+) -> ExecAction {
+    if last_obs.high_confidence_vuln
+        && attacked_for_attempt == Some(attempt)
+        && attempt > 0
+    {
+        return if reflected_for_attempt != Some(attempt) {
+            ExecAction::Reflect
+        } else {
+            ExecAction::Finish
+        };
+    }
+    if needs_recover && recoveries_used < MAX_ENDPOINT_RECOVERIES {
+        return ExecAction::Recover;
+    }
+    if attacked_for_attempt == Some(attempt)
+        && reflected_for_attempt != Some(attempt)
+        && !matches!(action, ExecAction::Recover)
+    {
+        return ExecAction::Reflect;
+    }
+    if matches!(action, ExecAction::Recover)
+        || (matches!(action, ExecAction::Finish) && attacked_for_attempt.is_none())
+    {
+        return policy_next_action(
+            request,
+            attempt,
+            max_attempts,
+            generated_for_attempt,
+            attacked_for_attempt,
+            reflected_for_attempt,
+            adapted_after_attempt,
+            last_reflection,
+            needs_recover,
+            recoveries_used,
+            last_obs,
+        );
+    }
+    action
+}
+
 fn policy_next_action(
     request: &AttackExecutionRequest,
     attempt: u32,
@@ -1114,5 +1154,97 @@ fn map_pick_action(action: AttackPickAction) -> ExecAction {
         AttackPickAction::Reflect => ExecAction::Reflect,
         AttackPickAction::Adapt => ExecAction::Adapt,
         AttackPickAction::Finish => ExecAction::Finish,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn healthy_obs() -> AttackAttemptObservation {
+        AttackAttemptObservation {
+            successes: 4,
+            attempts: 4,
+            any_vulnerable: false,
+            high_confidence_vuln: false,
+            summary: "no vuln".into(),
+            http_successes: 4,
+            ..AttackAttemptObservation::default()
+        }
+    }
+
+    #[test]
+    fn coerce_forces_reflect_when_llm_finishes_after_attack() {
+        let request = AttackExecutionRequest {
+            max_attempts: 3,
+            ..AttackExecutionRequest::default()
+        };
+        let action = coerce_exec_action(
+            ExecAction::Finish,
+            &request,
+            1,
+            3,
+            Some(1),
+            Some(1),
+            None,
+            None,
+            None,
+            false,
+            0,
+            &healthy_obs(),
+        );
+        assert_eq!(action, ExecAction::Reflect);
+    }
+
+    #[test]
+    fn coerce_forces_reflect_when_llm_attacks_again_before_reflect() {
+        let request = AttackExecutionRequest {
+            max_attempts: 3,
+            ..AttackExecutionRequest::default()
+        };
+        let action = coerce_exec_action(
+            ExecAction::Attack,
+            &request,
+            1,
+            3,
+            Some(1),
+            Some(1),
+            None,
+            None,
+            None,
+            false,
+            0,
+            &healthy_obs(),
+        );
+        assert_eq!(action, ExecAction::Reflect);
+    }
+
+    #[test]
+    fn coerce_allows_finish_after_reflect() {
+        let request = AttackExecutionRequest {
+            max_attempts: 3,
+            ..AttackExecutionRequest::default()
+        };
+        let reflection = ReflectionOutcome {
+            should_retry: false,
+            reason: "enough".into(),
+            focus_hints: Vec::new(),
+            events: Vec::new(),
+        };
+        let action = coerce_exec_action(
+            ExecAction::Finish,
+            &request,
+            1,
+            3,
+            Some(1),
+            Some(1),
+            Some(1),
+            None,
+            Some(&reflection),
+            false,
+            0,
+            &healthy_obs(),
+        );
+        assert_eq!(action, ExecAction::Finish);
     }
 }

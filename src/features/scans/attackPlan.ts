@@ -482,9 +482,18 @@ export function extractPlannerEndpoint(summary: string): string {
 }
 
 export function formatExecutionStrategySummary(
-  plan: Pick<AttackPlanConfig, "executionStrategy">,
+  plan: Pick<
+    AttackPlanConfig,
+    "executionStrategy" | "adaptivePlanning" | "maxAttempts"
+  >,
 ): string {
-  return plan.executionStrategy === "agentic" ? "Agentic" : "Sequential";
+  if (plan.executionStrategy !== "agentic") {
+    return "Sequential";
+  }
+  const parts = ["Agentic", "Reflection"];
+  if (plan.adaptivePlanning) parts.push("Adaptive");
+  parts.push(`${Math.max(1, plan.maxAttempts)} attempts`);
+  return parts.join(" · ");
 }
 
 export function buildPlannerSummaryPreview(_plan: AttackPlanConfig, endpoint: string): string {

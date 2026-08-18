@@ -560,7 +560,12 @@ export function ReviewAttackPlanStep({
           <button
             type="button"
             className={`wizard-attack-profile${attackPlan.executionStrategy === "agentic" ? " wizard-attack-profile--selected" : ""}`}
-            onClick={() => updateExecution({ executionStrategy: "agentic" })}
+            onClick={() =>
+              updateExecution({
+                executionStrategy: "agentic",
+                reflectionEnabled: true,
+              })
+            }
             aria-pressed={attackPlan.executionStrategy === "agentic"}
           >
             <span className="wizard-attack-profile__label">Agentic</span>

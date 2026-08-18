@@ -1378,6 +1378,12 @@ impl AttackExecutionTools for AgenticCategoryTools<'_> {
     }
 
     async fn set_phase(&self, phase: &str, attempt: u32, retry: u32) {
+        // Host already recorded the real Generate stage (all categories). Per-category
+        // "generate" binds or regenerates payloads — do not re-append a Generate node.
+        // Retry / Reflection / Adaptive are the visible agentic loop stages.
+        if phase.eq_ignore_ascii_case("generate") {
+            return;
+        }
         let label = self.category.display_name();
         set_scan_phase(
             &self.ctx.progress,

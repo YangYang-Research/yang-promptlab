@@ -117,13 +117,13 @@ export function executionStrategySteps(
     },
   ];
 
-  if (plan.reflectionEnabled) {
-    steps.push({
-      id: "reflection",
-      label: PHASE_META.reflection.label,
-      description: PHASE_META.reflection.description,
-    });
-  }
+  steps.push({
+    id: "reflection",
+    label: PHASE_META.reflection.label,
+    description: plan.reflectionEnabled
+      ? PHASE_META.reflection.description
+      : "Heuristic gate — decide whether another attempt is needed",
+  });
 
   if (plan.adaptivePlanning) {
     steps.push({
