@@ -44,7 +44,7 @@
 
   --focus-ring: 0 0 0 3px var(--accent-muted);
   --brand-mark-bg: var(--accent);
-  --brand-mark-fg: #ffffff;
+  --brand-mark-fg: var(--bg-surface);
   --z-sidebar: 10;
   --z-topbar: 20;
   --z-dropdown: 100;
@@ -94,8 +94,8 @@
   --shadow-elevated: 0 12px 40px color-mix(in srgb, #18181b 12%, transparent);
 
   --focus-ring: 0 0 0 3px var(--accent-muted);
-  --brand-mark-bg: #09090b;
-  --brand-mark-fg: var(--accent);
+  --brand-mark-bg: var(--accent);
+  --brand-mark-fg: var(--bg-surface);
 }
 
 * {
@@ -163,7 +163,11 @@ a:hover {
 }
 
 .boot-screen__logo {
-  filter: drop-shadow(0 8px 24px color-mix(in srgb, var(--accent) 25%, transparent));
+  line-height: 0;
+}
+
+.boot-screen__logo .brand-mark {
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .boot-screen__title {
@@ -315,23 +319,23 @@ a:hover {
 }
 
 .brand-mark {
-  display: inline-grid;
-  place-items: center;
+  display: block;
   flex-shrink: 0;
-  border-radius: 28%;
+  overflow: hidden;
+  aspect-ratio: 1;
+  line-height: 0;
+  border-radius: var(--brand-mark-radius, 9px);
   background: var(--brand-mark-bg);
-  -webkit-mask:
-    var(--brand-mark-mask) center / 72% no-repeat,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    var(--brand-mark-mask) center / 72% no-repeat,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
 }
 
 .brand-mark__glyph {
-  display: none;
+  display: block;
+  width: 72%;
+  height: 72%;
+  margin: 14%;
+  background: var(--brand-mark-fg);
+  -webkit-mask: var(--brand-mark-mask) center / contain no-repeat;
+  mask: var(--brand-mark-mask) center / contain no-repeat;
 }
 
 .sidebar__brand-text {

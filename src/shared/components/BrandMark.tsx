@@ -9,6 +9,7 @@ type BrandMarkProps = {
 
 /** PromptLab mark from source flask artwork. Colors follow theme. */
 export function BrandMark({ className, size = 32 }: BrandMarkProps) {
+  const radius = Math.round(size * 0.28);
   return (
     <span
       className={["brand-mark", className].filter(Boolean).join(" ")}
@@ -17,6 +18,7 @@ export function BrandMark({ className, size = 32 }: BrandMarkProps) {
           width: size,
           height: size,
           "--brand-mark-mask": `url("${flaskMask}")`,
+          "--brand-mark-radius": `${radius}px`,
         } as CSSProperties
       }
       aria-hidden="true"
