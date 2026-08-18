@@ -166,9 +166,18 @@ export function parsePhaseTrailEntry(raw: string): { phase: string; category: st
   return { phase, category };
 }
 
+const CATEGORY_PHASES = new Set([
+  "attack",
+  "judge",
+  "recover",
+  "reflection",
+  "adaptive",
+  "retry",
+]);
+
 export function phaseTrailStepLabel(phase: string, category: string | null): string {
   const base = phaseLabel(phase);
-  if (category && (phase === "attack" || phase === "judge")) {
+  if (category && CATEGORY_PHASES.has(phase)) {
     return `${base} · ${category}`;
   }
   return base;
@@ -223,7 +232,7 @@ export function resolvePhaseTrail(status: ScanStatusDto | null | undefined): str
     // Enrich a plain attack/judge entry with current category when trail lagged.
     if (
       !last.category &&
-      (current === "attack" || current === "judge") &&
+      CATEGORY_PHASES.has(current) &&
       status.current_test?.trim()
     ) {
       const enriched = `${current}|${status.current_test.trim()}`;
@@ -241,10 +250,7 @@ export function resolvePhaseTrail(status: ScanStatusDto | null | undefined): str
     return trail;
   }
 
-  if (
-    (current === "attack" || current === "judge") &&
-    status.current_test?.trim()
-  ) {
+  if (CATEGORY_PHASES.has(current) && status.current_test?.trim()) {
     trail.push(`${current}|${status.current_test.trim()}`);
   } else {
     trail.push(current);
@@ -261,7 +267,7 @@ function trailEntryMatchesCurrent(
   if (!current || current !== phase) {
     return false;
   }
-  if (phase !== "attack" && phase !== "judge") {
+  if (!CATEGORY_PHASES.has(phase)) {
     return true;
   }
   const currentId = categoryIdFromCurrentTest(status?.current_test);

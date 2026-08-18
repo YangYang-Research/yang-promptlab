@@ -82,7 +82,16 @@ impl ScanProgress {
             phase_trail: Vec::new(),
         }
     }
+}
 
+fn phase_carries_category(phase_key: &str) -> bool {
+    matches!(
+        phase_key,
+        "attack" | "judge" | "recover" | "reflection" | "adaptive" | "retry"
+    )
+}
+
+impl ScanProgress {
     pub fn progress_percent(&self) -> f64 {
         if self.total == 0 {
             return 0.0;
@@ -101,7 +110,8 @@ impl ScanProgress {
     }
 
     /// Record a phase transition for the live Execution pipeline trail.
-    /// Attack/Judge entries may include a category label as `phase|Category Name`.
+    /// Per-category stages (attack, judge, recover, reflection, adaptive, retry)
+    /// may include a category label as `phase|Category Name`.
     pub fn push_phase(&mut self, phase: &str) {
         self.push_phase_with_category(phase, None);
     }
@@ -126,7 +136,7 @@ impl ScanProgress {
             return;
         }
         let entry = match category.map(str::trim).filter(|s| !s.is_empty()) {
-            Some(cat) if matches!(phase_key.as_str(), "attack" | "judge") => {
+            Some(cat) if phase_carries_category(&phase_key) => {
                 format!("{phase_key}|{cat}")
             }
             _ => phase_key,
@@ -466,6 +476,29 @@ mod tests {
             ]
         );
         assert_eq!(progress.current_phase.as_deref(), Some("attack"));
+        assert_eq!(progress.current_test.as_deref(), Some("Jailbreak"));
+    }
+
+    #[test]
+    fn reflection_trail_includes_category() {
+        let mut progress = ScanProgress::new(4);
+        progress.apply_phase("preparing", None, None, None);
+        progress.apply_phase("generate", None, None, None);
+        progress.apply_phase("attack", Some("Jailbreak"), Some(1), None);
+        progress.apply_phase("judge", Some("Jailbreak"), Some(1), None);
+        progress.apply_phase("reflection", Some("Jailbreak"), Some(1), Some(0));
+
+        assert_eq!(
+            progress.phase_trail,
+            vec![
+                "preparing",
+                "generate",
+                "attack|Jailbreak",
+                "judge|Jailbreak",
+                "reflection|Jailbreak",
+            ]
+        );
+        assert_eq!(progress.current_phase.as_deref(), Some("reflection"));
         assert_eq!(progress.current_test.as_deref(), Some("Jailbreak"));
     }
 

@@ -105,6 +105,25 @@ describe("resolveExecutionTrail", () => {
     const trail = resolveExecutionTrail(
       status({
         agent_mode: true,
+        phase_trail: ["generate", "attack|Jailbreak", "judge|Jailbreak", "reflection|Jailbreak"],
+        current_phase: "reflection",
+        current_test: "Jailbreak",
+      }),
+    );
+    expect(trail.map((step) => step.label)).toEqual([
+      "Preparing",
+      "Generate · Payload",
+      "Attack · Jailbreak",
+      "Judge · Jailbreak",
+      "Reflection · Jailbreak",
+    ]);
+    expect(trail[trail.length - 1]?.state).toBe("active");
+  });
+
+  it("enriches a plain reflection trail entry with the current category", () => {
+    const trail = resolveExecutionTrail(
+      status({
+        agent_mode: true,
         phase_trail: ["generate", "attack|Jailbreak", "judge|Jailbreak", "reflection"],
         current_phase: "reflection",
         current_test: "Jailbreak",
@@ -115,9 +134,8 @@ describe("resolveExecutionTrail", () => {
       "Generate · Payload",
       "Attack · Jailbreak",
       "Judge · Jailbreak",
-      "Reflection",
+      "Reflection · Jailbreak",
     ]);
-    expect(trail[trail.length - 1]?.state).toBe("active");
   });
 
   it("labels attack and judge stages with category names from the trail", () => {
@@ -152,7 +170,7 @@ describe("resolveExecutionTrail", () => {
           current_phase: "recover",
         }),
       ),
-    ).toEqual(["preparing", "generate", "attack|Jailbreak", "recover"]);
+    ).toEqual(["preparing", "generate", "attack|Jailbreak", "recover|Jailbreak"]);
   });
 
   it("keeps preparing as the first pipeline stage", () => {
