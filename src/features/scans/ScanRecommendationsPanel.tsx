@@ -35,7 +35,7 @@ type ScanRecommendationsPanelProps = {
   className?: string;
   /** Section heading — defaults to Recommendations. */
   title?: string;
-  /** When false, hide the Re-recommend action (e.g. report Executive summary). */
+  /** When false, hide the Re-recommend action (e.g. report Executive Summary). */
   showReRecommend?: boolean;
   /** `details` uses the Scan Details editorial layout; `wizard` keeps the compact step-6 style. */
   variant?: "wizard" | "details";

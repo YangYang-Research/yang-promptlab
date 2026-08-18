@@ -26,7 +26,7 @@ type FindingRecommendationsPanelProps = {
   /** Heading for `embedded` variant (default: Recommendation). */
   embeddedTitle?: string;
   className?: string;
-  /** When false, hide the Re-recommend action (e.g. report Detailed findings). */
+  /** When false, hide the Re-recommend action (e.g. report Detailed Findings). */
   showReRecommend?: boolean;
   enabled?: boolean;
   /**

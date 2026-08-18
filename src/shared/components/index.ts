@@ -10,6 +10,7 @@ export { EmptyState } from "./EmptyState";
 export {
   IconAi,
   IconArrowRight,
+  IconArrowUp,
   IconBack,
   IconCheck,
   IconCloud,

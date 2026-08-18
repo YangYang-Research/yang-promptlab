@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { useAppStore } from "@/app/store/AppStore";
 import { parseFindingEvidence, formatHttpRequest, formatHttpResponse } from "@/features/findings/findingEvidence";
 import { FindingRecommendationsPanel } from "@/features/findings/FindingRecommendationsPanel";
+import { categoryLabel } from "@/features/scans/categoryLabel";
 import { parseAttackPlaybook } from "@/features/scans/scanPlaybook";
 import { ScanRecommendationsPanel } from "@/features/scans/ScanRecommendationsPanel";
 import {
@@ -129,6 +130,12 @@ export function ReportDetailsPage() {
         header: "No",
         width: "56px",
         render: (row: FindingSummaryRow) => row.no,
+      },
+      {
+        key: "category",
+        header: "Category",
+        width: "160px",
+        render: (row: FindingSummaryRow) => categoryLabel(row.category),
       },
       {
         key: "finding",
@@ -294,7 +301,7 @@ export function ReportDetailsPage() {
         <Card className="detail-section report-native__executive">
           {report.scanId ? (
             <ScanRecommendationsPanel
-              title="Executive summary"
+              title="Executive Summary"
               scanId={report.scanId}
               attackCategories={playbook?.categories ?? []}
               enabled={!loading && Boolean(report.scanId)}
@@ -306,7 +313,7 @@ export function ReportDetailsPage() {
             />
           ) : (
             <>
-              <h2 className="detail-section__title">Executive summary</h2>
+              <h2 className="detail-section__title">Executive Summary</h2>
               <p className="text-muted">No linked scan for this report.</p>
             </>
           )}
@@ -327,10 +334,7 @@ export function ReportDetailsPage() {
 
       <section className="reports-section" aria-label="Findings summary">
         <div className="reports-section__header">
-          <div>
-            <h2 className="reports-section__title">Summary</h2>
-            <span className="text-muted text-sm">{reportFindings.length} findings</span>
-          </div>
+          <h2 className="reports-section__title">Findings Summary</h2>
         </div>
         <Card padding="none">
           <DataTable
@@ -342,12 +346,9 @@ export function ReportDetailsPage() {
         </Card>
       </section>
 
-      <section className="reports-section" aria-label="Detailed findings">
+      <section className="reports-section" aria-label="Detailed Findings">
         <div className="reports-section__header">
-          <div>
-            <h2 className="reports-section__title">Detailed findings</h2>
-            <span className="text-muted text-sm">{reportFindings.length} findings</span>
-          </div>
+          <h2 className="reports-section__title">Detailed Findings</h2>
         </div>
 
         {reportFindings.length === 0 ? (
