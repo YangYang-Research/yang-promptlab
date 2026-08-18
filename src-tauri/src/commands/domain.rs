@@ -753,7 +753,7 @@ pub async fn report_generate_op(
         .create(CreateReport {
             project_id: project_id.clone(),
             scan_id: Some(scan_id.clone()),
-            name: format!("{} {} report", report_kind.as_str(), report_format.as_str()),
+            name: "PromptLab - Security Scan Report".into(),
             format: report_format.as_str().to_string(),
             status: Some("completed".into()),
             file_path: Some(file_path.to_string_lossy().into_owned()),

@@ -85,8 +85,9 @@ impl PlaywrightHarness {
             .await
             .map_err(|err| HarnessError::transport(err.client_message()))?;
 
-        Ok(NormalizedResponse::from_http(
+        Ok(NormalizedResponse::from_http_headers(
             result.status,
+            result.headers,
             result.body,
             self.id(),
         ))

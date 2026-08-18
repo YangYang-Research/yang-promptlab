@@ -9,17 +9,30 @@ pub struct NormalizedResponse {
     pub content: String,
     pub raw_response: String,
     pub status_code: Option<u16>,
+    /// Wire HTTP response headers from the target (not harness metadata).
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
     #[serde(default)]
     pub metadata: HashMap<String, String>,
 }
 
 impl NormalizedResponse {
     pub fn from_http(status: u16, body: String, harness: &str) -> Self {
+        Self::from_http_headers(status, HashMap::new(), body, harness)
+    }
+
+    pub fn from_http_headers(
+        status: u16,
+        headers: HashMap<String, String>,
+        body: String,
+        harness: &str,
+    ) -> Self {
         let content = extract_display_content(&body);
         Self {
             content: content.clone(),
             raw_response: body,
             status_code: Some(status),
+            headers,
             metadata: HashMap::from([
                 ("harness".into(), harness.into()),
                 ("transport".into(), "http".into()),
@@ -32,6 +45,7 @@ impl NormalizedResponse {
             content: response_text.clone(),
             raw_response: response_text,
             status_code: None,
+            headers: HashMap::new(),
             metadata: HashMap::from([
                 ("harness".into(), harness.into()),
                 ("transport".into(), "playwright_chat".into()),
@@ -131,6 +145,7 @@ mod tests {
             content: String::new(),
             raw_response: "plain text response".into(),
             status_code: Some(200),
+            headers: Default::default(),
             metadata: Default::default(),
         };
         assert_eq!(normalized.judge_text(), "plain text response");

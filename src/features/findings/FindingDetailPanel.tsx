@@ -8,6 +8,8 @@ import type { Finding, Severity } from "@/shared/types";
 import {
   buildFindingCurl,
   DEFAULT_JUDGE_ROLE_WEIGHTS,
+  formatHttpRequest,
+  formatHttpResponse,
   parseFindingEvidence,
   type JudgeRoleResult,
   type JudgeRoleWeights,
@@ -114,18 +116,13 @@ export function FindingDetailPanel({
                     ? [evidence.requestMethod, evidence.requestUrl].filter(Boolean).join(" ")
                     : undefined
                 }
-                content={
-                  evidence.requestBody ??
-                  (evidence.requestUrl
-                    ? `${evidence.requestMethod ?? "POST"} ${evidence.requestUrl}`
-                    : null)
-                }
+                content={formatHttpRequest(evidence)}
                 actions={<CopyCurlButton evidence={evidence} />}
               />
               <EvidenceBlock
                 title="Response"
                 subtitle={responseStatusSubtitle(evidence.requestUrl, evidence.responseStatus)}
-                content={evidence.responseBody ?? evidence.responseExcerpt}
+                content={formatHttpResponse(evidence)}
               />
             </div>
           )}

@@ -369,8 +369,17 @@ function redactHeaderValue(name: string, value: string): string {
   return value;
 }
 
+const HARNESS_META_HEADER_KEYS = new Set([
+  "harness",
+  "transport",
+  "payload_length",
+  "api_format",
+  "error",
+]);
+
 function formatHeaderBlock(headers: Record<string, string>): string[] {
   return Object.entries(headers)
+    .filter(([name]) => !HARNESS_META_HEADER_KEYS.has(name.toLowerCase()))
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([name, value]) => `${name}: ${redactHeaderValue(name, value)}`);
 }

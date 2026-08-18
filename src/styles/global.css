@@ -8123,6 +8123,13 @@ a:hover {
   align-items: start;
 }
 
+.scan-details__insights-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-width: 0;
+}
+
 .project-details__insights-aside {
   display: flex;
   flex-direction: column;
@@ -8631,12 +8638,6 @@ a:hover {
   margin: 0;
   font-size: 0.8125rem;
   color: var(--text-muted);
-}
-
-.scan-details__export-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
 }
 
 .project-details__subsection,

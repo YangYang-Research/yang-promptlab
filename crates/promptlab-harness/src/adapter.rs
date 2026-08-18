@@ -69,7 +69,7 @@ impl HarnessAttackTransport {
         let raw_response = normalized.raw_response.clone();
         Ok(TransportResponse {
             status: normalized.status_code.unwrap_or(200),
-            headers: normalized.metadata.clone(),
+            headers: normalized.headers.clone(),
             body: raw_response,
             duration_ms: started.elapsed().as_millis() as u64,
             normalized,

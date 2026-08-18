@@ -238,7 +238,7 @@ export function ReportDetailsPage() {
 
       <Card className="report-native__identity">
         <div>
-          <span className="report-native__eyebrow">Technical security report</span>
+          <span className="report-native__eyebrow">PromptLab - Security Scan Report</span>
           <h2>{report.scanName}</h2>
           <p className="text-muted">
             Generated {new Date(report.createdAt).toLocaleString()}

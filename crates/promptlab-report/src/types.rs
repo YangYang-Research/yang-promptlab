@@ -65,7 +65,7 @@ impl ReportKind {
     pub fn title(self) -> &'static str {
         match self {
             Self::Executive => "Executive Security Summary",
-            Self::Technical => "Technical Findings Report",
+            Self::Technical => "PromptLab - Security Scan Report",
             Self::Compliance => "Compliance Assessment Report",
         }
     }

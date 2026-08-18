@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
+import { findLatestHtmlReport } from "@/features/reports/reportDownloads";
 import {
   ActionsDropdown,
   type ActionsDropdownItem,
@@ -23,11 +24,6 @@ import {
   SeverityBadge,
   StatusBadge,
 } from "@/shared/components";
-import {
-  generateAndExportScanReport,
-  reportExportLabel,
-  type ReportExportFormat,
-} from "@/features/reports/reportDownloads";
 import {
   buildFindingsByCategory,
   FindingsByCategoryChart,
@@ -93,12 +89,11 @@ export function ScanDetailsPage() {
   const { scanId = "" } = useParams();
   const navigate = useNavigate();
   const { notify, dismiss } = useToast();
-  const { scans, projects, targets, findings, actions } = useAppStore();
+  const { scans, projects, targets, findings, reports, actions } = useAppStore();
   const [detail, setDetail] = useState<ScanDetailDto | null>(null);
   const [targetDto, setTargetDto] = useState<TargetDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [exporting, setExporting] = useState<string | null>(null);
   const [controlPending, setControlPending] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
   const [exportConfigPending, setExportConfigPending] = useState(false);
@@ -157,6 +152,15 @@ export function ScanDetailsPage() {
     () => buildFindingsByCategory(scanFindings),
     [scanFindings],
   );
+  const scanReport = useMemo(() => {
+    const html = findLatestHtmlReport(reports, scanId);
+    if (html) return html;
+    return (
+      reports
+        .filter((report) => report.scanId === scanId)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null
+    );
+  }, [reports, scanId]);
   const statuses = useScanStatuses(scanId ? [scanId] : [], Boolean(scanId));
   const live = statuses.get(scanId);
   const status = scan
@@ -362,18 +366,6 @@ export function ScanDetailsPage() {
     });
 
     return items;
-  }
-
-  async function handleExport(format: ReportExportFormat) {
-    setExporting(format);
-    try {
-      if (scan) {
-        await generateAndExportScanReport(scan.projectId, scanId, format);
-        await actions.refresh();
-      }
-    } finally {
-      setExporting(null);
-    }
   }
 
   if (!scanId) {
@@ -735,42 +727,49 @@ export function ScanDetailsPage() {
           )}
         </Card>
 
-        <Card className="detail-section scan-details__category-panel">
-          <div className="detail-section__header">
-            <div>
-              <h2 className="detail-section__title">By attack category</h2>
-              <p className="detail-section__hint">
-                {scanFindings.length === 0
-                  ? "Finding counts will appear here after the scan records issues."
-                  : `${findingsByCategory.length} categor${findingsByCategory.length === 1 ? "y" : "ies"} with findings`}
-              </p>
-            </div>
-          </div>
-
-          <FindingsByCategoryChart data={findingsByCategory} />
-
-          {playbook && isAttackScanName(scan?.name ?? "") && (
-            <div className="scan-details__subsection scan-details__report-actions">
-              <h3 className="scan-details__subsection-title">Generate report</h3>
-              <div className="scan-details__export-actions">
-                {(["html", "pdf", "sarif", "csv"] as ReportExportFormat[]).map((format) => (
-                  <Button
-                    key={format}
-                    variant="secondary"
-                    size="sm"
-                    disabled={scanFindings.length === 0 || exporting !== null}
-                    onClick={() => void handleExport(format)}
-                  >
-                    {exporting === format ? "Generating…" : reportExportLabel(format)}
-                  </Button>
-                ))}
+        <div className="scan-details__insights-aside">
+          <Card className="detail-section scan-details__category-panel">
+            <div className="detail-section__header">
+              <div>
+                <h2 className="detail-section__title">By attack category</h2>
+                <p className="detail-section__hint">
+                  {scanFindings.length === 0
+                    ? "Finding counts will appear here after the scan records issues."
+                    : `${findingsByCategory.length} categor${findingsByCategory.length === 1 ? "y" : "ies"} with findings`}
+                </p>
               </div>
             </div>
-          )}
-        </Card>
+
+            <FindingsByCategoryChart data={findingsByCategory} />
+          </Card>
+
+          <Card className="detail-section scan-details__report-panel">
+            <div className="detail-section__header">
+              <div>
+                <h2 className="detail-section__title">Report</h2>
+              </div>
+              {scanReport ? <StatusBadge status={scanReport.status} /> : null}
+            </div>
+
+            {scanReport ? (
+              <DetailRow
+                label="Name"
+                value={
+                  <Link className="link" to={`/reports/${scanReport.id}`}>
+                    PromptLab - Security Scan Report
+                  </Link>
+                }
+              />
+            ) : (
+              <p className="text-muted text-sm">
+                A technical report will appear here after one is generated for this scan.
+              </p>
+            )}
+          </Card>
+        </div>
       </section>
 
-      {scan && isMonitorableAttackScan(scan) && (
+      {scan && isMonitorableAttackScan(scan) && effectiveStatus === "completed" && (
         <section className="scan-details__recommendations" aria-label="Recommendations">
           <Card className="detail-section scan-details__recommendations-card">
             <ScanRecommendationsPanel
@@ -780,14 +779,10 @@ export function ScanDetailsPage() {
               variant="details"
               projectId={scan?.projectId}
               targetId={scan?.targetId}
-              revision={
-                effectiveStatus === "running" || effectiveStatus === "paused"
-                  ? effectiveStatus
-                  : `${effectiveStatus}|${scanFindings
-                      .map((f) => `${f.id}:${f.severity}:${f.title}`)
-                      .sort()
-                      .join(",")}`
-              }
+              revision={`${effectiveStatus}|${scanFindings
+                .map((f) => `${f.id}:${f.severity}:${f.title}`)
+                .sort()
+                .join(",")}`}
             />
           </Card>
         </section>
