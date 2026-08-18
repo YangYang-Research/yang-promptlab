@@ -10,6 +10,8 @@ use time::OffsetDateTime;
 
 use promptlab_storage::{Endpoint, Finding, Project, Report, Scan, Target};
 
+use crate::scan_playbook::{scan_retries_from_playbook, ScanRetryRecord};
+
 pub(crate) fn ts(dt: OffsetDateTime) -> String {
     dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string())
 }
@@ -221,10 +223,13 @@ pub struct ScanDetailDto {
     pub created_at: String,
     pub updated_at: String,
     pub playbook: Option<serde_json::Value>,
+    #[serde(default)]
+    pub retries: Vec<ScanRetryRecord>,
 }
 
 impl ScanDetailDto {
     pub fn from_scan(scan: Scan) -> Self {
+        let retries = scan_retries_from_playbook(scan.playbook_json.as_deref());
         Self {
             id: scan.id,
             project_id: scan.project_id,
@@ -236,6 +241,7 @@ impl ScanDetailDto {
             created_at: ts(scan.created_at),
             updated_at: ts(scan.updated_at),
             playbook: json_opt(scan.playbook_json),
+            retries,
         }
     }
 }
@@ -251,10 +257,13 @@ pub struct ScanDto {
     pub completed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub retries: Vec<ScanRetryRecord>,
 }
 
 impl From<Scan> for ScanDto {
     fn from(s: Scan) -> Self {
+        let retries = scan_retries_from_playbook(s.playbook_json.as_deref());
         Self {
             id: s.id,
             project_id: s.project_id,
@@ -265,6 +274,7 @@ impl From<Scan> for ScanDto {
             completed_at: ts_opt(s.completed_at),
             created_at: ts(s.created_at),
             updated_at: ts(s.updated_at),
+            retries,
         }
     }
 }

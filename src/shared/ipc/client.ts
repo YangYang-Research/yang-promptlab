@@ -53,6 +53,7 @@ export type ScanDto = {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  retries?: Array<{ at: string; mode: string }>;
 };
 
 export type ScanDetailDto = ScanDto & {

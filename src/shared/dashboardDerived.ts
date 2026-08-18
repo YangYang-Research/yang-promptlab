@@ -73,6 +73,15 @@ export function deriveActivity(
   for (const scan of scans) {
     if (!isAttackScan(scan)) continue;
 
+    for (const retry of scan.retries ?? []) {
+      items.push({
+        id: `scan-retry-${scan.id}-${retry.at}`,
+        type: "attack",
+        message: `Retry Scan: ${scan.name}`,
+        timestamp: retry.at,
+      });
+    }
+
     if (scan.status === "running" || scan.status === "paused" || scan.status === "pending") {
       items.push({
         id: `scan-active-${scan.id}`,

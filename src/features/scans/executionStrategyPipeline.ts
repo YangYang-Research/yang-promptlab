@@ -1,4 +1,5 @@
 import type { AttackPlanConfig } from "./attackPlan";
+import { categoryIdFromCurrentTest } from "./attackGraphProgress";
 import type { ScanStatusDto } from "@/shared/ipc";
 
 export type ExecutionPhaseId =
@@ -179,10 +180,41 @@ function normalizePhase(phase: string | null | undefined): string | null {
   return value || null;
 }
 
+function trailHasPhase(trail: string[], phase: string): boolean {
+  return trail.some((entry) => parsePhaseTrailEntry(entry).phase === phase);
+}
+
+function trailCategoryId(
+  category: string | null,
+  currentTest: string | null | undefined,
+): string | null {
+  return categoryIdFromCurrentTest(category) ?? categoryIdFromCurrentTest(currentTest);
+}
+
+function idInList(
+  list: string[] | undefined,
+  categoryId: string | null,
+  categoryLabel: string | null,
+): boolean {
+  const items = (list ?? []).map((value) => value.trim().toLowerCase()).filter(Boolean);
+  if (categoryId) {
+    const id = categoryId.toLowerCase();
+    if (items.includes(id) || items.includes(id.replace(/_/g, " "))) return true;
+  }
+  if (categoryLabel) {
+    const label = categoryLabel.trim().toLowerCase();
+    if (items.includes(label) || items.includes(label.replace(/ /g, "_"))) return true;
+  }
+  return false;
+}
+
 /** Merge backend trail with current_phase (covers poll gaps / older builds). */
 export function resolvePhaseTrail(status: ScanStatusDto | null | undefined): string[] {
   if (!status) return [];
-  const trail = [...(status.phase_trail ?? [])].map((phase) => phase.trim()).filter(Boolean);
+  let trail = [...(status.phase_trail ?? [])].map((phase) => phase.trim()).filter(Boolean);
+  if (trail.length > 0 && !trailHasPhase(trail, "preparing")) {
+    trail = ["preparing", ...trail];
+  }
   const current = normalizePhase(status.current_phase);
   if (!current) return trail;
 
@@ -220,6 +252,28 @@ export function resolvePhaseTrail(status: ScanStatusDto | null | undefined): str
   return trail;
 }
 
+function trailEntryMatchesCurrent(
+  phase: string,
+  category: string | null,
+  status: ScanStatusDto | null | undefined,
+): boolean {
+  const current = normalizePhase(status?.current_phase);
+  if (!current || current !== phase) {
+    return false;
+  }
+  if (phase !== "attack" && phase !== "judge") {
+    return true;
+  }
+  const currentId = categoryIdFromCurrentTest(status?.current_test);
+  const entryId = categoryIdFromCurrentTest(category);
+  if (currentId && entryId) {
+    return currentId === entryId;
+  }
+  const currentLabel = status?.current_test?.trim().toLowerCase() ?? "";
+  const entryLabel = category?.trim().toLowerCase() ?? "";
+  return Boolean(currentLabel) && currentLabel === entryLabel;
+}
+
 /**
  * Live pipeline: only stages that have actually run, in order.
  * Example: Generate · Payload → Attack · Jailbreak → Recover → Attack · Jailbreak → Judge · Jailbreak
@@ -230,7 +284,10 @@ export function resolveExecutionTrail(
   const phases = resolvePhaseTrail(status);
   if (phases.length === 0) return [];
 
-  const failed = status?.status === "failed" || status?.status === "stopped";
+  const interrupted =
+    status?.status === "failed" ||
+    status?.status === "stopped" ||
+    status?.status === "cancelled";
   const terminal = ["completed", "failed", "cancelled", "stopped", "error"].includes(
     status?.status ?? "",
   );
@@ -239,10 +296,22 @@ export function resolveExecutionTrail(
   return phases.map((raw, index) => {
     const { phase, category } = parsePhaseTrailEntry(raw);
     let state: ExecutionStepState = "done";
-    if (!terminal && index === lastIndex) {
-      state = failed ? "failed" : "active";
-    } else if (terminal && failed && index === lastIndex) {
-      state = "failed";
+    if (index === lastIndex) {
+      const categoryId = trailCategoryId(category, status?.current_test);
+      const succeededLast =
+        (phase === "attack" || phase === "judge") &&
+        idInList(status?.categories_succeeded, categoryId, category);
+      if (trailEntryMatchesCurrent(phase, category, status) && !terminal) {
+        state = "active";
+      } else if (succeededLast) {
+        state = "done";
+      } else if (terminal && interrupted) {
+        state = "failed";
+      } else if (!terminal && !succeededLast) {
+        // Retry Scan is running earlier stages (Preparing / Generate) — keep the
+        // interrupted category as failed until this stage actually resumes.
+        state = "failed";
+      }
     }
     return {
       id: `${raw}-${index}`,

@@ -1,14 +1,58 @@
 //! Persist scan progress and batch checkpoints in `playbook_json`.
 
 use promptlab_storage::{Repositories, ScanRepository, UpdateScan};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 use crate::jobs::{ScanBatchCheckpoint, ScanProgress};
+
+const MAX_SCAN_RETRIES: usize = 20;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScanRetryRecord {
+    pub at: String,
+    pub mode: String,
+}
+
+pub fn scan_retries_from_playbook(playbook_json: Option<&str>) -> Vec<ScanRetryRecord> {
+    let raw = playbook_json.unwrap_or("");
+    let value: Value = serde_json::from_str(raw).unwrap_or(Value::Null);
+    value
+        .get("scan_retries")
+        .and_then(|retries| serde_json::from_value(retries.clone()).ok())
+        .unwrap_or_default()
+}
+
+/// Record a Retry Scan / retry-failed-categories event on the playbook.
+pub fn append_scan_retry(playbook: &mut Value, mode: &str) {
+    let at = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "now".into());
+    let entry = serde_json::json!({ "at": at, "mode": mode });
+    let Some(obj) = playbook.as_object_mut() else {
+        return;
+    };
+    let retries = obj
+        .entry("scan_retries")
+        .or_insert_with(|| serde_json::json!([]));
+    let Some(list) = retries.as_array_mut() else {
+        return;
+    };
+    list.push(entry);
+    if list.len() > MAX_SCAN_RETRIES {
+        let drop = list.len() - MAX_SCAN_RETRIES;
+        list.drain(0..drop);
+    }
+}
 
 pub fn progress_from_playbook(playbook_json: Option<&str>) -> Option<ScanProgress> {
     let raw = playbook_json?;
     let value: Value = serde_json::from_str(raw).ok()?;
-    serde_json::from_value(value.get("progress")?.clone()).ok()
+    let mut progress: ScanProgress = serde_json::from_value(value.get("progress")?.clone()).ok()?;
+    progress.normalize_phase_trail();
+    Some(progress)
 }
 
 pub fn checkpoint_from_playbook(playbook_json: Option<&str>) -> Option<ScanBatchCheckpoint> {
@@ -50,9 +94,11 @@ pub async fn persist_scan_playbook_state(
 
     if let Some(obj) = playbook.as_object_mut() {
         if let Some(progress) = progress {
+            let mut snapshot = progress.clone();
+            snapshot.normalize_phase_trail();
             obj.insert(
                 "progress".into(),
-                serde_json::to_value(progress).unwrap_or(Value::Null),
+                serde_json::to_value(&snapshot).unwrap_or(Value::Null),
             );
         }
         if let Some(checkpoint) = batch_checkpoint {
@@ -81,4 +127,28 @@ pub async fn persist_scan_playbook_state(
         )
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn append_scan_retry_records_continue_events() {
+        let mut playbook = serde_json::json!({ "profile": "standard" });
+        append_scan_retry(&mut playbook, "continue");
+        append_scan_retry(&mut playbook, "failed_categories");
+
+        let retries = scan_retries_from_playbook(Some(&playbook.to_string()));
+        assert_eq!(retries.len(), 2);
+        assert_eq!(retries[0].mode, "continue");
+        assert_eq!(retries[1].mode, "failed_categories");
+        assert!(!retries[0].at.is_empty());
+    }
+
+    #[test]
+    fn scan_retries_from_playbook_empty_when_missing() {
+        assert!(scan_retries_from_playbook(None).is_empty());
+        assert!(scan_retries_from_playbook(Some("{}")).is_empty());
+    }
 }

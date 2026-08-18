@@ -29,6 +29,7 @@ export function mapScanDetailToRun(dto: ScanDetailDto): ScanRun {
     startedAt: dto.started_at,
     completedAt: dto.completed_at,
     createdAt: dto.created_at,
+    retries: (dto.retries ?? []).filter((retry) => retry.at.trim().length > 0),
   };
 }
 

@@ -212,6 +212,24 @@ impl ScanProgress {
         }
         self.categories_completed = self.categories_succeeded.len() as u64;
     }
+
+    /// Preparing is a scan-level stage. Older playbooks / crash snapshots may omit it
+    /// even when later stages were persisted.
+    pub fn normalize_phase_trail(&mut self) {
+        if self.phase_trail.is_empty() {
+            return;
+        }
+        let has_preparing = self.phase_trail.iter().any(|entry| {
+            entry
+                .split('|')
+                .next()
+                .unwrap_or(entry)
+                .eq_ignore_ascii_case("preparing")
+        });
+        if !has_preparing {
+            self.phase_trail.insert(0, "preparing".into());
+        }
+    }
 }
 
 pub fn bump_scan_progress(progress: &Arc<Mutex<ScanProgress>>, units: u64) {
@@ -449,6 +467,19 @@ mod tests {
         );
         assert_eq!(progress.current_phase.as_deref(), Some("attack"));
         assert_eq!(progress.current_test.as_deref(), Some("Jailbreak"));
+    }
+
+    #[test]
+    fn normalize_phase_trail_inserts_missing_preparing() {
+        let mut progress = ScanProgress::new(4);
+        progress.phase_trail = vec![
+            "generate".into(),
+            "attack|Prompt Injection".into(),
+            "judge|Prompt Injection".into(),
+        ];
+        progress.normalize_phase_trail();
+        assert_eq!(progress.phase_trail[0], "preparing");
+        assert_eq!(progress.phase_trail.len(), 4);
     }
 
     #[test]

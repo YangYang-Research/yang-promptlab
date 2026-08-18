@@ -66,6 +66,7 @@ describe("resolveExecutionTrail", () => {
       }),
     );
     expect(trail.map((step) => step.label)).toEqual([
+      "Preparing",
       "Generate · Payload",
       "Attack",
       "Recover",
@@ -73,6 +74,7 @@ describe("resolveExecutionTrail", () => {
       "Judge · Jailbreak",
     ]);
     expect(trail.map((step) => step.state)).toEqual([
+      "done",
       "done",
       "done",
       "done",
@@ -96,6 +98,7 @@ describe("resolveExecutionTrail", () => {
       }),
     );
     expect(trail.map((step) => step.label)).toEqual([
+      "Preparing",
       "Generate · Payload",
       "Attack · Prompt Injection",
       "Judge · Prompt Injection",
@@ -112,7 +115,7 @@ describe("resolveExecutionTrail", () => {
           current_phase: "recover",
         }),
       ),
-    ).toEqual(["generate", "attack|Jailbreak", "recover"]);
+    ).toEqual(["preparing", "generate", "attack|Jailbreak", "recover"]);
   });
 
   it("keeps preparing as the first pipeline stage", () => {
@@ -172,5 +175,118 @@ describe("resolveExecutionTrail", () => {
       }),
     );
     expect(trail.every((step) => step.state === "done")).toBe(true);
+  });
+
+  it("restores Preparing when a persisted trail omitted it", () => {
+    expect(
+      resolvePhaseTrail(
+        status({
+          status: "failed",
+          phase_trail: [
+            "generate",
+            "attack|Prompt Injection",
+            "judge|Prompt Injection",
+          ],
+        }),
+      ),
+    ).toEqual(["preparing", "generate", "attack|Prompt Injection", "judge|Prompt Injection"]);
+  });
+
+  it("does not mark a succeeded Judge as failed when the scan died later", () => {
+    const trail = resolveExecutionTrail(
+      status({
+        status: "failed",
+        phase_trail: [
+          "preparing",
+          "generate",
+          "attack|Prompt Injection",
+          "judge|Prompt Injection",
+        ],
+        current_phase: null,
+        current_test: null,
+        categories_succeeded: ["prompt_injection"],
+      }),
+    );
+    expect(trail.map((step) => `${step.label}:${step.state}`)).toEqual([
+      "Preparing:done",
+      "Generate · Payload:done",
+      "Attack · Prompt Injection:done",
+      "Judge · Prompt Injection:done",
+    ]);
+  });
+
+  it("marks the interrupted category Attack as failed", () => {
+    const trail = resolveExecutionTrail(
+      status({
+        status: "failed",
+        phase_trail: [
+          "preparing",
+          "generate",
+          "attack|Prompt Injection",
+          "judge|Prompt Injection",
+          "attack|Jailbreak",
+        ],
+        current_phase: "attack",
+        current_test: "Jailbreak",
+        categories_succeeded: ["prompt_injection"],
+      }),
+    );
+    expect(trail.map((step) => `${step.label}:${step.state}`)).toEqual([
+      "Preparing:done",
+      "Generate · Payload:done",
+      "Attack · Prompt Injection:done",
+      "Judge · Prompt Injection:done",
+      "Attack · Jailbreak:failed",
+    ]);
+  });
+
+  it("keeps interrupted Attack failed until Retry actually resumes that category", () => {
+    const trail = resolveExecutionTrail(
+      status({
+        status: "running",
+        phase_trail: [
+          "preparing",
+          "generate",
+          "attack|Prompt Injection",
+          "judge|Prompt Injection",
+          "attack|Jailbreak",
+        ],
+        current_phase: "generate",
+        current_test: "all categories",
+        categories_succeeded: ["prompt_injection"],
+      }),
+    );
+    expect(trail.map((step) => `${step.label}:${step.state}`)).toEqual([
+      "Preparing:done",
+      "Generate · Payload:done",
+      "Attack · Prompt Injection:done",
+      "Judge · Prompt Injection:done",
+      "Attack · Jailbreak:failed",
+    ]);
+  });
+
+  it("marks interrupted Attack active once Retry reaches that category", () => {
+    const trail = resolveExecutionTrail(
+      status({
+        status: "running",
+        phase_trail: [
+          "preparing",
+          "generate",
+          "attack|Prompt Injection",
+          "judge|Prompt Injection",
+          "attack|Jailbreak",
+        ],
+        current_phase: "attack",
+        current_test: "Jailbreak",
+        categories_succeeded: ["prompt_injection"],
+      }),
+    );
+    expect(trail.map((step) => `${step.label}:${step.state}`)).toEqual([
+      "Preparing:done",
+      "Generate · Payload:done",
+      "Attack · Prompt Injection:done",
+      "Judge · Prompt Injection:done",
+      "Attack · Jailbreak:active",
+    ]);
   });
 });

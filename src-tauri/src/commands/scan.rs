@@ -31,8 +31,8 @@ use crate::error::{CommandError, CommandResult};
 use crate::jobs::{ScanJobManager, ScanProgress};
 use crate::scan_console_log;
 use crate::scan_playbook::{
-    checkpoint_from_playbook, persist_playbook_progress, persist_scan_playbook_state,
-    progress_from_playbook,
+    append_scan_retry, checkpoint_from_playbook, persist_playbook_progress,
+    persist_scan_playbook_state, progress_from_playbook,
 };
 use crate::state::AppState;
 
@@ -55,6 +55,7 @@ fn prepare_restored_progress(mut restored: ScanProgress) -> ScanProgress {
     restored.current_retry = None;
     restored.current_endpoint = None;
     restored.current_test = None;
+    restored.normalize_phase_trail();
     restored
 }
 
@@ -752,11 +753,16 @@ pub async fn scan_start_op(
         }
 
         let clear_progress = is_restart && !retry_failed_only && !continue_from_progress;
-        let playbook = merge_scan_execution_playbook(
+        let mut playbook = merge_scan_execution_playbook(
             existing.playbook_json.as_deref(),
             &mut execution_playbook,
             clear_progress,
         );
+        if continue_from_progress {
+            append_scan_retry(&mut playbook, "continue");
+        } else if retry_failed_only {
+            append_scan_retry(&mut playbook, "failed_categories");
+        }
 
         let mut update = UpdateScan {
             target_id: Some(Some(target_id.clone())),
@@ -876,13 +882,13 @@ pub async fn scan_start_op(
         let failed_labels: Vec<&str> = job_categories.iter().map(|c| c.display_name()).collect();
         let emitter = ScanProgressEmitter::new(app.clone(), scan.id.clone());
         emitter.info(format!(
-            "Retrying failed categories only: {}",
+            "Retry Scan: retrying failed categories only ({})",
             failed_labels.join(", ")
         ));
     } else if continue_from_progress {
         let emitter = ScanProgressEmitter::new(app.clone(), scan.id.clone());
         emitter.info(
-            "Continuing scan from last incomplete stage (skipping succeeded categories)",
+            "Retry Scan: continuing from last incomplete stage (skipping succeeded categories)",
         );
     }
 
@@ -1511,5 +1517,27 @@ mod tests {
         assert!(merged.get("progress").is_some());
         assert!(merged.get("batch_checkpoint").is_some());
         assert_eq!(merged["wizard"], serde_json::json!({ "step": 4 }));
+    }
+
+    #[test]
+    fn merge_then_append_retry_keeps_progress_and_records_retry() {
+        let existing = serde_json::json!({
+            "wizard": { "step": 4 },
+            "progress": { "status": "failed" }
+        });
+        let mut execution = serde_json::json!({
+            "profile": "standard",
+            "categories": ["jailbreak"]
+        });
+        let mut merged = merge_scan_execution_playbook(
+            Some(&existing.to_string()),
+            &mut execution,
+            false,
+        );
+        append_scan_retry(&mut merged, "continue");
+        let retries = crate::scan_playbook::scan_retries_from_playbook(Some(&merged.to_string()));
+        assert_eq!(retries.len(), 1);
+        assert_eq!(retries[0].mode, "continue");
+        assert!(merged.get("progress").is_some());
     }
 }

@@ -34,6 +34,7 @@ function scan(partial: Partial<ScanRun> & Pick<ScanRun, "id" | "status">): ScanR
     startedAt: partial.startedAt ?? "2026-07-01T10:00:00.000Z",
     completedAt: partial.completedAt ?? null,
     createdAt: partial.createdAt ?? "2026-07-01T09:00:00.000Z",
+    retries: partial.retries ?? [],
   };
 }
 
@@ -165,6 +166,30 @@ describe("deriveActivity", () => {
 
     expect(activity).toHaveLength(1);
     expect(activity[0]?.message).toContain("Agent Scan (deep)");
+  });
+
+  it("includes Retry Scan events from persisted retries", () => {
+    const activity = deriveActivity(
+      [],
+      [
+        scan({
+          id: "scan-retry",
+          status: "running",
+          name: "Scan (standard)",
+          startedAt: "2026-07-06T09:00:00.000Z",
+          retries: [{ at: "2026-07-06T11:00:00.000Z", mode: "continue" }],
+        }),
+      ],
+      [],
+      [],
+    );
+
+    expect(activity.map((item) => item.message)).toEqual([
+      "Retry Scan: Scan (standard)",
+      "Scan running: Scan (standard)",
+    ]);
+    expect(activity[0]?.id).toBe("scan-retry-scan-retry-2026-07-06T11:00:00.000Z");
+    expect(activity[0]?.timestamp).toBe("2026-07-06T11:00:00.000Z");
   });
 });
 

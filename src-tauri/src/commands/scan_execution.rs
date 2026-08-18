@@ -594,6 +594,7 @@ pub async fn run_target_profile_attack_scan(
         &ctx.emitter,
     )
     .await;
+    persist_scan_progress_now(&ctx).await;
 
     if ctx.cancel.load(Ordering::Relaxed) {
         return TargetProfileScanOutcome {
@@ -609,6 +610,7 @@ pub async fn run_target_profile_attack_scan(
     );
 
     set_scan_phase(&ctx.progress, "generate", Some("all categories"), None, None);
+    persist_scan_progress_now(&ctx).await;
 
     let catalog = match crate::attack_catalog::load_payload_database_from_repos(ctx.repos).await {
         Ok(db) => db,
@@ -1089,6 +1091,7 @@ impl AttackExecutionTools for SequentialCategoryTools<'_> {
             Some(attempt),
             Some(retry),
         );
+        persist_scan_progress_now(self.ctx).await;
     }
 
     async fn bump_progress(&self, delta: u64) {
@@ -1359,6 +1362,7 @@ impl AttackExecutionTools for AgenticCategoryTools<'_> {
             Some(attempt),
             Some(retry),
         );
+        persist_scan_progress_now(self.ctx).await;
     }
 
     async fn bump_progress(&self, delta: u64) {

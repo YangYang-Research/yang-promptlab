@@ -87,6 +87,11 @@ export type Finding = {
   evidence: unknown;
 };
 
+export type ScanRetry = {
+  at: string;
+  mode: string;
+};
+
 export type ScanRun = {
   id: string;
   projectId: string;
@@ -96,6 +101,7 @@ export type ScanRun = {
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
+  retries?: ScanRetry[];
 };
 
 export type Report = {

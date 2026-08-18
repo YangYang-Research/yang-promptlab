@@ -177,6 +177,7 @@ export function mapScans(scans: ScanDto[]): ScanRun[] {
     startedAt: s.started_at,
     completedAt: s.completed_at,
     createdAt: s.created_at,
+    retries: (s.retries ?? []).filter((retry) => retry.at.trim().length > 0),
   }));
 }
 
