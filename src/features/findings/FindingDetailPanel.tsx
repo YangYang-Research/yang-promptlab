@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Badge, FindingStatusBadge, IconButton, SeverityBadge } from "@/shared/components";
+import {
+  AttackCategoryBadge,
+  Badge,
+  FindingStatusBadge,
+  IconButton,
+  SeverityBadge,
+} from "@/shared/components";
 import { IconCheck, IconCopy } from "@/shared/components/Icons";
 import { getJudgeRoleWeights } from "@/shared/ipc/runtime";
 import { useToast } from "@/shared/notifications";
@@ -82,9 +88,11 @@ export function FindingDetailPanel({
               <SeverityBadge severity={finding.severity} />
               <h3 className="finding-detail__title">{finding.title}</h3>
             </div>
-            <p className="text-sm text-muted">
-              {finding.category.replace(/_/g, " ")} · {finding.targetName || "target"} ·{" "}
-              {new Date(finding.discoveredAt).toLocaleString()}
+            <p className="finding-detail__meta text-sm text-muted">
+              <AttackCategoryBadge category={finding.category} />
+              <span>
+                {finding.targetName || "target"} · {new Date(finding.discoveredAt).toLocaleString()}
+              </span>
             </p>
           </div>
           {onClose ? (

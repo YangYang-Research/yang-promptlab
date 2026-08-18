@@ -1368,6 +1368,7 @@ export function ScanWizardPage() {
         adaptivePlanning: session.attackPlan.adaptivePlanning,
         draftScanId: scanIdToReuse,
         retryFailedOnly: options?.retryFailedOnly,
+        continueFromProgress: Boolean(options?.restart) && !options?.retryFailedOnly,
       });
       await actions.refresh();
       updateSession({ submittedScanId: result.scan_id, currentStep: 5 });

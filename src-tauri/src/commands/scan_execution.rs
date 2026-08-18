@@ -15,7 +15,7 @@ use promptlab_inference::InferenceRuntimeManager;
 use promptlab_models::LocalModelManager;
 use promptlab_planner::AttackPlan;
 use promptlab_runtime::{RuntimeManager, SharedModelProvider};
-use promptlab_storage::Repositories;
+use promptlab_storage::{Repositories, ScanRepository};
 use promptlab_target_profile::{MutationLevel, PayloadGenerationStrategy, PayloadStrategy};
 use promptlab_target_profile::wizard_plan::{
     enabled_tests_for_category, estimate_scan_requests, ExecutionStrategy,
@@ -36,7 +36,9 @@ use crate::commands::generator::{
 use crate::events::ScanProgressEmitter;
 use crate::inference_host::{is_inference_ready, YazgHostLlms};
 use crate::jobs::{bump_scan_progress, ScanProgress};
-use crate::scan_playbook::persist_scan_playbook_state;
+use crate::scan_playbook::{
+    generated_payloads_from_playbook, persist_generated_payloads, persist_scan_playbook_state,
+};
 use crate::session_auth::AttackRuntime;
 
 pub struct ScanExecutionConfig {
@@ -625,28 +627,50 @@ pub async fn run_target_profile_attack_scan(
         }
     };
 
-    let generated_payloads = match generate_scan_payloads(
-        ctx.data_dir,
-        Arc::clone(&ctx.inference_manager),
-        Arc::clone(&ctx.model_manager),
-        ctx.model_provider.clone(),
-        Arc::clone(&ctx.runtime_manager),
-        &plan,
-        &config,
-        ctx.profile,
-        catalog.clone(),
-        &ctx.emitter,
-    )
-    .await
-    {
-        Ok(map) => map,
+    let restored_payloads = match ctx.repos.scans().get(ctx.scan_id).await {
+        Ok(scan) => generated_payloads_from_playbook(scan.playbook_json.as_deref()),
         Err(err) => {
-            warn!(scan_id = %ctx.scan_id, error = %err, "payload generation failed");
-            ctx.emitter.error(format!("Payload generation failed: {err}"));
-            return TargetProfileScanOutcome {
-                findings_total: 0,
-                had_error: true,
-            };
+            warn!(scan_id = %ctx.scan_id, error = %err, "failed to load scan for payload reuse");
+            None
+        }
+    };
+    let reused_payloads = restored_payloads.is_some();
+
+    let generated_payloads = if let Some(map) = restored_payloads {
+        let count: usize = map.values().map(|items| items.len()).sum();
+        ctx.emitter.info(format!(
+            "Reusing {count} payloads from previous generate (skip regenerate on Retry Scan)"
+        ));
+        map
+    } else {
+        match generate_scan_payloads(
+            ctx.data_dir,
+            Arc::clone(&ctx.inference_manager),
+            Arc::clone(&ctx.model_manager),
+            ctx.model_provider.clone(),
+            Arc::clone(&ctx.runtime_manager),
+            &plan,
+            &config,
+            ctx.profile,
+            catalog.clone(),
+            &ctx.emitter,
+        )
+        .await
+        {
+            Ok(map) => {
+                if let Err(err) = persist_generated_payloads(ctx.repos, ctx.scan_id, &map).await {
+                    warn!(scan_id = %ctx.scan_id, error = %err, "failed to persist generated payloads");
+                }
+                map
+            }
+            Err(err) => {
+                warn!(scan_id = %ctx.scan_id, error = %err, "payload generation failed");
+                ctx.emitter.error(format!("Payload generation failed: {err}"));
+                return TargetProfileScanOutcome {
+                    findings_total: 0,
+                    had_error: true,
+                };
+            }
         }
     };
 
@@ -666,7 +690,7 @@ pub async fn run_target_profile_attack_scan(
         }
     }
 
-    if config.execution == ExecutionStrategy::Sequential {
+    if config.execution == ExecutionStrategy::Sequential && !reused_payloads {
         bump_scan_progress(&ctx.progress, 1);
     }
 

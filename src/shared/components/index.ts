@@ -1,6 +1,14 @@
 export { ActionsDropdown, type ActionsDropdownItem } from "./ActionsDropdown";
 export { scanOpenActionIcon } from "./actionIcons";
-export { Badge, SeverityBadge, StatusBadge, FindingStatusBadge, TargetScanStatusBadge, AuthTypeBadge } from "./Badge";
+export {
+  Badge,
+  SeverityBadge,
+  StatusBadge,
+  FindingStatusBadge,
+  TargetScanStatusBadge,
+  AuthTypeBadge,
+  AttackCategoryBadge,
+} from "./Badge";
 export { Button } from "./Button";
 export { Card, StatCard } from "./Card";
 export { ConnectivityStatus, connectivityStatusVariant } from "./ConnectivityStatus";

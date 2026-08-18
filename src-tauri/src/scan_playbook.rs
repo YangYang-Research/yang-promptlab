@@ -6,6 +6,8 @@ use serde_json::Value;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+use promptlab_attack::{AttackCategory, AttackPayload};
+
 use crate::jobs::{ScanBatchCheckpoint, ScanProgress};
 
 const MAX_SCAN_RETRIES: usize = 20;
@@ -59,6 +61,49 @@ pub fn checkpoint_from_playbook(playbook_json: Option<&str>) -> Option<ScanBatch
     let raw = playbook_json?;
     let value: Value = serde_json::from_str(raw).ok()?;
     serde_json::from_value(value.get("batch_checkpoint")?.clone()).ok()
+}
+
+pub fn generated_payloads_from_playbook(
+    playbook_json: Option<&str>,
+) -> Option<std::collections::HashMap<AttackCategory, Vec<AttackPayload>>> {
+    let raw = playbook_json?;
+    let value: Value = serde_json::from_str(raw).ok()?;
+    let payloads: std::collections::HashMap<AttackCategory, Vec<AttackPayload>> =
+        serde_json::from_value(value.get("generated_payloads")?.clone()).ok()?;
+    if payloads.values().all(|items| items.is_empty()) {
+        return None;
+    }
+    Some(payloads)
+}
+
+pub async fn persist_generated_payloads(
+    repos: &Repositories,
+    scan_id: &str,
+    payloads: &std::collections::HashMap<AttackCategory, Vec<AttackPayload>>,
+) -> Result<(), promptlab_core::PromptLabError> {
+    let scan = repos.scans().get(scan_id).await?;
+    let mut playbook = scan
+        .playbook_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let Some(obj) = playbook.as_object_mut() {
+        obj.insert(
+            "generated_payloads".into(),
+            serde_json::to_value(payloads).unwrap_or(Value::Null),
+        );
+    }
+    repos
+        .scans()
+        .update(
+            scan_id,
+            UpdateScan {
+                playbook_json: Some(playbook),
+                ..Default::default()
+            },
+        )
+        .await?;
+    Ok(())
 }
 
 pub async fn persist_playbook_progress(
@@ -150,5 +195,18 @@ mod tests {
     fn scan_retries_from_playbook_empty_when_missing() {
         assert!(scan_retries_from_playbook(None).is_empty());
         assert!(scan_retries_from_playbook(Some("{}")).is_empty());
+    }
+
+    #[test]
+    fn generated_payloads_from_playbook_roundtrip() {
+        let payload = AttackPayload::new("p1", "Probe", AttackCategory::Jailbreak, "ignore rules");
+        let mut pack = std::collections::HashMap::new();
+        pack.insert(AttackCategory::Jailbreak, vec![payload]);
+        let playbook = serde_json::json!({
+            "generated_payloads": pack,
+        });
+        let restored = generated_payloads_from_playbook(Some(&playbook.to_string())).unwrap();
+        assert_eq!(restored.get(&AttackCategory::Jailbreak).unwrap().len(), 1);
+        assert!(generated_payloads_from_playbook(Some("{}")).is_none());
     }
 }

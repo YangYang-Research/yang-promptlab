@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { categoryLabel } from "@/features/scans/categoryLabel";
 import type { Severity } from "@/shared/types";
 import type { TargetScanStatusLabel } from "@/shared/targetScanContext";
 
@@ -121,4 +122,34 @@ type AuthTypeBadgeProps = {
 /** Badge colors aligned with Scan wizard Authentication Type buttons. */
 export function AuthTypeBadge({ kind, label }: AuthTypeBadgeProps) {
   return <span className={["badge", "badge--auth", AUTH_KIND_CLASS[kind]].join(" ")}>{label}</span>;
+}
+
+const ATTACK_CATEGORY_CLASS: Record<string, string> = {
+  prompt_injection: "badge--category-prompt-injection",
+  system_prompt_extraction: "badge--category-system-prompt-extraction",
+  jailbreak: "badge--category-jailbreak",
+  rag_leakage: "badge--category-rag-leakage",
+  memory_poisoning: "badge--category-memory-poisoning",
+  cross_user_leakage: "badge--category-cross-user-leakage",
+  agent_goal_hijacking: "badge--category-agent-goal-hijacking",
+  tool_abuse: "badge--category-tool-abuse",
+  mcp_abuse: "badge--category-mcp-abuse",
+};
+
+function attackCategoryClass(category: string): string {
+  const id = category.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return ATTACK_CATEGORY_CLASS[id] ?? "badge--category-unknown";
+}
+
+type AttackCategoryBadgeProps = {
+  category: string;
+};
+
+/** Per-category colors so Attack Category badges don't sink into the zinc/teal theme. */
+export function AttackCategoryBadge({ category }: AttackCategoryBadgeProps) {
+  return (
+    <span className={["badge", "badge--category", attackCategoryClass(category)].join(" ")}>
+      {categoryLabel(category)}
+    </span>
+  );
 }

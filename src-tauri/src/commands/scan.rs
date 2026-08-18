@@ -47,6 +47,19 @@ fn is_restartable_scan_status(status: &str) -> bool {
     matches!(status, "failed" | "cancelled" | "stopped" | "completed")
 }
 
+fn should_continue_from_progress(
+    continue_requested: bool,
+    retry_failed_only: bool,
+    has_progress: bool,
+    is_restartable: bool,
+    running_without_job: bool,
+) -> bool {
+    continue_requested
+        && !retry_failed_only
+        && has_progress
+        && (is_restartable || running_without_job)
+}
+
 fn prepare_restored_progress(mut restored: ScanProgress) -> ScanProgress {
     restored.status = "running".into();
     restored.pause_pending = false;
@@ -227,6 +240,7 @@ fn merge_scan_execution_playbook(
         if clear_progress {
             obj.remove("progress");
             obj.remove("batch_checkpoint");
+            obj.remove("generated_payloads");
         }
         if let Some(execution) = execution_playbook.as_object() {
             for (key, value) in execution {
@@ -529,8 +543,10 @@ pub async fn scan_start_op(
     adaptive_planning: Option<bool>,
     draft_scan_id: Option<String>,
     retry_failed_only: Option<bool>,
+    continue_from_progress: Option<bool>,
 ) -> CommandResult<ScanStartDto> {
     let retry_failed_only = retry_failed_only.unwrap_or(false);
+    let continue_requested = continue_from_progress.unwrap_or(false);
 
     let repos = state.repositories();
     repos
@@ -712,13 +728,17 @@ pub async fn scan_start_op(
         let running_without_job = !is_draft
             && existing.status == "running"
             && !state.jobs().contains(&draft_id);
-        continue_from_progress = !retry_failed_only
-            && existing_progress.is_some()
-            && (is_restart || running_without_job);
+        continue_from_progress = should_continue_from_progress(
+            continue_requested,
+            retry_failed_only,
+            existing_progress.is_some(),
+            is_restart,
+            running_without_job,
+        );
         clear_console_log = !retry_failed_only
             && !continue_from_progress
             && (is_restart || running_without_job);
-        if is_restart || retry_failed_only {
+        if continue_from_progress || retry_failed_only {
             execution_config.pipeline_warmup_secs = 0;
         }
 
@@ -752,7 +772,9 @@ pub async fn scan_start_op(
             }
         }
 
-        let clear_progress = is_restart && !retry_failed_only && !continue_from_progress;
+        let clear_progress = !continue_from_progress
+            && !retry_failed_only
+            && (is_restart || running_without_job);
         let mut playbook = merge_scan_execution_playbook(
             existing.playbook_json.as_deref(),
             &mut execution_playbook,
@@ -874,7 +896,7 @@ pub async fn scan_start_op(
     let profile_for_job = profile.clone();
     let execution_config_for_job = execution_config;
     let app_for_job = app.clone();
-    let skip_completed_categories = !retry_failed_only;
+    let skip_completed_categories = continue_from_progress;
 
     emit_app_data_changed(app, "scan_created");
 
@@ -1332,6 +1354,7 @@ pub async fn scan_start(
     adaptive_planning: Option<bool>,
     draft_scan_id: Option<String>,
     retry_failed_only: Option<bool>,
+    continue_from_progress: Option<bool>,
 ) -> CommandResult<ScanStartDto> {
     let parsed_strategy = payload_strategy
         .map(serde_json::from_value)
@@ -1353,6 +1376,7 @@ pub async fn scan_start(
         adaptive_planning,
         draft_scan_id,
         retry_failed_only,
+        continue_from_progress,
     )
     .await
 }
@@ -1451,6 +1475,25 @@ mod tests {
     }
 
     #[test]
+    fn start_attack_after_change_plan_does_not_resume() {
+        assert!(!should_continue_from_progress(
+            false, false, true, true, false
+        ));
+        assert!(should_continue_from_progress(
+            true, false, true, true, false
+        ));
+        assert!(!should_continue_from_progress(
+            true, true, true, true, false
+        ));
+        assert!(should_continue_from_progress(
+            true, false, true, false, true
+        ));
+        assert!(!should_continue_from_progress(
+            true, false, false, true, false
+        ));
+    }
+
+    #[test]
     fn interrupted_scan_statuses_include_active_states() {
         assert!(is_interrupted_scan_status("running"));
         assert!(is_interrupted_scan_status("paused"));
@@ -1469,7 +1512,8 @@ mod tests {
     fn merge_scan_execution_playbook_preserves_wizard_and_clears_progress_on_restart() {
         let existing = serde_json::json!({
             "wizard": { "step": 4 },
-            "progress": { "completed": 3, "total": 5 }
+            "progress": { "completed": 3, "total": 5 },
+            "generated_payloads": { "jailbreak": [] }
         });
         let mut execution = serde_json::json!({
             "profile": "standard",
@@ -1485,6 +1529,7 @@ mod tests {
         assert_eq!(merged["wizard"], serde_json::json!({ "step": 4 }));
         assert_eq!(merged["profile"], "standard");
         assert!(merged.get("progress").is_none());
+        assert!(merged.get("generated_payloads").is_none());
         assert_eq!(
             execution["wizard_snapshot"],
             serde_json::json!({ "step": 4 })
@@ -1501,7 +1546,8 @@ mod tests {
                 "categories_succeeded": ["prompt_injection"],
                 "categories_failed": ["jailbreak"]
             },
-            "batch_checkpoint": { "kind": "pending_judge" }
+            "batch_checkpoint": { "kind": "pending_judge" },
+            "generated_payloads": { "prompt_injection": [{ "id": "p1" }] }
         });
         let mut execution = serde_json::json!({
             "profile": "standard",
@@ -1516,6 +1562,7 @@ mod tests {
 
         assert!(merged.get("progress").is_some());
         assert!(merged.get("batch_checkpoint").is_some());
+        assert!(merged.get("generated_payloads").is_some());
         assert_eq!(merged["wizard"], serde_json::json!({ "step": 4 }));
     }
 

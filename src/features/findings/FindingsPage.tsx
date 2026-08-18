@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import {
-  Badge,
+  AttackCategoryBadge,
   Button,
   Card,
   ContentToolbar,
@@ -130,9 +130,7 @@ export function FindingsPage() {
       key: "category",
       header: "Attack Category",
       width: "150px",
-      render: (f: Finding) => (
-        <Badge variant="muted">{f.category.replace(/_/g, " ")}</Badge>
-      ),
+      render: (f: Finding) => <AttackCategoryBadge category={f.category} />,
     },
     {
       key: "title",
@@ -303,9 +301,7 @@ export function FindingsPage() {
                       },
                       {
                         label: "Attack Category",
-                        value: (
-                          <Badge variant="muted">{finding.category.replace(/_/g, " ")}</Badge>
-                        ),
+                        value: <AttackCategoryBadge category={finding.category} />,
                       },
                       { label: "Conf.", value: `${Math.round(finding.confidence * 100)}%` },
                       {

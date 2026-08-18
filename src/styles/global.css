@@ -1558,6 +1558,59 @@ a:hover {
   background: color-mix(in srgb, #0891b2 12%, transparent);
 }
 
+/* Attack category badges — categorical hues, not theme zinc/teal */
+.badge--category {
+  text-transform: none;
+  border: 1px solid color-mix(in srgb, var(--category-badge) 58%, transparent);
+  color: var(--category-badge);
+  background: color-mix(in srgb, var(--category-badge) 22%, transparent);
+}
+[data-theme="light"] .badge--category {
+  color: var(--category-badge-ink);
+  background: color-mix(in srgb, var(--category-badge-ink) 12%, transparent);
+  border-color: color-mix(in srgb, var(--category-badge-ink) 35%, transparent);
+}
+.badge--category-prompt-injection {
+  --category-badge: #e879f9;
+  --category-badge-ink: #a21caf;
+}
+.badge--category-system-prompt-extraction {
+  --category-badge: #c4b5fd;
+  --category-badge-ink: #6d28d9;
+}
+.badge--category-jailbreak {
+  --category-badge: #fb923c;
+  --category-badge-ink: #c2410c;
+}
+.badge--category-rag-leakage {
+  --category-badge: #818cf8;
+  --category-badge-ink: #4338ca;
+}
+.badge--category-memory-poisoning {
+  --category-badge: #a3e635;
+  --category-badge-ink: #4d7c0f;
+}
+.badge--category-cross-user-leakage {
+  --category-badge: #f472b6;
+  --category-badge-ink: #be185d;
+}
+.badge--category-agent-goal-hijacking {
+  --category-badge: #fbbf24;
+  --category-badge-ink: #b45309;
+}
+.badge--category-tool-abuse {
+  --category-badge: #22d3ee;
+  --category-badge-ink: #0e7490;
+}
+.badge--category-mcp-abuse {
+  --category-badge: #fb7185;
+  --category-badge-ink: #be123c;
+}
+.badge--category-unknown {
+  --category-badge: #a78bfa;
+  --category-badge-ink: #5b21b6;
+}
+
 /* Yazg / AI Runtime inference badge */
 .yazg-badge {
   display: inline-flex;
@@ -5002,6 +5055,13 @@ a:hover {
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+.finding-detail__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.35rem 0 0;
 }
 .finding-detail__title {
   margin: 0;

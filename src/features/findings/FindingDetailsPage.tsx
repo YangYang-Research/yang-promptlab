@@ -5,6 +5,7 @@ import { useAppStore } from "@/app/store/AppStore";
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import {
   ActionsDropdown,
+  AttackCategoryBadge,
   Badge,
   Button,
   Card,
@@ -238,6 +239,10 @@ export function FindingDetailsPage() {
             <div className="finding-details__signal-item">
               <span className="finding-details__signal-label">Severity</span>
               <SeverityBadge severity={finding.severity} />
+            </div>
+            <div className="finding-details__signal-item">
+              <span className="finding-details__signal-label">Attack Category</span>
+              <AttackCategoryBadge category={finding.category} />
             </div>
             <div className="finding-details__signal-item">
               <span className="finding-details__signal-label">Verdict</span>

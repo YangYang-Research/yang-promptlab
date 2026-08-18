@@ -100,6 +100,8 @@ export type ScanStartRequest = {
   draftScanId?: string;
   /** Re-run only categories listed in scan progress `categories_failed`. */
   retryFailedOnly?: boolean;
+  /** Retry Scan: resume from last incomplete stage. Start Attack is a fresh run. */
+  continueFromProgress?: boolean;
 };
 
 export type ScanStatusDto = {
@@ -252,6 +254,7 @@ export const startScan = (request: ScanStartRequest) =>
     adaptivePlanning: request.adaptivePlanning ?? false,
     draftScanId: request.draftScanId,
     retryFailedOnly: request.retryFailedOnly ?? false,
+    continueFromProgress: request.continueFromProgress ?? false,
   });
 
 export const getScanStatus = (scanId: string) =>

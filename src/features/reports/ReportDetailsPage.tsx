@@ -8,6 +8,7 @@ import { categoryLabel } from "@/features/scans/categoryLabel";
 import { parseAttackPlaybook } from "@/features/scans/scanPlaybook";
 import { ScanRecommendationsPanel } from "@/features/scans/ScanRecommendationsPanel";
 import {
+  AttackCategoryBadge,
   Badge,
   Button,
   Card,
@@ -378,7 +379,7 @@ export function ReportDetailsPage() {
                     <Badge variant="muted">#{index + 1}</Badge>
                     <SeverityBadge severity={finding.severity} />
                     <FindingStatusBadge status={finding.status} />
-                    <Badge variant="muted">{finding.category.replace(/_/g, " ")}</Badge>
+                    <AttackCategoryBadge category={finding.category} />
                   </div>
 
                   <h3>
