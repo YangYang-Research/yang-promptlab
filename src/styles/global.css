@@ -1254,8 +1254,41 @@ a:hover {
 .severity-chart__bar--low { background: var(--severity-low); }
 .severity-chart__bar--info { background: var(--severity-info); }
 
+.severity-chart__row:last-child {
+  margin-bottom: 0;
+}
+
 .severity-chart__count {
   font-size: 0.8125rem;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.confidence-meter {
+  display: grid;
+  grid-template-columns: minmax(3.5rem, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 6.5rem;
+}
+
+.confidence-meter__track {
+  height: 6px;
+  background: var(--bg-elevated);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.confidence-meter__bar {
+  height: 100%;
+  border-radius: 4px;
+  min-width: 3px;
+  background: var(--accent);
+}
+
+.confidence-meter__value {
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
   color: var(--text-muted);
   text-align: right;
 }
@@ -7470,8 +7503,19 @@ a:hover {
 
 .report-native__grid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  grid-template-columns: 1fr;
   gap: 1rem;
+}
+
+.report-native__charts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.report-native__charts > .detail-section {
+  min-width: 0;
 }
 
 .report-native__grid p:last-child {
@@ -7618,7 +7662,7 @@ a:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .report-native__grid {
+  .report-native__charts {
     grid-template-columns: 1fr;
   }
 
@@ -8259,6 +8303,15 @@ a:hover {
 .report-native__executive .scan-rec__skeleton--lead {
   max-width: none;
   width: 100%;
+}
+
+.report-native__executive .scan-rec__title,
+.report-native__charts .detail-section__title {
+  margin: 0 0 0.75rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
 }
 
 .project-summary__footer {

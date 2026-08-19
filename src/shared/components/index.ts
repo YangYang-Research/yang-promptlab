@@ -12,6 +12,7 @@ export {
 } from "./Badge";
 export { Button } from "./Button";
 export { Card, StatCard } from "./Card";
+export { ConfidenceMeter } from "./ConfidenceMeter";
 export { ConnectivityStatus, connectivityStatusVariant } from "./ConnectivityStatus";
 export { ContentToolbar, PageSizeSelect, Pagination } from "./Pagination";
 export { DataTable } from "./DataTable";

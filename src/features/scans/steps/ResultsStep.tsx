@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Badge, Card, DataTable, FindingStatusBadge, Pagination, RefreshButton, SeverityBadge } from "@/shared/components";
+import { Badge, Card, ConfidenceMeter, DataTable, FindingStatusBadge, Pagination, RefreshButton, SeverityBadge } from "@/shared/components";
 import { IconCheck } from "@/shared/components/Icons";
 import { resolveAttackGraphStates } from "@/features/scans/attackGraphProgress";
 import { type AttackCategoryId } from "@/features/scans/attackProfiles";
@@ -25,10 +25,6 @@ const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"]
 const FINDINGS_SUMMARY_PAGE_SIZE = 10;
 
 type FindingSummaryRow = Finding & { no: number };
-
-function confidencePercent(confidence: number): number {
-  return Math.round(confidence > 1 ? confidence : confidence * 100);
-}
 
 function severityVariantForStatus(
   status: string,
@@ -120,8 +116,8 @@ export function ResultsStep({
       {
         key: "confidence",
         header: "Confidence",
-        width: "100px",
-        render: (row: FindingSummaryRow) => `${confidencePercent(row.confidence)}%`,
+        width: "140px",
+        render: (row: FindingSummaryRow) => <ConfidenceMeter confidence={row.confidence} />,
       },
       {
         key: "status",

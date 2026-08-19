@@ -4,36 +4,34 @@ import { Link, useParams } from "react-router-dom";
 import { useAppStore } from "@/app/store/AppStore";
 import { parseFindingEvidence, formatHttpRequest, formatHttpResponse } from "@/features/findings/findingEvidence";
 import { FindingRecommendationsPanel } from "@/features/findings/FindingRecommendationsPanel";
+import { DoughnutChart } from "@/features/dashboard/SeverityDoughnutChart";
 import { categoryLabel } from "@/features/scans/categoryLabel";
+import { buildFindingsByCategory } from "@/features/scans/FindingsByCategoryChart";
 import { parseAttackPlaybook } from "@/features/scans/scanPlaybook";
+import { ReportExportDropdown } from "@/features/scans/components/ReportExportDropdown";
 import { ScanRecommendationsPanel } from "@/features/scans/ScanRecommendationsPanel";
 import {
   AttackCategoryBadge,
   Badge,
-  Button,
   Card,
+  ConfidenceMeter,
   DataTable,
   EmptyState,
   FindingStatusBadge,
   PageHeader,
   PageLoadingSkeleton,
+  Pagination,
+  RefreshButton,
   SeverityBadge,
   StatCard,
   StatusBadge,
 } from "@/shared/components";
 import { getScan, type ScanDetailDto } from "@/shared/ipc";
-import { useToast } from "@/shared/notifications";
 import { severityCounts } from "@/shared/stats";
+import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
 import type { Finding, Severity } from "@/shared/types";
 
-import {
-  exportStoredReport,
-  generateAndExportScanReport,
-  reportExportLabel,
-  type ReportExportFormat,
-} from "./reportDownloads";
-
-const EXPORT_FORMATS: ReportExportFormat[] = ["html", "pdf", "sarif", "csv"];
+const FINDINGS_SUMMARY_PAGE_SIZE = 10;
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
 const RISK_WEIGHT: Record<Severity, number> = {
   critical: 16,
@@ -73,9 +71,7 @@ type FindingSummaryRow = Finding & { no: number };
 
 export function ReportDetailsPage() {
   const { reportId = "" } = useParams();
-  const { reports, scans, findings, projects, targets, loading, actions } = useAppStore();
-  const { notify } = useToast();
-  const [busyFormat, setBusyFormat] = useState<ReportExportFormat | null>(null);
+  const { reports, scans, findings, projects, targets, loading, error, actions } = useAppStore();
   const [scanDetail, setScanDetail] = useState<ScanDetailDto | null>(null);
 
   const report = reports.find((item) => item.id === reportId);
@@ -119,11 +115,21 @@ export function ReportDetailsPage() {
   }, [report?.scanId]);
 
   const counts = useMemo(() => severityCounts(reportFindings), [reportFindings]);
+  const maxSeverityCount = Math.max(...SEVERITIES.map((severity) => counts[severity]), 1);
+  const findingsByCategory = useMemo(
+    () => buildFindingsByCategory(reportFindings),
+    [reportFindings],
+  );
   const riskScore = useMemo(() => computeRiskScore(reportFindings), [reportFindings]);
   const summaryRows = useMemo<FindingSummaryRow[]>(
     () => reportFindings.map((finding, index) => ({ ...finding, no: index + 1 })),
     [reportFindings],
   );
+  const {
+    page: findingsPage,
+    setPage: setFindingsPage,
+    pagination: findingsPagination,
+  } = usePaginatedList(summaryRows, FINDINGS_SUMMARY_PAGE_SIZE);
   const summaryColumns = useMemo(
     () => [
       {
@@ -163,8 +169,8 @@ export function ReportDetailsPage() {
       {
         key: "confidence",
         header: "Confidence",
-        width: "100px",
-        render: (row: FindingSummaryRow) => `${confidencePercent(row.confidence)}%`,
+        width: "140px",
+        render: (row: FindingSummaryRow) => <ConfidenceMeter confidence={row.confidence} />,
       },
       {
         key: "status",
@@ -175,23 +181,6 @@ export function ReportDetailsPage() {
     ],
     [],
   );
-
-  async function handleExport(format: ReportExportFormat) {
-    if (!report?.scanId) return;
-    setBusyFormat(format);
-    try {
-      const dest =
-        format === "html" && report.format === "html"
-          ? await exportStoredReport(report.id)
-          : await generateAndExportScanReport(report.projectId, report.scanId, format);
-      await actions.refresh();
-      notify(`${reportExportLabel(format)} report saved to ${dest}`, "success");
-    } catch (err) {
-      notify(err instanceof Error ? err.message : "Report export failed", "error");
-    } finally {
-      setBusyFormat(null);
-    }
-  }
 
   if (!report && !loading) {
     return (
@@ -221,18 +210,23 @@ export function ReportDetailsPage() {
         backOnly
         title="Report details"
         actions={
-          <div className="report-viewer__exports" aria-label="Export report">
-            {EXPORT_FORMATS.map((format) => (
-              <Button
-                key={format}
-                size="sm"
-                variant={format === "html" ? "primary" : "secondary"}
-                disabled={!report.scanId || busyFormat !== null}
-                onClick={() => void handleExport(format)}
-              >
-                {busyFormat === format ? "…" : reportExportLabel(format)}
-              </Button>
-            ))}
+          <div className="page-actions">
+            <RefreshButton
+              size="sm"
+              loading={loading}
+              error={error}
+              onClick={() => void actions.refresh()}
+            />
+            {report.scanId ? (
+              <ReportExportDropdown
+                projectId={report.projectId}
+                scanId={report.scanId}
+                findingsCount={reportFindings.length}
+                requireFindings={false}
+                storedHtmlReportId={report.format === "html" ? report.id : undefined}
+                onExported={() => void actions.refresh()}
+              />
+            ) : null}
           </div>
         }
       />
@@ -299,6 +293,36 @@ export function ReportDetailsPage() {
       </section>
 
       <section className="report-native__grid">
+        <div className="report-native__charts">
+          <Card className="detail-section">
+            <h2 className="detail-section__title">Severity Distribution</h2>
+            <div className="severity-chart">
+              {SEVERITIES.map((severity) => (
+                <div key={severity} className="severity-chart__row">
+                  <SeverityBadge severity={severity} />
+                  <div className="severity-chart__bar-track">
+                    <div
+                      className={`severity-chart__bar severity-chart__bar--${severity}`}
+                      style={{ width: `${(counts[severity] / maxSeverityCount) * 100}%` }}
+                    />
+                  </div>
+                  <span className="severity-chart__count">{counts[severity]}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card className="detail-section">
+            <h2 className="detail-section__title">Findings by Category</h2>
+            <DoughnutChart
+              data={findingsByCategory}
+              size={176}
+              emptyMessage="No findings by attack category yet."
+              ariaLabel="Findings by attack category"
+            />
+          </Card>
+        </div>
+
         <Card className="detail-section report-native__executive">
           {report.scanId ? (
             <ScanRecommendationsPanel
@@ -318,18 +342,6 @@ export function ReportDetailsPage() {
             </>
           )}
         </Card>
-
-        <Card className="detail-section">
-          <h2 className="detail-section__title">Severity distribution</h2>
-          <div className="report-native__severity-list">
-            {SEVERITIES.map((severity) => (
-              <div key={severity} className="report-native__severity-row">
-                <SeverityBadge severity={severity} />
-                <strong>{counts[severity]}</strong>
-              </div>
-            ))}
-          </div>
-        </Card>
       </section>
 
       <section className="reports-section" aria-label="Findings summary">
@@ -339,11 +351,21 @@ export function ReportDetailsPage() {
         <Card padding="none">
           <DataTable
             columns={summaryColumns}
-            rows={summaryRows}
+            rows={findingsPagination.items}
             keyField="id"
             emptyMessage="No findings"
           />
         </Card>
+        {summaryRows.length > 0 ? (
+          <Pagination
+            page={findingsPage}
+            totalItems={findingsPagination.totalItems}
+            rangeStart={findingsPagination.rangeStart}
+            rangeEnd={findingsPagination.rangeEnd}
+            totalPages={findingsPagination.totalPages}
+            onPageChange={setFindingsPage}
+          />
+        ) : null}
       </section>
 
       <section className="reports-section" aria-label="Detailed Findings">

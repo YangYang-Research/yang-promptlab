@@ -1,5 +1,12 @@
 import type { Severity } from "@/shared/types";
 
+export type DoughnutSlice = {
+  id: string;
+  label: string;
+  count: number;
+  color: string;
+};
+
 export type SeveritySlice = {
   severity: Severity;
   label: string;
@@ -16,17 +23,24 @@ const SEVERITY_COLORS: Record<Severity, string> = {
   info: "#1975d2",
 };
 
-type SeverityDoughnutChartProps = {
-  data: SeveritySlice[];
+type DoughnutChartProps = {
+  data: DoughnutSlice[];
   size?: number;
+  emptyMessage?: string;
+  ariaLabel?: string;
 };
 
-export function SeverityDoughnutChart({ data, size = 168 }: SeverityDoughnutChartProps) {
+export function DoughnutChart({
+  data,
+  size = 168,
+  emptyMessage = "No data yet.",
+  ariaLabel = "Doughnut chart",
+}: DoughnutChartProps) {
   const slices = data.filter((item) => item.count > 0);
   const total = slices.reduce((sum, item) => sum + item.count, 0);
 
   if (total === 0) {
-    return <p className="text-muted text-sm">No findings by severity yet.</p>;
+    return <p className="text-muted text-sm">{emptyMessage}</p>;
   }
 
   const cx = size / 2;
@@ -45,7 +59,7 @@ export function SeverityDoughnutChart({ data, size = 168 }: SeverityDoughnutChar
           height={size}
           viewBox={`0 0 ${size} ${size}`}
           role="img"
-          aria-label="Findings by severity doughnut chart"
+          aria-label={ariaLabel}
         >
           <circle
             cx={cx}
@@ -62,7 +76,7 @@ export function SeverityDoughnutChart({ data, size = 168 }: SeverityDoughnutChar
             offset += length;
             return (
               <circle
-                key={item.severity}
+                key={item.id}
                 cx={cx}
                 cy={cy}
                 r={radius}
@@ -85,7 +99,7 @@ export function SeverityDoughnutChart({ data, size = 168 }: SeverityDoughnutChar
       </div>
       <ul className="category-doughnut__legend">
         {slices.map((item) => (
-          <li key={item.severity} className="category-doughnut__legend-item">
+          <li key={item.id} className="category-doughnut__legend-item">
             <span
               className="category-doughnut__swatch"
               style={{ background: item.color }}
@@ -97,6 +111,27 @@ export function SeverityDoughnutChart({ data, size = 168 }: SeverityDoughnutChar
         ))}
       </ul>
     </div>
+  );
+}
+
+type SeverityDoughnutChartProps = {
+  data: SeveritySlice[];
+  size?: number;
+};
+
+export function SeverityDoughnutChart({ data, size = 168 }: SeverityDoughnutChartProps) {
+  return (
+    <DoughnutChart
+      data={data.map((item) => ({
+        id: item.severity,
+        label: item.label,
+        count: item.count,
+        color: item.color,
+      }))}
+      size={size}
+      emptyMessage="No findings by severity yet."
+      ariaLabel="Findings by severity doughnut chart"
+    />
   );
 }
 

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import {
+  exportStoredReport,
   generateAndExportScanReport,
   reportExportLabel,
   type ReportExportFormat,
@@ -24,6 +25,11 @@ type ReportExportDropdownProps = {
   scanId: string;
   findingsCount: number;
   disabled?: boolean;
+  /** When set, HTML export writes the stored report instead of regenerating. */
+  storedHtmlReportId?: string;
+  /** When false, export stays enabled even if there are zero findings. */
+  requireFindings?: boolean;
+  onExported?: () => void;
 };
 
 export function ReportExportDropdown({
@@ -31,6 +37,9 @@ export function ReportExportDropdown({
   scanId,
   findingsCount,
   disabled = false,
+  storedHtmlReportId,
+  requireFindings = true,
+  onExported,
 }: ReportExportDropdownProps) {
   const { notify } = useToast();
   const [open, setOpen] = useState(false);
@@ -39,7 +48,8 @@ export function ReportExportDropdown({
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const exportDisabled = disabled || findingsCount === 0 || exporting !== null;
+  const exportDisabled =
+    disabled || (requireFindings && findingsCount === 0) || exporting !== null;
 
   useLayoutEffect(() => {
     if (!open) {
@@ -104,11 +114,15 @@ export function ReportExportDropdown({
     setExporting(format);
     setOpen(false);
     try {
-      const path = await generateAndExportScanReport(projectId, scanId, format);
+      const path =
+        format === "html" && storedHtmlReportId
+          ? await exportStoredReport(storedHtmlReportId)
+          : await generateAndExportScanReport(projectId, scanId, format);
       notify(`${reportExportLabel(format)} report saved`, "success");
       if (path) {
         notify(`Saved to ${path}`, "info");
       }
+      onExported?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Report export failed";
       notify(message, "error");
