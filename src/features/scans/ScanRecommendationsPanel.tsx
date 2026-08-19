@@ -5,6 +5,7 @@ import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
 import {
   buildScanChangePlanUrl,
   buildScanRetryUrl,
+  buildScanWizardUrl,
 } from "@/features/scans/wizardState";
 import { Badge, Button, YazgBadge } from "@/shared/components";
 import { IconAi } from "@/shared/components/Icons";
@@ -22,9 +23,14 @@ function recommendationPriorityVariant(
   return "muted";
 }
 
-function isActionRecommendation(item: AttackRecommendationDto): boolean {
+function isRetryAction(item: AttackRecommendationDto): boolean {
   const action = item.action?.trim().toLowerCase();
   return action === "retry_scan" || action === "start_attack";
+}
+
+function isNewScanAction(item: AttackRecommendationDto): boolean {
+  const action = item.action?.trim().toLowerCase();
+  return action === "new_scan" || action === "rescan";
 }
 
 type ScanRecommendationsPanelProps = {
@@ -37,10 +43,12 @@ type ScanRecommendationsPanelProps = {
   title?: string;
   /** When false, hide the Re-recommend action (e.g. report Executive Summary). */
   showReRecommend?: boolean;
-  /** Required for Retry Scan / Change Attack Plan navigation from Scan Details. */
+  /** Required for Retry Scan / New Scan navigation from Scan Details / reports. */
   projectId?: string;
   targetId?: string | null;
-  /** In-wizard overrides (avoid full navigation). */
+  /** In-wizard override (reset wizard onto a fresh New Scan). */
+  onNewScan?: () => void;
+  /** In-wizard overrides for incomplete scans. */
   onRetryScan?: () => void;
   onChangeAttackPlan?: () => void;
   /**
@@ -59,6 +67,7 @@ export function ScanRecommendationsPanel({
   showReRecommend = true,
   projectId,
   targetId,
+  onNewScan,
   onRetryScan,
   onChangeAttackPlan,
   revision = "",
@@ -122,6 +131,15 @@ export function ScanRecommendationsPanel({
     };
   }, [scanId, enabled, categoriesKey, revision]);
 
+  function handleNewScan() {
+    if (onNewScan) {
+      onNewScan();
+      return;
+    }
+    if (!projectId) return;
+    navigate(buildScanWizardUrl(projectId, targetId ?? undefined, { step: 2 }));
+  }
+
   function handleRetryScan() {
     if (onRetryScan) {
       onRetryScan();
@@ -141,18 +159,30 @@ export function ScanRecommendationsPanel({
   }
 
   function renderActionButtons(item: AttackRecommendationDto) {
-    if (!isActionRecommendation(item)) return null;
-    if (!onRetryScan && !onChangeAttackPlan && !projectId) return null;
-    return (
-      <div className="scan-rec__actions">
-        <Button variant="primary" size="sm" onClick={handleRetryScan}>
-          Retry Scan
-        </Button>
-        <Button variant="secondary" size="sm" onClick={handleChangeAttackPlan}>
-          Change Attack Plan
-        </Button>
-      </div>
-    );
+    if (isNewScanAction(item)) {
+      if (!onNewScan && !projectId) return null;
+      return (
+        <div className="scan-rec__actions">
+          <Button variant="primary" size="sm" onClick={handleNewScan}>
+            New Scan
+          </Button>
+        </div>
+      );
+    }
+    if (isRetryAction(item)) {
+      if (!onRetryScan && !onChangeAttackPlan && !projectId) return null;
+      return (
+        <div className="scan-rec__actions">
+          <Button variant="primary" size="sm" onClick={handleRetryScan}>
+            Retry Scan
+          </Button>
+          <Button variant="secondary" size="sm" onClick={handleChangeAttackPlan}>
+            Change Attack Plan
+          </Button>
+        </div>
+      );
+    }
+    return null;
   }
 
   if (!enabled) return null;

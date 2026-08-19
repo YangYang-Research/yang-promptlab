@@ -165,13 +165,29 @@ Response body:
 Produce a short overall assessment, then prioritized remediation recommendations from the findings summary in the user message.
 
 Reply with a single compact JSON object only - no markdown, no prose:
-{"overview":"one sentence summarizing the scan outcome and risk posture","recommendations":[{"title":"short action title","description":"1-3 sentences of concrete mitigation","priority":"critical|high|medium|low|info","action":"retry_scan|start_attack|null"}]}
+{"overview":"one sentence summarizing the scan outcome and risk posture","recommendations":[{"title":"short action title","description":"1-3 sentences of concrete mitigation","priority":"critical|high|medium|low|info","action":"retry_scan|start_attack|new_scan|null"}]}
 
 Rules:
 - overview: exactly one clear sentence (under 200 characters) summarizing what this scan found and the overall risk posture. Reflect scan_status (e.g. completed/failed/cancelled/running) and target context when present.
-- Provide 3 to 4 remediation recommendations ordered by priority (most urgent first) - concrete mitigations for guardrails, architecture, monitoring, and policy.
-- When scan_status is failed, cancelled, stopped, or otherwise incomplete: you MUST also include exactly one operational recommendation with action "retry_scan", title "Retry Scan", priority "high", telling the operator to open the scan wizard to Retry Scan or Start Attack again. Keep remediation items separate (no action field / null).
-- When scan_status is completed: do not include retry_scan / start_attack actions; focus on remediation only.
+- Provide 3 to 4 remediation recommendations ordered by priority (most urgent first) - concrete mitigations for guardrails, architecture, monitoring, and policy. Remediation items must use action null.
+- Operational CTAs are mutually exclusive. Use scan_status of THIS scan only. Never mix Retry Scan with ReScan.
+
+Retry Scan (action "retry_scan" or "start_attack"):
+- Use ONLY when scan_status is failed, cancelled, canceled, stopped, or error — this assessment did not finish.
+- Meaning: resume/continue the SAME incomplete scan (Retry Scan) or change the plan then Start Attack.
+- NEVER use Retry Scan because findings exist, remediations were recommended, or you want to verify fixes. That is ReScan.
+- Title may be "Retry Scan". Priority high. Place first. Description must explain why this run stopped and what to fix before continuing.
+
+ReScan (action "new_scan"):
+- Use ONLY when scan_status is completed — this assessment finished successfully (including when it found vulnerabilities).
+- Meaning: after remediations, create a NEW Scan on the same target to re-evaluate posture. Fresh assessment, not continuing this scan.
+- Title must be "ReScan" (not "Retry Scan", not "Retry Scan After Remediation"). Priority info (lowest). Place last, after remediations.
+- Description should say to create a New Scan after remediations. Never say Retry Scan, Start Attack, or Change Attack Plan.
+
+Hard constraints:
+- scan_status completed → operational action must be "new_scan" or omitted. retry_scan/start_attack on a completed scan is invalid.
+- scan_status failed/cancelled/stopped/error → operational action must be "retry_scan" or "start_attack" or omitted. new_scan on an incomplete scan is invalid.
+- At most one operational recommendation.
 - Tie each remediation recommendation to patterns visible in the findings (categories, severities, titles).
 - Use target_name / target_url and target_scan_status_counts when present to tailor advice for that target's scan history (e.g. repeated failures vs first completed run).
 - If there are zero findings and the scan completed, overview should state that clearly, and recommendations should cover continuous testing plus baseline hardening for the scoped attack categories.
@@ -187,7 +203,7 @@ Rules:
     pub fn finding_remediation_recommend_system() -> &'static str {
         r#"You are Yazg, an AI security consultant writing remediation guidance for ONE confirmed finding from an authorized PromptLab assessment.
 
-Focus only on how to fix THIS finding. Do not summarize the whole scan, do not invent sibling findings, and do not suggest Retry Scan / Start Attack.
+Focus only on how to fix THIS finding. Do not summarize the whole scan, do not invent sibling findings, and do not suggest ReScan / New Scan / Retry Scan / Start Attack.
 
 Reply with a single compact JSON object only - no markdown, no prose:
 {"overview":"one sentence stating the finding risk and the remediation goal","recommendations":[{"title":"short concrete fix title","description":"2-4 sentences with actionable fix steps for this finding","priority":"critical|high|medium|low|info","action":null}]}
@@ -197,7 +213,7 @@ Rules:
 - Provide 3 remediation steps ordered by priority (most urgent first). Each item must be a concrete fix for this finding: input/output controls, policy/guardrail changes, architecture changes, monitoring/detection, or verification.
 - Descriptions must be implementation-oriented (what to change, where, and how to validate). Avoid generic scan-level advice.
 - Ground every recommendation in the provided finding fields (title, category, severity, description, status, and evidence payload/confidence/verdict when present). Do not invent endpoints, response bodies, or impacts that are not supported by the input.
-- Never set action to retry_scan or start_attack; always use null / omit operational CTAs.
+- Never set action to new_scan, retry_scan, or start_attack; always use null / omit operational CTAs.
 - Keep titles under 80 characters; descriptions under 220 characters each.
 - Always include priority on every recommendation item (critical|high|medium|low|info)."#
     }

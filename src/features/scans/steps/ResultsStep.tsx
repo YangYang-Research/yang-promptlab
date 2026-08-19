@@ -16,6 +16,7 @@ import type { Finding, Severity } from "@/shared/types";
 type ResultsStepProps = {
   scanId: string;
   attackCategories?: AttackCategoryId[];
+  onNewScan?: () => void;
   onRetryScan?: () => void;
   onChangeAttackPlan?: () => void;
 };
@@ -42,6 +43,7 @@ function severityVariantForStatus(
 export function ResultsStep({
   scanId,
   attackCategories = [],
+  onNewScan,
   onRetryScan,
   onChangeAttackPlan,
 }: ResultsStepProps) {
@@ -209,6 +211,7 @@ export function ResultsStep({
           attackCategories={attackCategories as string[]}
           projectId={scan?.projectId}
           targetId={scan?.targetId}
+          onNewScan={onNewScan}
           onRetryScan={onRetryScan}
           onChangeAttackPlan={onChangeAttackPlan}
           revision={

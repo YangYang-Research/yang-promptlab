@@ -4,7 +4,7 @@
 
 use promptlab_planner::PlannerLlm;
 use promptlab_target_profile::{
-    ensure_failed_scan_action_recommendation, generate_attack_recommendations_with_llm,
+    ensure_rescan_action_recommendation, generate_attack_recommendations_with_llm,
     AttackRecommendationsBundle, AttackResultsSummary,
 };
 use tracing::info;
@@ -44,7 +44,7 @@ impl RecommendAgent {
 
         match generate_attack_recommendations_with_llm(summary, llm).await {
             Ok(bundle) => {
-                let bundle = ensure_failed_scan_action_recommendation(summary, bundle);
+                let bundle = ensure_rescan_action_recommendation(summary, bundle);
                 events.push(AgentEvent::completed(
                     AgentId::Recommend,
                     format!(

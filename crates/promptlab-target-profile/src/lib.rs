@@ -29,7 +29,8 @@ pub use planner::{plan_from_target_profile, summary_for_api_endpoint};
 pub use wizard_llm::build_wizard_attack_plan_with_llm;
 pub use wizard_recommendations::{
     build_attack_results_summary, ensure_failed_scan_action_recommendation,
-    generate_attack_recommendations_with_llm, generate_finding_recommendations_with_llm,
+    ensure_rescan_action_recommendation, generate_attack_recommendations_with_llm,
+    generate_finding_recommendations_with_llm,
     is_retryable_scan_status, parse_attack_recommendations, AttackRecommendation,
     AttackRecommendationsBundle, AttackResultsSummary, FindingRemediationInput,
     FindingSummaryInput,

@@ -6,7 +6,7 @@ use promptlab_agent::{MemoryContext, YazgDelegation, YazgSupervisor};
 use promptlab_report::{generate_recommendations, data::StorageFindingRow};
 use promptlab_storage::{Finding, FindingRepository, ScanRepository, TargetRepository, UpdateScan};
 use promptlab_target_profile::{
-    build_attack_results_summary, ensure_failed_scan_action_recommendation,
+    build_attack_results_summary, ensure_rescan_action_recommendation,
     AttackRecommendation, AttackRecommendationsBundle, FindingSummaryInput,
 };
 use serde::{Deserialize, Serialize};
@@ -36,7 +36,7 @@ pub struct AttackRecommendationDto {
     pub title: String,
     pub description: String,
     pub priority: String,
-    /// Optional UI action: `retry_scan` | `start_attack`.
+    /// Optional UI action: `retry_scan` | `start_attack` | `new_scan`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<String>,
 }
@@ -101,7 +101,13 @@ pub async fn scan_recommendations_generate_op(
                 }
                 let mut cache_summary = build_attack_results_summary(&scan.status, &[], &[]);
                 cache_summary.scan_name = Some(scan.name.clone());
-                let ensured = ensure_failed_scan_action_recommendation(
+                if let Some(target_id) = scan.target_id.as_deref() {
+                    if let Ok(target) = repos.targets().get(target_id).await {
+                        cache_summary.target_name = Some(target.name);
+                        cache_summary.target_url = seed_url_from_descriptor(&target.descriptor_json);
+                    }
+                }
+                let ensured = ensure_rescan_action_recommendation(
                     &cache_summary,
                     AttackRecommendationsBundle {
                         overview: cached.overview.clone(),
@@ -202,10 +208,10 @@ pub async fn scan_recommendations_generate_op(
     };
 
     let (source, bundle) = match bundle {
-        Some((source, bundle)) => (source, bundle),
+        Some((source, bundle)) => (source, ensure_rescan_action_recommendation(&summary, bundle)),
         None => (
             "fallback",
-            ensure_failed_scan_action_recommendation(
+            ensure_rescan_action_recommendation(
                 &summary,
                 fallback_recommendations_bundle(&findings),
             ),

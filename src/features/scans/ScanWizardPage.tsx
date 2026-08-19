@@ -60,6 +60,7 @@ import {
   prepareAuthFormForStep3,
   saveWizardSession,
   type ScanWizardSession,
+  buildScanWizardUrl,
 } from "./wizardState";
 import {
   canNavigateToStep,
@@ -1414,6 +1415,21 @@ export function ScanWizardPage() {
     updateSession({ currentStep: 4, submittedScanId: null });
   }
 
+  function handleNewScan() {
+    const projectId = lockedProjectId || session.selectedProjectId;
+    const targetId = lockedTargetId || session.savedTargetId;
+    if (!projectId) return;
+    wizardDbBootstrap.current = false;
+    deepLinkApplied.current = false;
+    wizardResumeHydratedRef.current = null;
+    setSession((prev) => {
+      const next = applyWizardEntryStep(prev, 2);
+      saveWizardSession(next);
+      return next;
+    });
+    navigate(buildScanWizardUrl(projectId, targetId ?? undefined, { step: 2 }));
+  }
+
   async function handleRetryFailedCategories() {
     if (!store.savedTarget || !session.attackPlan) return;
     await submitScanJob({ retryFailedOnly: true });
@@ -1610,6 +1626,7 @@ export function ScanWizardPage() {
           <ResultsStep
             scanId={session.submittedScanId}
             attackCategories={session.attackPlan?.categories}
+            onNewScan={handleNewScan}
             onRetryScan={() => {
               void handleRetryScan();
             }}
