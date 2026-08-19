@@ -37,8 +37,6 @@ type ScanRecommendationsPanelProps = {
   title?: string;
   /** When false, hide the Re-recommend action (e.g. report Executive Summary). */
   showReRecommend?: boolean;
-  /** `details` uses the Scan Details editorial layout; `wizard` keeps the compact step-6 style. */
-  variant?: "wizard" | "details";
   /** Required for Retry Scan / Change Attack Plan navigation from Scan Details. */
   projectId?: string;
   targetId?: string | null;
@@ -59,7 +57,6 @@ export function ScanRecommendationsPanel({
   className,
   title = "Recommendations",
   showReRecommend = true,
-  variant = "wizard",
   projectId,
   targetId,
   onRetryScan,
@@ -168,124 +165,80 @@ export function ScanRecommendationsPanel({
       <Badge variant="muted">Rule-based guidance</Badge>
     ) : null;
 
-  if (variant === "details") {
-    return (
-      <div
-        className={["scan-rec", className].filter(Boolean).join(" ")}
-        data-state={loading && empty ? "loading" : error ? "error" : empty ? "empty" : "ready"}
-      >
-        <header className="scan-rec__header">
-          <h2 className="scan-rec__title">{title}</h2>
-          {sourceBadge}
-        </header>
-
-        {loading && empty ? (
-          <div className="scan-rec__loading" aria-busy="true" aria-live="polite">
-            <div className="scan-rec__skeleton scan-rec__skeleton--lead" />
-            <div className="scan-rec__skeleton" />
-            <div className="scan-rec__skeleton scan-rec__skeleton--short" />
-            <p className="scan-rec__status text-muted text-sm">
-              Yazg is generating recommendations from findings…
-            </p>
-          </div>
-        ) : error && empty ? (
-          <p className="scan-rec__status text-danger text-sm">{error}</p>
-        ) : empty ? (
-          <p className="scan-rec__status text-muted text-sm">
-            No recommendations available yet.
-          </p>
-        ) : (
-          <>
-            {error ? <p className="scan-rec__status text-danger text-sm">{error}</p> : null}
-            {overview ? <p className="scan-rec__overview">{overview}</p> : null}
-
-            <ol className="scan-rec__list">
-              {recommendations.map((item, index) => (
-                <li key={`${item.title}-${item.priority}-${index}`} className="scan-rec__item">
-                  <span className="scan-rec__index" aria-hidden="true">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <div className="scan-rec__body">
-                    <div className="scan-rec__item-head">
-                      <h3 className="scan-rec__item-title">{item.title}</h3>
-                      <Badge variant={recommendationPriorityVariant(item.priority)}>
-                        {item.priority}
-                      </Badge>
-                    </div>
-                    <p className="scan-rec__item-desc">{item.description}</p>
-                    {renderActionButtons(item)}
-                  </div>
-                </li>
-              ))}
-            </ol>
-
-            <div className="project-summary__footer">
-              {generatedAt ? (
-                <p className="project-summary__generated">
-                  Generated {formatTimestamp(generatedAt)}
-                </p>
-              ) : (
-                <span />
-              )}
-              {showReRecommend ? (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  type="button"
-                  className="project-summary__action"
-                  onClick={() => load(true)}
-                  disabled={loading}
-                >
-                  <span className="btn__content">
-                    <IconAi className="btn__icon" aria-hidden />
-                    {loading ? "Re-recommending…" : "Re-recommend"}
-                  </span>
-                </Button>
-              ) : null}
-            </div>
-          </>
-        )}
-      </div>
-    );
-  }
-
   return (
-    <div className={["wizard-results__recommendations", className].filter(Boolean).join(" ")}>
-      <div className="wizard-results__recommendations-header">
-        <h4 className="wizard-results__recommendations-title">{title}</h4>
+    <div
+      className={["scan-rec", className].filter(Boolean).join(" ")}
+      data-state={loading && empty ? "loading" : error ? "error" : empty ? "empty" : "ready"}
+    >
+      <header className="scan-rec__header">
+        <h2 className="scan-rec__title">{title}</h2>
         {sourceBadge}
-      </div>
+      </header>
 
       {loading && empty ? (
-        <p className="text-muted text-sm">Yazg is generating recommendations from findings…</p>
-      ) : error ? (
-        <p className="text-danger text-sm">{error}</p>
+        <div className="scan-rec__loading" aria-busy="true" aria-live="polite">
+          <div className="scan-rec__skeleton scan-rec__skeleton--lead" />
+          <div className="scan-rec__skeleton" />
+          <div className="scan-rec__skeleton scan-rec__skeleton--short" />
+          <p className="scan-rec__status text-muted text-sm">
+            Yazg is generating recommendations from findings…
+          </p>
+        </div>
+      ) : error && empty ? (
+        <p className="scan-rec__status text-danger text-sm">{error}</p>
       ) : empty ? (
-        <p className="text-muted text-sm">No recommendations available yet.</p>
+        <p className="scan-rec__status text-muted text-sm">
+          No recommendations available yet.
+        </p>
       ) : (
         <>
-          {overview ? (
-            <p className="wizard-results__recommendations-overview">{overview}</p>
-          ) : null}
-          <ul className="wizard-results__recommendation-list">
+          {error ? <p className="scan-rec__status text-danger text-sm">{error}</p> : null}
+          {overview ? <p className="scan-rec__overview">{overview}</p> : null}
+
+          <ol className="scan-rec__list">
             {recommendations.map((item, index) => (
-              <li
-                key={`${item.title}-${item.priority}-${index}`}
-                className="wizard-results__recommendation-item"
-              >
-                <div className="wizard-results__recommendation-row">
-                  <Badge variant={recommendationPriorityVariant(item.priority)}>
-                    {item.priority}
-                  </Badge>
-                  <span className="wizard-results__recommendation-name">{item.title}</span>
+              <li key={`${item.title}-${item.priority}-${index}`} className="scan-rec__item">
+                <span className="scan-rec__index" aria-hidden="true">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <div className="scan-rec__body">
+                  <div className="scan-rec__item-head">
+                    <h3 className="scan-rec__item-title">{item.title}</h3>
+                    <Badge variant={recommendationPriorityVariant(item.priority)}>
+                      {item.priority}
+                    </Badge>
+                  </div>
+                  <p className="scan-rec__item-desc">{item.description}</p>
+                  {renderActionButtons(item)}
                 </div>
-                <p className="wizard-results__recommendation-description text-sm">
-                  {item.description}
-                </p>
-                {renderActionButtons(item)}
               </li>
             ))}
-          </ul>
+          </ol>
+
+          <div className="project-summary__footer">
+            {generatedAt ? (
+              <p className="project-summary__generated">
+                Generated {formatTimestamp(generatedAt)}
+              </p>
+            ) : (
+              <span />
+            )}
+            {showReRecommend ? (
+              <Button
+                variant="primary"
+                size="sm"
+                type="button"
+                className="project-summary__action"
+                onClick={() => load(true)}
+                disabled={loading}
+              >
+                <span className="btn__content">
+                  <IconAi className="btn__icon" aria-hidden />
+                  {loading ? "Re-recommending…" : "Re-recommend"}
+                </span>
+              </Button>
+            ) : null}
+          </div>
         </>
       )}
     </div>

@@ -5655,21 +5655,14 @@ a:hover {
   }
 }
 
-.wizard-results__finding-button {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  width: 100%;
-  padding: 0.625rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: transparent;
-  color: inherit;
+.wizard-results__finding-link {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   text-align: left;
   cursor: pointer;
-}
-.wizard-results__finding-button:hover {
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .wizard-submitted {
@@ -5917,70 +5910,6 @@ a:hover {
 .wizard-results__attack-category-check {
   color: var(--success, #22c55e);
 }
-.wizard-results__recommendations {
-  margin-top: var(--space-4);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border);
-}
-.wizard-results__recommendations-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: var(--space-3, 0.75rem);
-}
-.wizard-results__recommendations-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.625rem;
-  margin: 0;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-.wizard-results__recommendations-icon {
-  width: 1.125rem;
-  height: 1.125rem;
-  flex-shrink: 0;
-  color: var(--color-accent);
-}
-.wizard-results__recommendations-overview {
-  margin: 0 0 var(--space-3);
-  font-size: 0.9375rem;
-  line-height: 1.55;
-  color: var(--text);
-}
-.wizard-results__recommendations-meta {
-  margin: 0 0 var(--space-3);
-}
-.wizard-results__recommendation-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-.wizard-results__recommendation-item {
-  padding: var(--space-3, 0.75rem);
-  border: 1px solid var(--color-border, var(--border));
-  border-radius: var(--radius-md, var(--radius-sm));
-  background: var(--color-surface-elevated, var(--bg-elevated));
-}
-.wizard-results__recommendation-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-.wizard-results__recommendation-name {
-  font-weight: 600;
-}
-.wizard-results__recommendation-description {
-  margin: 0;
-  color: var(--text-muted);
-  line-height: 1.5;
-}
 
 /* Scan Details — Recommendations (editorial layout) */
 .scan-details__recommendations-card {
@@ -6091,8 +6020,7 @@ a:hover {
   text-wrap: pretty;
 }
 
-.scan-rec__actions,
-.wizard-results__recommendation-item .scan-rec__actions {
+.scan-rec__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;

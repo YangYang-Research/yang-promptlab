@@ -2,13 +2,15 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Badge, RefreshButton, SeverityBadge } from "@/shared/components";
+import { Badge, Card, DataTable, FindingStatusBadge, Pagination, RefreshButton, SeverityBadge } from "@/shared/components";
 import { IconCheck } from "@/shared/components/Icons";
 import { resolveAttackGraphStates } from "@/features/scans/attackGraphProgress";
-import { getCategory, type AttackCategoryId } from "@/features/scans/attackProfiles";
+import { type AttackCategoryId } from "@/features/scans/attackProfiles";
+import { categoryLabel } from "@/features/scans/categoryLabel";
 import { buildSeverityBreakdown } from "@/features/scans/resultsSeverityBreakdown";
 import { ScanRecommendationsPanel } from "@/features/scans/ScanRecommendationsPanel";
 import { mergeScanStatus, useScanStatuses } from "@/features/scans/useScanStatuses";
+import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
 import type { Finding, Severity } from "@/shared/types";
 
 type ResultsStepProps = {
@@ -19,18 +21,12 @@ type ResultsStepProps = {
 };
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
+const FINDINGS_SUMMARY_PAGE_SIZE = 10;
 
-function severityRank(severity: Severity): number {
-  const idx = SEVERITY_ORDER.indexOf(severity);
-  return idx === -1 ? SEVERITY_ORDER.length : idx;
-}
+type FindingSummaryRow = Finding & { no: number };
 
-function categoryLabel(categoryId: string): string {
-  try {
-    return getCategory(categoryId as AttackCategoryId).label;
-  } catch {
-    return categoryId.replace(/_/g, " ");
-  }
+function confidencePercent(confidence: number): number {
+  return Math.round(confidence > 1 ? confidence : confidence * 100);
 }
 
 function severityVariantForStatus(
@@ -77,18 +73,63 @@ export function ResultsStep({
     return buildSeverityBreakdown(scanFindings, selectedSeverity, categoryLabel);
   }, [scanFindings, selectedSeverity]);
 
-  const findingsByCategory = useMemo(() => {
-    const groups = new Map<string, Finding[]>();
-    const sorted = [...scanFindings].sort(
-      (a, b) => severityRank(a.severity) - severityRank(b.severity),
-    );
-    for (const finding of sorted) {
-      const bucket = groups.get(finding.category) ?? [];
-      bucket.push(finding);
-      groups.set(finding.category, bucket);
-    }
-    return [...groups.entries()].sort((a, b) => categoryLabel(a[0]).localeCompare(categoryLabel(b[0])));
-  }, [scanFindings]);
+  const summaryRows = useMemo<FindingSummaryRow[]>(
+    () => scanFindings.map((finding, index) => ({ ...finding, no: index + 1 })),
+    [scanFindings],
+  );
+  const {
+    page: findingsPage,
+    setPage: setFindingsPage,
+    pagination: findingsPagination,
+  } = usePaginatedList(summaryRows, FINDINGS_SUMMARY_PAGE_SIZE);
+  const summaryColumns = useMemo(
+    () => [
+      {
+        key: "no",
+        header: "No",
+        width: "56px",
+        render: (row: FindingSummaryRow) => row.no,
+      },
+      {
+        key: "category",
+        header: "Category",
+        width: "160px",
+        render: (row: FindingSummaryRow) => categoryLabel(row.category),
+      },
+      {
+        key: "finding",
+        header: "Finding",
+        render: (row: FindingSummaryRow) => (
+          <button
+            type="button"
+            className="link wizard-results__finding-link"
+            onClick={() => navigate(`/findings/${row.id}`)}
+          >
+            {row.title}
+          </button>
+        ),
+      },
+      {
+        key: "severity",
+        header: "Severity",
+        width: "110px",
+        render: (row: FindingSummaryRow) => <SeverityBadge severity={row.severity} />,
+      },
+      {
+        key: "confidence",
+        header: "Confidence",
+        width: "100px",
+        render: (row: FindingSummaryRow) => `${confidencePercent(row.confidence)}%`,
+      },
+      {
+        key: "status",
+        header: "Status",
+        width: "120px",
+        render: (row: FindingSummaryRow) => <FindingStatusBadge status={row.status} />,
+      },
+    ],
+    [navigate],
+  );
 
   const categoryStates = useMemo(
     () => resolveAttackGraphStates(attackCategories, status),
@@ -116,7 +157,7 @@ export function ResultsStep({
       )}
 
       <section className="wizard-results__section">
-        <h3 className="wizard-results__heading">Attack summary</h3>
+        <h3 className="wizard-results__heading">Attack Summary</h3>
         <dl className="wizard-results__summary-grid">
           <div>
             <dt>Status</dt>
@@ -160,10 +201,12 @@ export function ResultsStep({
             </ul>
           </div>
         )}
+      </section>
+
+      <section className="wizard-results__section" aria-label="Recommendations">
         <ScanRecommendationsPanel
           scanId={scanId}
           attackCategories={attackCategories as string[]}
-          variant="wizard"
           projectId={scan?.projectId}
           targetId={scan?.targetId}
           onRetryScan={onRetryScan}
@@ -180,7 +223,7 @@ export function ResultsStep({
       </section>
 
       <section className="wizard-results__section">
-        <h3 className="wizard-results__heading">Severity summary</h3>
+        <h3 className="wizard-results__heading">Severity Summary</h3>
         <div className="wizard-results__severity-grid">
           {SEVERITY_ORDER.map((severity) => {
             const count = severityCounts.get(severity) ?? 0;
@@ -240,42 +283,30 @@ export function ResultsStep({
         )}
       </section>
 
-      <section className="wizard-results__section">
-        <div className="wizard-results__heading-row">
-          <h3 className="wizard-results__heading">Findings summary</h3>
-        </div>
-        {scanFindings.length === 0 ? (
-          <p className="text-muted">
-            {scanRunning
-              ? "No findings recorded yet. Attack tests are still running."
-              : "No findings were recorded for this scan."}
-          </p>
-        ) : (
-          <div className="wizard-results__category-groups">
-            {findingsByCategory.map(([category, categoryFindings]) => (
-              <div key={category} className="wizard-results__category-group">
-                <div className="wizard-results__category-header">
-                  <h4 className="wizard-results__category-title">{categoryLabel(category)}</h4>
-                  <span className="text-muted text-sm">{categoryFindings.length} finding{categoryFindings.length === 1 ? "" : "s"}</span>
-                </div>
-                <ul className="wizard-results__finding-list">
-                  {categoryFindings.map((finding) => (
-                    <li key={finding.id} className="wizard-results__finding-row">
-                      <button
-                        type="button"
-                        className="wizard-results__finding-button"
-                        onClick={() => navigate(`/findings/${finding.id}`)}
-                      >
-                        <SeverityBadge severity={finding.severity} />
-                        <span className="wizard-results__finding-title">{finding.title}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        )}
+      <section className="wizard-results__section" aria-label="Findings Summary">
+        <h3 className="wizard-results__heading">Findings Summary</h3>
+        <Card padding="none">
+          <DataTable
+            columns={summaryColumns}
+            rows={findingsPagination.items}
+            keyField="id"
+            emptyMessage={
+              scanRunning
+                ? "No findings recorded yet. Attack tests are still running."
+                : "No findings were recorded for this scan."
+            }
+          />
+        </Card>
+        {summaryRows.length > 0 ? (
+          <Pagination
+            page={findingsPage}
+            totalItems={findingsPagination.totalItems}
+            rangeStart={findingsPagination.rangeStart}
+            rangeEnd={findingsPagination.rangeEnd}
+            totalPages={findingsPagination.totalPages}
+            onPageChange={setFindingsPage}
+          />
+        ) : null}
       </section>
     </div>
   );

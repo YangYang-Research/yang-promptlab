@@ -306,7 +306,6 @@ export function ReportDetailsPage() {
               scanId={report.scanId}
               attackCategories={playbook?.categories ?? []}
               enabled={!loading && Boolean(report.scanId)}
-              variant="details"
               showReRecommend={false}
               projectId={report.projectId}
               targetId={scan?.targetId}

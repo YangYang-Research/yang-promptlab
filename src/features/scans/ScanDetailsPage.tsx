@@ -791,7 +791,6 @@ export function ScanDetailsPage() {
               scanId={scanId}
               attackCategories={playbook?.categories ?? []}
               enabled={!loading && Boolean(detail)}
-              variant="details"
               projectId={scan?.projectId}
               targetId={scan?.targetId}
               revision={`${effectiveStatus}|${scanFindings
