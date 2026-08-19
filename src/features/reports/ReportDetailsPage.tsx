@@ -223,7 +223,6 @@ export function ReportDetailsPage() {
                 scanId={report.scanId}
                 findingsCount={reportFindings.length}
                 requireFindings={false}
-                storedHtmlReportId={report.format === "html" ? report.id : undefined}
                 onExported={() => void actions.refresh()}
               />
             ) : null}

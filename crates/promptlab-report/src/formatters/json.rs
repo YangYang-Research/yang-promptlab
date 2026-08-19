@@ -104,6 +104,7 @@ mod tests {
                 http_response: None,
                 confidence: Some(0.8),
                 evidence: Some(r#"{"text":"leak"}"#.into()),
+                evidence_raw: None,
                 recommendation: Some("Add guardrails".into()),
                 compliance_refs: vec!["LLM01".into()],
                 status: "open".into(),

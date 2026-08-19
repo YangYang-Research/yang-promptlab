@@ -160,6 +160,9 @@ pub struct ReportFinding {
     #[serde(default)]
     pub confidence: Option<f32>,
     pub evidence: Option<String>,
+    /// Original scanner evidence JSON (used by HTML detailed findings).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_raw: Option<String>,
     pub recommendation: Option<String>,
     pub compliance_refs: Vec<String>,
     pub status: String,

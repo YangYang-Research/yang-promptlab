@@ -234,7 +234,7 @@ fn parse_http_response(value: &Value) -> Option<ReportHttpResponse> {
         .or_else(|| str_of(value, "response_body"))
         .or_else(|| str_of_nested(response, "normalized"))
         .or_else(|| str_of(value, "response_excerpt"))
-        .map(|s| s.trim().to_string())
+        .map(|s| pretty_json_if_possible(s.trim()))
         .filter(|s| !s.is_empty());
     let parsed = ReportHttpResponse {
         status,
@@ -439,6 +439,185 @@ fn f64_of(value: &Value, key: &str) -> Option<f64> {
 
 fn f64_of_nested(parent: Option<&Value>, key: &str) -> Option<f64> {
     parent.and_then(|v| f64_of(v, key))
+}
+
+/// Structured finding detail used by the HTML report (mirrors the app finding page).
+#[derive(Debug, Clone, Default)]
+pub struct FindingDetailView {
+    pub verdict: Option<String>,
+    pub explanation: Option<String>,
+    pub payload_id: Option<String>,
+    pub indicators: Vec<String>,
+    pub judge_roles: Vec<FindingJudgeRole>,
+    pub consensus: Option<String>,
+    pub judged_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FindingJudgeRole {
+    pub role: String,
+    pub label: String,
+    pub kind: Option<String>,
+    pub vulnerable: bool,
+    pub score: u32,
+    pub severity: Option<String>,
+    pub category: Option<String>,
+    pub rationale: Option<String>,
+    pub indicators: Vec<String>,
+}
+
+pub fn parse_finding_detail(raw: Option<&str>) -> FindingDetailView {
+    let Some(raw) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
+        return FindingDetailView::default();
+    };
+    let Ok(value) = serde_json::from_str::<Value>(raw) else {
+        return FindingDetailView::default();
+    };
+
+    let judge = value.get("judge");
+    let verdict = str_of(&value, "verdict").or_else(|| str_of_nested(judge, "verdict"));
+    let explanation = str_of(&value, "explanation")
+        .or_else(|| str_of_nested(judge, "summary"))
+        .or_else(|| str_of_nested(judge, "reasoning"));
+    let payload_id = str_of(&value, "payload_id").or_else(|| str_of(&value, "payloadId"));
+    let indicators = collect_signals(&value, judge);
+    let judged_at = str_of_nested(judge, "judged_at").or_else(|| str_of_nested(judge, "judgedAt"));
+
+    let mut consensus = None;
+    if let Some(c) = judge.and_then(|j| j.get("consensus")) {
+        let votes = c.get("vulnerable_votes").and_then(|v| v.as_u64());
+        let participating = c.get("participating_evaluators").and_then(|v| v.as_u64());
+        let agreement = c.get("agreement_ratio").and_then(|v| v.as_f64());
+        if let (Some(votes), Some(n)) = (votes, participating) {
+            let mut line = format!("{votes}/{n} vulnerable votes");
+            if let Some(ratio) = agreement {
+                line.push_str(&format!(" · agreement {:.0}%", ratio * 100.0));
+            }
+            consensus = Some(line);
+        }
+    }
+
+    let mut judge_roles = parse_judge_roles(judge);
+    if judge_roles.is_empty() {
+        judge_roles = parse_roles_from_reasoning(judge);
+    }
+
+    FindingDetailView {
+        verdict,
+        explanation,
+        payload_id,
+        indicators,
+        judge_roles,
+        consensus,
+        judged_at,
+    }
+}
+
+fn parse_judge_roles(judge: Option<&Value>) -> Vec<FindingJudgeRole> {
+    let Some(rows) = judge
+        .and_then(|j| j.get("evaluator_results").or_else(|| j.get("evaluatorResults")))
+        .and_then(|v| v.as_array())
+    else {
+        return Vec::new();
+    };
+
+    let mut roles = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        let evaluator_id = str_of(row, "evaluator_id").or_else(|| str_of(row, "evaluatorId"));
+        let kind = str_of(row, "kind");
+        let role = infer_role_key(
+            str_of(row, "role").as_deref().unwrap_or(""),
+            evaluator_id.as_deref(),
+        );
+        let label = judge_role_label(&role, evaluator_id.as_deref(), kind.as_deref(), index);
+        let confidence = row
+            .get("confidence")
+            .and_then(|v| v.as_f64())
+            .or_else(|| {
+                row.get("structured")
+                    .and_then(|s| s.get("confidence"))
+                    .and_then(|v| v.as_f64())
+            })
+            .unwrap_or(0.0);
+        let score = if confidence > 1.0 {
+            confidence.round().clamp(0.0, 100.0) as u32
+        } else {
+            (confidence * 100.0).round().clamp(0.0, 100.0) as u32
+        };
+        let vulnerable = row.get("vulnerable").and_then(|v| v.as_bool()).unwrap_or(false);
+        let indicators = string_array(row.get("indicators"));
+        roles.push(FindingJudgeRole {
+            role,
+            label,
+            kind,
+            vulnerable,
+            score,
+            severity: str_of(row, "severity"),
+            category: str_of(row, "category"),
+            rationale: str_of(row, "rationale"),
+            indicators,
+        });
+    }
+    roles
+}
+
+fn parse_roles_from_reasoning(judge: Option<&Value>) -> Vec<FindingJudgeRole> {
+    let Some(reasoning) = str_of_nested(judge, "reasoning") else {
+        return Vec::new();
+    };
+    reasoning
+        .split(" | ")
+        .enumerate()
+        .filter_map(|(index, part)| {
+            let part = part.trim();
+            if part.is_empty() {
+                return None;
+            }
+            let (head, rest) = part.split_once(':').unwrap_or(("evaluator", part));
+            let evaluator_id = head.trim();
+            let role = infer_role_key("", Some(evaluator_id));
+            Some(FindingJudgeRole {
+                label: judge_role_label(&role, Some(evaluator_id), None, index),
+                role,
+                kind: None,
+                vulnerable: true,
+                score: 0,
+                severity: None,
+                category: None,
+                rationale: Some(rest.trim().to_string()),
+                indicators: Vec::new(),
+            })
+        })
+        .collect()
+}
+
+fn infer_role_key(role: &str, evaluator_id: Option<&str>) -> String {
+    let raw = role.to_ascii_lowercase().replace([' ', '-'], "_");
+    if matches!(raw.as_str(), "judge" | "classifier" | "attacker") {
+        return raw;
+    }
+    let id = evaluator_id.unwrap_or("").to_ascii_lowercase();
+    if id.contains("classifier") {
+        "classifier".into()
+    } else if id.contains("attacker") {
+        "attacker".into()
+    } else if id.contains("judge") {
+        "judge".into()
+    } else {
+        "other".into()
+    }
+}
+
+fn judge_role_label(role: &str, evaluator_id: Option<&str>, kind: Option<&str>, index: usize) -> String {
+    match role.to_ascii_lowercase().replace([' ', '-'], "_").as_str() {
+        "judge" => "JudgeWorker".into(),
+        "classifier" => "ClassifierWorker".into(),
+        "attacker" => "AttackerWorker".into(),
+        _ => evaluator_id
+            .map(str::to_string)
+            .or_else(|| kind.map(|k| k.replace('_', " ")))
+            .unwrap_or_else(|| format!("Evaluator {}", index + 1)),
+    }
 }
 
 #[cfg(test)]

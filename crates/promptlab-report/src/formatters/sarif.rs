@@ -305,6 +305,7 @@ mod tests {
                 }),
                 confidence: Some(0.95),
                 evidence: Some(r#"{"indicators":["UNRESTRICTED_OK"]}"#.into()),
+                evidence_raw: None,
                 recommendation: Some("fix".into()),
                 compliance_refs: vec!["LLM01".into()],
                 status: "open".into(),

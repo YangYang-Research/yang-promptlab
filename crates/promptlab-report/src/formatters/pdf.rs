@@ -409,6 +409,7 @@ mod tests {
                 http_response: None,
                 confidence: Some(0.9),
                 evidence: Some(r#"{"indicators":["OK"]}"#.into()),
+                evidence_raw: None,
                 recommendation: Some("Fix it".into()),
                 compliance_refs: vec!["LLM01".into()],
                 status: "open".into(),

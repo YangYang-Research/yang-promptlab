@@ -165,6 +165,7 @@ mod tests {
             http_response: None,
             confidence: None,
             evidence: None,
+            evidence_raw: None,
             recommendation: None,
             compliance_refs: vec![],
             status: "open".into(),
