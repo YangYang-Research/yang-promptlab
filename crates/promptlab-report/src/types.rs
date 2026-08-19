@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -148,6 +150,12 @@ pub struct ReportFinding {
     /// The target/model response that was captured.
     #[serde(default)]
     pub response: Option<String>,
+    /// Full HTTP request reconstructed from scanner evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_request: Option<ReportHttpRequest>,
+    /// Full HTTP response reconstructed from scanner evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_response: Option<ReportHttpResponse>,
     /// Judge confidence score in `[0.0, 1.0]`.
     #[serde(default)]
     pub confidence: Option<f32>,
@@ -155,6 +163,47 @@ pub struct ReportFinding {
     pub recommendation: Option<String>,
     pub compliance_refs: Vec<String>,
     pub status: String,
+}
+
+/// Wire HTTP request captured (or reconstructed) for a finding.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReportHttpRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+}
+
+impl ReportHttpRequest {
+    pub fn is_empty(&self) -> bool {
+        self.method.is_none()
+            && self.url.is_none()
+            && self.headers.is_empty()
+            && self.body.as_deref().map(str::trim).unwrap_or("").is_empty()
+    }
+}
+
+/// Wire HTTP response captured for a finding.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReportHttpResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+}
+
+impl ReportHttpResponse {
+    pub fn is_empty(&self) -> bool {
+        self.status.is_none()
+            && self.headers.is_empty()
+            && self.body.as_deref().map(str::trim).unwrap_or("").is_empty()
+    }
 }
 
 /// Remediation recommendation.

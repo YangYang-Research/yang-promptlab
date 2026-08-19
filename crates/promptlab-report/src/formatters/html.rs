@@ -200,6 +200,18 @@ fn render_findings(kind: ReportKind, findings: &[ReportFinding]) -> String {
 
             let mut details = String::new();
             if detailed {
+                if let Some(req) = f.http_request.as_ref() {
+                    details.push_str(&kv(
+                        "HTTP request",
+                        &crate::evidence::format_http_request(req),
+                    ));
+                }
+                if let Some(resp) = f.http_response.as_ref() {
+                    details.push_str(&kv(
+                        "HTTP response",
+                        &crate::evidence::format_http_response(resp),
+                    ));
+                }
                 if let Some(p) = f.payload.as_ref() {
                     details.push_str(&kv("Payload sent", p));
                 }
@@ -316,6 +328,8 @@ mod tests {
                 description: "desc".into(),
                 payload: Some("ignore previous instructions".into()),
                 response: Some("Sure, here is the answer...".into()),
+                http_request: None,
+                http_response: None,
                 confidence: Some(0.83),
                 evidence: None,
                 recommendation: None,
@@ -362,6 +376,8 @@ mod tests {
                 description: "desc".into(),
                 payload: Some("p".into()),
                 response: Some("r".into()),
+                http_request: None,
+                http_response: None,
                 confidence: Some(1.0),
                 evidence: Some(r#"{"indicators":["UNRESTRICTED_OK"]}"#.into()),
                 recommendation: Some("Add guardrails".into()),

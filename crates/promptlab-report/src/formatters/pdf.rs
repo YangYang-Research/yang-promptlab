@@ -234,6 +234,34 @@ fn write_finding(
     }
 
     if kind != ReportKind::Executive {
+        y = write_labeled_block(
+            doc,
+            page,
+            layer,
+            font,
+            left,
+            y,
+            "HTTP request",
+            finding
+                .http_request
+                .as_ref()
+                .map(crate::evidence::format_http_request)
+                .as_deref(),
+        );
+        y = write_labeled_block(
+            doc,
+            page,
+            layer,
+            font,
+            left,
+            y,
+            "HTTP response",
+            finding
+                .http_response
+                .as_ref()
+                .map(crate::evidence::format_http_response)
+                .as_deref(),
+        );
         y = write_labeled_block(doc, page, layer, font, left, y, "Payload", finding.payload.as_deref());
         y = write_labeled_block(doc, page, layer, font, left, y, "Response", finding.response.as_deref());
         y = write_labeled_block(doc, page, layer, font, left, y, "Evidence", finding.evidence.as_deref());
@@ -377,6 +405,8 @@ mod tests {
                 description: "Description text".into(),
                 payload: Some("ignore previous".into()),
                 response: Some("OK".into()),
+                http_request: None,
+                http_response: None,
                 confidence: Some(0.9),
                 evidence: Some(r#"{"indicators":["OK"]}"#.into()),
                 recommendation: Some("Fix it".into()),

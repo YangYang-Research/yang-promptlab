@@ -161,6 +161,8 @@ mod tests {
             description: String::new(),
             payload: None,
             response: None,
+            http_request: None,
+            http_response: None,
             confidence: None,
             evidence: None,
             recommendation: None,

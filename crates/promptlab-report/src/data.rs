@@ -80,6 +80,15 @@ impl StorageFindingRow {
         // report fields.
         let (payload, response, confidence) =
             extract_evidence_fields(self.evidence_json.as_deref());
+        let (http_request, http_response) = self
+            .evidence_json
+            .as_deref()
+            .map(crate::evidence::parse_http_from_evidence)
+            .unwrap_or((None, None));
+        let response = http_response
+            .as_ref()
+            .and_then(|r| r.body.clone())
+            .or(response);
 
         let evidence = self.evidence_json.as_deref().map(|raw| {
             let readable = crate::evidence::format_evidence_readable(raw);
@@ -98,6 +107,8 @@ impl StorageFindingRow {
             description: self.description.unwrap_or_default(),
             payload,
             response,
+            http_request,
+            http_response,
             confidence,
             evidence,
             recommendation: Some(recommendation.description.clone()),
@@ -129,21 +140,21 @@ fn extract_evidence_fields(
     };
 
     let payload = str_field(&["sent_payload", "payload", "mutated_content"]);
-    let response = str_field(&["response_excerpt", "response_body"]).or_else(|| {
-        value
-            .get("response")
-            .and_then(|r| {
-                r.as_str()
-                    .map(str::to_string)
-                    .or_else(|| {
-                        r.get("normalized")
-                            .and_then(|v| v.as_str())
-                            .map(str::to_string)
-                    })
-                    .or_else(|| r.get("body").and_then(|v| v.as_str()).map(str::to_string))
-            })
-            .filter(|s| !s.is_empty())
-    });
+    let response = value
+        .get("response")
+        .and_then(|r| {
+            r.get("body")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .or_else(|| {
+                    r.get("normalized")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                })
+                .or_else(|| r.as_str().map(str::to_string))
+        })
+        .filter(|s| !s.is_empty())
+        .or_else(|| str_field(&["response_body", "response_excerpt"]));
     let confidence = value
         .get("confidence")
         .and_then(|v| v.as_f64())
@@ -196,6 +207,8 @@ mod tests {
             description: "desc".into(),
             payload: None,
             response: None,
+            http_request: None,
+            http_response: None,
             confidence: None,
             evidence: None,
             recommendation: None,
@@ -259,6 +272,56 @@ mod tests {
         assert!(evidence.contains("UNRESTRICTED_OK"));
         assert!(!evidence.contains("\"evaluator_results\""));
         assert_eq!(f.response.as_deref(), Some("UNRESTRICTED_OK"));
+        assert_eq!(f.http_response.as_ref().and_then(|r| r.status), Some(200));
+    }
+
+    #[test]
+    fn maps_full_http_from_nested_evidence() {
+        let row = StorageFindingRow {
+            id: "f3".into(),
+            title: "HTTP dump".into(),
+            severity: "high".into(),
+            category: Some("prompt_injection".into()),
+            description: Some("vuln".into()),
+            evidence_json: Some(
+                serde_json::json!({
+                    "payload": "ignore previous",
+                    "request": {
+                        "method": "POST",
+                        "url": "https://llm.internal/v1/chat",
+                        "headers": {
+                            "Authorization": "Bearer sk-live",
+                            "content-type": "application/json"
+                        },
+                        "body": "{\"messages\":[{\"role\":\"user\",\"content\":\"ignore previous\"}]}"
+                    },
+                    "response": {
+                        "status": 200,
+                        "headers": { "content-type": "application/json" },
+                        "body": "{\"choices\":[{\"message\":{\"content\":\"full model output here\"}}]}",
+                        "normalized": "full model output here"
+                    },
+                    "response_excerpt": "full model output"
+                })
+                .to_string(),
+            ),
+            status: "open".into(),
+        };
+        let f = row.into_report_finding();
+        let request = f.http_request.expect("http request");
+        let response = f.http_response.expect("http response");
+        assert_eq!(request.method.as_deref(), Some("POST"));
+        assert_eq!(request.url.as_deref(), Some("https://llm.internal/v1/chat"));
+        assert_eq!(
+            request.headers.get("Authorization").map(String::as_str),
+            Some("[REDACTED]")
+        );
+        assert!(request.body.as_deref().unwrap().contains("ignore previous"));
+        assert_eq!(response.status, Some(200));
+        assert!(response.body.as_deref().unwrap().contains("full model output here"));
+        assert!(f.response.as_deref().unwrap().contains("full model output here"));
+        assert!(f.evidence.as_deref().unwrap().contains("HTTP request:"));
+        assert!(f.evidence.as_deref().unwrap().contains("POST /v1/chat HTTP/1.1"));
     }
 
     #[test]

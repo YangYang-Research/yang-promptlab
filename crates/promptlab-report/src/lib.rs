@@ -16,7 +16,9 @@ pub use charts::ChartRenderer;
 pub use data::{ReportDataBuilder, StorageFindingRow};
 pub use engine::ReportingEngine;
 pub use error::{ReportError, ReportResult};
-pub use evidence::format_evidence_readable;
+pub use evidence::{
+    format_evidence_readable, format_http_request, format_http_response, parse_http_from_evidence,
+};
 pub use formatters::{
     formatter_for, CsvFormatter, HtmlFormatter, JsonFormatter, PdfFormatter, ReportFormatter,
     SarifFormatter,

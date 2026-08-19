@@ -100,6 +100,8 @@ mod tests {
                 description: "Model leaked policy".into(),
                 payload: Some("ignore previous instructions".into()),
                 response: Some("policy: ...".into()),
+                http_request: None,
+                http_response: None,
                 confidence: Some(0.8),
                 evidence: Some(r#"{"text":"leak"}"#.into()),
                 recommendation: Some("Add guardrails".into()),
