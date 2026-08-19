@@ -3,6 +3,7 @@ export { scanOpenActionIcon } from "./actionIcons";
 export {
   Badge,
   SeverityBadge,
+  PriorityBadge,
   StatusBadge,
   FindingStatusBadge,
   TargetScanStatusBadge,

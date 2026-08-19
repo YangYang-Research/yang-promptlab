@@ -25,6 +25,21 @@ export function SeverityBadge({ severity }: SeverityBadgeProps) {
   return <span className={`badge badge--severity-${severity}`}>{severity}</span>;
 }
 
+const SEVERITY_LEVELS: Severity[] = ["critical", "high", "medium", "low", "info"];
+
+type PriorityBadgeProps = {
+  priority: string;
+};
+
+/** Same palette as SeverityBadge (critical / high / medium / low / info). */
+export function PriorityBadge({ priority }: PriorityBadgeProps) {
+  const normalized = priority.trim().toLowerCase() as Severity;
+  if (SEVERITY_LEVELS.includes(normalized)) {
+    return <SeverityBadge severity={normalized} />;
+  }
+  return <Badge variant="muted">{priority}</Badge>;
+}
+
 const targetScanStatusVariant: Record<TargetScanStatusLabel, BadgeProps["variant"]> = {
   "Never Scanned": "muted",
   Running: "info",

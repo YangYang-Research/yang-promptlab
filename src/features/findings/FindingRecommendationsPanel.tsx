@@ -1,23 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 
 import { formatTimestamp } from "@/features/scans/scanDetailsHelpers";
-import { Badge, Button, YazgBadge } from "@/shared/components";
+import { Badge, Button, PriorityBadge, YazgBadge } from "@/shared/components";
 import { IconAi } from "@/shared/components/Icons";
 import {
   generateFindingRecommendations,
   type FindingRecommendationDto,
 } from "@/shared/ipc/findingRecommendations";
 import type { Finding } from "@/shared/types";
-
-function recommendationPriorityVariant(
-  priority: string,
-): "danger" | "warning" | "info" | "muted" {
-  const normalized = priority.trim().toLowerCase();
-  if (normalized === "critical" || normalized === "high") return "danger";
-  if (normalized === "medium") return "warning";
-  if (normalized === "low") return "info";
-  return "muted";
-}
 
 type FindingRecommendationsPanelProps = {
   finding: Pick<Finding, "id" | "category" | "severity" | "title" | "status" | "description">;
@@ -128,7 +118,7 @@ export function FindingRecommendationsPanel({
           <div className="scan-rec__body">
             <div className="scan-rec__item-head">
               <h3 className="scan-rec__item-title">{item.title}</h3>
-              <Badge variant={recommendationPriorityVariant(item.priority)}>{item.priority}</Badge>
+              <PriorityBadge priority={item.priority} />
             </div>
             <p className="scan-rec__item-desc">{item.description}</p>
           </div>

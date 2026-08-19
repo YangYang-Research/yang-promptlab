@@ -7,21 +7,12 @@ import {
   buildScanRetryUrl,
   buildScanWizardUrl,
 } from "@/features/scans/wizardState";
-import { Badge, Button, YazgBadge } from "@/shared/components";
+import { Badge, Button, PriorityBadge, YazgBadge } from "@/shared/components";
 import { IconAi } from "@/shared/components/Icons";
 import {
   generateScanRecommendations,
   type AttackRecommendationDto,
 } from "@/shared/ipc/scanRecommendations";
-
-function recommendationPriorityVariant(
-  priority: string,
-): "danger" | "warning" | "info" | "muted" {
-  if (priority === "critical" || priority === "high") return "danger";
-  if (priority === "medium") return "warning";
-  if (priority === "low") return "info";
-  return "muted";
-}
 
 function isRetryAction(item: AttackRecommendationDto): boolean {
   const action = item.action?.trim().toLowerCase();
@@ -234,9 +225,7 @@ export function ScanRecommendationsPanel({
                 <div className="scan-rec__body">
                   <div className="scan-rec__item-head">
                     <h3 className="scan-rec__item-title">{item.title}</h3>
-                    <Badge variant={recommendationPriorityVariant(item.priority)}>
-                      {item.priority}
-                    </Badge>
+                    <PriorityBadge priority={item.priority} />
                   </div>
                   <p className="scan-rec__item-desc">{item.description}</p>
                   {renderActionButtons(item)}
