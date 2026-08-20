@@ -158,7 +158,7 @@ impl ChartRenderer {
         )
     }
 
-    /// Text-based chart for PDF rendering.
+    /// Text-based chart for PDF rendering (ASCII-only; Helvetica can't paint block glyphs).
     pub fn severity_text_chart(charts: &ChartData) -> String {
         let max = charts
             .severity_counts
@@ -169,15 +169,42 @@ impl ChartRenderer {
             .max(1);
 
         let mut lines = Vec::new();
-        for (severity, count) in &charts.severity_counts {
-            let bar_len = (*count * 20 / max).max(if *count > 0 { 1 } else { 0 });
-            let bar: String = "█".repeat(bar_len);
+        for severity in Severity::all_ordered() {
+            let count = charts
+                .severity_counts
+                .iter()
+                .find(|(s, _)| *s == *severity)
+                .map(|(_, c)| *c)
+                .unwrap_or(0);
+            let bar_len = (count * 20 / max).max(if count > 0 { 1 } else { 0 });
+            let bar: String = "#".repeat(bar_len);
             lines.push(format!(
                 "{:>8} | {bar} ({count})",
                 severity.as_str(),
                 bar = bar,
                 count = count,
             ));
+        }
+        lines.join("\n")
+    }
+
+    /// Text legend for Findings by Category (PDF).
+    pub fn category_text_chart(charts: &ChartData) -> String {
+        let slices: Vec<_> = charts
+            .category_counts
+            .iter()
+            .filter(|(_, c)| *c > 0)
+            .collect();
+        if slices.is_empty() {
+            return "No findings by attack category yet.".into();
+        }
+        let max = slices.iter().map(|(_, c)| *c).max().unwrap_or(1).max(1);
+        let mut lines = Vec::new();
+        for (id, count) in slices {
+            let bar_len = (*count * 20 / max).max(1);
+            let bar: String = "#".repeat(bar_len);
+            let label = id.replace('_', " ");
+            lines.push(format!("{label} | {bar} ({count})"));
         }
         lines.join("\n")
     }
@@ -194,6 +221,163 @@ impl ChartRenderer {
         } else {
             "No detected risk"
         }
+    }
+
+    /// Self-contained SVG for PDF (no CSS) — severity bars matching Report Details order.
+    pub fn severity_distribution_svg(charts: &ChartData, width: u32) -> String {
+        let counts: Vec<(Severity, usize)> = Severity::all_ordered()
+            .iter()
+            .map(|sev| {
+                let count = charts
+                    .severity_counts
+                    .iter()
+                    .find(|(s, _)| s == sev)
+                    .map(|(_, c)| *c)
+                    .unwrap_or(0);
+                (*sev, count)
+            })
+            .collect();
+        let max = counts.iter().map(|(_, c)| *c).max().unwrap_or(0).max(1);
+        let row_h = 28_u32;
+        let gap = 10_u32;
+        let label_w = 78_u32;
+        let count_w = 36_u32;
+        let track_x = label_w;
+        let track_w = width.saturating_sub(label_w + count_w + 16);
+        let height = 16 + counts.len() as u32 * (row_h + gap);
+        let muted = "#52525b";
+        let track = "#ececee";
+        let ink = "#18181b";
+
+        let mut bars = String::new();
+        for (i, (sev, count)) in counts.iter().enumerate() {
+            let y = 12 + i as u32 * (row_h + gap);
+            let bar_w = ((*count as f64 / max as f64) * track_w as f64).round() as u32;
+            let bar_w = bar_w.max(if *count > 0 { 4 } else { 0 });
+            bars.push_str(&format!(
+                concat!(
+                    r#"<text x="0" y="{ty}" font-family="Helvetica" font-size="12" fill="{muted}">{label}</text>"#,
+                    r#"<rect x="{track_x}" y="{ry}" width="{track_w}" height="10" fill="{track}" rx="4"/>"#,
+                    r#"<rect x="{track_x}" y="{ry}" width="{bar_w}" height="10" fill="{color}" rx="4"/>"#,
+                    r#"<text x="{cx}" y="{ty}" font-family="Helvetica" font-size="12" fill="{ink}" text-anchor="end">{count}</text>"#,
+                ),
+                ty = y + 10,
+                label = sev.as_str(),
+                track_x = track_x,
+                ry = y,
+                track_w = track_w,
+                bar_w = bar_w,
+                color = html_severity_color(*sev),
+                cx = width.saturating_sub(4),
+                count = count,
+                muted = muted,
+                track = track,
+                ink = ink,
+            ));
+        }
+
+        format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}" role="img" aria-label="Severity Distribution">{bars}</svg>"#,
+            width = width,
+            height = height.max(80),
+            bars = bars,
+        )
+    }
+
+    /// Self-contained SVG doughnut + legend for PDF embedding.
+    pub fn category_doughnut_svg(charts: &ChartData, width: u32, height: u32) -> String {
+        let slices: Vec<_> = charts
+            .category_counts
+            .iter()
+            .filter(|(_, c)| *c > 0)
+            .collect();
+        let muted = "#71717a";
+        let ink = "#18181b";
+        let track = "#ececee";
+        if slices.is_empty() {
+            return format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}"><text x="12" y="28" font-family="Helvetica" font-size="12" fill="{muted}">No findings by attack category yet.</text></svg>"#,
+                width = width,
+                height = height,
+                muted = muted,
+            );
+        }
+
+        let total: usize = slices.iter().map(|(_, c)| *c).sum();
+        let chart_size = height.min(200) as f64;
+        let cx = chart_size / 2.0 + 8.0;
+        let cy = chart_size / 2.0 + 4.0;
+        let radius = chart_size * 0.34;
+        let stroke_width = chart_size * 0.13;
+        let circumference = 2.0 * std::f64::consts::PI * radius;
+        let legend_x = chart_size + 28.0;
+
+        let mut circles = String::new();
+        let mut legend = String::new();
+        let mut offset = 0.0_f64;
+        for (i, (id, count)) in slices.iter().enumerate() {
+            let fraction = *count as f64 / total as f64;
+            let length = fraction * circumference;
+            let color = category_color(id, i);
+            let label = id.replace('_', " ");
+            circles.push_str(&format!(
+                r#"<circle cx="{cx}" cy="{cy}" r="{radius}" fill="none" stroke="{color}" stroke-width="{sw}" stroke-dasharray="{length:.4} {gap:.4}" stroke-dashoffset="{dash:.4}" transform="rotate(-90 {cx} {cy})"/>"#,
+                cx = cx,
+                cy = cy,
+                radius = radius,
+                color = color,
+                sw = stroke_width,
+                length = length,
+                gap = circumference - length,
+                dash = -offset,
+            ));
+            offset += length;
+
+            let ly = 22.0 + i as f64 * 18.0;
+            legend.push_str(&format!(
+                concat!(
+                    r#"<rect x="{lx}" y="{ly}" width="10" height="10" rx="5" fill="{color}"/>"#,
+                    r#"<text x="{tx}" y="{ty}" font-family="Helvetica" font-size="11" fill="{ink}">{label}</text>"#,
+                    r#"<text x="{cx_count}" y="{ty}" font-family="Helvetica" font-size="11" fill="{muted}" text-anchor="end">{count}</text>"#,
+                ),
+                lx = legend_x,
+                ly = ly - 8.0,
+                color = color,
+                tx = legend_x + 16.0,
+                ty = ly,
+                label = escape_xml(&label),
+                cx_count = width.saturating_sub(8) as f64,
+                count = count,
+                ink = ink,
+                muted = muted,
+            ));
+        }
+
+        format!(
+            concat!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}" role="img" aria-label="Findings by Category">"#,
+                r#"<circle cx="{cx}" cy="{cy}" r="{radius}" fill="none" stroke="{track}" stroke-width="{sw}"/>"#,
+                "{circles}",
+                r#"<text x="{cx}" y="{ty}" text-anchor="middle" font-family="Helvetica" font-size="20" font-weight="700" fill="{ink}">{total}</text>"#,
+                r#"<text x="{cx}" y="{ly}" text-anchor="middle" font-family="Helvetica" font-size="11" fill="{muted}">findings</text>"#,
+                "{legend}",
+                "</svg>",
+            ),
+            width = width,
+            height = height,
+            cx = cx,
+            cy = cy,
+            radius = radius,
+            sw = stroke_width,
+            circles = circles,
+            ty = cy - 2.0,
+            total = total,
+            ly = cy + 14.0,
+            legend = legend,
+            track = track,
+            ink = ink,
+            muted = muted,
+        )
     }
 
     /// HTML bar rows matching Report Details (no overflowing SVG).
@@ -379,5 +563,23 @@ mod tests {
         assert!(html.contains("category-doughnut"));
         assert!(html.contains("stroke-dasharray"));
         assert!(html.contains("prompt injection"));
+        let svg = ChartRenderer::category_doughnut_svg(&charts, 520, 210);
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("stroke-dasharray"));
+        assert!(svg.contains("findings"));
+    }
+
+    #[test]
+    fn severity_distribution_svg_is_self_contained() {
+        let charts = ChartData {
+            severity_counts: vec![(Severity::High, 3), (Severity::Low, 1)],
+            category_counts: vec![],
+            risk_score: 10,
+            total_findings: 4,
+        };
+        let svg = ChartRenderer::severity_distribution_svg(&charts, 520);
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("#f47f1f"));
+        assert!(!svg.contains("<style>"));
     }
 }

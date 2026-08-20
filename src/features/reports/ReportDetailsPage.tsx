@@ -273,7 +273,6 @@ export function ReportDetailsPage() {
         <StatCard
           label="Total findings"
           value={reportFindings.length}
-          hint={`${counts.critical + counts.high} critical or high`}
         />
         <StatCard
           label="Confirmed"

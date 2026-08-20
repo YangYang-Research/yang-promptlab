@@ -41,11 +41,6 @@ fn render_html(kind: ReportKind, input: &ReportInput) -> String {
     } else {
         "success"
     };
-    let critical_or_high = input
-        .findings
-        .iter()
-        .filter(|f| f.severity == Severity::Critical || f.severity == Severity::High)
-        .count();
     let confirmed = input
         .findings
         .iter()
@@ -66,7 +61,6 @@ fn render_html(kind: ReportKind, input: &ReportInput) -> String {
   <div class="card stat-card">
     <span class="stat-card__label">Total findings</span>
     <span class="stat-card__value">{total}</span>
-    <span class="stat-card__hint">{critical_or_high} critical or high</span>
   </div>
   <div class="card stat-card">
     <span class="stat-card__label">Confirmed</span>
@@ -83,7 +77,6 @@ fn render_html(kind: ReportKind, input: &ReportInput) -> String {
         score = risk_score,
         risk_label = risk_label,
         total = input.findings.len(),
-        critical_or_high = critical_or_high,
         confirmed = confirmed,
         open = open,
     );
@@ -209,6 +202,14 @@ header.identity {{
   padding: 1.25rem 1.4rem;
   margin-bottom: 1.25rem;
 }}
+.identity__brand {{
+  display: flex; align-items: center; gap: 0.9rem; margin-bottom: 0.15rem;
+}}
+.identity__logo {{
+  width: 3rem; height: 3rem; flex-shrink: 0; border-radius: 0.7rem;
+  display: block; object-fit: cover;
+}}
+.identity__brand-text {{ min-width: 0; flex: 1; }}
 .identity__eyebrow {{
   display: block; margin-bottom: 0.25rem; color: var(--accent);
   font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
@@ -310,8 +311,17 @@ table.summary-table td {{
 }}
 table.summary-table tbody tr:last-child td {{ border-bottom: none; }}
 .compliance-list {{ display: flex; flex-wrap: wrap; gap: 0.4rem; }}
-.rec {{ padding: 0.85rem 0; border-bottom: 1px solid var(--border-subtle); }}
+.rec {{
+  display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: 0.65rem 0.75rem;
+  padding: 0.85rem 0; border-bottom: 1px solid var(--border-subtle); align-items: start;
+}}
 .rec:last-child {{ border: none; }}
+.rec__index {{
+  font-size: 0.8125rem; font-weight: 700; color: var(--text-subtle); letter-spacing: 0.04em;
+  line-height: 1.4; padding-top: 0.15rem;
+}}
+.rec__main {{ min-width: 0; }}
+.rec__head {{ display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }}
 .rec p {{ color: var(--text-muted); margin-top: 0.25rem; }}
 footer {{ margin-top: 2rem; color: var(--text-subtle); font-size: 0.75rem; text-align: center; }}
 .finding-page__index {{ font-size: 0.75rem; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-subtle); }}
@@ -410,8 +420,13 @@ footer {{ margin-top: 2rem; color: var(--text-subtle); font-size: 0.75rem; text-
 <div class="main">
 <div class="container">
 <header class="identity card" id="overview">
-  <span class="identity__eyebrow">{title}</span>
-  <h1 class="identity__title">{scan_name}</h1>
+  <div class="identity__brand">
+    <img class="identity__logo" src="{logo_src}" alt="PromptLab" width="48" height="48" />
+    <div class="identity__brand-text">
+      <span class="identity__eyebrow">{title}</span>
+      <h1 class="identity__title">{scan_name}</h1>
+    </div>
+  </div>
   <dl class="identity__metadata">
     <div><dt>Project</dt><dd>{project}</dd></div>
     <div><dt>Scan ID</dt><dd class="mono">{scan_id}</dd></div>
@@ -530,6 +545,7 @@ footer {{ margin-top: 2rem; color: var(--text-subtle); font-size: 0.75rem; text-
 </body>
 </html>"##,
         title = kind.title(),
+        logo_src = crate::brand::logo_data_uri(),
         scan_name = escape_html(
             input
                 .scan_name
@@ -912,13 +928,20 @@ fn render_recommendations(recs: &[crate::types::Recommendation]) -> String {
         return "<p class=\"meta\">No recommendations available yet.</p>".into();
     }
     recs.iter()
-        .map(|r| {
+        .enumerate()
+        .map(|(i, r)| {
             format!(
                 r#"<div class="rec">
-  <span class="badge badge-sev-{p}">{p}</span>
-  <strong>{title}</strong>
-  <p>{desc}</p>
+  <span class="rec__index">{n:02}</span>
+  <div class="rec__main">
+    <div class="rec__head">
+      <span class="badge badge-sev-{p}">{p}</span>
+      <strong>{title}</strong>
+    </div>
+    <p>{desc}</p>
+  </div>
 </div>"#,
+                n = i + 1,
                 p = r.priority.as_str(),
                 title = escape_html(&r.title),
                 desc = escape_html(&r.description),
@@ -993,6 +1016,8 @@ mod tests {
         assert!(html.contains("back-to-top"));
         assert!(html.contains("Back to top"));
         assert!(html.contains("identity__eyebrow"));
+        assert!(html.contains("identity__logo"));
+        assert!(html.contains("data:image/png;base64,"));
         assert!(html.contains("PromptLab - Security Scan Report"));
         assert!(html.contains("<dt>Project</dt>"));
         assert!(html.contains("<dt>Scan ID</dt>"));

@@ -2,6 +2,7 @@
 //!
 //! Generates executive, technical, and compliance reports in HTML, PDF, JSON, SARIF, and CSV.
 
+pub mod brand;
 pub mod charts;
 pub mod data;
 pub mod engine;
