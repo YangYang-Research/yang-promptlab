@@ -233,9 +233,6 @@ export function ReportDetailsPage() {
         <div>
           <span className="report-native__eyebrow">PromptLab - Security Scan Report</span>
           <h2>{report.scanName}</h2>
-          <p className="text-muted">
-            Generated {new Date(report.createdAt).toLocaleString()}
-          </p>
         </div>
         <StatusBadge status={report.status} />
         <dl className="report-native__metadata">
@@ -342,18 +339,16 @@ export function ReportDetailsPage() {
         </Card>
       </section>
 
-      <section className="reports-section" aria-label="Findings summary">
-        <div className="reports-section__header">
-          <h2 className="reports-section__title">Findings Summary</h2>
-        </div>
-        <Card padding="none">
+      <Card className="detail-section" aria-label="Findings summary">
+        <h2 className="detail-section__title">Findings Summary</h2>
+        <div className="report-native__summary-table">
           <DataTable
             columns={summaryColumns}
             rows={findingsPagination.items}
             keyField="id"
             emptyMessage="No findings"
           />
-        </Card>
+        </div>
         {summaryRows.length > 0 ? (
           <Pagination
             page={findingsPage}
@@ -364,20 +359,16 @@ export function ReportDetailsPage() {
             onPageChange={setFindingsPage}
           />
         ) : null}
-      </section>
+      </Card>
 
-      <section className="reports-section" aria-label="Detailed Findings">
-        <div className="reports-section__header">
-          <h2 className="reports-section__title">Detailed Findings</h2>
-        </div>
+      <Card className="detail-section" aria-label="Detailed Findings">
+        <h2 className="detail-section__title">Detailed Findings</h2>
 
         {reportFindings.length === 0 ? (
-          <Card>
-            <EmptyState
-              title="No findings"
-              description="This scan completed without reportable findings."
-            />
-          </Card>
+          <EmptyState
+            title="No findings"
+            description="This scan completed without reportable findings."
+          />
         ) : (
           <div className="report-native__findings">
             {reportFindings.map((finding, index) => {
@@ -388,12 +379,11 @@ export function ReportDetailsPage() {
                 (finding.targetUrl || null);
 
               return (
-                <div
+                <article
                   key={finding.id}
                   id={`finding-${finding.id}`}
-                  className="report-native__finding-anchor"
+                  className="report-native__finding report-native__finding-anchor"
                 >
-                <Card className="report-native__finding">
                   <div className="row-actions">
                     <Badge variant="muted">#{index + 1}</Badge>
                     <SeverityBadge severity={finding.severity} />
@@ -441,13 +431,12 @@ export function ReportDetailsPage() {
                       <pre>{formatHttpResponse(evidence)}</pre>
                     </div>
                   </div>
-                </Card>
-                </div>
+                </article>
               );
             })}
           </div>
         )}
-      </section>
+      </Card>
     </div>
   );
 }

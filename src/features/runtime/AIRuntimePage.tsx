@@ -193,8 +193,8 @@ function RuntimeModePicker({
   onSelect: (route: AiInferenceRoute) => void;
 }) {
   return (
-    <div className="runtime-mode-picker">
-      <h2 className="runtime-mode-picker__title">Choose AI Runtime Mode</h2>
+    <Card className="runtime-mode-picker detail-section">
+      <h2 className="detail-section__title runtime-mode-picker__title">Choose AI Runtime Mode</h2>
       <p className="runtime-mode-picker__lead">
         Pick how PromptLab runs AI features. You can change this later after configuration.
       </p>
@@ -234,7 +234,7 @@ function RuntimeModePicker({
           </button>
         ))}
       </div>
-    </div>
+    </Card>
   );
 }
 

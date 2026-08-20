@@ -85,32 +85,32 @@ export function ReportsPage() {
         </Card>
       )}
 
-      <section className="reports-section">
-        <div className="reports-section__header">
+      <Card className="detail-section reports-section">
+        <div className="detail-section__header">
           <div>
-            <h2 className="reports-section__title">Scan reports</h2>
+            <h2 className="detail-section__title">Scan reports</h2>
             <span className="text-muted text-sm">
               {rows.length} scan{rows.length === 1 ? "" : "s"} with reports
             </span>
           </div>
           {rows.length > 0 && (
-            <ContentToolbar
-              pageSize={pageSize}
-              onPageSizeChange={setPageSize}
-              showViewMode={false}
-            />
+            <div className="detail-section__header-actions">
+              <ContentToolbar
+                pageSize={pageSize}
+                onPageSizeChange={setPageSize}
+                showViewMode={false}
+              />
+            </div>
           )}
         </div>
 
         {rows.length === 0 && !loading ? (
-          <Card>
-            <EmptyState
-              title="No reports yet"
-              description="Generate a report from a completed scan to see it listed here."
-            />
-          </Card>
+          <EmptyState
+            title="No reports yet"
+            description="Generate a report from a completed scan to see it listed here."
+          />
         ) : (
-          <Card padding="none">
+          <div className="reports-section__table">
             <DataTable
               columns={columns}
               rows={pagination.items}
@@ -119,7 +119,7 @@ export function ReportsPage() {
               emptyMessage={loading ? "Loading reports…" : "No reports"}
               loading={loading && pagination.items.length === 0}
             />
-          </Card>
+          </div>
         )}
 
         {rows.length > 0 && (
@@ -132,7 +132,7 @@ export function ReportsPage() {
             onPageChange={setPage}
           />
         )}
-      </section>
+      </Card>
     </div>
   );
 }

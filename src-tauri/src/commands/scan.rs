@@ -60,6 +60,24 @@ fn should_continue_from_progress(
         && (is_restartable || running_without_job)
 }
 
+/// Short hex suffix so scans with the same profile stay distinguishable in lists/reports.
+fn short_scan_suffix() -> String {
+    let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos() as u64;
+    let mixed = nanos
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add(0xA5A5_A5A5_A5A5_A5A5);
+    format!("{:08x}", (mixed & 0xFFFF_FFFF) as u32)
+}
+
+fn scan_display_name(agentic: bool, profile: &str) -> String {
+    let base = if agentic {
+        format!("Agent Scan ({profile})")
+    } else {
+        format!("Scan ({profile})")
+    };
+    format!("{base} - {}", short_scan_suffix())
+}
+
 fn prepare_restored_progress(mut restored: ScanProgress) -> ScanProgress {
     restored.status = "running".into();
     restored.pause_pending = false;
@@ -668,11 +686,7 @@ pub async fn scan_start_op(
         effective_generator_mode.clone(),
     );
     let max_attempts_per_category = max_agent_attempts.unwrap_or(5);
-    let scan_name = if agentic {
-        format!("Agent Scan ({profile})")
-    } else {
-        format!("Scan ({profile})")
-    };
+    let scan_name = scan_display_name(agentic, &profile);
 
     let mut execution_playbook = {
         let mut playbook = serde_json::json!({
@@ -788,7 +802,11 @@ pub async fn scan_start_op(
 
         let mut update = UpdateScan {
             target_id: Some(Some(target_id.clone())),
-            name: Some(scan_name.clone()),
+            name: Some(if continue_from_progress || retry_failed_only {
+                existing.name.clone()
+            } else {
+                scan_name.clone()
+            }),
             status: Some("running".into()),
             playbook_json: Some(playbook),
             ..Default::default()
@@ -1472,6 +1490,16 @@ mod tests {
         assert!(is_restartable_scan_status("completed"));
         assert!(!is_restartable_scan_status("draft"));
         assert!(!is_restartable_scan_status("running"));
+    }
+
+    #[test]
+    fn scan_display_name_appends_random_suffix() {
+        let name = scan_display_name(false, "standard");
+        assert!(name.starts_with("Scan (standard) - "));
+        assert_eq!(name.len(), "Scan (standard) - ".len() + 8);
+        let agent = scan_display_name(true, "deep");
+        assert!(agent.starts_with("Agent Scan (deep) - "));
+        assert_eq!(agent.len(), "Agent Scan (deep) - ".len() + 8);
     }
 
     #[test]

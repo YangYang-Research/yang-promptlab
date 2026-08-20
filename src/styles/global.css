@@ -3116,13 +3116,17 @@ a:hover {
   margin-bottom: 0.75rem;
 }
 
+.settings-section.card > .settings-section__header {
+  margin-bottom: 1rem;
+}
+
 .settings-section__title {
   margin: 0;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-subtle);
+  font-size: 0.9375rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: var(--text);
 }
 
 .settings-section__lead {
@@ -3135,13 +3139,33 @@ a:hover {
 }
 
 .settings-section--danger .settings-section__title {
-  color: color-mix(in srgb, var(--danger) 70%, var(--text-subtle));
+  color: color-mix(in srgb, var(--danger) 78%, var(--text));
+}
+
+.settings-section--danger.card {
+  border-color: color-mix(in srgb, var(--danger) 32%, var(--border));
+  background: color-mix(in srgb, var(--danger) 5%, var(--bg-surface));
 }
 
 .settings-section__body {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.settings-section__panel {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  padding: 1rem 1.1rem;
+  min-width: 0;
+}
+
+/* Nested cards inside a settings section card — flatten chrome. */
+.settings-section.card .settings-section__body > .card {
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  box-shadow: none;
 }
 
 .settings-section__actions {
@@ -3486,8 +3510,9 @@ a:hover {
 }
 
 .settings-danger-card {
-  border-color: color-mix(in srgb, var(--danger) 32%, var(--border));
-  background: color-mix(in srgb, var(--danger) 5%, var(--bg-elevated));
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .card__subtitle {
@@ -5815,6 +5840,9 @@ a:hover {
   flex-direction: column;
   gap: 0.75rem;
 }
+.wizard-results__section.card {
+  gap: 0.85rem;
+}
 .wizard-results__heading {
   margin: 0;
   font-size: 1rem;
@@ -7413,8 +7441,14 @@ a:hover {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 0;
 }
+
+.reports-section__table {
+  margin: 0 -0.25rem;
+  overflow: auto;
+}
+
 .reports-section__header {
   display: flex;
   align-items: center;
@@ -7544,6 +7578,18 @@ a:hover {
 .report-native__findings {
   display: grid;
   gap: 0.75rem;
+}
+
+.report-native__summary-table {
+  margin: 0 -0.25rem;
+  overflow: auto;
+}
+
+.report-native__finding {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  padding: 1rem 1.1rem;
 }
 
 .report-native__finding-anchor {

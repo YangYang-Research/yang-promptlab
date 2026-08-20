@@ -128,16 +128,16 @@ export function TroubleshootingPanel({ backendConnected }: TroubleshootingPanelP
   return (
     <div className="settings-tab-panel troubleshooting-panel">
       <div className="settings-sections">
-        <section className="settings-section">
+        <Card className="settings-section detail-section">
           <header className="settings-section__header">
-            <h2 className="settings-section__title">Health summary</h2>
+            <h2 className="detail-section__title settings-section__title">Health summary</h2>
             <p className="settings-section__lead">
               Recent high-severity events and local database connectivity.
             </p>
           </header>
           <div className="settings-section__body">
             <div className="settings-grid settings-grid--diagnostics">
-              <Card>
+              <div className="settings-section__panel">
                 <h3 className="card__title">Recent errors</h3>
                 {latestError ? (
                   <p className="text-danger text-sm">{latestError.message}</p>
@@ -150,21 +150,21 @@ export function TroubleshootingPanel({ backendConnected }: TroubleshootingPanelP
                 ) : (
                   <p className="text-muted text-sm">No recent warnings.</p>
                 )}
-              </Card>
+              </div>
 
-              <Card>
+              <div className="settings-section__panel">
                 <h3 className="card__title">Database diagnostics</h3>
                 {dbHealth ? (
                   <DatabaseDiagnosticsPanel health={dbHealth} root={environment?.root} />
                 ) : null}
-              </Card>
+              </div>
             </div>
           </div>
-        </section>
+        </Card>
 
-        <section className="settings-section">
+        <Card className="settings-section detail-section troubleshooting-logs">
           <header className="settings-section__header">
-            <h2 className="settings-section__title">Live logs</h2>
+            <h2 className="detail-section__title settings-section__title">Live logs</h2>
             <p className="settings-section__lead">
               Tail application logs with filters. Workspace paths are under Data &amp; storage.
               {environment ? (
@@ -178,92 +178,88 @@ export function TroubleshootingPanel({ backendConnected }: TroubleshootingPanelP
               ) : null}
             </p>
           </header>
-          <div className="settings-section__body">
-            <Card className="troubleshooting-logs">
-              <div className="troubleshooting-logs__header">
-                <label className="settings-toggle troubleshooting-logs__toggle">
-                  <input
-                    type="checkbox"
-                    checked={autoRefresh}
-                    onChange={(e) => setAutoRefresh(e.target.checked)}
-                  />
-                  <span>Auto refresh</span>
-                </label>
-                <div className="troubleshooting-logs__actions">
-                  <RefreshButton
-                    loading={loading}
-                    error={error}
-                    showSuccessToast={false}
-                    onClick={() => void refresh()}
-                  />
-                  <Button variant="secondary" onClick={() => void openLogFolder()}>
-                    Open log folder
-                  </Button>
-                </div>
-              </div>
-
-              <div className="troubleshooting-logs__filters">
-                <SearchInput
-                  value={query}
-                  onChange={setQuery}
-                  placeholder="Search logs…"
-                />
-                <label className="field troubleshooting-logs__field">
-                  <span className="field__label">Severity</span>
-                  <Select value={severity} onChange={(e) => setSeverity(e.target.value)}>
-                    <option value="all">All severities</option>
-                    <option value="informational">Informational</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="critical">Critical</option>
-                  </Select>
-                </label>
-                <label className="field troubleshooting-logs__field">
-                  <span className="field__label">Log file</span>
-                  <Select
-                    className="mono"
-                    value={selectedLog}
-                    onChange={(e) => setSelectedLog(e.target.value)}
-                  >
-                    {logFiles.map((file) => (
-                      <option key={file.path} value={file.name}>
-                        {file.name}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-              </div>
-
-              {error ? <p className="text-danger text-sm">{error}</p> : null}
-
-              <div className="troubleshooting-logs__table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>Severity</th>
-                      <th>Category</th>
-                      <th>Activity</th>
-                      <th>Message</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredEvents.slice(-200).map((event) => (
-                      <tr key={`${event.timestamp}-${event.activityName}-${event.message}`}>
-                        <td className="mono text-sm">{event.timestamp}</td>
-                        <td>{event.severity}</td>
-                        <td>{event.category}</td>
-                        <td>{event.activityName}</td>
-                        <td>{event.message}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
+          <div className="troubleshooting-logs__header">
+            <label className="settings-toggle troubleshooting-logs__toggle">
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+              />
+              <span>Auto refresh</span>
+            </label>
+            <div className="troubleshooting-logs__actions">
+              <RefreshButton
+                loading={loading}
+                error={error}
+                showSuccessToast={false}
+                onClick={() => void refresh()}
+              />
+              <Button variant="secondary" onClick={() => void openLogFolder()}>
+                Open log folder
+              </Button>
+            </div>
           </div>
-        </section>
+
+          <div className="troubleshooting-logs__filters">
+            <SearchInput
+              value={query}
+              onChange={setQuery}
+              placeholder="Search logs…"
+            />
+            <label className="field troubleshooting-logs__field">
+              <span className="field__label">Severity</span>
+              <Select value={severity} onChange={(e) => setSeverity(e.target.value)}>
+                <option value="all">All severities</option>
+                <option value="informational">Informational</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </Select>
+            </label>
+            <label className="field troubleshooting-logs__field">
+              <span className="field__label">Log file</span>
+              <Select
+                className="mono"
+                value={selectedLog}
+                onChange={(e) => setSelectedLog(e.target.value)}
+              >
+                {logFiles.map((file) => (
+                  <option key={file.path} value={file.name}>
+                    {file.name}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          </div>
+
+          {error ? <p className="text-danger text-sm">{error}</p> : null}
+
+          <div className="troubleshooting-logs__table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Severity</th>
+                  <th>Category</th>
+                  <th>Activity</th>
+                  <th>Message</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredEvents.slice(-200).map((event) => (
+                  <tr key={`${event.timestamp}-${event.activityName}-${event.message}`}>
+                    <td className="mono text-sm">{event.timestamp}</td>
+                    <td>{event.severity}</td>
+                    <td>{event.category}</td>
+                    <td>{event.activityName}</td>
+                    <td>{event.message}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       </div>
     </div>
   );

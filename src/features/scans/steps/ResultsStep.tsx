@@ -154,8 +154,8 @@ export function ResultsStep({
         </div>
       )}
 
-      <section className="wizard-results__section">
-        <h3 className="wizard-results__heading">Attack Summary</h3>
+      <Card className="wizard-results__section detail-section">
+        <h3 className="detail-section__title wizard-results__heading">Attack Summary</h3>
         <dl className="wizard-results__summary-grid">
           <div>
             <dt>Status</dt>
@@ -199,9 +199,9 @@ export function ResultsStep({
             </ul>
           </div>
         )}
-      </section>
+      </Card>
 
-      <section className="wizard-results__section" aria-label="Recommendations">
+      <Card className="wizard-results__section detail-section" aria-label="Recommendations">
         <ScanRecommendationsPanel
           scanId={scanId}
           attackCategories={attackCategories as string[]}
@@ -219,10 +219,10 @@ export function ResultsStep({
                   .join(",")}`
           }
         />
-      </section>
+      </Card>
 
-      <section className="wizard-results__section">
-        <h3 className="wizard-results__heading">Severity Summary</h3>
+      <Card className="wizard-results__section detail-section">
+        <h3 className="detail-section__title wizard-results__heading">Severity Summary</h3>
         <div className="wizard-results__severity-grid">
           {SEVERITY_ORDER.map((severity) => {
             const count = severityCounts.get(severity) ?? 0;
@@ -280,22 +280,20 @@ export function ResultsStep({
             )}
           </div>
         )}
-      </section>
+      </Card>
 
-      <section className="wizard-results__section" aria-label="Findings Summary">
-        <h3 className="wizard-results__heading">Findings Summary</h3>
-        <Card padding="none">
-          <DataTable
-            columns={summaryColumns}
-            rows={findingsPagination.items}
-            keyField="id"
-            emptyMessage={
-              scanRunning
-                ? "No findings recorded yet. Attack tests are still running."
-                : "No findings were recorded for this scan."
-            }
-          />
-        </Card>
+      <Card className="wizard-results__section detail-section" aria-label="Findings Summary">
+        <h3 className="detail-section__title wizard-results__heading">Findings Summary</h3>
+        <DataTable
+          columns={summaryColumns}
+          rows={findingsPagination.items}
+          keyField="id"
+          emptyMessage={
+            scanRunning
+              ? "No findings recorded yet. Attack tests are still running."
+              : "No findings were recorded for this scan."
+          }
+        />
         {summaryRows.length > 0 ? (
           <Pagination
             page={findingsPage}
@@ -306,7 +304,7 @@ export function ResultsStep({
             onPageChange={setFindingsPage}
           />
         ) : null}
-      </section>
+      </Card>
     </div>
   );
 }

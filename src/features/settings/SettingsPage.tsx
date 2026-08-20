@@ -53,15 +53,15 @@ function SettingsSection({
   children,
 }: SettingsSectionProps) {
   return (
-    <section
-      className={`settings-section ${variant === "danger" ? "settings-section--danger" : ""}`}
+    <Card
+      className={`settings-section detail-section ${variant === "danger" ? "settings-section--danger" : ""}`}
     >
       <header className="settings-section__header">
-        <h2 className="settings-section__title">{title}</h2>
+        <h2 className="detail-section__title settings-section__title">{title}</h2>
         {description ? <p className="settings-section__lead">{description}</p> : null}
       </header>
       <div className="settings-section__body">{children}</div>
-    </section>
+    </Card>
   );
 }
 
@@ -129,30 +129,28 @@ function AboutPanel({
       title="Application"
       description="Build and connection details for this installation."
     >
-      <Card>
-        <dl className="about-list">
-          <div>
-            <dt>Application</dt>
-            <dd>PromptLab</dd>
-          </div>
-          <div>
-            <dt>Version</dt>
-            <dd>v{version}</dd>
-          </div>
-          <div>
-            <dt>Backend</dt>
-            <dd>
-              {backendConnected
-                ? `Rust - Connected (v${version})`
-                : "Mock mode — Tauri IPC unavailable"}
-            </dd>
-          </div>
-          <div>
-            <dt>Platform</dt>
-            <dd>{platform}</dd>
-          </div>
-        </dl>
-      </Card>
+      <dl className="about-list">
+        <div>
+          <dt>Application</dt>
+          <dd>PromptLab</dd>
+        </div>
+        <div>
+          <dt>Version</dt>
+          <dd>v{version}</dd>
+        </div>
+        <div>
+          <dt>Backend</dt>
+          <dd>
+            {backendConnected
+              ? `Rust - Connected (v${version})`
+              : "Mock mode — Tauri IPC unavailable"}
+          </dd>
+        </div>
+        <div>
+          <dt>Platform</dt>
+          <dd>{platform}</dd>
+        </div>
+      </dl>
     </SettingsSection>
   );
 }
@@ -187,7 +185,7 @@ function ClearAllDataCard({ backendConnected }: { backendConnected: boolean }) {
   }
 
   return (
-    <Card className="settings-danger-card">
+    <div className="settings-danger-card">
       <p className="text-muted text-sm">
         Remove all application data from this device and restart PromptLab with a fresh workspace.
       </p>
@@ -201,7 +199,7 @@ function ClearAllDataCard({ backendConnected }: { backendConnected: boolean }) {
           {busy ? "Clearing…" : "Clear All Data"}
         </Button>
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -262,33 +260,29 @@ export function SettingsPage() {
                 title="Appearance"
                 description="Choose how PromptLab looks on this device."
               >
-                <Card>
-                  <div className="settings-field settings-field--last">
-                    <label htmlFor="theme">Theme</label>
-                    <Select
-                      id="theme"
-                      value={settings.theme}
-                      onChange={(e) => update("theme", e.target.value as AppSettings["theme"])}
-                    >
-                      <option value="dark">Dark</option>
-                      <option value="light">Light</option>
-                      <option value="system">System</option>
-                    </Select>
-                  </div>
-                </Card>
+                <div className="settings-field settings-field--last">
+                  <label htmlFor="theme">Theme</label>
+                  <Select
+                    id="theme"
+                    value={settings.theme}
+                    onChange={(e) => update("theme", e.target.value as AppSettings["theme"])}
+                  >
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                    <option value="system">System</option>
+                  </Select>
+                </div>
               </SettingsSection>
 
               <SettingsSection
                 title="Privacy"
                 description="Control optional data sent outside this device."
               >
-                <Card>
-                  <label className="settings-toggle settings-toggle--disabled">
-                    <input type="checkbox" disabled checked={false} readOnly />
-                    <span>Anonymous usage telemetry</span>
-                    <Badge variant="muted">Coming soon</Badge>
-                  </label>
-                </Card>
+                <label className="settings-toggle settings-toggle--disabled">
+                  <input type="checkbox" disabled checked={false} readOnly />
+                  <span>Anonymous usage telemetry</span>
+                  <Badge variant="muted">Coming soon</Badge>
+                </label>
               </SettingsSection>
             </div>
           )}
@@ -299,16 +293,14 @@ export function SettingsPage() {
                 title="AI runtime"
                 description="Judge, planner, and payload generation share one runtime configuration."
               >
-                <Card>
-                  <p className="text-muted text-sm">
-                    Configure local llama.cpp or a third-party API model on the AI Runtime page.
-                  </p>
-                  <div className="settings-section__actions">
-                    <Link className="button button--secondary" to="/runtime">
-                      Open AI Runtime
-                    </Link>
-                  </div>
-                </Card>
+                <p className="text-muted text-sm">
+                  Configure local llama.cpp or a third-party API model on the AI Runtime page.
+                </p>
+                <div className="settings-section__actions">
+                  <Link className="button button--secondary" to="/runtime">
+                    Open AI Runtime
+                  </Link>
+                </div>
               </SettingsSection>
 
               <SettingsSection
