@@ -57,7 +57,7 @@ fn render_html(kind: ReportKind, input: &ReportInput) -> String {
         .filter(|f| f.status.eq_ignore_ascii_case("open"))
         .count();
     let stats_html = format!(
-        r#"<section class="stats" aria-label="Report summary">
+        r#"<section class="stats" id="summary" aria-label="Report summary">
   <div class="card stat-card">
     <span class="stat-card__label">Risk score</span>
     <span class="stat-card__value stat-card__value--{accent}">{score}<span class="stat-max">/100</span></span>
@@ -136,9 +136,72 @@ body {{
   background: var(--bg-app);
   color: var(--text);
   line-height: 1.55;
-  padding: 2rem 1.25rem 3rem;
+  padding: 1.5rem 1.25rem 3rem;
 }}
-.container {{ max-width: 1080px; margin: 0 auto; }}
+.layout {{
+  display: grid;
+  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+  gap: 1.5rem;
+  max-width: 1280px;
+  margin: 0 auto;
+  align-items: start;
+}}
+@media (max-width: 980px) {{
+  .layout {{ grid-template-columns: 1fr; }}
+  .toc {{ position: static; max-height: none; }}
+}}
+.toc {{
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 0.9rem;
+}}
+.toc__title {{
+  margin: 0 0 0.75rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}}
+.toc__list {{ list-style: none; display: flex; flex-direction: column; gap: 0.15rem; margin: 0; padding: 0; }}
+.toc__item--child {{ margin-left: 0.65rem; }}
+.toc__link {{
+  display: block;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}}
+.toc__link:hover {{ background: var(--bg-hover); color: var(--text); }}
+.toc__link--active {{
+  background: color-mix(in srgb, var(--accent) 12%, white);
+  color: var(--accent);
+  font-weight: 650;
+}}
+.toc__findings-label {{
+  margin: 0.55rem 0 0.2rem;
+  padding: 0 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}}
+.main {{ min-width: 0; }}
+.container {{ max-width: none; margin: 0; }}
+#overview, #summary, #charts, #executive-summary, #findings-summary, #detailed-findings, #compliance, .finding-page {{
+  scroll-margin-top: 1rem;
+}}
 header.identity {{
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -151,7 +214,6 @@ header.identity {{
   font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
 }}
 .identity__title {{ margin: 0; font-size: 1.5rem; font-weight: 650; letter-spacing: -0.02em; }}
-.identity__generated {{ margin: 0.25rem 0 0; color: var(--text-muted); font-size: 0.875rem; }}
 .identity__metadata {{
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem;
   margin: 0; padding-top: 1rem; border-top: 1px solid var(--border);
@@ -162,6 +224,32 @@ header.identity {{
 .identity__metadata dd {{ margin: 0; overflow-wrap: anywhere; font-size: 0.9375rem; font-weight: 500; }}
 .meta {{ color: var(--text-muted); font-size: 0.875rem; margin-top: 0.35rem; }}
 .mono {{ font-family: var(--font-mono); font-size: 0.8rem; }}
+.detailed-findings {{ margin-bottom: 1.25rem; }}
+.detailed-findings__stack {{ display: flex; flex-direction: column; gap: 1rem; }}
+.finding-page {{
+  display: flex; flex-direction: column; gap: 1.25rem;
+  margin: 0; padding: 1.15rem 1.25rem;
+}}
+.card.finding-page {{
+  background: var(--bg-elevated);
+}}
+.finding-page__title {{ margin: 0; font-size: 1.125rem; font-weight: 650; letter-spacing: -0.02em; }}
+.finding-page .card {{
+  background: var(--bg-surface);
+}}
+.report-footer {{
+  display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
+  margin-top: 2rem; color: var(--text-subtle); font-size: 0.75rem;
+}}
+.report-footer__meta {{ margin: 0; }}
+.report-footer__generated {{
+  margin: 0 0 0 auto; font-style: italic; color: var(--text-muted); text-align: right;
+  white-space: nowrap;
+}}
+@media (max-width: 640px) {{
+  .report-footer {{ flex-direction: column; align-items: flex-end; }}
+  .report-footer__meta {{ align-self: flex-start; }}
+}}
 .badge {{
   display: inline-flex; align-items: center; gap: 0.25rem;
   padding: 0.15rem 0.55rem; border-radius: 999px;
@@ -226,10 +314,7 @@ table.summary-table tbody tr:last-child td {{ border-bottom: none; }}
 .rec:last-child {{ border: none; }}
 .rec p {{ color: var(--text-muted); margin-top: 0.25rem; }}
 footer {{ margin-top: 2rem; color: var(--text-subtle); font-size: 0.75rem; text-align: center; }}
-.finding-page {{ display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--border); }}
-.finding-page:last-child {{ border-bottom: none; }}
 .finding-page__index {{ font-size: 0.75rem; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-subtle); }}
-.finding-page__title {{ font-size: 1.25rem; font-weight: 650; letter-spacing: -0.02em; }}
 .detail-section__title {{ font-size: 1.0625rem; font-weight: 650; margin: 0 0 1rem; }}
 .finding-details__overview {{ display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr); gap: 1.25rem; }}
 @media (max-width: 880px) {{ .finding-details__overview {{ grid-template-columns: 1fr; }} }}
@@ -317,11 +402,16 @@ footer {{ margin-top: 2rem; color: var(--text-subtle); font-size: 0.75rem; text-
 </style>
 </head>
 <body>
+<div class="layout">
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc__title">Contents</p>
+  {toc_html}
+</nav>
+<div class="main">
 <div class="container">
-<header class="identity card">
+<header class="identity card" id="overview">
   <span class="identity__eyebrow">{title}</span>
   <h1 class="identity__title">{scan_name}</h1>
-  <p class="identity__generated">Generated {generated}</p>
   <dl class="identity__metadata">
     <div><dt>Project</dt><dd>{project}</dd></div>
     <div><dt>Scan ID</dt><dd class="mono">{scan_id}</dd></div>
@@ -331,32 +421,98 @@ footer {{ margin-top: 2rem; color: var(--text-subtle); font-size: 0.75rem; text-
 
 {stats_html}
 
-<section class="charts">
+<section class="charts" id="charts">
   <div class="card"><h2>Severity Distribution</h2>{severity_chart}</div>
   <div class="card"><h2>Findings by Category</h2>{category_chart}</div>
 </section>
 
 {executive_summary}
 
-<section class="card" style="margin-bottom:1.25rem">
+<section class="card" id="findings-summary" style="margin-bottom:1.25rem">
   <h2>Findings Summary ({finding_count})</h2>
   {summary_table}
 </section>
 
-<section style="margin-bottom:1.25rem">
-  <div class="section-head"><h2 class="section-title">Detailed Findings</h2></div>
-  {findings_html}
+<section class="card detailed-findings" id="detailed-findings">
+  <h2>Detailed Findings</h2>
+  <div class="detailed-findings__stack">{findings_html}</div>
 </section>
 
 {compliance_section}
 
-<footer>Generated by PromptLab · {generated} · Report type: {kind}</footer>
+<footer class="report-footer">
+  <p class="report-footer__meta">PromptLab · Report type: {kind}</p>
+  <time class="report-footer__generated" id="report-generated" datetime="{generated_iso}">Generated {generated}</time>
+</footer>
+</div>
+</div>
 </div>
 <button type="button" class="back-to-top" id="back-to-top" aria-label="Back to top" title="Back to top">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
 </button>
 <script>
 (function () {{
+  var gen = document.getElementById("report-generated");
+  if (gen) {{
+    var iso = gen.getAttribute("datetime");
+    if (iso) {{
+      var d = new Date(iso);
+      if (!isNaN(d.getTime())) {{
+        gen.textContent = "Generated " + d.toLocaleString(undefined, {{
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+          timeZoneName: "short"
+        }});
+      }}
+    }}
+  }}
+
+  var tocLinks = Array.prototype.slice.call(document.querySelectorAll(".toc__link"));
+  var sections = tocLinks
+    .map(function (link) {{
+      var id = (link.getAttribute("href") || "").replace(/^#/, "");
+      return id ? document.getElementById(id) : null;
+    }})
+    .filter(Boolean);
+
+  function setActive(id) {{
+    tocLinks.forEach(function (link) {{
+      var active = link.getAttribute("href") === "#" + id;
+      link.classList.toggle("toc__link--active", active);
+    }});
+  }}
+
+  if (sections.length && "IntersectionObserver" in window) {{
+    var visible = new Map();
+    var observer = new IntersectionObserver(function (entries) {{
+      entries.forEach(function (entry) {{
+        visible.set(entry.target.id, entry.isIntersecting ? entry.intersectionRatio : 0);
+      }});
+      var bestId = null;
+      var bestRatio = 0;
+      visible.forEach(function (ratio, id) {{
+        if (ratio > bestRatio) {{
+          bestRatio = ratio;
+          bestId = id;
+        }}
+      }});
+      if (bestId) setActive(bestId);
+    }}, {{ rootMargin: "-12% 0px -70% 0px", threshold: [0, 0.1, 0.25, 0.5, 1] }});
+    sections.forEach(function (section) {{ observer.observe(section); }});
+  }}
+
+  tocLinks.forEach(function (link) {{
+    link.addEventListener("click", function () {{
+      var id = (link.getAttribute("href") || "").replace(/^#/, "");
+      if (id) setActive(id);
+    }});
+  }});
+
   var btn = document.getElementById("back-to-top");
   if (!btn) return;
   var showAfter = 240;
@@ -385,7 +541,9 @@ footer {{ margin-top: 2rem; color: var(--text-subtle); font-size: 0.75rem; text-
         project = escape_html(&input.project_name),
         scan_id = escape_html(&input.scan_id),
         generated = escape_html(&format_generated_at(input.generated_at)),
+        generated_iso = escape_html(&format_generated_iso(input.generated_at)),
         target = escape_html(input.target_name.as_deref().unwrap_or("—")),
+        toc_html = render_toc(kind, input),
         executive_summary = executive_summary,
         stats_html = stats_html,
         severity_chart = severity_chart,
@@ -398,15 +556,70 @@ footer {{ margin-top: 2rem; color: var(--text-subtle); font-size: 0.75rem; text-
     )
 }
 
-fn format_generated_at(at: time::OffsetDateTime) -> String {
+fn toc_label(text: &str, max_chars: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+    let short: String = trimmed.chars().take(max_chars.saturating_sub(1)).collect();
+    format!("{short}…")
+}
+
+fn render_toc(kind: ReportKind, input: &ReportInput) -> String {
+    let mut items = String::new();
+    items.push_str(
+        r##"<li><a class="toc__link" href="#overview">Overview</a></li>
+<li><a class="toc__link" href="#summary">Summary</a></li>
+<li><a class="toc__link" href="#charts">Charts</a></li>
+<li><a class="toc__link" href="#executive-summary">Executive Summary</a></li>
+<li><a class="toc__link" href="#findings-summary">Findings Summary</a></li>
+<li><a class="toc__link" href="#detailed-findings">Detailed Findings</a></li>"##,
+    );
+
+    if !input.findings.is_empty() {
+        items.push_str(r#"<li class="toc__findings-label">Findings</li>"#);
+        for (index, finding) in input.findings.iter().enumerate() {
+            let label = format!(
+                "#{} · {}",
+                index + 1,
+                toc_label(&finding.title, 42)
+            );
+            items.push_str(&format!(
+                r##"<li class="toc__item--child"><a class="toc__link" href="#finding-{id}" title="{full}">Finding {label}</a></li>"##,
+                id = escape_html(&finding.id),
+                full = escape_html(&format!("Finding #{} - {}", index + 1, finding.title)),
+                label = escape_html(&label),
+            ));
+        }
+    }
+
+    if kind == ReportKind::Compliance {
+        items.push_str(
+            r##"<li><a class="toc__link" href="#compliance">Compliance Mapping</a></li>"##,
+        );
+    }
+
+    format!(r#"<ul class="toc__list">{items}</ul>"#)
+}
+
+fn format_generated_iso(at: time::OffsetDateTime) -> String {
     at.to_offset(time::UtcOffset::UTC)
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| at.to_string())
+}
+
+fn format_generated_at(at: time::OffsetDateTime) -> String {
+    let local = time::UtcOffset::current_local_offset()
+        .map(|offset| at.to_offset(offset))
+        .unwrap_or_else(|_| at.to_offset(time::UtcOffset::UTC));
+    local
         .format(
             &time::format_description::parse(
-                "[year]-[month]-[day] [hour]:[minute]:[second] UTC",
+                "[year]-[month]-[day] [hour]:[minute]:[second] [offset_hour sign:mandatory]:[offset_minute]",
             )
             .expect("valid time format"),
         )
-        .unwrap_or_else(|_| at.to_string())
+        .unwrap_or_else(|_| local.to_string())
 }
 
 fn render_executive_summary(input: &ReportInput) -> String {
@@ -425,7 +638,7 @@ fn render_executive_summary(input: &ReportInput) -> String {
         format!("{overview_html}{}", render_recommendations(recs))
     };
     format!(
-        r#"<section class="card" style="margin-bottom:1.25rem"><h2>Executive Summary</h2>{body}</section>"#
+        r#"<section class="card" id="executive-summary" style="margin-bottom:1.25rem"><h2>Executive Summary</h2>{body}</section>"#
     )
 }
 
@@ -459,7 +672,7 @@ fn render_findings_summary(findings: &[ReportFinding]) -> String {
 
 fn render_findings(kind: ReportKind, input: &ReportInput) -> String {
     if input.findings.is_empty() {
-        return r#"<div class="card"><p>No findings recorded for this scan.</p></div>"#.into();
+        return r#"<p class="meta">No findings recorded for this scan.</p>"#.into();
     }
 
     let detailed = kind != ReportKind::Executive;
@@ -573,7 +786,7 @@ fn render_finding_card(
     }
 
     format!(
-        r#"<article class="finding-page" id="finding-{id}">{body}</article>"#,
+        r#"<article class="card finding-page" id="finding-{id}">{body}</article>"#,
         id = escape_html(&f.id),
         body = body
     )
@@ -731,7 +944,7 @@ fn render_compliance(findings: &[ReportFinding]) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
-    format!(r#"<section class="card"><h2>Compliance Mapping</h2><ul>{items}</ul></section>"#)
+    format!(r#"<section class="card" id="compliance" style="margin-bottom:1.25rem"><h2>Compliance Mapping</h2><ul>{items}</ul></section>"#)
 }
 
 #[cfg(test)]
@@ -784,7 +997,18 @@ mod tests {
         assert!(html.contains("<dt>Project</dt>"));
         assert!(html.contains("<dt>Scan ID</dt>"));
         assert!(html.contains("<dt>Target</dt>"));
+        assert!(html.contains("class=\"toc\""));
+        assert!(html.contains("Table of contents") || html.contains("Contents"));
+        assert!(html.contains("href=\"#overview\""));
+        assert!(html.contains("href=\"#detailed-findings\""));
+        assert!(html.contains("href=\"#finding-f1\"") || html.contains("href=\"#finding-"));
+        assert!(html.contains("report-footer__generated"));
         assert!(html.contains("Generated "));
+        assert!(html.contains("datetime="));
+        assert!(!html.contains("identity__generated"));
+        assert!(html.contains("detailed-findings"));
+        assert!(html.contains("card finding-page"));
+        assert!(html.contains("Finding #1 - "));
         assert!(!html.contains("Target:"));
         assert!(html.contains("Risk score"));
         assert!(html.contains("Total findings"));
