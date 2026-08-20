@@ -191,6 +191,49 @@ describe("deriveActivity", () => {
     expect(activity[0]?.id).toBe("scan-retry-scan-retry-2026-07-06T11:00:00.000Z");
     expect(activity[0]?.timestamp).toBe("2026-07-06T11:00:00.000Z");
   });
+
+  it("includes exported report events", () => {
+    const activity = deriveActivity(
+      [],
+      [],
+      [],
+      [
+        {
+          id: "proj-1",
+          name: "Demo",
+          description: "",
+          status: "active",
+          createdAt: "2026-06-01T00:00:00.000Z",
+          updatedAt: "2026-06-01T00:00:00.000Z",
+          targetCount: 0,
+          findingCount: 0,
+          healthScore: null,
+          owner: "",
+        },
+      ],
+      [
+        {
+          id: "rep-1",
+          projectId: "proj-1",
+          projectName: "Demo",
+          scanId: "scan-1",
+          scanName: "Scan (standard)",
+          title: "PromptLab - Security Scan Report",
+          format: "pdf",
+          status: "completed",
+          findingCount: 3,
+          createdAt: "2026-07-06T13:00:00.000Z",
+          sizeBytes: 0,
+        },
+      ],
+    );
+
+    expect(activity).toHaveLength(1);
+    expect(activity[0]?.type).toBe("report");
+    expect(activity[0]?.id).toBe("report-rep-1");
+    expect(activity[0]?.message).toBe("Exported PDF report: Scan (standard) (Demo)");
+    expect(activity[0]?.timestamp).toBe("2026-07-06T13:00:00.000Z");
+  });
 });
 
 describe("severityCountSeries", () => {

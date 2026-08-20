@@ -188,15 +188,17 @@ async function loadAll(): Promise<LoadedData> {
       .map((status) => [status.scan_id, status]),
   );
 
+  const reports = mapReports(reportDtos, projectDtos, scanDtos);
+
   return {
     projects,
     targets,
     scans,
     findings,
-    reports: mapReports(reportDtos, projectDtos, scanDtos),
+    reports,
     models: mapLocalModels(modelEntries),
     attackRuns: deriveAttackRuns(scans, targets, liveStatusMap),
-    activity: deriveActivity(findings, scans, targets, projects),
+    activity: deriveActivity(findings, scans, targets, projects, reports),
   };
 }
 

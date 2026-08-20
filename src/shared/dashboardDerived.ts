@@ -4,6 +4,7 @@ import type {
   AttackRun,
   Finding,
   Project,
+  Report,
   ScanRun,
   Target,
 } from "@/shared/types";
@@ -17,6 +18,12 @@ function isAttackScan(scan: ScanRun): boolean {
 function targetName(targets: Target[], targetId: string | null): string {
   if (!targetId) return "Unknown target";
   return targets.find((t) => t.id === targetId)?.name ?? "Unknown target";
+}
+
+function formatReportLabel(format: string): string {
+  const upper = format.trim().toUpperCase();
+  if (!upper) return "Report";
+  return upper;
 }
 
 export function deriveAttackRuns(
@@ -54,6 +61,7 @@ export function deriveActivity(
   scans: ScanRun[],
   targets: Target[],
   projects: Project[],
+  reports: Report[] = [],
 ): ActivityItem[] {
   const items: ActivityItem[] = [];
 
@@ -109,6 +117,19 @@ export function deriveActivity(
       type: "target",
       message: `Target added: ${target.name}${project ? ` (${project.name})` : ""}`,
       timestamp: target.createdAt,
+    });
+  }
+
+  for (const report of reports) {
+    if (report.status !== "completed") continue;
+    const format = formatReportLabel(report.format);
+    const scanLabel = report.scanName && report.scanName !== "—" ? report.scanName : "scan";
+    const projectSuffix = report.projectName ? ` (${report.projectName})` : "";
+    items.push({
+      id: `report-${report.id}`,
+      type: "report",
+      message: `Exported ${format} report: ${scanLabel}${projectSuffix}`,
+      timestamp: report.createdAt,
     });
   }
 

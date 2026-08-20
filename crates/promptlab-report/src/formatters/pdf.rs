@@ -88,7 +88,7 @@ fn render_pdf(kind: ReportKind, input: &ReportInput) -> ReportResult<Vec<u8>> {
     }
 
     write_report_footer(&mut body, kind, input);
-    write_toc_page(
+    let toc_links = write_toc_page(
         &doc,
         toc_page,
         toc_layer,
@@ -102,7 +102,10 @@ fn render_pdf(kind: ReportKind, input: &ReportInput) -> ReportResult<Vec<u8>> {
     let mut buf = BufWriter::new(Vec::new());
     doc.save(&mut buf)
         .map_err(|e| ReportError::render(e.to_string()))?;
-    Ok(buf.into_inner().map_err(|e| ReportError::render(e.to_string()))?)
+    let bytes = buf
+        .into_inner()
+        .map_err(|e| ReportError::render(e.to_string()))?;
+    inject_toc_goto_links(bytes, &toc_links)
 }
 
 const BODY_LEFT_MM: f32 = 20.0;
@@ -427,10 +430,11 @@ fn write_toc_page(
     kind: ReportKind,
     input: &ReportInput,
     pages: &TocPageMap,
-) {
+) -> Vec<TocHotspot> {
     let left = 24.0_f32;
     let right = PAGE_W_MM - 24.0;
     let mut y = 270.0_f32;
+    let mut links = Vec::new();
 
     write_line(doc, page, layer, font_bold, left, y, 16.0, "Contents");
     y -= 14.0;
@@ -457,20 +461,128 @@ fn write_toc_page(
         } else {
             font_bold
         };
+        let row_left = left + indent;
         write_toc_row(
             doc,
             page,
             layer,
             entry_font,
-            left + indent,
+            row_left,
             right,
             y,
             size,
             &entry.label,
             entry.page,
         );
+        if let Some(target_page) = entry.page {
+            // Clickable row band (baseline ± padding).
+            links.push(TocHotspot {
+                llx_mm: row_left,
+                lly_mm: y - 2.0,
+                urx_mm: right,
+                ury_mm: y + size * 0.35,
+                target_page,
+            });
+        }
         y -= if entry.child { 6.5 } else { 8.0 };
     }
+    links
+}
+
+/// Clickable Contents row → absolute PDF page (1-based).
+struct TocHotspot {
+    llx_mm: f32,
+    lly_mm: f32,
+    urx_mm: f32,
+    ury_mm: f32,
+    target_page: u32,
+}
+
+fn mm_to_pt(mm: f32) -> f32 {
+    mm * 72.0 / 25.4
+}
+
+/// printpdf 0.7 LinkAnnotation only supports URI actions; inject GoTo links with lopdf.
+fn inject_toc_goto_links(pdf_bytes: Vec<u8>, links: &[TocHotspot]) -> ReportResult<Vec<u8>> {
+    if links.is_empty() {
+        return Ok(pdf_bytes);
+    }
+
+    use lopdf::{dictionary, Document, Object, ObjectId};
+
+    let mut doc = Document::load_mem(&pdf_bytes)
+        .map_err(|e| ReportError::render(format!("pdf link post-process load: {e}")))?;
+    let pages = doc.get_pages();
+    // Contents is always absolute page 2 (cover=1, contents=2).
+    let toc_page_id = pages
+        .get(&2)
+        .copied()
+        .ok_or_else(|| ReportError::render("pdf missing Contents page for links".into()))?;
+
+    let page_top_pt = mm_to_pt(PAGE_H_MM);
+    let mut annot_refs: Vec<Object> = Vec::new();
+
+    for link in links {
+        let Some(dest_page_id) = pages.get(&link.target_page).copied() else {
+            continue;
+        };
+        let action = dictionary! {
+            "S" => Object::Name(b"GoTo".to_vec()),
+            "D" => Object::Array(vec![
+                Object::Reference(dest_page_id),
+                Object::Name(b"XYZ".to_vec()),
+                Object::Null,
+                Object::Real(page_top_pt),
+                Object::Null,
+            ]),
+        };
+        let annot = dictionary! {
+            "Type" => Object::Name(b"Annot".to_vec()),
+            "Subtype" => Object::Name(b"Link".to_vec()),
+            "Rect" => Object::Array(vec![
+                Object::Real(mm_to_pt(link.llx_mm)),
+                Object::Real(mm_to_pt(link.lly_mm)),
+                Object::Real(mm_to_pt(link.urx_mm)),
+                Object::Real(mm_to_pt(link.ury_mm)),
+            ]),
+            "Border" => Object::Array(vec![
+                Object::Integer(0),
+                Object::Integer(0),
+                Object::Integer(0),
+            ]),
+            "C" => Object::Array(vec![]),
+            "H" => Object::Name(b"I".to_vec()),
+            "A" => Object::Dictionary(action),
+        };
+        let id: ObjectId = doc.add_object(Object::Dictionary(annot));
+        annot_refs.push(Object::Reference(id));
+    }
+
+    if annot_refs.is_empty() {
+        return Ok(pdf_bytes);
+    }
+
+    {
+        let page_obj = doc
+            .get_object_mut(toc_page_id)
+            .map_err(|e| ReportError::render(format!("pdf toc page: {e}")))?;
+        let dict = page_obj
+            .as_dict_mut()
+            .map_err(|e| ReportError::render(format!("pdf toc page dict: {e}")))?;
+        match dict.get_mut(b"Annots") {
+            Ok(Object::Array(existing)) => {
+                existing.extend(annot_refs);
+            }
+            _ => {
+                dict.set("Annots", Object::Array(annot_refs));
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    doc.save_to(&mut out)
+        .map_err(|e| ReportError::render(format!("pdf link post-process save: {e}")))?;
+    Ok(out)
 }
 
 fn write_toc_row(

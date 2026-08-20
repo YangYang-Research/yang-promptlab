@@ -893,6 +893,31 @@ pub async fn report_export_scan_op(
     )
     .await?;
 
+    // Persist to report history (Recent Activity + Reports list), then copy to Downloads.
+    let engine = ReportingEngine::new(state.reports_dir()).map_err(map_report_err)?;
+    let history_path = engine.output_dir().join(&generated.filename);
+    std::fs::write(&history_path, &generated.bytes)
+        .map_err(|err| CommandError::from(PromptLabError::from(err)))?;
+
+    state
+        .repositories()
+        .reports()
+        .create(CreateReport {
+            project_id: project_id.clone(),
+            scan_id: Some(scan_id.clone()),
+            name: "PromptLab - Security Scan Report".into(),
+            format: generated.format.as_str().to_string(),
+            status: Some("completed".into()),
+            file_path: Some(history_path.to_string_lossy().into_owned()),
+            metadata_json: Some(serde_json::json!({
+                "findings": findings_len,
+                "kind": generated.kind.as_str(),
+                "exported": true,
+            })),
+        })
+        .await
+        .map_err(CommandError::from)?;
+
     let downloads = downloads_dir(state);
     std::fs::create_dir_all(&downloads).map_err(|err| CommandError::from(PromptLabError::from(err)))?;
     let dest = unique_path(&downloads, &timestamped_filename(&generated.filename));
@@ -904,7 +929,7 @@ pub async fn report_export_scan_op(
         scan_id = %scan_id,
         dest = %dest_str,
         findings = findings_len,
-        "report exported without history"
+        "report exported"
     );
     Ok(dest_str)
 }

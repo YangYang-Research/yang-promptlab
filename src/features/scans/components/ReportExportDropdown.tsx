@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { useAppStore } from "@/app/store/AppStore";
 import {
   generateAndExportScanReport,
   reportExportLabel,
@@ -38,6 +39,7 @@ export function ReportExportDropdown({
   onExported,
 }: ReportExportDropdownProps) {
   const { notify } = useToast();
+  const { actions } = useAppStore();
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState<ReportExportFormat | null>(null);
   const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null);
@@ -115,6 +117,7 @@ export function ReportExportDropdown({
       if (path) {
         notify(`Saved to ${path}`, "info");
       }
+      await actions.refresh();
       onExported?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Report export failed";
