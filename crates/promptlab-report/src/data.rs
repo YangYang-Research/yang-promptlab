@@ -3,9 +3,7 @@ use std::collections::HashMap;
 use time::OffsetDateTime;
 
 use crate::recommendations::generate_recommendations;
-use crate::types::{
-    ChartData, Recommendation, ReportFinding, ReportInput, Severity,
-};
+use crate::types::{ChartData, ReportFinding, ReportInput, Severity};
 
 /// Builds normalized report input from raw findings.
 pub struct ReportDataBuilder;
@@ -30,6 +28,7 @@ impl ReportDataBuilder {
             generated_at: OffsetDateTime::now_utc(),
             findings,
             recommendations,
+            recommendation_overview: None,
             charts,
             metadata: serde_json::json!({}),
         }

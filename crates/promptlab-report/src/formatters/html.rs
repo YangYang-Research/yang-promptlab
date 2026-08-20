@@ -32,24 +32,72 @@ impl ReportFormatter for HtmlFormatter {
 }
 
 fn render_html(kind: ReportKind, input: &ReportInput) -> String {
-    let severity_chart = ChartRenderer::severity_bar_svg(&input.charts, 420, 180);
-    let category_chart = ChartRenderer::category_bar_svg(&input.charts, 420, 160);
-    let risk_gauge = ChartRenderer::risk_gauge_svg(
-        input.charts.risk_score,
-        input.charts.total_findings.max(1),
-        200,
-        120,
+    let risk_score = input.charts.risk_score_100();
+    let risk_label = ChartRenderer::risk_label(risk_score);
+    let risk_accent = if risk_score >= 50 {
+        "critical"
+    } else if risk_score >= 25 {
+        "warning"
+    } else {
+        "success"
+    };
+    let critical_or_high = input
+        .findings
+        .iter()
+        .filter(|f| f.severity == Severity::Critical || f.severity == Severity::High)
+        .count();
+    let confirmed = input
+        .findings
+        .iter()
+        .filter(|f| f.status.eq_ignore_ascii_case("confirmed"))
+        .count();
+    let open = input
+        .findings
+        .iter()
+        .filter(|f| f.status.eq_ignore_ascii_case("open"))
+        .count();
+    let stats_html = format!(
+        r#"<section class="stats" aria-label="Report summary">
+  <div class="card stat-card">
+    <span class="stat-card__label">Risk score</span>
+    <span class="stat-card__value stat-card__value--{accent}">{score}<span class="stat-max">/100</span></span>
+    <span class="stat-card__hint">{risk_label}</span>
+  </div>
+  <div class="card stat-card">
+    <span class="stat-card__label">Total findings</span>
+    <span class="stat-card__value">{total}</span>
+    <span class="stat-card__hint">{critical_or_high} critical or high</span>
+  </div>
+  <div class="card stat-card">
+    <span class="stat-card__label">Confirmed</span>
+    <span class="stat-card__value">{confirmed}</span>
+    <span class="stat-card__hint">Validated vulnerabilities</span>
+  </div>
+  <div class="card stat-card">
+    <span class="stat-card__label">Open</span>
+    <span class="stat-card__value">{open}</span>
+    <span class="stat-card__hint">Awaiting triage</span>
+  </div>
+</section>"#,
+        accent = risk_accent,
+        score = risk_score,
+        risk_label = risk_label,
+        total = input.findings.len(),
+        critical_or_high = critical_or_high,
+        confirmed = confirmed,
+        open = open,
     );
+    let severity_chart = ChartRenderer::severity_distribution_html(&input.charts);
+    let category_chart = ChartRenderer::category_doughnut_html(&input.charts);
 
     let summary_table = render_findings_summary(&input.findings);
     let findings_html = render_findings(kind, input);
-    let recommendations_html = render_recommendations(&input.recommendations);
     let compliance_section = if kind == ReportKind::Compliance {
         render_compliance(&input.findings)
     } else {
         String::new()
     };
-    let executive_summary = render_executive_summary(kind, input);
+    let executive_summary = render_executive_summary(input);
 
     format!(
         r##"<!DOCTYPE html>
@@ -116,7 +164,29 @@ h1 {{ font-size: 1.5rem; font-weight: 650; letter-spacing: -0.02em; }}
 .badge-muted {{ background: var(--bg-hover); color: var(--text-muted); }}
 .badge-danger {{ background: color-mix(in srgb, var(--danger) 12%, white); color: var(--danger); }}
 .badge-info {{ background: color-mix(in srgb, var(--info) 12%, white); color: var(--info); }}
-.grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }}
+.stats {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; margin-bottom: 1.25rem; }}
+.charts {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; margin-bottom: 1.25rem; align-items: stretch; }}
+@media (max-width: 880px) {{ .stats, .charts {{ grid-template-columns: 1fr; }} }}
+.stat-card__label {{ display: block; font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 0.25rem; }}
+.stat-card__value {{ display: block; font-family: var(--font-mono); font-size: 1.875rem; font-weight: 600; line-height: 1.1; letter-spacing: -0.04em; }}
+.stat-card__hint {{ display: block; font-size: 0.75rem; color: var(--text-subtle); margin-top: 0.375rem; }}
+.stat-card__value--critical {{ color: var(--severity-critical); }}
+.stat-card__value--warning {{ color: #d97706; }}
+.stat-card__value--success {{ color: var(--severity-low); }}
+.stat-max {{ font-size: 1rem; font-weight: 500; color: var(--text-subtle); margin-left: 0.15rem; }}
+.severity-chart__row {{ display: grid; grid-template-columns: 90px minmax(0, 1fr) 24px; align-items: center; gap: 0.75rem; margin-bottom: 0.625rem; }}
+.severity-chart__label {{ font-size: 0.8125rem; text-transform: capitalize; color: var(--text-muted); }}
+.severity-chart__bar-track {{ height: 8px; background: var(--bg-elevated); border-radius: 4px; overflow: hidden; min-width: 0; }}
+.severity-chart__bar {{ height: 100%; border-radius: 4px; }}
+.severity-chart__count {{ font-size: 0.8125rem; text-align: right; color: var(--text); }}
+.category-doughnut {{ display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; min-width: 0; }}
+.category-doughnut__chart {{ width: 168px; max-width: 100%; flex: 0 0 auto; }}
+.category-doughnut svg {{ width: 100%; height: auto; display: block; }}
+.category-doughnut__legend {{ list-style: none; flex: 1 1 160px; min-width: 0; }}
+.category-doughnut__legend-item {{ display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; font-size: 0.8125rem; }}
+.category-doughnut__swatch {{ width: 10px; height: 10px; border-radius: 99px; }}
+.category-doughnut__legend-label {{ text-transform: capitalize; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+.category-doughnut__legend-count {{ color: var(--text-muted); }}
 .card {{
   background: var(--bg-surface);
   border-radius: var(--radius);
@@ -230,13 +300,14 @@ footer {{ margin-top: 2rem; color: var(--text-subtle); font-size: 0.75rem; text-
   {target_line}
 </header>
 
-<section class="card summary">{executive_summary}</section>
+{stats_html}
 
-<div class="grid">
-  <div class="card"><h2>Risk Score</h2>{risk_gauge}</div>
+<section class="charts">
   <div class="card"><h2>Severity Distribution</h2>{severity_chart}</div>
-  <div class="card"><h2>Category Breakdown</h2>{category_chart}</div>
-</div>
+  <div class="card"><h2>Findings by Category</h2>{category_chart}</div>
+</section>
+
+{executive_summary}
 
 <section class="card" style="margin-bottom:1.25rem">
   <h2>Findings Summary ({finding_count})</h2>
@@ -246,11 +317,6 @@ footer {{ margin-top: 2rem; color: var(--text-subtle); font-size: 0.75rem; text-
 <section style="margin-bottom:1.25rem">
   <div class="section-head"><h2 class="section-title">Detailed Findings</h2></div>
   {findings_html}
-</section>
-
-<section class="card" style="margin-bottom:1.25rem">
-  <h2>Recommendations</h2>
-  {recommendations_html}
 </section>
 
 {compliance_section}
@@ -272,51 +338,35 @@ footer {{ margin-top: 2rem; color: var(--text-subtle); font-size: 0.75rem; text-
             ))
             .unwrap_or_default(),
         executive_summary = executive_summary,
-        risk_gauge = risk_gauge,
+        stats_html = stats_html,
         severity_chart = severity_chart,
         category_chart = category_chart,
         finding_count = input.findings.len(),
         summary_table = summary_table,
         findings_html = findings_html,
-        recommendations_html = recommendations_html,
         compliance_section = compliance_section,
         kind = kind.as_str(),
     )
 }
 
-fn render_executive_summary(kind: ReportKind, input: &ReportInput) -> String {
-    let critical = input
-        .findings
-        .iter()
-        .filter(|f| f.severity == Severity::Critical)
-        .count();
-    let high = input
-        .findings
-        .iter()
-        .filter(|f| f.severity == Severity::High)
-        .count();
-
-    match kind {
-        ReportKind::Executive => format!(
-            "<p><strong>{} findings</strong> identified across the AI attack surface. \
-             {} critical and {} high severity issues require immediate leadership attention. \
-             Risk score: {}.</p>",
-            input.charts.total_findings, critical, high, input.charts.risk_score
-        ),
-        ReportKind::Technical => format!(
-            "<p>Technical assessment of <strong>{}</strong> covering {} findings \
-             with full evidence and remediation guidance.</p>",
-            escape_html(&input.project_name),
-            input.charts.total_findings
-        ),
-        ReportKind::Compliance => format!(
-            "<p>Compliance mapping for <strong>{}</strong>: {} findings mapped to \
-             OWASP LLM Top 10 and NIST AI RMF controls. {} require priority remediation.</p>",
-            escape_html(&input.project_name),
-            input.charts.total_findings,
-            critical + high
-        ),
-    }
+fn render_executive_summary(input: &ReportInput) -> String {
+    let overview = input
+        .recommendation_overview
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let recs = &input.recommendations;
+    let body = if overview.is_none() && recs.is_empty() {
+        r#"<p class="meta">No recommendations available yet.</p>"#.to_string()
+    } else {
+        let overview_html = overview
+            .map(|s| format!(r#"<p class="summary">{}</p>"#, escape_html(s)))
+            .unwrap_or_default();
+        format!("{overview_html}{}", render_recommendations(recs))
+    };
+    format!(
+        r#"<section class="card" style="margin-bottom:1.25rem"><h2>Executive Summary</h2>{body}</section>"#
+    )
 }
 
 fn render_findings_summary(findings: &[ReportFinding]) -> String {
@@ -417,8 +467,7 @@ fn render_finding_card(
     };
 
     let mut body = format!(
-        r#"<p class="finding-page__index">Finding #{n}</p>
-<h3 class="finding-page__title">{title}</h3>
+        r#"<h3 class="finding-page__title">Finding #{n} - {title}</h3>
 <section class="finding-details__overview">
   <div class="card finding-details__context">
     <h2 class="detail-section__title">Finding Information</h2>
@@ -460,13 +509,7 @@ fn render_finding_card(
 
     if detailed {
         body.push_str(&render_poc(f, &detail, http_request.as_ref(), http_response.as_ref()));
-        body.push_str(&render_judge(&detail, f.confidence));
-        if let Some(rec) = f.recommendation.as_ref() {
-            body.push_str(&format!(
-                r#"<div class="card"><h2 class="detail-section__title">Recommendations</h2><p>{}</p></div>"#,
-                escape_html(rec)
-            ));
-        }
+        body.push_str(&render_finding_recommendations(f));
     }
 
     format!(
@@ -566,169 +609,34 @@ fn render_poc(
     )
 }
 
-fn render_judge(detail: &FindingDetailView, confidence: Option<f32>) -> String {
-    let has_judge = detail.explanation.is_some()
-        || !detail.indicators.is_empty()
-        || !detail.judge_roles.is_empty()
-        || detail.consensus.is_some();
-    if !has_judge {
-        return String::new();
-    }
-
-    let mut inner = String::from(r#"<div class="finding-detail">"#);
-    if !detail.judge_roles.is_empty() {
-        inner.push_str(r#"<div class="finding-detail__judge-roles">"#);
-        for role in &detail.judge_roles {
-            let verd = if role.vulnerable {
-                r#"<span class="badge badge-danger">Vulnerable</span>"#
-            } else {
-                r#"<span class="badge badge-muted">Not vulnerable</span>"#
-            };
-            let score = if role.score > 0 {
-                format!(
-                    r#"<span class="finding-detail__score"><span class="finding-detail__score-value">{}</span><span class="finding-detail__score-max">/100</span></span>"#,
-                    role.score
-                )
-            } else {
-                String::new()
-            };
-            let sev = role
-                .severity
-                .as_deref()
-                .map(|s| {
-                    format!(
-                        r#"<span class="badge badge-sev-{s}">{s}</span>"#,
-                        s = escape_html(s)
-                    )
-                })
-                .unwrap_or_default();
-            let cat = role
-                .category
-                .as_deref()
-                .map(|c| {
-                    format!(
-                        r#"<p class="finding-detail__role-category">Category: {}</p>"#,
-                        escape_html(&c.replace('_', " "))
-                    )
-                })
-                .unwrap_or_default();
-            let rationale = role
-                .rationale
-                .as_deref()
+fn render_finding_recommendations(f: &ReportFinding) -> String {
+    match crate::recommendations::stored_recommendations_from_evidence(f.evidence_raw.as_deref()) {
+        Some((overview, recs)) => {
+            let items = recs
+                .iter()
                 .map(|r| {
                     format!(
-                        r#"<p class="finding-detail__role-rationale">{}</p>"#,
-                        escape_html(r)
+                        r#"<div class="rec"><span class="badge badge-sev-{p}">{p}</span> <strong>{title}</strong><p>{desc}</p></div>"#,
+                        p = r.priority.as_str(),
+                        title = escape_html(&r.title),
+                        desc = escape_html(&r.description),
                     )
                 })
-                .unwrap_or_default();
-            inner.push_str(&format!(
-                r#"<div class="finding-detail__role finding-detail__role--{role}">
-  <div class="finding-detail__role-header">
-    <span class="finding-detail__role-name">{label}</span>
-    <div class="finding-detail__role-badges">{score}{verd}{sev}</div>
-  </div>
-  {cat}{rationale}
-</div>"#,
-                role = escape_html(&role.role),
-                label = escape_html(&role.label),
-                score = score,
-                verd = verd,
-                sev = sev,
-                cat = cat,
-                rationale = rationale,
-            ));
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!(
+                r#"<div class="card"><h2 class="detail-section__title">Recommendations</h2><p class="meta" style="margin-bottom:0.75rem">{}</p>{}</div>"#,
+                escape_html(&overview),
+                items
+            )
         }
-        inner.push_str("</div>");
-    } else if let Some(summary) = &detail.explanation {
-        inner.push_str(&format!(
-            r#"<pre class="finding-detail__code">{}</pre>"#,
-            escape_html(summary)
-        ));
+        None => r#"<div class="card"><h2 class="detail-section__title">Recommendations</h2><p class="meta">No recommendations available yet.</p></div>"#.into(),
     }
-
-    let mut indicator_rows: Vec<(String, Option<String>)> = Vec::new();
-    for role in &detail.judge_roles {
-        for indicator in &role.indicators {
-            indicator_rows.push((indicator.clone(), Some(role.label.clone())));
-        }
-    }
-    if indicator_rows.is_empty() {
-        for indicator in &detail.indicators {
-            indicator_rows.push((indicator.clone(), None));
-        }
-    }
-    if !indicator_rows.is_empty() {
-        let show_role = indicator_rows.iter().any(|(_, role)| role.is_some());
-        inner.push_str(
-            r#"<div class="finding-detail__indicators-wrap"><h5 class="finding-detail__indicators-title">Indicators</h5><div class="finding-detail__indicators-grid">"#,
-        );
-        for (i, (indicator, role)) in indicator_rows.iter().enumerate() {
-            let role_html = if show_role {
-                format!(
-                    r#"<span class="finding-detail__indicator-role">{}</span>"#,
-                    escape_html(role.as_deref().unwrap_or("—"))
-                )
-            } else {
-                String::new()
-            };
-            inner.push_str(&format!(
-                r#"<div class="finding-detail__indicator"><span class="finding-detail__indicator-index mono">{n:02}</span><div>{role_html}<p class="finding-detail__indicator-text">{}</p></div></div>"#,
-                escape_html(indicator),
-                n = i + 1,
-                role_html = role_html,
-            ));
-        }
-        inner.push_str("</div></div>");
-    }
-
-    if let Some(score) = confidence {
-        let verd = detail
-            .verdict
-            .as_deref()
-            .map(|v| {
-                if v.eq_ignore_ascii_case("vulnerable") {
-                    r#"<span class="badge badge-danger">Vulnerable</span>"#.to_string()
-                } else {
-                    format!(r#"<span class="badge badge-muted">{}</span>"#, escape_html(v))
-                }
-            })
-            .unwrap_or_default();
-        inner.push_str(&format!(
-            r#"<div class="finding-detail__score-summary">
-  <div class="finding-detail__score-summary-head">
-    <span class="finding-detail__score-label--heading">Score</span>
-    <div class="finding-detail__role-badges">
-      <span class="finding-detail__score finding-detail__score--summary"><span class="finding-detail__score-value">{:.0}</span><span class="finding-detail__score-max">/100</span></span>
-      {verd}
-    </div>
-  </div>
-</div>"#,
-            score * 100.0,
-            verd = verd,
-        ));
-    }
-    if let Some(consensus) = &detail.consensus {
-        inner.push_str(&format!(
-            r#"<p class="finding-detail__consensus">Consensus: {}</p>"#,
-            escape_html(consensus)
-        ));
-    }
-    if let Some(at) = &detail.judged_at {
-        inner.push_str(&format!(
-            r#"<p class="finding-detail__consensus">Generated {}</p>"#,
-            escape_html(at)
-        ));
-    }
-    inner.push_str("</div>");
-    format!(
-        r#"<div class="card"><h2 class="detail-section__title">Judging Analysis</h2>{inner}</div>"#
-    )
 }
 
 fn render_recommendations(recs: &[crate::types::Recommendation]) -> String {
     if recs.is_empty() {
-        return "<p>No recommendations.</p>".into();
+        return "<p class=\"meta\">No recommendations available yet.</p>".into();
     }
     recs.iter()
         .map(|r| {
@@ -812,8 +720,19 @@ mod tests {
         assert!(html.contains("data-theme=\"light\""));
         assert!(html.contains("color-scheme: light"));
         assert!(html.contains("--bg-app: #f4f4f5"));
-        assert!(html.contains("<svg"));
-        assert!(html.contains("Findings Summary"));
+        assert!(html.contains("Risk score"));
+        assert!(html.contains("Total findings"));
+        assert!(html.contains("Confirmed"));
+        assert!(html.contains(">Open<") || html.contains("Awaiting triage"));
+        assert!(html.contains("Findings by Category"));
+        assert!(html.contains("category-doughnut"));
+        assert!(html.contains("severity-chart"));
+        assert!(html.contains("class=\"stats\""));
+        assert!(html.contains("class=\"charts\""));
+        assert!(html.contains("Executive Summary"));
+        assert!(!html.contains("Technical assessment"));
+        assert!(!html.contains("with full evidence and remediation guidance"));
+        assert!(!html.contains("Judging Analysis"));
         assert!(html.contains("Detailed Findings"));
         assert!(html.contains("Finding Information"));
         assert!(html.contains("Assessment"));
@@ -837,7 +756,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn technical_html_shows_judge_analysis_from_raw_evidence() {
+    async fn technical_html_uses_stored_finding_recommendations() {
         let mut finding = sample_finding();
         finding.id = "f2".into();
         finding.title = "Leak".into();
@@ -848,27 +767,27 @@ mod tests {
         finding.evidence_raw = Some(
             serde_json::json!({
                 "verdict": "vulnerable",
-                "explanation": "Model complied with injected instruction",
-                "indicators": ["UNRESTRICTED_OK"],
-                "judge": {
-                    "summary": "Model complied with injected instruction",
-                    "evaluator_results": [{
-                        "evaluator_id": "llm-judge",
-                        "role": "judge",
-                        "vulnerable": true,
-                        "confidence": 0.97,
-                        "rationale": "confirmation token present"
-                    }],
-                    "consensus": {
-                        "vulnerable_votes": 1,
-                        "participating_evaluators": 1,
-                        "agreement_ratio": 1.0
-                    }
+                "recommendations": {
+                    "overview": "Lock down the prompt boundary.",
+                    "source": "ai",
+                    "recommendations": [{
+                        "title": "Isolate system prompt",
+                        "description": "Keep system instructions out of user context.",
+                        "priority": "critical"
+                    }]
                 }
             })
             .to_string(),
         );
-        let input = ReportDataBuilder::build("s1", "Proj", None, vec![finding]);
+        let mut input = ReportDataBuilder::build("s1", "Proj", None, vec![finding]);
+        input.recommendation_overview = Some("Scan found injection risk.".into());
+        input.recommendations = vec![crate::types::Recommendation {
+            id: "r1".into(),
+            priority: Severity::Critical,
+            title: "Deploy input filters".into(),
+            description: "Filter injected instructions before they reach the model.".into(),
+            related_findings: vec!["f2".into()],
+        }];
         let html = String::from_utf8(
             HtmlFormatter
                 .render(ReportKind::Technical, &input)
@@ -877,10 +796,11 @@ mod tests {
                 .bytes,
         )
         .unwrap();
-        assert!(html.contains("Judging Analysis"));
-        assert!(html.contains("UNRESTRICTED_OK"));
-        assert!(html.contains("Vulnerable"));
-        assert!(html.contains("JudgeWorker"));
-        assert!(html.contains("Add guardrails"));
+        assert!(!html.contains("Judging Analysis"));
+        assert!(html.contains("Lock down the prompt boundary."));
+        assert!(html.contains("Isolate system prompt"));
+        assert!(html.contains("Scan found injection risk."));
+        assert!(html.contains("Deploy input filters"));
+        assert!(!html.contains("Add guardrails"));
     }
 }

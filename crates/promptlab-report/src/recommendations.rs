@@ -1,6 +1,61 @@
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::types::{Recommendation, ReportFinding, Severity};
+
+/// Scan-level AI recommendations stored on `scan.playbook_json.recommendations`.
+pub fn stored_recommendations_from_playbook(
+    playbook_json: Option<&str>,
+) -> Option<(String, Vec<Recommendation>)> {
+    let raw = playbook_json?;
+    let playbook: Value = serde_json::from_str(raw).ok()?;
+    parse_stored_recommendation_set(playbook.get("recommendations")?)
+}
+
+/// Finding-level AI recommendations stored on `evidence_json.recommendations`.
+pub fn stored_recommendations_from_evidence(
+    evidence_json: Option<&str>,
+) -> Option<(String, Vec<Recommendation>)> {
+    let raw = evidence_json?;
+    let evidence: Value = serde_json::from_str(raw).ok()?;
+    parse_stored_recommendation_set(evidence.get("recommendations")?)
+}
+
+fn parse_stored_recommendation_set(value: &Value) -> Option<(String, Vec<Recommendation>)> {
+    let overview = value
+        .get("overview")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let items = value.get("recommendations")?.as_array()?;
+    let mut recs = Vec::new();
+    for item in items {
+        let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
+        if title.is_empty() {
+            continue;
+        }
+        let description = item
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let priority = Severity::from_str_loose(
+            item.get("priority").and_then(|v| v.as_str()).unwrap_or("info"),
+        );
+        recs.push(Recommendation {
+            id: Uuid::new_v4().to_string(),
+            priority,
+            title: title.to_string(),
+            description,
+            related_findings: vec![],
+        });
+    }
+    if overview.is_empty() || recs.is_empty() {
+        return None;
+    }
+    Some((overview, recs))
+}
 
 /// Generate remediation recommendations from findings.
 pub fn generate_recommendations(findings: &[ReportFinding]) -> Vec<Recommendation> {
@@ -172,5 +227,19 @@ mod tests {
         }];
         let recs = generate_recommendations(&findings);
         assert!(recs.iter().any(|r| r.title.contains("guardrails")));
+    }
+
+    #[test]
+    fn parses_playbook_and_evidence_stored_recommendations() {
+        let playbook = r#"{"recommendations":{"overview":"Scan found injection risk.","recommendations":[{"title":"Guardrails","description":"Add input filters.","priority":"critical"}]}}"#;
+        let (overview, recs) = stored_recommendations_from_playbook(Some(playbook)).unwrap();
+        assert_eq!(overview, "Scan found injection risk.");
+        assert_eq!(recs[0].title, "Guardrails");
+
+        let evidence = r#"{"recommendations":{"overview":"Fix this finding.","recommendations":[{"title":"Isolate prompt","description":"Move system text.","priority":"high"}]}}"#;
+        let (overview, recs) = stored_recommendations_from_evidence(Some(evidence)).unwrap();
+        assert_eq!(overview, "Fix this finding.");
+        assert_eq!(recs[0].title, "Isolate prompt");
+        assert!(stored_recommendations_from_playbook(Some("{}")).is_none());
     }
 }

@@ -273,6 +273,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::domain::report_list_all,
             commands::domain::report_read,
             commands::domain::report_export,
+            commands::domain::report_export_scan,
             commands::scan::scan_start,
             commands::scan::scan_status,
             commands::scan::scan_pause,

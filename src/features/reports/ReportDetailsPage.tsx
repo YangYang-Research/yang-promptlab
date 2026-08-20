@@ -223,7 +223,6 @@ export function ReportDetailsPage() {
                 scanId={report.scanId}
                 findingsCount={reportFindings.length}
                 requireFindings={false}
-                onExported={() => void actions.refresh()}
               />
             ) : null}
           </div>

@@ -40,6 +40,7 @@ export {
   listReportsAll,
   readReport,
   exportReport,
+  exportScanReport,
   startScan,
   getScanStatus,
   pauseScan,

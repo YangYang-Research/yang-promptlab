@@ -239,6 +239,14 @@ export const readReport = (id: string) =>
 export const exportReport = (id: string) =>
   invokeCommand<string>("report_export", { id });
 
+export const exportScanReport = (
+  projectId: string,
+  scanId: string,
+  format?: string,
+  kind?: string,
+) =>
+  invokeCommand<string>("report_export_scan", { projectId, scanId, format, kind });
+
 export const startScan = (request: ScanStartRequest) =>
   invokeCommand<ScanStartDto>("scan_start", {
     projectId: request.projectId,

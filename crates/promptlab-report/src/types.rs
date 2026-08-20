@@ -228,6 +228,19 @@ pub struct ChartData {
     pub total_findings: usize,
 }
 
+impl ChartData {
+    /// Normalized 0–100 risk used by Report Details (`computeRiskScore`).
+    pub fn risk_score_100(&self) -> u32 {
+        if self.total_findings == 0 {
+            return 0;
+        }
+        let max = (self.total_findings as u32).saturating_mul(Severity::Critical.risk_weight());
+        ((self.risk_score as f64 / max.max(1) as f64) * 100.0)
+            .min(100.0)
+            .round() as u32
+    }
+}
+
 /// Input data for report generation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReportInput {
@@ -243,6 +256,9 @@ pub struct ReportInput {
     pub generated_at: OffsetDateTime,
     pub findings: Vec<ReportFinding>,
     pub recommendations: Vec<Recommendation>,
+    /// Overview from stored scan AI recommendations, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recommendation_overview: Option<String>,
     pub charts: ChartData,
     #[serde(default)]
     pub metadata: serde_json::Value,

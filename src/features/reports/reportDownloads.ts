@@ -1,4 +1,4 @@
-import { exportReport, generateReport } from "@/shared/ipc";
+import { exportScanReport } from "@/shared/ipc";
 import type { ReportFormat } from "@/shared/types";
 
 export type ReportExportFormat = Extract<ReportFormat, "html" | "pdf" | "sarif" | "csv">;
@@ -19,15 +19,7 @@ export async function generateAndExportScanReport(
   scanId: string,
   format: ReportExportFormat,
 ): Promise<string> {
-  const report = await generateReport(projectId, scanId, format, "technical");
-  if (report.status !== "completed") {
-    throw new Error(`Report generation failed (${report.status})`);
-  }
-  return exportReport(report.id);
-}
-
-export async function exportStoredReport(reportId: string): Promise<string> {
-  return exportReport(reportId);
+  return exportScanReport(projectId, scanId, format, "technical");
 }
 
 type HtmlReportCandidate = {

@@ -81,7 +81,12 @@ async fn executive_html_has_charts() {
         .unwrap();
     let html = String::from_utf8(report.bytes).unwrap();
     assert!(html.contains("<svg"));
-    assert!(html.contains("Risk Score"));
+    assert!(html.contains("Executive Summary"));
+    assert!(html.contains("Risk score"));
+    assert!(html.contains("Total findings"));
+    assert!(html.contains("Confirmed"));
+    assert!(html.contains("Severity Distribution"));
+    assert!(html.contains("Findings by Category"));
 }
 
 #[tokio::test]

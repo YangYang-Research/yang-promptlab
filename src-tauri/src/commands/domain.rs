@@ -4,6 +4,7 @@
 //! function that takes `&AppState`, so the same logic is exercised by the
 //! integration tests without a Tauri runtime.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use promptlab_auth::{
@@ -11,8 +12,8 @@ use promptlab_auth::{
 };
 use promptlab_core::PromptLabError;
 use promptlab_report::{
-    parse_sarif_import, ReportDataBuilder, ReportFormat, ReportKind, ReportingEngine,
-    StorageFindingRow,
+    formatter_for, parse_sarif_import, stored_recommendations_from_playbook, GeneratedReport,
+    ReportDataBuilder, ReportFormat, ReportKind, ReportingEngine, StorageFindingRow,
 };
 use promptlab_storage::{
     CreateFinding, CreateReport, CreateScan, CreateTarget, FindingRepository, ProjectRepository,
@@ -47,6 +48,110 @@ fn parse_kind(value: Option<&str>) -> ReportKind {
         Some("compliance") => ReportKind::Compliance,
         _ => ReportKind::Technical,
     }
+}
+
+async fn render_scan_report(
+    state: &AppState,
+    project_id: &str,
+    scan_id: &str,
+    format: Option<&str>,
+    kind: Option<&str>,
+) -> CommandResult<(GeneratedReport, usize)> {
+    let repos = state.repositories();
+    let project = repos.projects().get(project_id).await.map_err(CommandError::from)?;
+    let scan = repos.scans().get(scan_id).await.map_err(CommandError::from)?;
+    let findings = repos
+        .findings()
+        .list_by_scan(scan_id)
+        .await
+        .map_err(CommandError::from)?;
+
+    let target_name = match &scan.target_id {
+        Some(tid) => repos.targets().get(tid).await.ok().map(|t| t.name),
+        None => None,
+    };
+
+    let rows: Vec<StorageFindingRow> = findings
+        .iter()
+        .map(|f| StorageFindingRow {
+            id: f.id.clone(),
+            title: f.title.clone(),
+            severity: f.severity.clone(),
+            category: f.category.clone(),
+            description: f.description.clone(),
+            evidence_json: f.evidence_json.clone(),
+            status: f.status.clone(),
+        })
+        .collect();
+
+    let report_findings = ReportDataBuilder::from_storage_findings(&rows);
+    let mut input = ReportDataBuilder::with_context(
+        ReportDataBuilder::build(
+            scan_id.to_string(),
+            project.name.clone(),
+            target_name,
+            report_findings,
+        ),
+        project_id.to_string(),
+        scan.name.clone(),
+        scan.target_id.clone(),
+    );
+    if let Some((overview, recs)) = stored_recommendations_from_playbook(scan.playbook_json.as_deref()) {
+        input.recommendation_overview = Some(overview);
+        input.recommendations = recs;
+    } else {
+        input.recommendations.clear();
+    }
+
+    let report_format = parse_format(format);
+    let report_kind = parse_kind(kind);
+    let generated = formatter_for(report_format)
+        .render(report_kind, &input)
+        .await
+        .map_err(map_report_err)?;
+    Ok((generated, findings.len()))
+}
+
+fn downloads_dir(state: &AppState) -> PathBuf {
+    std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join("Downloads"))
+        .unwrap_or_else(|| state.workspaces_dir().join("downloads"))
+}
+
+fn timestamped_filename(filename: &str) -> String {
+    let ts = time::OffsetDateTime::now_utc().unix_timestamp();
+    if let Some(stem) = filename.strip_suffix(".sarif.json") {
+        format!("{stem}-{ts}.sarif.json")
+    } else if let Some((stem, ext)) = filename.rsplit_once('.') {
+        format!("{stem}-{ts}.{ext}")
+    } else {
+        format!("{filename}-{ts}")
+    }
+}
+
+fn unique_path(dir: &Path, filename: &str) -> PathBuf {
+    let mut dest = dir.join(filename);
+    if !dest.exists() {
+        return dest;
+    }
+    let (stem, ext) = match filename.rsplit_once('.') {
+        Some((s, e)) if !filename.ends_with(".sarif.json") => (s.to_string(), format!(".{e}")),
+        _ if filename.ends_with(".sarif.json") => (
+            filename.trim_end_matches(".sarif.json").to_string(),
+            ".sarif.json".to_string(),
+        ),
+        _ => (filename.to_string(), String::new()),
+    };
+    for i in 2..1000 {
+        dest = dir.join(format!("{stem}-{i}{ext}"));
+        if !dest.exists() {
+            return dest;
+        }
+    }
+    dir.join(format!(
+        "{stem}-{}{ext}",
+        time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -695,71 +800,35 @@ pub async fn report_generate_op(
     format: Option<String>,
     kind: Option<String>,
 ) -> CommandResult<ReportDto> {
-    let repos = state.repositories();
-
-    let project = repos.projects().get(&project_id).await.map_err(CommandError::from)?;
-    let scan = repos.scans().get(&scan_id).await.map_err(CommandError::from)?;
-    let findings = repos
-        .findings()
-        .list_by_scan(&scan_id)
-        .await
-        .map_err(CommandError::from)?;
-
-    let target_name = match &scan.target_id {
-        Some(tid) => repos.targets().get(tid).await.ok().map(|t| t.name),
-        None => None,
-    };
-
-    let rows: Vec<StorageFindingRow> = findings
-        .iter()
-        .map(|f| StorageFindingRow {
-            id: f.id.clone(),
-            title: f.title.clone(),
-            severity: f.severity.clone(),
-            category: f.category.clone(),
-            description: f.description.clone(),
-            evidence_json: f.evidence_json.clone(),
-            status: f.status.clone(),
-        })
-        .collect();
-
-    let report_findings = ReportDataBuilder::from_storage_findings(&rows);
-    let input = ReportDataBuilder::with_context(
-        ReportDataBuilder::build(
-            scan_id.clone(),
-            project.name.clone(),
-            target_name,
-            report_findings,
-        ),
-        project_id.clone(),
-        scan.name.clone(),
-        scan.target_id.clone(),
-    );
-
-    let report_format = parse_format(format.as_deref());
-    let report_kind = parse_kind(kind.as_deref());
+    let (generated, findings_len) = render_scan_report(
+        state,
+        &project_id,
+        &scan_id,
+        format.as_deref(),
+        kind.as_deref(),
+    )
+    .await?;
 
     let engine = ReportingEngine::new(state.reports_dir()).map_err(map_report_err)?;
-    let generated = engine
-        .generate(report_kind, report_format, &input)
-        .await
-        .map_err(map_report_err)?;
-    let file_path = state.reports_dir().join(&generated.filename);
+    let file_path = engine.output_dir().join(&generated.filename);
+    std::fs::write(&file_path, &generated.bytes)
+        .map_err(|err| CommandError::from(PromptLabError::from(err)))?;
 
-    info!(scan_id = %scan_id, file = %file_path.display(), findings = findings.len(), "report generated");
+    info!(scan_id = %scan_id, file = %file_path.display(), findings = findings_len, "report generated");
 
-    let record = repos
+    let record = state
+        .repositories()
         .reports()
         .create(CreateReport {
             project_id: project_id.clone(),
             scan_id: Some(scan_id.clone()),
             name: "PromptLab - Security Scan Report".into(),
-            format: report_format.as_str().to_string(),
+            format: generated.format.as_str().to_string(),
             status: Some("completed".into()),
             file_path: Some(file_path.to_string_lossy().into_owned()),
             metadata_json: Some(serde_json::json!({
-                "findings": findings.len(),
-                "kind": report_kind.as_str(),
+                "findings": findings_len,
+                "kind": generated.kind.as_str(),
             })),
         })
         .await
@@ -791,20 +860,52 @@ pub async fn report_export_op(state: &AppState, id: String) -> CommandResult<Str
         .clone()
         .ok_or_else(|| CommandError::invalid_input("Report has no saved file"))?;
 
-    let downloads = std::env::var_os("HOME")
-        .map(|home| std::path::PathBuf::from(home).join("Downloads"))
-        .unwrap_or_else(|| state.workspaces_dir().join("downloads"));
+    let downloads = downloads_dir(state);
     std::fs::create_dir_all(&downloads).map_err(|err| CommandError::from(PromptLabError::from(err)))?;
 
     let file_name = std::path::Path::new(&src)
         .file_name()
-        .map(|f| f.to_os_string())
-        .unwrap_or_else(|| format!("{}.{}", report.name, report.format).into());
-    let dest = downloads.join(file_name);
+        .and_then(|f| f.to_str())
+        .map(timestamped_filename)
+        .unwrap_or_else(|| timestamped_filename(&format!("{}.{}", report.name, report.format)));
+    let dest = unique_path(&downloads, &file_name);
 
     std::fs::copy(&src, &dest).map_err(|err| CommandError::from(PromptLabError::from(err)))?;
     let dest_str = dest.to_string_lossy().into_owned();
     info!(report_id = %report.id, dest = %dest_str, "report exported");
+    Ok(dest_str)
+}
+
+#[instrument(skip(state))]
+pub async fn report_export_scan_op(
+    state: &AppState,
+    project_id: String,
+    scan_id: String,
+    format: Option<String>,
+    kind: Option<String>,
+) -> CommandResult<String> {
+    let (generated, findings_len) = render_scan_report(
+        state,
+        &project_id,
+        &scan_id,
+        format.as_deref(),
+        kind.as_deref(),
+    )
+    .await?;
+
+    let downloads = downloads_dir(state);
+    std::fs::create_dir_all(&downloads).map_err(|err| CommandError::from(PromptLabError::from(err)))?;
+    let dest = unique_path(&downloads, &timestamped_filename(&generated.filename));
+    std::fs::write(&dest, &generated.bytes)
+        .map_err(|err| CommandError::from(PromptLabError::from(err)))?;
+
+    let dest_str = dest.to_string_lossy().into_owned();
+    info!(
+        scan_id = %scan_id,
+        dest = %dest_str,
+        findings = findings_len,
+        "report exported without history"
+    );
     Ok(dest_str)
 }
 
@@ -994,4 +1095,15 @@ pub async fn report_read(
 #[tauri::command]
 pub async fn report_export(state: State<'_, AppState>, id: String) -> CommandResult<String> {
     report_export_op(state.inner(), id).await
+}
+
+#[tauri::command]
+pub async fn report_export_scan(
+    state: State<'_, AppState>,
+    project_id: String,
+    scan_id: String,
+    format: Option<String>,
+    kind: Option<String>,
+) -> CommandResult<String> {
+    report_export_scan_op(state.inner(), project_id, scan_id, format, kind).await
 }

@@ -181,6 +181,161 @@ impl ChartRenderer {
         }
         lines.join("\n")
     }
+
+    pub fn risk_label(score_100: u32) -> &'static str {
+        if score_100 >= 75 {
+            "Critical"
+        } else if score_100 >= 50 {
+            "High"
+        } else if score_100 >= 25 {
+            "Medium"
+        } else if score_100 > 0 {
+            "Low"
+        } else {
+            "No detected risk"
+        }
+    }
+
+    /// HTML bar rows matching Report Details (no overflowing SVG).
+    pub fn severity_distribution_html(charts: &ChartData) -> String {
+        let counts: Vec<(Severity, usize)> = Severity::all_ordered()
+            .iter()
+            .map(|sev| {
+                let count = charts
+                    .severity_counts
+                    .iter()
+                    .find(|(s, _)| s == sev)
+                    .map(|(_, c)| *c)
+                    .unwrap_or(0);
+                (*sev, count)
+            })
+            .collect();
+        let max = counts.iter().map(|(_, c)| *c).max().unwrap_or(0).max(1);
+        let rows: String = counts
+            .iter()
+            .map(|(sev, count)| {
+                let pct = (*count as f64 / max as f64 * 100.0).round() as u32;
+                format!(
+                    r#"<div class="severity-chart__row">
+  <span class="severity-chart__label">{label}</span>
+  <div class="severity-chart__bar-track"><div class="severity-chart__bar" style="width:{pct}%;background:{color}"></div></div>
+  <span class="severity-chart__count">{count}</span>
+</div>"#,
+                    label = sev.as_str(),
+                    color = html_severity_color(*sev),
+                    pct = pct,
+                    count = count,
+                )
+            })
+            .collect();
+        format!(r#"<div class="severity-chart">{rows}</div>"#)
+    }
+
+    /// Doughnut + legend matching in-app Findings by Category.
+    pub fn category_doughnut_html(charts: &ChartData) -> String {
+        let slices: Vec<_> = charts
+            .category_counts
+            .iter()
+            .filter(|(_, c)| *c > 0)
+            .collect();
+        if slices.is_empty() {
+            return r#"<p class="meta">No findings by attack category yet.</p>"#.into();
+        }
+        let total: usize = slices.iter().map(|(_, c)| *c).sum();
+        let size = 168.0_f64;
+        let cx = size / 2.0;
+        let cy = size / 2.0;
+        let radius = size * 0.36;
+        let stroke_width = size * 0.14;
+        let circumference = 2.0 * std::f64::consts::PI * radius;
+        let mut offset = 0.0;
+        let mut circles = String::new();
+        let mut legend = String::new();
+        for (i, (id, count)) in slices.iter().enumerate() {
+            let fraction = *count as f64 / total as f64;
+            let length = fraction * circumference;
+            let color = category_color(id, i);
+            let label = id.replace('_', " ");
+            circles.push_str(&format!(
+                r#"<circle cx="{cx}" cy="{cy}" r="{radius}" fill="none" stroke="{color}" stroke-width="{sw}" stroke-dasharray="{length:.4} {gap:.4}" stroke-dashoffset="{dash:.4}" transform="rotate(-90 {cx} {cy})"/>"#,
+                cx = cx,
+                cy = cy,
+                radius = radius,
+                color = color,
+                sw = stroke_width,
+                length = length,
+                gap = circumference - length,
+                dash = -offset,
+            ));
+            offset += length;
+            legend.push_str("<li class=\"category-doughnut__legend-item\"><span class=\"category-doughnut__swatch\" style=\"background:");
+            legend.push_str(color);
+            legend.push_str("\"></span><span class=\"category-doughnut__legend-label\">");
+            legend.push_str(&escape_html(&label));
+            legend.push_str("</span><span class=\"category-doughnut__legend-count\">");
+            legend.push_str(&count.to_string());
+            legend.push_str("</span></li>");
+        }
+        let mut html = String::new();
+        html.push_str(r#"<div class="category-doughnut"><div class="category-doughnut__chart">"#);
+        html.push_str(&format!(
+            r#"<svg viewBox="0 0 {size} {size}" width="100%" height="auto" role="img" aria-label="Findings by category">"#,
+            size = size
+        ));
+        html.push_str(&format!(
+            r#"<circle cx="{cx}" cy="{cy}" r="{radius}" fill="none" stroke="{track}" stroke-width="{sw}"/>"#,
+            cx = cx,
+            cy = cy,
+            radius = radius,
+            track = "#ececee",
+            sw = stroke_width
+        ));
+        html.push_str(&circles);
+        html.push_str(&format!(
+            r#"<text x="{cx}" y="{ty}" text-anchor="middle" font-size="22" font-weight="700" fill="{ink}">{total}</text><text x="{cx}" y="{ly}" text-anchor="middle" font-size="11" fill="{muted}">findings</text></svg></div>"#,
+            cx = cx,
+            ty = cy - 4.0,
+            total = total,
+            ly = cy + 14.0,
+            ink = "#18181b",
+            muted = "#71717a",
+        ));
+        html.push_str(r#"<ul class="category-doughnut__legend">"#);
+        html.push_str(&legend);
+        html.push_str("</ul></div>");
+        html
+    }
+}
+
+fn html_severity_color(sev: Severity) -> &'static str {
+    match sev {
+        Severity::Critical => "#c72929",
+        Severity::High => "#f47f1f",
+        Severity::Medium => "#ffb300",
+        Severity::Low => "#4cae4f",
+        Severity::Info => "#1975d2",
+    }
+}
+
+fn category_color(id: &str, index: usize) -> &'static str {
+    match id {
+        "prompt_injection" => "#c72929",
+        "system_prompt_extraction" => "#f47f1f",
+        "jailbreak" => "#eab308",
+        "rag_leakage" => "#1975d2",
+        "memory_poisoning" => "#0d9488",
+        "cross_user_leakage" => "#4cae4f",
+        "agent_goal_hijacking" => "#b45309",
+        "tool_abuse" => "#64748b",
+        "mcp_abuse" => "#0891b2",
+        _ => {
+            const FALLBACK: &[&str] = &[
+                "#c72929", "#f47f1f", "#eab308", "#4cae4f", "#1975d2", "#0d9488", "#b45309",
+                "#64748b", "#0891b2", "#78716c",
+            ];
+            FALLBACK[index % FALLBACK.len()]
+        }
+    }
 }
 
 fn escape_xml(s: &str) -> String {
@@ -210,5 +365,19 @@ mod tests {
         let svg = ChartRenderer::severity_bar_svg(&charts, 400, 200);
         assert!(svg.contains("<svg"));
         assert!(svg.contains("#f97316"));
+    }
+
+    #[test]
+    fn category_doughnut_uses_circles() {
+        let charts = ChartData {
+            severity_counts: vec![],
+            category_counts: vec![("prompt_injection".into(), 2), ("jailbreak".into(), 1)],
+            risk_score: 10,
+            total_findings: 3,
+        };
+        let html = ChartRenderer::category_doughnut_html(&charts);
+        assert!(html.contains("category-doughnut"));
+        assert!(html.contains("stroke-dasharray"));
+        assert!(html.contains("prompt injection"));
     }
 }
