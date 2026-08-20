@@ -517,7 +517,7 @@ fn inject_toc_goto_links(pdf_bytes: Vec<u8>, links: &[TocHotspot]) -> ReportResu
     let toc_page_id = pages
         .get(&2)
         .copied()
-        .ok_or_else(|| ReportError::render("pdf missing Contents page for links".into()))?;
+        .ok_or_else(|| ReportError::render("pdf missing Contents page for links"))?;
 
     let page_top_pt = mm_to_pt(PAGE_H_MM);
     let mut annot_refs: Vec<Object> = Vec::new();
