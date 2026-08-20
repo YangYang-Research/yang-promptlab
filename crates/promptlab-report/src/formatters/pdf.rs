@@ -49,37 +49,55 @@ fn render_pdf(kind: ReportKind, input: &ReportInput) -> ReportResult<Vec<u8>> {
     let font_bold = doc
         .add_builtin_font(BuiltinFont::HelveticaBold)
         .map_err(|e| ReportError::render(e.to_string()))?;
+    let font_bold_italic = doc
+        .add_builtin_font(BuiltinFont::HelveticaBoldOblique)
+        .map_err(|e| ReportError::render(e.to_string()))?;
 
     write_cover_page(&doc, page1, layer1, &font, &font_bold, kind, input);
     doc.add_bookmark("Overview", page1);
 
+    // Reserve Contents page; fill page numbers after body layout is known.
     let (toc_page, toc_layer) = doc.add_page(Mm(PAGE_W_MM), Mm(PAGE_H_MM), "Layer 1");
-    write_toc_page(&doc, toc_page, toc_layer, &font, &font_bold, kind, input);
+    write_page_number(&doc, toc_page, toc_layer, &font, 2);
     doc.add_bookmark("Contents", toc_page);
 
     let (page, layer) = doc.add_page(Mm(PAGE_W_MM), Mm(PAGE_H_MM), "Layer 1");
     doc.add_bookmark("Summary", page);
+    write_page_number(&doc, page, layer, &font, 3);
     let mut body = PdfBody {
         doc: &doc,
         page,
         layer,
         font: &font,
         font_bold: &font_bold,
+        font_bold_italic: &font_bold_italic,
         left: BODY_LEFT_MM,
         y: BODY_TOP_MM,
+        page_no: 3,
     };
 
-    write_summary_section(&mut body, input);
-    write_charts_section(&mut body, input);
-    write_executive_summary_section(&mut body, input);
-    write_findings_summary_section(&mut body, input);
-    write_detailed_findings_section(&mut body, kind, input);
+    let mut toc_pages = TocPageMap::new(input.findings.len());
+    write_summary_section(&mut body, input, &mut toc_pages);
+    write_charts_section(&mut body, input, &mut toc_pages);
+    write_executive_summary_section(&mut body, input, &mut toc_pages);
+    write_findings_summary_section(&mut body, input, &mut toc_pages);
+    write_detailed_findings_section(&mut body, kind, input, &mut toc_pages);
 
     if kind == ReportKind::Compliance {
-        write_compliance_section(&mut body, input);
+        write_compliance_section(&mut body, input, &mut toc_pages);
     }
 
     write_report_footer(&mut body, kind, input);
+    write_toc_page(
+        &doc,
+        toc_page,
+        toc_layer,
+        &font,
+        &font_bold,
+        kind,
+        input,
+        &toc_pages,
+    );
 
     let mut buf = BufWriter::new(Vec::new());
     doc.save(&mut buf)
@@ -90,6 +108,7 @@ fn render_pdf(kind: ReportKind, input: &ReportInput) -> ReportResult<Vec<u8>> {
 const BODY_LEFT_MM: f32 = 20.0;
 const BODY_TOP_MM: f32 = 280.0;
 const BODY_BOTTOM_MM: f32 = 24.0;
+const PAGE_NUMBER_Y_MM: f32 = 12.0;
 
 /// Tracks the current body page and cursor so content never overwrites itself.
 struct PdfBody<'a> {
@@ -98,8 +117,11 @@ struct PdfBody<'a> {
     layer: PdfLayerIndex,
     font: &'a IndirectFontRef,
     font_bold: &'a IndirectFontRef,
+    font_bold_italic: &'a IndirectFontRef,
     left: f32,
     y: f32,
+    /// Absolute PDF page index (cover = 1). Numbered in footer from page 2.
+    page_no: u32,
 }
 
 impl<'a> PdfBody<'a> {
@@ -108,6 +130,8 @@ impl<'a> PdfBody<'a> {
         self.page = page;
         self.layer = layer;
         self.y = BODY_TOP_MM;
+        self.page_no += 1;
+        write_page_number(self.doc, self.page, self.layer, self.font, self.page_no);
     }
 
     fn ensure_space(&mut self, needed_mm: f32) {
@@ -160,6 +184,21 @@ impl<'a> PdfBody<'a> {
             self.page,
             self.layer,
             self.font_bold,
+            self.left,
+            self.y,
+            size,
+            text,
+        );
+        self.y -= advance;
+    }
+
+    fn write_bold_italic(&mut self, size: f32, text: &str, advance: f32) {
+        self.ensure_space(advance.max(4.0));
+        write_line(
+            self.doc,
+            self.page,
+            self.layer,
+            self.font_bold_italic,
             self.left,
             self.y,
             size,
@@ -264,6 +303,33 @@ fn place_logo(
     );
 }
 
+/// Absolute page numbers collected while laying out the body (cover = 1, contents = 2).
+struct TocPageMap {
+    overview: u32,
+    summary: u32,
+    charts: u32,
+    executive_summary: u32,
+    findings_summary: u32,
+    detailed_findings: u32,
+    finding_pages: Vec<u32>,
+    compliance: Option<u32>,
+}
+
+impl TocPageMap {
+    fn new(finding_count: usize) -> Self {
+        Self {
+            overview: 1,
+            summary: BODY_START_PAGE,
+            charts: BODY_START_PAGE,
+            executive_summary: BODY_START_PAGE,
+            findings_summary: BODY_START_PAGE,
+            detailed_findings: BODY_START_PAGE,
+            finding_pages: vec![BODY_START_PAGE; finding_count],
+            compliance: None,
+        }
+    }
+}
+
 /// Body content starts on page 3 (cover=1, contents=2).
 const BODY_START_PAGE: u32 = 3;
 
@@ -274,36 +340,36 @@ struct TocEntry {
     child: bool,
 }
 
-fn build_toc_entries(kind: ReportKind, input: &ReportInput) -> Vec<TocEntry> {
+fn build_toc_entries(kind: ReportKind, input: &ReportInput, pages: &TocPageMap) -> Vec<TocEntry> {
     let mut entries = vec![
         TocEntry {
             label: "Overview".into(),
-            page: Some(1),
+            page: Some(pages.overview),
             child: false,
         },
         TocEntry {
             label: "Summary".into(),
-            page: Some(BODY_START_PAGE),
+            page: Some(pages.summary),
             child: false,
         },
         TocEntry {
             label: "Charts".into(),
-            page: Some(BODY_START_PAGE),
+            page: Some(pages.charts),
             child: false,
         },
         TocEntry {
             label: "Executive Summary".into(),
-            page: Some(BODY_START_PAGE),
+            page: Some(pages.executive_summary),
             child: false,
         },
         TocEntry {
             label: "Findings Summary".into(),
-            page: Some(BODY_START_PAGE),
+            page: Some(pages.findings_summary),
             child: false,
         },
         TocEntry {
             label: "Detailed Findings".into(),
-            page: Some(BODY_START_PAGE),
+            page: Some(pages.detailed_findings),
             child: false,
         },
     ];
@@ -315,13 +381,18 @@ fn build_toc_entries(kind: ReportKind, input: &ReportInput) -> Vec<TocEntry> {
             child: false,
         });
         for (index, finding) in input.findings.iter().enumerate() {
+            let page = pages
+                .finding_pages
+                .get(index)
+                .copied()
+                .unwrap_or(pages.detailed_findings);
             entries.push(TocEntry {
                 label: format!(
                     "Finding #{} · {}",
                     index + 1,
                     toc_label(&finding.title, 48)
                 ),
-                page: Some(BODY_START_PAGE),
+                page: Some(page),
                 child: true,
             });
         }
@@ -330,7 +401,7 @@ fn build_toc_entries(kind: ReportKind, input: &ReportInput) -> Vec<TocEntry> {
     if kind == ReportKind::Compliance {
         entries.push(TocEntry {
             label: "Compliance Mapping".into(),
-            page: Some(BODY_START_PAGE),
+            page: Some(pages.compliance.unwrap_or(pages.detailed_findings)),
             child: false,
         });
     }
@@ -355,6 +426,7 @@ fn write_toc_page(
     font_bold: &IndirectFontRef,
     kind: ReportKind,
     input: &ReportInput,
+    pages: &TocPageMap,
 ) {
     let left = 24.0_f32;
     let right = PAGE_W_MM - 24.0;
@@ -363,7 +435,7 @@ fn write_toc_page(
     write_line(doc, page, layer, font_bold, left, y, 16.0, "Contents");
     y -= 14.0;
 
-    for entry in build_toc_entries(kind, input) {
+    for entry in build_toc_entries(kind, input, pages) {
         if y < 30.0 {
             // Keep TOC on a single dedicated page; truncate gracefully.
             write_line(
@@ -492,7 +564,11 @@ fn write_line_centered(
 const STAT_CARD_H_MM: f32 = 28.0;
 const STAT_CARD_GAP_MM: f32 = 3.0;
 
-fn write_summary_section(body: &mut PdfBody<'_>, input: &ReportInput) {
+fn write_summary_section(
+    body: &mut PdfBody<'_>,
+    input: &ReportInput,
+    toc: &mut TocPageMap,
+) {
     let risk_score = input.charts.risk_score_100();
     let risk_label = ChartRenderer::risk_label(risk_score);
     let confirmed = input
@@ -507,6 +583,7 @@ fn write_summary_section(body: &mut PdfBody<'_>, input: &ReportInput) {
         .count();
 
     body.write_heading("Summary");
+    toc.summary = body.page_no;
     body.ensure_space(STAT_CARD_H_MM + 8.0);
 
     let cards = [
@@ -538,17 +615,19 @@ fn draw_summary_stat_cards(
     let layer = body.doc.get_page(body.page).get_layer(body.layer);
     layer.set_outline_color(Color::Rgb(Rgb::new(0.83, 0.83, 0.87, None)));
     layer.set_outline_thickness(0.7);
-    layer.set_fill_color(Color::Rgb(Rgb::new(1.0, 1.0, 1.0, None)));
 
     let top = body.y;
     let bottom = top - STAT_CARD_H_MM;
     let right = PAGE_W_MM - BODY_LEFT_MM;
     let total_w = right - body.left;
     let cell_w = (total_w - STAT_CARD_GAP_MM * 3.0) / 4.0;
+    let card_fill = Color::Rgb(Rgb::new(1.0, 1.0, 1.0, None));
 
     for (i, (label, value, hint)) in cards.iter().enumerate() {
         let x0 = body.left + i as f32 * (cell_w + STAT_CARD_GAP_MM);
         let x1 = x0 + cell_w;
+        // write_line() sets fill to black for glyphs — re-apply white before each card fill.
+        layer.set_fill_color(card_fill.clone());
         let rect = Rect::new(Mm(x0), Mm(bottom), Mm(x1), Mm(top)).with_mode(PaintMode::FillStroke);
         layer.add_rect(rect);
 
@@ -588,54 +667,269 @@ fn draw_summary_stat_cards(
     }
 }
 
-fn write_charts_section(body: &mut PdfBody<'_>, input: &ReportInput) {
+fn write_charts_section(
+    body: &mut PdfBody<'_>,
+    input: &ReportInput,
+    toc: &mut TocPageMap,
+) {
     body.write_heading("Charts");
+    toc.charts = body.page_no;
 
     body.write_bold(10.0, "Severity Distribution", 5.0);
-    let severity_svg = ChartRenderer::severity_distribution_svg(&input.charts, 520);
-    place_svg_chart(body, &severity_svg, PAGE_W_MM - BODY_LEFT_MM * 2.0);
+    draw_severity_distribution_chart(body, &input.charts);
     body.gap(6.0);
 
     body.write_bold(10.0, "Findings by Category", 5.0);
-    let category_svg = ChartRenderer::category_doughnut_svg(&input.charts, 520, 210);
-    place_svg_chart(body, &category_svg, PAGE_W_MM - BODY_LEFT_MM * 2.0);
+    draw_category_distribution_chart(body, &input.charts);
     body.gap(6.0);
 }
 
-/// Generate chart SVG → convert via printpdf → paint on the current page.
-fn place_svg_chart(body: &mut PdfBody<'_>, svg_src: &str, target_width_mm: f32) {
-    let Ok(svg) = Svg::parse(svg_src) else {
-        body.write_text(8.0, "(chart unavailable)", 4.0);
-        return;
-    };
+/// Native PDF severity bars (SVG text often drops under svg2pdf/usvg).
+fn draw_severity_distribution_chart(body: &mut PdfBody<'_>, charts: &crate::types::ChartData) {
+    use crate::types::Severity;
 
-    let dpi = 96.0_f32;
-    let native_w_pt = svg.width.into_pt(dpi).0.max(1.0);
-    let native_h_pt = svg.height.into_pt(dpi).0.max(1.0);
-    let target_w_pt: Pt = Mm(target_width_mm).into();
-    let scale = target_w_pt.0 / native_w_pt;
-    let height_mm = (native_h_pt * scale) * 25.4 / 72.0;
-
-    body.ensure_space(height_mm + 2.0);
-    let y_bottom = body.y - height_mm;
-    let layer = body.doc.get_page(body.page).get_layer(body.layer);
-    let reference = svg.into_xobject(&layer);
-    reference.add_to_layer(
-        &layer,
-        SvgTransform {
-            translate_x: Some(Mm(body.left).into()),
-            translate_y: Some(Mm(y_bottom).into()),
-            scale_x: Some(scale),
-            scale_y: Some(scale),
-            dpi: Some(dpi),
-            ..Default::default()
-        },
-    );
-    body.y = y_bottom - 2.0;
+    let counts: Vec<(String, usize, Color)> = Severity::all_ordered()
+        .iter()
+        .map(|sev| {
+            let count = charts
+                .severity_counts
+                .iter()
+                .find(|(s, _)| s == sev)
+                .map(|(_, c)| *c)
+                .unwrap_or(0);
+            let mut label = sev.as_str().to_string();
+            if let Some(first) = label.get_mut(0..1) {
+                first.make_ascii_uppercase();
+            }
+            (label, count, severity_pdf_color(*sev))
+        })
+        .collect();
+    draw_vertical_bar_chart(body, &counts);
 }
 
-fn write_executive_summary_section(body: &mut PdfBody<'_>, input: &ReportInput) {
+/// Native PDF category bars with visible labels (same approach as severity).
+fn draw_category_distribution_chart(body: &mut PdfBody<'_>, charts: &crate::types::ChartData) {
+    let slices: Vec<(String, usize, Color)> = charts
+        .category_counts
+        .iter()
+        .filter(|(_, c)| *c > 0)
+        .enumerate()
+        .map(|(i, (id, count))| {
+            (
+                id.replace('_', " "),
+                *count,
+                category_pdf_color(id, i),
+            )
+        })
+        .collect();
+
+    if slices.is_empty() {
+        body.write_text(9.0, "No findings by attack category yet.", 4.5);
+        return;
+    }
+
+    draw_horizontal_bar_chart(body, &slices, 48.0);
+}
+
+fn draw_vertical_bar_chart(body: &mut PdfBody<'_>, cols: &[(String, usize, Color)]) {
+    if cols.is_empty() {
+        return;
+    }
+
+    let max = cols.iter().map(|(_, c, _)| *c).max().unwrap_or(0).max(1);
+    let chart_w = body_content_width_mm();
+    let plot_h = 52.0_f32;
+    let value_gap = 5.0_f32;
+    let label_gap = 10.0_f32;
+    let total_h = value_gap + plot_h + label_gap + 2.0;
+    let n = cols.len() as f32;
+    let gap = 8.0_f32;
+    let bar_w = ((chart_w - gap * (n + 1.0)) / n).clamp(12.0, 24.0);
+    let used = n * bar_w + (n - 1.0) * gap;
+    let start_x = body.left + ((chart_w - used) / 2.0).max(0.0);
+
+    body.ensure_space(total_h + 4.0);
+    let top = body.y;
+    let baseline = top - value_gap - plot_h;
+    let layer = body.doc.get_page(body.page).get_layer(body.layer);
+    let track_fill = Color::Rgb(Rgb::new(0.93, 0.93, 0.94, None));
+
+    for (i, (label, count, color)) in cols.iter().enumerate() {
+        let x = start_x + i as f32 * (bar_w + gap);
+        let bar_h = ((*count as f32 / max as f32) * plot_h).max(if *count > 0 { 2.0 } else { 0.0 });
+
+        layer.set_outline_thickness(0.0);
+        layer.set_fill_color(track_fill.clone());
+        layer.add_rect(
+            Rect::new(Mm(x), Mm(baseline), Mm(x + bar_w), Mm(baseline + plot_h))
+                .with_mode(PaintMode::Fill),
+        );
+        if bar_h > 0.0 {
+            layer.set_fill_color(color.clone());
+            layer.add_rect(
+                Rect::new(Mm(x), Mm(baseline), Mm(x + bar_w), Mm(baseline + bar_h))
+                    .with_mode(PaintMode::Fill),
+            );
+        }
+
+        let count_text = count.to_string();
+        let count_x = x + (bar_w - text_width_approx(&count_text, 8.0)) / 2.0;
+        write_line(
+            body.doc,
+            body.page,
+            body.layer,
+            body.font,
+            count_x.max(x),
+            baseline + bar_h.max(2.0) + 3.0,
+            8.0,
+            &count_text,
+        );
+
+        let label_x = x + (bar_w - text_width_approx(label, 7.5)) / 2.0;
+        write_line(
+            body.doc,
+            body.page,
+            body.layer,
+            body.font,
+            label_x.max(body.left),
+            baseline - 6.0,
+            7.5,
+            label,
+        );
+    }
+
+    body.y = top - total_h;
+}
+
+fn text_width_approx(text: &str, size_pt: f32) -> f32 {
+    text.chars().count() as f32 * size_pt * 0.5 * 0.352778
+}
+
+fn draw_horizontal_bar_chart(
+    body: &mut PdfBody<'_>,
+    rows: &[(String, usize, Color)],
+    label_w: f32,
+) {
+    let max = rows.iter().map(|(_, c, _)| *c).max().unwrap_or(0).max(1);
+    let count_w = 14.0_f32;
+    let row_h = 9.0_f32;
+    let gap = 3.5_f32;
+    let bar_h = 5.0_f32;
+    let chart_w = PAGE_W_MM - BODY_LEFT_MM * 2.0;
+    let track_x = body.left + label_w;
+    let track_w = (chart_w - label_w - count_w).max(20.0);
+    let total_h = rows.len() as f32 * (row_h + gap) + 2.0;
+    let label_chars = chars_for_width(label_w - 2.0, 8.0);
+
+    body.ensure_space(total_h + 4.0);
+    let top = body.y;
+    let layer = body.doc.get_page(body.page).get_layer(body.layer);
+    let track_fill = Color::Rgb(Rgb::new(0.93, 0.93, 0.94, None));
+
+    for (i, (label, count, color)) in rows.iter().enumerate() {
+        let row_top = top - i as f32 * (row_h + gap);
+        let bar_y = row_top - 6.5;
+        let bar_w = ((*count as f32 / max as f32) * track_w).max(if *count > 0 { 2.0 } else { 0.0 });
+
+        write_line(
+            body.doc,
+            body.page,
+            body.layer,
+            body.font,
+            body.left,
+            row_top - 5.0,
+            8.0,
+            &truncate_chars(label, label_chars),
+        );
+
+        layer.set_outline_thickness(0.0);
+        layer.set_fill_color(track_fill.clone());
+        layer.add_rect(
+            Rect::new(
+                Mm(track_x),
+                Mm(bar_y - bar_h),
+                Mm(track_x + track_w),
+                Mm(bar_y),
+            )
+            .with_mode(PaintMode::Fill),
+        );
+        if bar_w > 0.0 {
+            layer.set_fill_color(color.clone());
+            layer.add_rect(
+                Rect::new(
+                    Mm(track_x),
+                    Mm(bar_y - bar_h),
+                    Mm(track_x + bar_w),
+                    Mm(bar_y),
+                )
+                .with_mode(PaintMode::Fill),
+            );
+        }
+
+        write_line(
+            body.doc,
+            body.page,
+            body.layer,
+            body.font,
+            body.left + chart_w - count_w + 2.0,
+            row_top - 5.0,
+            8.0,
+            &count.to_string(),
+        );
+    }
+
+    body.y = top - total_h;
+}
+
+fn severity_pdf_color(sev: crate::types::Severity) -> Color {
+    use crate::types::Severity;
+    let (r, g, b) = match sev {
+        Severity::Critical => (0.78, 0.16, 0.16),
+        Severity::High => (0.96, 0.50, 0.12),
+        Severity::Medium => (1.0, 0.70, 0.0),
+        Severity::Low => (0.30, 0.68, 0.31),
+        Severity::Info => (0.10, 0.46, 0.82),
+    };
+    Color::Rgb(Rgb::new(r, g, b, None))
+}
+
+fn category_pdf_color(id: &str, index: usize) -> Color {
+    let hex = match id {
+        "prompt_injection" => (0.78, 0.16, 0.16),
+        "system_prompt_extraction" => (0.96, 0.50, 0.12),
+        "jailbreak" => (0.92, 0.70, 0.03),
+        "rag_leakage" => (0.10, 0.46, 0.82),
+        "memory_poisoning" => (0.05, 0.58, 0.53),
+        "cross_user_leakage" => (0.30, 0.68, 0.31),
+        "agent_goal_hijacking" => (0.71, 0.33, 0.04),
+        "tool_abuse" => (0.39, 0.45, 0.55),
+        "mcp_abuse" => (0.03, 0.57, 0.70),
+        _ => {
+            const FALLBACK: &[(f32, f32, f32)] = &[
+                (0.78, 0.16, 0.16),
+                (0.96, 0.50, 0.12),
+                (0.92, 0.70, 0.03),
+                (0.30, 0.68, 0.31),
+                (0.10, 0.46, 0.82),
+                (0.05, 0.58, 0.53),
+                (0.71, 0.33, 0.04),
+                (0.39, 0.45, 0.55),
+                (0.03, 0.57, 0.70),
+                (0.47, 0.44, 0.42),
+            ];
+            FALLBACK[index % FALLBACK.len()]
+        }
+    };
+    Color::Rgb(Rgb::new(hex.0, hex.1, hex.2, None))
+}
+
+fn write_executive_summary_section(
+    body: &mut PdfBody<'_>,
+    input: &ReportInput,
+    toc: &mut TocPageMap,
+) {
     body.write_heading("Executive Summary");
+    toc.executive_summary = body.page_no;
     let overview = input
         .recommendation_overview
         .as_deref()
@@ -650,24 +944,23 @@ fn write_executive_summary_section(body: &mut PdfBody<'_>, input: &ReportInput) 
     }
 
     if let Some(text) = overview {
-        for line in wrap_text(text, 85) {
+        for line in wrap_for_body(text, 10.0) {
             body.write_text(10.0, &line, 5.0);
         }
         body.gap(2.0);
     }
 
     for (i, rec) in recs.iter().enumerate() {
-        body.write_bold(
-            9.0,
-            &format!(
-                "{:02}. [{}] {}",
-                i + 1,
-                rec.priority.as_str(),
-                rec.title
-            ),
-            4.5,
+        let title = format!(
+            "{:02}. [{}] {}",
+            i + 1,
+            rec.priority.as_str(),
+            rec.title
         );
-        for line in wrap_text(&rec.description, 85) {
+        for line in wrap_for_body(&title, 9.0) {
+            body.write_bold(9.0, &line, 4.5);
+        }
+        for line in wrap_for_body(&rec.description, 8.0) {
             body.write_text(8.0, &line, 4.0);
         }
         body.gap(2.0);
@@ -675,7 +968,15 @@ fn write_executive_summary_section(body: &mut PdfBody<'_>, input: &ReportInput) 
     body.gap(4.0);
 }
 
-fn write_findings_summary_section(body: &mut PdfBody<'_>, input: &ReportInput) {
+fn write_findings_summary_section(
+    body: &mut PdfBody<'_>,
+    input: &ReportInput,
+    toc: &mut TocPageMap,
+) {
+    // Always begin Findings Summary on a fresh page.
+    body.new_page();
+    toc.findings_summary = body.page_no;
+    body.doc.add_bookmark("Findings Summary", body.page);
     body.write_heading(&format!("Findings Summary ({})", input.findings.len()));
     if input.findings.is_empty() {
         body.write_text(9.0, "No findings recorded for this scan.", 4.5);
@@ -684,15 +985,24 @@ fn write_findings_summary_section(body: &mut PdfBody<'_>, input: &ReportInput) {
     }
 
     // Column widths sum to content width (A4 - side margins).
-    let col_w = [10.0_f32, 62.0, 22.0, 32.0, 24.0, 20.0];
-    let headers = ["No", "Title", "Severity", "Category", "Status", "Confidence"];
+    // No | Category | Finding | Severity | Confidence | Status
+    let col_w = [10.0_f32, 32.0, 62.0, 22.0, 20.0, 24.0];
+    let headers = [
+        "No",
+        "Category",
+        "Finding",
+        "Severity",
+        "Confidence",
+        "Status",
+    ];
     let font_size = 7.5_f32;
     let pad_x = 1.6_f32;
     let pad_y = 2.2_f32;
     let line_h = 3.6_f32;
     let header_h = 8.0_f32;
 
-    let title_max_chars = chars_for_width(col_w[1] - pad_x * 2.0, font_size);
+    let finding_col = 2usize;
+    let finding_max_chars = chars_for_width(col_w[finding_col] - pad_x * 2.0, font_size);
     let rows: Vec<[String; 6]> = input
         .findings
         .iter()
@@ -704,11 +1014,11 @@ fn write_findings_summary_section(body: &mut PdfBody<'_>, input: &ReportInput) {
                 .unwrap_or_else(|| "-".into());
             [
                 (i + 1).to_string(),
+                f.category.replace('_', " "),
                 f.title.clone(),
                 f.severity.as_str().to_string(),
-                f.category.replace('_', " "),
-                f.status.clone(),
                 conf,
+                f.status.clone(),
             ]
         })
         .collect();
@@ -736,8 +1046,9 @@ fn write_findings_summary_section(body: &mut PdfBody<'_>, input: &ReportInput) {
         body.y = header_bottom;
 
         while row_idx < rows.len() {
-            let title_lines = wrap_text(&rows[row_idx][1], title_max_chars.max(8));
-            let content_lines = title_lines.len().max(1) as f32;
+            let finding_lines =
+                wrap_text(&rows[row_idx][finding_col], finding_max_chars.max(8));
+            let content_lines = finding_lines.len().max(1) as f32;
             let row_h = (pad_y * 2.0 + content_lines * line_h).max(7.0);
             if body.y - row_h < BODY_BOTTOM_MM {
                 break;
@@ -751,7 +1062,8 @@ fn write_findings_summary_section(body: &mut PdfBody<'_>, input: &ReportInput) {
                 bottom,
                 &col_w,
                 &rows[row_idx],
-                &title_lines,
+                finding_col,
+                &finding_lines,
                 font_size,
                 pad_x,
                 pad_y,
@@ -774,6 +1086,31 @@ fn write_findings_summary_section(body: &mut PdfBody<'_>, input: &ReportInput) {
 fn chars_for_width(width_mm: f32, size_pt: f32) -> usize {
     let char_w = size_pt * 0.5 * 0.352778;
     ((width_mm / char_w.max(0.1)).floor() as usize).max(4)
+}
+
+fn body_content_width_mm() -> f32 {
+    PAGE_W_MM - BODY_LEFT_MM * 2.0
+}
+
+/// Wrap text to the full PDF content width for the given font size.
+/// Preserves explicit newlines (HTTP request/response, multi-line payloads).
+fn wrap_for_body(text: &str, size_pt: f32) -> Vec<String> {
+    // Slightly conservative so Helvetica wide glyphs don't clip the right margin.
+    let max = chars_for_width(body_content_width_mm() - 2.0, size_pt)
+        .saturating_sub(2)
+        .max(40);
+    let mut lines = Vec::new();
+    for part in text.split('\n') {
+        if part.is_empty() {
+            lines.push(String::new());
+        } else {
+            lines.extend(wrap_text(part, max));
+        }
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
 
 fn draw_table_header_row(
@@ -820,7 +1157,8 @@ fn draw_table_data_row(
     bottom: f32,
     col_w: &[f32; 6],
     row: &[String; 6],
-    title_lines: &[String],
+    wrap_col: usize,
+    wrap_lines: &[String],
     font_size: f32,
     pad_x: f32,
     pad_y: f32,
@@ -832,9 +1170,9 @@ fn draw_table_data_row(
     let mut x = left;
     for (i, cell) in row.iter().enumerate() {
         let text_x = x + pad_x;
-        if i == 1 {
+        if i == wrap_col {
             let mut y = top - pad_y - 3.0;
-            for line in title_lines {
+            for line in wrap_lines {
                 write_line(
                     body.doc,
                     body.page,
@@ -848,11 +1186,7 @@ fn draw_table_data_row(
                 y -= line_h;
             }
         } else {
-            let text = if i == 3 || i == 2 || i == 4 {
-                truncate_chars(cell, chars_for_width(col_w[i] - pad_x * 2.0, font_size))
-            } else {
-                cell.clone()
-            };
+            let text = truncate_chars(cell, chars_for_width(col_w[i] - pad_x * 2.0, font_size));
             write_line(
                 body.doc,
                 body.page,
@@ -914,9 +1248,11 @@ fn write_detailed_findings_section(
     body: &mut PdfBody<'_>,
     kind: ReportKind,
     input: &ReportInput,
+    toc: &mut TocPageMap,
 ) {
     // Always begin Detailed Findings on a fresh page.
     body.new_page();
+    toc.detailed_findings = body.page_no;
     body.doc.add_bookmark("Detailed Findings", body.page);
     body.write_heading("Detailed Findings");
     if input.findings.is_empty() {
@@ -926,13 +1262,18 @@ fn write_detailed_findings_section(
 
     let detailed = kind != ReportKind::Executive;
     for (index, finding) in input.findings.iter().enumerate() {
-        write_finding(body, index, input, finding, detailed);
+        write_finding(body, index, input, finding, detailed, toc);
     }
 }
 
-fn write_compliance_section(body: &mut PdfBody<'_>, input: &ReportInput) {
+fn write_compliance_section(
+    body: &mut PdfBody<'_>,
+    input: &ReportInput,
+    toc: &mut TocPageMap,
+) {
     body.gap(4.0);
     body.write_heading("Compliance Mapping");
+    toc.compliance = Some(body.page_no);
     let mut any = false;
     for finding in &input.findings {
         for cref in &finding.compliance_refs {
@@ -964,6 +1305,22 @@ fn write_report_footer(body: &mut PdfBody<'_>, kind: ReportKind, input: &ReportI
     body.write_text(8.0, &format!("Generated {}", input.generated_at), 4.0);
 }
 
+/// Centered page number in the footer. Cover (page 1) is left unnumbered.
+fn write_page_number(
+    doc: &PdfDocumentReference,
+    page: PdfPageIndex,
+    layer: PdfLayerIndex,
+    font: &IndirectFontRef,
+    page_no: u32,
+) {
+    if page_no < 2 {
+        return;
+    }
+    let text = page_no.to_string();
+    let x = ((PAGE_W_MM - approx_text_width_mm(&text, 9.0)) / 2.0).max(BODY_LEFT_MM);
+    write_line(doc, page, layer, font, x, PAGE_NUMBER_Y_MM, 9.0, &text);
+}
+
 fn truncate_chars(text: &str, max: usize) -> String {
     let trimmed = text.trim();
     if trimmed.chars().count() <= max {
@@ -979,20 +1336,26 @@ fn write_finding(
     input: &ReportInput,
     finding: &ReportFinding,
     detailed: bool,
+    toc: &mut TocPageMap,
 ) {
     body.ensure_space(36.0);
-    body.write_bold(
-        11.0,
+    if let Some(slot) = toc.finding_pages.get_mut(index) {
+        *slot = body.page_no;
+    }
+    for line in wrap_for_body(
         &format!("Finding #{} - {}", index + 1, finding.title),
-        6.0,
-    );
+        11.0,
+    ) {
+        body.write_bold(11.0, &line, 6.0);
+    }
 
     body.write_bold(9.0, "Finding Information", 4.5);
-    body.write_text(8.0, &format!("Title: {}", finding.title), 4.0);
-    body.write_text(8.0, &format!("Project: {}", input.project_name), 4.0);
-    body.write_text(8.0, &format!("Scan ID: {}", input.scan_id), 4.0);
-    body.write_text(8.0, &format!("Finding ID: {}", finding.id), 4.0);
-    body.write_text(
+    write_body_lines(body, 8.0, &format!("Title: {}", finding.title), 4.0);
+    write_body_lines(body, 8.0, &format!("Project: {}", input.project_name), 4.0);
+    write_body_lines(body, 8.0, &format!("Scan ID: {}", input.scan_id), 4.0);
+    write_body_lines(body, 8.0, &format!("Finding ID: {}", finding.id), 4.0);
+    write_body_lines(
+        body,
         8.0,
         &format!("Target: {}", input.target_name.as_deref().unwrap_or("-")),
         4.0,
@@ -1009,29 +1372,40 @@ fn write_finding(
         .as_ref()
         .and_then(|r| r.url.clone())
         .unwrap_or_else(|| "-".into());
-    body.write_text(8.0, &format!("Endpoint: {endpoint}"), 4.0);
+    write_body_lines(body, 8.0, &format!("Endpoint: {endpoint}"), 4.0);
     body.gap(2.0);
 
     body.write_bold(9.0, "Assessment", 4.5);
-    body.write_text(8.0, &format!("Severity: {}", finding.severity.as_str()), 4.0);
-    body.write_text(8.0, &format!("Attack Category: {}", finding.category), 4.0);
-    body.write_text(
+    write_body_lines(
+        body,
+        8.0,
+        &format!("Severity: {}", finding.severity.as_str()),
+        4.0,
+    );
+    write_body_lines(
+        body,
+        8.0,
+        &format!("Attack Category: {}", finding.category),
+        4.0,
+    );
+    write_body_lines(
+        body,
         8.0,
         &format!("Verdict: {}", detail.verdict.as_deref().unwrap_or("-")),
         4.0,
     );
-    body.write_text(8.0, &format!("Status: {}", finding.status), 4.0);
+    write_body_lines(body, 8.0, &format!("Status: {}", finding.status), 4.0);
     let compliance = if finding.compliance_refs.is_empty() {
         "-".to_string()
     } else {
         finding.compliance_refs.join(", ")
     };
-    body.write_text(8.0, &format!("Compliance: {compliance}"), 4.0);
+    write_body_lines(body, 8.0, &format!("Compliance: {compliance}"), 4.0);
     let conf = finding
         .confidence
         .map(|c| format!("{:.0}%", c * 100.0))
         .unwrap_or_else(|| "-".into());
-    body.write_text(8.0, &format!("Confidence: {conf}"), 4.0);
+    write_body_lines(body, 8.0, &format!("Confidence: {conf}"), 4.0);
     body.gap(2.0);
 
     if detailed {
@@ -1040,6 +1414,18 @@ fn write_finding(
     }
 
     body.gap(6.0);
+}
+
+fn write_body_lines(body: &mut PdfBody<'_>, size: f32, text: &str, line_h: f32) {
+    for line in wrap_for_body(text, size) {
+        body.write_text(size, &line, line_h);
+    }
+}
+
+fn write_body_bold_lines(body: &mut PdfBody<'_>, size: f32, text: &str, line_h: f32) {
+    for line in wrap_for_body(text, size) {
+        body.write_bold(size, &line, line_h);
+    }
 }
 
 fn write_finding_poc(
@@ -1060,28 +1446,24 @@ fn write_finding_poc(
 
     body.write_bold(9.0, "Proof of Concept (PoC)", 4.5);
     if let Some(p) = payload {
-        body.write_text(8.0, "Payload:", 4.0);
-        for line in wrap_text(p, 85) {
-            body.write_text(8.0, &line, 4.0);
-        }
+        body.write_bold_italic(8.0, "Payload:", 4.0);
+        write_body_lines(body, 8.0, p, 4.0);
+        body.gap(1.5);
     }
     if has_traffic {
-        body.write_text(8.0, "Request:", 4.0);
+        body.write_bold_italic(8.0, "Request:", 4.0);
         let req = http_request
             .as_ref()
             .map(format_http_request)
             .unwrap_or_else(|| "-".into());
-        for line in wrap_text(&req, 85) {
-            body.write_text(7.0, &line, 3.5);
-        }
-        body.write_text(8.0, "Response:", 4.0);
+        write_body_lines(body, 7.0, &req, 3.5);
+        body.gap(1.5);
+        body.write_bold_italic(8.0, "Response:", 4.0);
         let resp = http_response
             .as_ref()
             .map(format_http_response)
             .unwrap_or_else(|| "-".into());
-        for line in wrap_text(&resp, 85) {
-            body.write_text(7.0, &line, 3.5);
-        }
+        write_body_lines(body, 7.0, &resp, 3.5);
     }
     body.gap(2.0);
 }
@@ -1090,18 +1472,15 @@ fn write_finding_recommendations(body: &mut PdfBody<'_>, finding: &ReportFinding
     body.write_bold(9.0, "Recommendations", 4.5);
     match stored_recommendations_from_evidence(finding.evidence_raw.as_deref()) {
         Some((overview, recs)) => {
-            for line in wrap_text(&overview, 85) {
-                body.write_text(8.0, &line, 4.0);
-            }
+            write_body_lines(body, 8.0, &overview, 4.0);
             for rec in recs {
-                body.write_bold(
+                write_body_bold_lines(
+                    body,
                     8.0,
                     &format!("[{}] {}", rec.priority.as_str(), rec.title),
                     4.0,
                 );
-                for line in wrap_text(&rec.description, 85) {
-                    body.write_text(8.0, &line, 4.0);
-                }
+                write_body_lines(body, 8.0, &rec.description, 4.0);
             }
         }
         None => {
@@ -1111,9 +1490,7 @@ fn write_finding_recommendations(body: &mut PdfBody<'_>, finding: &ReportFinding
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
             {
-                for line in wrap_text(rec, 85) {
-                    body.write_text(8.0, &line, 4.0);
-                }
+                write_body_lines(body, 8.0, rec, 4.0);
             } else {
                 body.write_text(8.0, "No recommendations available yet.", 4.0);
             }
@@ -1135,23 +1512,40 @@ fn write_line(
         .chars()
         .filter(|c| c.is_ascii())
         .collect::<String>();
-    doc.get_page(page)
-        .get_layer(layer)
-        .use_text(sanitized, size, Mm(x), Mm(y), font);
+    // Shape draws (stat cards / table fills) leave a light fill color on the layer;
+    // PDF text uses the current fill color, so reset to black before every glyph paint.
+    let layer_ref = doc.get_page(page).get_layer(layer);
+    layer_ref.set_fill_color(Color::Rgb(Rgb::new(0.09, 0.09, 0.11, None)));
+    layer_ref.use_text(sanitized, size, Mm(x), Mm(y), font);
 }
 
 fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
+    let max_chars = max_chars.max(1);
     let mut lines = Vec::new();
     let mut current = String::new();
+
     for word in text.split_whitespace() {
-        if current.is_empty() {
-            current = word.to_string();
-        } else if current.len() + 1 + word.len() <= max_chars {
-            current.push(' ');
-            current.push_str(word);
+        // Hard-break tokens longer than the line (JSON bodies, URLs).
+        let chunks: Vec<String> = if word.chars().count() > max_chars {
+            word.chars()
+                .collect::<Vec<_>>()
+                .chunks(max_chars)
+                .map(|c| c.iter().collect())
+                .collect()
         } else {
-            lines.push(current);
-            current = word.to_string();
+            vec![word.to_string()]
+        };
+
+        for chunk in chunks {
+            if current.is_empty() {
+                current = chunk;
+            } else if current.chars().count() + 1 + chunk.chars().count() <= max_chars {
+                current.push(' ');
+                current.push_str(&chunk);
+            } else {
+                lines.push(std::mem::take(&mut current));
+                current = chunk;
+            }
         }
     }
     if !current.is_empty() {

@@ -10,7 +10,7 @@ rust-version.workspace = true
 [dependencies]
 promptlab-core = { workspace = true }
 async-trait = { workspace = true }
-printpdf = { version = "0.7", default-features = false, features = ["embedded_images", "svg"] }
+printpdf = { version = "0.7", default-features = false, features = ["embedded_images"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -669,18 +669,18 @@ fn render_findings_summary(findings: &[ReportFinding]) -> String {
             .map(|c| format!("{:.0}%", c * 100.0))
             .unwrap_or_else(|| "—".into());
         rows.push_str(&format!(
-            "<tr><td>{no}</td><td>{title}</td><td>{sev}</td><td>{cat}</td><td>{status}</td><td>{conf}</td></tr>",
+            "<tr><td>{no}</td><td>{cat}</td><td>{title}</td><td>{sev}</td><td>{conf}</td><td>{status}</td></tr>",
             no = i + 1,
+            cat = escape_html(&f.category.replace('_', " ")),
             title = escape_html(&f.title),
             sev = escape_html(f.severity.as_str()),
-            cat = escape_html(&f.category),
-            status = escape_html(&f.status),
             conf = conf,
+            status = escape_html(&f.status),
         ));
     }
     format!(
         r#"<table class="summary-table">
-<thead><tr><th>No</th><th>Title</th><th>Severity</th><th>Category</th><th>Status</th><th>Confidence</th></tr></thead>
+<thead><tr><th>No</th><th>Category</th><th>Finding</th><th>Severity</th><th>Confidence</th><th>Status</th></tr></thead>
 <tbody>{rows}</tbody>
 </table>"#
     )
@@ -901,25 +901,27 @@ fn render_poc(
 fn render_finding_recommendations(f: &ReportFinding) -> String {
     match crate::recommendations::stored_recommendations_from_evidence(f.evidence_raw.as_deref()) {
         Some((overview, recs)) => {
-            let items = recs
-                .iter()
-                .map(|r| {
-                    format!(
-                        r#"<div class="rec"><span class="badge badge-sev-{p}">{p}</span> <strong>{title}</strong><p>{desc}</p></div>"#,
-                        p = r.priority.as_str(),
-                        title = escape_html(&r.title),
-                        desc = escape_html(&r.description),
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
             format!(
                 r#"<div class="card"><h2 class="detail-section__title">Recommendations</h2><p class="meta" style="margin-bottom:0.75rem">{}</p>{}</div>"#,
                 escape_html(&overview),
-                items
+                render_recommendations(&recs),
             )
         }
-        None => r#"<div class="card"><h2 class="detail-section__title">Recommendations</h2><p class="meta">No recommendations available yet.</p></div>"#.into(),
+        None => {
+            if let Some(rec) = f
+                .recommendation
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                format!(
+                    r#"<div class="card"><h2 class="detail-section__title">Recommendations</h2><p class="summary">{}</p></div>"#,
+                    escape_html(rec),
+                )
+            } else {
+                r#"<div class="card"><h2 class="detail-section__title">Recommendations</h2><p class="meta">No recommendations available yet.</p></div>"#.into()
+            }
+        }
     }
 }
 
