@@ -225,7 +225,7 @@ fn build_work_items(
             work_items.push(WorkItem {
                 seq,
                 payload: payload.clone(),
-                content,
+                content: crate::attacks::preserve_canary_in_mutated(&content, payload),
                 mutators,
             });
             seq += 1;
@@ -297,7 +297,9 @@ async fn run_work_item<T: TargetTransport>(
         }
     };
     let evaluation = match attack.evaluate(ctx, &item.payload, &response).await {
-        Ok(evaluation) => evaluation,
+        Ok(evaluation) => {
+            crate::attacks::merge_canary_evaluation(&item.payload, &response, evaluation)
+        }
         Err(err) => AttackEvaluation::negative(format!("evaluation error: {err}")),
     };
 
@@ -319,18 +321,35 @@ fn select_payloads(
     ctx: &AttackContext,
 ) -> Vec<AttackPayload> {
     let category = attack.category();
-    if let Some(map) = &ctx.generated_payloads {
+    let mut payloads = if let Some(map) = &ctx.generated_payloads {
         if let Some(generated) = map.get(&category) {
             let filtered = filter_payload_list(generated, plan);
             if !filtered.is_empty() {
-                return filtered
+                filtered
                     .into_iter()
                     .take(ctx.budget.max_payloads)
-                    .collect();
+                    .collect()
+            } else {
+                filter_defaults(attack, plan, ctx)
             }
+        } else {
+            filter_defaults(attack, plan, ctx)
         }
-    }
+    } else {
+        filter_defaults(attack, plan, ctx)
+    };
 
+    for payload in &mut payloads {
+        crate::attacks::stamp_payload_canary(payload);
+    }
+    payloads
+}
+
+fn filter_defaults(
+    attack: &dyn Attack,
+    plan: &crate::types::AttackPlan,
+    ctx: &AttackContext,
+) -> Vec<AttackPayload> {
     let defaults = attack.default_payloads();
     let filtered = filter_payload_list(&defaults, plan);
     filtered

@@ -179,6 +179,8 @@ pub async fn attack_catalog_reset_op(
 pub struct AttackCatalogGeneratePromptDto {
     pub id: String,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canary: Option<String>,
 }
 
 pub async fn attack_catalog_generate_prompt_op(
@@ -231,6 +233,7 @@ pub async fn attack_catalog_generate_prompt_op(
     match delegation {
         YazgDelegation::GeneratedPrompt { outcome, .. } => Ok(AttackCatalogGeneratePromptDto {
             id: outcome.technique_id,
+            canary: Some(outcome.canary),
             content: outcome.content,
         }),
         other => {

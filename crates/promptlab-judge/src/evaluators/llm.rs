@@ -187,11 +187,12 @@ impl LlmEvaluator {
     }
 
     fn build_user_prompt(&self, request: &JudgeRequest) -> String {
-        RolePrompts::user(
+        RolePrompts::user_with_context(
             self.role,
             &request.attack_category,
             &request.payload,
             &request.response_text,
+            &request.context,
         )
     }
 

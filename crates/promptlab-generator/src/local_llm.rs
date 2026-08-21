@@ -145,6 +145,10 @@ fn build_category_prompt(
         }
     }
 
+    prompt.push_str(
+        "\nInclude literal placeholder {{CANARY}} once per probe; PromptLab replaces it with PROMPTLAB-<SUITE>-<PAYLOAD_ID>-<NONCE>.\n",
+    );
+
     if input.advanced.enable_conversation_memory {
         prompt.push_str(
             "\nPrefer multi-turn / conversation-state probes that reference prior dialogue.\n",

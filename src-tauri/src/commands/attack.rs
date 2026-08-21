@@ -485,12 +485,20 @@ async fn judge_single_attempt(
     let eval = &attempt.evaluation;
     let normalized = &attempt.response.normalized;
 
-    let judge_request = JudgeRequest::from_normalized(
-        attempt.payload_id.clone(),
-        env.category_name,
-        attempt.mutated_content.clone(),
-        normalized,
-    );
+    let judge_request = {
+        let mut req = JudgeRequest::from_normalized(
+            attempt.payload_id.clone(),
+            env.category_name,
+            attempt.mutated_content.clone(),
+            normalized,
+        );
+        if let Some(canary) = promptlab_core::find_canary_in(&attempt.mutated_content) {
+            if let Some(obj) = req.context.as_object_mut() {
+                obj.insert("expected_canary".into(), serde_json::Value::String(canary));
+            }
+        }
+        req
+    };
     let mut verdict: JudgeVerdict = match JudgeCoordinatorAgent::run(&judge_request, env.judge).await
     {
         Ok(out) => out.verdict,

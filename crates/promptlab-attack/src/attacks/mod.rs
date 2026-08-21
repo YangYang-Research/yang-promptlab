@@ -1,4 +1,5 @@
 mod agent_goal_hijacking;
+pub mod canary;
 mod common;
 mod cross_user_leakage;
 mod jailbreak;
@@ -14,6 +15,9 @@ use std::sync::Arc;
 use crate::traits::Attack;
 
 pub use agent_goal_hijacking::AgentGoalHijackingAttack;
+pub use canary::{
+    merge_canary_evaluation, payload_canary, preserve_canary_in_mutated, stamp_payload_canary,
+};
 pub use cross_user_leakage::CrossUserLeakageAttack;
 pub use jailbreak::JailbreakAttack;
 pub use mcp_abuse::McpAbuseAttack;

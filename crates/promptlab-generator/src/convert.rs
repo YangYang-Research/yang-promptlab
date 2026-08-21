@@ -1,4 +1,4 @@
-use promptlab_attack::{AttackCategory, AttackPayload, PayloadFormat};
+use promptlab_attack::{stamp_payload_canary, AttackCategory, AttackPayload, PayloadFormat};
 use promptlab_payload::{GeneratedPayload, PayloadCategory, PayloadRecord};
 
 pub fn attack_to_payload_category(category: AttackCategory) -> PayloadCategory {
@@ -17,7 +17,7 @@ pub fn attack_to_payload_category(category: AttackCategory) -> PayloadCategory {
 
 pub fn record_to_attack_payload(record: &PayloadRecord) -> AttackPayload {
     let category = payload_to_attack_category(record.category);
-    AttackPayload {
+    let mut payload = AttackPayload {
         id: record.id.clone(),
         name: record.name.clone(),
         category,
@@ -32,7 +32,9 @@ pub fn record_to_attack_payload(record: &PayloadRecord) -> AttackPayload {
         .cloned()
         .map(|m| m.into_iter().collect())
         .unwrap_or_default(),
-    }
+    };
+    stamp_payload_canary(&mut payload);
+    payload
 }
 
 pub fn generated_to_attack_payload(variant: &GeneratedPayload) -> AttackPayload {
@@ -42,7 +44,7 @@ pub fn generated_to_attack_payload(variant: &GeneratedPayload) -> AttackPayload 
     } else {
         format!("{}:{}", variant.source_id, variant.generation_id)
     };
-    AttackPayload {
+    let mut payload = AttackPayload {
         id,
         name: variant.source_name.clone(),
         category,
@@ -58,7 +60,9 @@ pub fn generated_to_attack_payload(variant: &GeneratedPayload) -> AttackPayload 
         .cloned()
         .map(|m| m.into_iter().collect())
         .unwrap_or_default(),
-    }
+    };
+    stamp_payload_canary(&mut payload);
+    payload
 }
 
 pub fn llm_payload_to_attack(
@@ -67,7 +71,7 @@ pub fn llm_payload_to_attack(
     name: impl Into<String>,
     content: impl Into<String>,
 ) -> AttackPayload {
-    AttackPayload {
+    let mut payload = AttackPayload {
         id: id.into(),
         name: name.into(),
         category,
@@ -78,7 +82,9 @@ pub fn llm_payload_to_attack(
             .cloned()
             .map(|m| m.into_iter().collect())
             .unwrap_or_default(),
-    }
+    };
+    stamp_payload_canary(&mut payload);
+    payload
 }
 
 fn payload_to_attack_category(category: PayloadCategory) -> AttackCategory {

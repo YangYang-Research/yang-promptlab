@@ -29,6 +29,9 @@ pub use payload::{MutatorConfig, MutatorKind, PayloadMutator, PayloadRunner};
 pub use registry::AttackRegistry;
 #[cfg(feature = "storage")]
 pub use scanner::{PromptInjectionScanner, ScanContext, ScanSummary};
+pub use attacks::{
+    merge_canary_evaluation, payload_canary, preserve_canary_in_mutated, stamp_payload_canary,
+};
 pub use traits::Attack;
 pub use target_auth::{apply_descriptor_auth, apply_descriptor_auth_value};
 pub use transport::{HarnessTransport, MockTransport, TargetTransport, TransportRequest, TransportResponse};

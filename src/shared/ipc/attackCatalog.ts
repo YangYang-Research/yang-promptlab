@@ -51,6 +51,7 @@ export function resetAttackCatalogTechnique(id: string): Promise<AttackCatalogTe
 export type AttackCatalogGeneratePromptDto = {
   id: string;
   content: string;
+  canary?: string | null;
 };
 
 export function generateAttackCatalogPrompt(

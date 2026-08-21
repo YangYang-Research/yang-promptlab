@@ -44,8 +44,19 @@ pub fn apply_advanced_options(
         apply_deduplication(&mut pack);
     }
 
+    stamp_canaries(&mut pack);
+
     recompute_stats(&mut pack);
     pack
+}
+
+fn stamp_canaries(pack: &mut PromptPayloads) {
+    use promptlab_attack::stamp_payload_canary;
+    for payloads in pack.by_category.values_mut() {
+        for payload in payloads.iter_mut() {
+            stamp_payload_canary(payload);
+        }
+    }
 }
 
 fn apply_context_awareness(pack: &mut PromptPayloads, ctx: &GeneratorTargetContext) {

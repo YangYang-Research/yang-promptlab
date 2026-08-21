@@ -1621,8 +1621,9 @@ impl Tool for GeneratePromptTool {
         match GeneratePromptAgent::run(technique, self.llm.as_ref()).await {
             Ok(out) => {
                 let msg = format!(
-                    "GeneratePromptAgent OK — technique={} chars={} preview={}",
+                    "GeneratePromptAgent OK — technique={} canary={} chars={} preview={}",
                     out.technique_id,
+                    out.canary,
                     out.content.chars().count(),
                     truncate(&out.content, 120)
                 );

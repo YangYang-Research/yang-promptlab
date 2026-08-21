@@ -437,7 +437,7 @@ pub async fn generate_scan_payloads(
         "attack payloads ready"
     );
     emitter.info(format!(
-        "Generated {} payloads across {} categories",
+        "Generated {} payloads across {} categories (PROMPTLAB canaries stamped)",
         pack.stats.payload_count, pack.stats.category_count
     ));
     Ok(prompt_payloads_map(&pack))
