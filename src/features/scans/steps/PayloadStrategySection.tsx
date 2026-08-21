@@ -39,9 +39,7 @@ export function PayloadStrategySection({
       <p className="text-muted text-sm">
         Configures Step 5 generation and attack expansion. Budget = payloads per
         testcase; variants = HTTP mutator expansions per payload. Estimated requests ≈
-        testcases × budget × variants. Each generated probe is stamped with a unique
-        canary (<code>PROMPTLAB-&lt;SUITE&gt;-&lt;PAYLOAD_ID&gt;-&lt;NONCE&gt;</code>) so judge
-        can detect successful echoes.
+        testcases × budget × variants.
       </p>
 
       <div className="wizard-attack-profiles">

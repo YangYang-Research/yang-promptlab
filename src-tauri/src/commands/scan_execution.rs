@@ -674,6 +674,8 @@ pub async fn run_target_profile_attack_scan(
         }
     };
 
+    recalibrate_progress_from_payloads(&ctx.progress, &generated_payloads, &config);
+
     if let Some(ref strategy) = config.payload_strategy {
         if let Err(err) = validate_payload_map_budget(
             &generated_payloads,
@@ -749,7 +751,12 @@ pub async fn run_target_profile_attack_scan(
         match outcome {
             Ok(category_result) => {
                 findings_total += category_result.findings.len() as u64;
-                record_category_success(&ctx.progress, findings_total, category);
+                record_category_success(
+                    &ctx.progress,
+                    findings_total,
+                    category,
+                    generated_payloads.get(category).map(|v| v.as_slice()),
+                );
             }
             Err(err) => {
                 had_error = true;
@@ -827,7 +834,12 @@ pub async fn run_target_profile_attack_scan(
             match outcome {
                 Ok(category_result) => {
                     findings_total += category_result.findings.len() as u64;
-                    record_category_success(&ctx.progress, findings_total, &category);
+                    record_category_success(
+                        &ctx.progress,
+                        findings_total,
+                        &category,
+                        generated_payloads.get(&category).map(|v| v.as_slice()),
+                    );
                     ctx.emitter.info(format!(
                         "{} recovered on auto-retry {attempt}/{MAX_CATEGORY_AUTO_RETRIES}",
                         category.display_name()
@@ -910,15 +922,47 @@ fn parse_category_id(id: &str) -> Option<AttackCategory> {
         .find(|c| c.as_str() == id || c.display_name().eq_ignore_ascii_case(id))
 }
 
+fn recalibrate_progress_from_payloads(
+    progress: &Arc<Mutex<ScanProgress>>,
+    payloads: &HashMap<AttackCategory, Vec<AttackPayload>>,
+    config: &ScanExecutionConfig,
+) {
+    let source_ids: Vec<String> = payloads
+        .values()
+        .flat_map(|items| items.iter().map(|p| p.id.clone()))
+        .collect();
+    let payload_count = payloads.values().map(|items| items.len() as u64).sum::<u64>();
+    let variants = config
+        .payload_strategy
+        .as_ref()
+        .map(|s| u64::from(s.variants_per_test.max(1)))
+        .unwrap_or(1);
+    let attempts = match config.execution {
+        ExecutionStrategy::Agentic => u64::from(config.max_attempts.max(1)),
+        ExecutionStrategy::Sequential => 1,
+    };
+    let http_estimate = payload_count
+        .saturating_mul(variants)
+        .saturating_mul(attempts)
+        .max(1);
+    if let Ok(mut state) = progress.lock() {
+        state.recalibrate_from_generated_payloads(&source_ids, http_estimate);
+    }
+}
+
 fn record_category_success(
     progress: &Arc<Mutex<ScanProgress>>,
     findings_total: u64,
     category: &AttackCategory,
+    category_payloads: Option<&[AttackPayload]>,
 ) {
     let id = category.as_str();
     if let Ok(mut state) = progress.lock() {
         state.findings = findings_total;
         state.mark_category_success(id);
+        if let Some(items) = category_payloads {
+            state.mark_testcases(items.iter().map(|p| p.id.as_str()));
+        }
     }
 }
 

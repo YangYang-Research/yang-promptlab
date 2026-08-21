@@ -41,6 +41,10 @@ pub struct ScanProgress {
     pub testcases_completed: u64,
     #[serde(default)]
     pub testcases_total: u64,
+    /// Unique payload source ids that already contributed to `testcases_completed`.
+    /// Avoids the old request→testcase ceil ratio which under-counted mid-run.
+    #[serde(default)]
+    pub completed_testcase_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_phase: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -76,6 +80,7 @@ impl ScanProgress {
             attacks_total: 0,
             testcases_completed: 0,
             testcases_total: 0,
+            completed_testcase_ids: Vec::new(),
             current_phase: None,
             current_attempt: None,
             current_retry: None,
@@ -184,13 +189,83 @@ impl ScanProgress {
     }
 
     /// Map finished HTTP requests to enabled test cases (ceil), capped at total.
+    ///
+    /// Prefer [`Self::note_testcase`] / [`Self::mark_testcases`] for live accuracy;
+    /// this remains as a fallback when only request counters are available.
     pub fn sync_testcases_completed(&mut self) {
+        if !self.completed_testcase_ids.is_empty() {
+            self.testcases_completed = (self.completed_testcase_ids.len() as u64)
+                .min(self.testcases_total.max(1));
+            return;
+        }
         if self.attacks_total == 0 || self.testcases_total == 0 {
             return;
         }
         let scaled = self.attacks_completed.saturating_mul(self.testcases_total);
         let completed = (scaled + self.attacks_total - 1) / self.attacks_total;
         self.testcases_completed = completed.min(self.testcases_total);
+    }
+
+    /// Normalize a payload id to its catalog / source key (`id` before `:` suffixes).
+    pub fn testcase_source_key(payload_id: &str) -> String {
+        payload_id
+            .split(':')
+            .next()
+            .unwrap_or(payload_id)
+            .trim()
+            .to_string()
+    }
+
+    /// Record that a payload source finished at least one HTTP attempt.
+    pub fn note_testcase(&mut self, payload_id: &str) {
+        let key = Self::testcase_source_key(payload_id);
+        if key.is_empty() {
+            return;
+        }
+        if !self.completed_testcase_ids.iter().any(|id| id == &key) {
+            self.completed_testcase_ids.push(key);
+        }
+        self.testcases_completed = (self.completed_testcase_ids.len() as u64)
+            .min(self.testcases_total.max(1));
+    }
+
+    /// Mark many payload sources complete (e.g. category finished early via agentic stop).
+    pub fn mark_testcases(&mut self, payload_ids: impl IntoIterator<Item = impl AsRef<str>>) {
+        for id in payload_ids {
+            self.note_testcase(id.as_ref());
+        }
+    }
+
+    /// After payload generation, align Active-tests / Est.requests denominators with reality.
+    pub fn recalibrate_from_generated_payloads(
+        &mut self,
+        source_ids: &[String],
+        http_requests_estimate: u64,
+    ) {
+        let unique: Vec<String> = {
+            let mut seen = std::collections::BTreeSet::new();
+            let mut out = Vec::new();
+            for id in source_ids {
+                let key = Self::testcase_source_key(id);
+                if key.is_empty() || !seen.insert(key.clone()) {
+                    continue;
+                }
+                out.push(key);
+            }
+            out
+        };
+        if !unique.is_empty() {
+            self.testcases_total = unique.len() as u64;
+        }
+        if http_requests_estimate > 0 {
+            self.attacks_total = http_requests_estimate;
+        }
+        // Drop stale completions that are no longer in the generated set.
+        if !unique.is_empty() {
+            self.completed_testcase_ids
+                .retain(|id| unique.iter().any(|u| u == id));
+            self.testcases_completed = self.completed_testcase_ids.len() as u64;
+        }
     }
 
     /// Skip this category on continue/retry. Failed and never-started categories are rerun.
@@ -435,6 +510,29 @@ mod tests {
         progress.attacks_completed = 1200;
         progress.sync_testcases_completed();
         assert_eq!(progress.testcases_completed, 12);
+    }
+
+    #[test]
+    fn note_testcase_counts_unique_sources() {
+        let mut progress = ScanProgress::new(100);
+        progress.testcases_total = 3;
+        progress.note_testcase("pi-direct-override");
+        progress.note_testcase("pi-direct-override:adapt");
+        progress.note_testcase("pi-role-spoof");
+        assert_eq!(progress.testcases_completed, 2);
+        assert_eq!(progress.completed_testcase_ids.len(), 2);
+
+        progress.recalibrate_from_generated_payloads(
+            &[
+                "pi-direct-override".into(),
+                "pi-role-spoof".into(),
+                "jb-dan".into(),
+            ],
+            24,
+        );
+        assert_eq!(progress.testcases_total, 3);
+        assert_eq!(progress.attacks_total, 24);
+        assert_eq!(progress.testcases_completed, 2);
     }
 
     #[test]

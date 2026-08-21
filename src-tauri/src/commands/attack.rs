@@ -742,7 +742,7 @@ async fn collect_category_attempts(
                             .attacks_completed
                             .saturating_add(1)
                             .min(state.attacks_total.max(1));
-                        state.sync_testcases_completed();
+                        state.note_testcase(&attempt.payload_id);
                     }
                 }
                 attempts.push(attempt);
