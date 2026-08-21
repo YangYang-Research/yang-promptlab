@@ -252,11 +252,27 @@ a:hover {
   padding: 1.75rem 2rem 2.5rem;
 }
 
-.back-to-top {
+.main-layout__fab-stack {
   position: fixed;
   right: 1.25rem;
   bottom: 1.25rem;
-  z-index: var(--z-fab);
+  z-index: calc(var(--z-fab) + 5);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.75rem;
+  pointer-events: none;
+}
+
+.main-layout__fab-stack > * {
+  pointer-events: auto;
+}
+
+.back-to-top {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
   opacity: 0;
   pointer-events: none;
   transform: translateY(0.5rem);
@@ -269,6 +285,10 @@ a:hover {
   transform: none;
 }
 
+.back-to-top:not(.back-to-top--visible) {
+  display: none;
+}
+
 .back-to-top .icon-btn {
   width: 2.5rem;
   height: 2.5rem;
@@ -277,6 +297,169 @@ a:hover {
   box-shadow: var(--shadow-elevated);
   backdrop-filter: blur(10px) saturate(140%);
   -webkit-backdrop-filter: blur(10px) saturate(140%);
+}
+
+/* First-time setup checklist (above scroll-to-top in fab stack) */
+.setup-checklist {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+  width: min(22rem, calc(100vw - 2.5rem));
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 0.65rem);
+  box-shadow: var(--shadow-elevated);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  overflow: hidden;
+}
+
+.setup-checklist__header {
+  display: flex;
+  align-items: stretch;
+}
+
+.setup-checklist__toggle {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  padding: 0.85rem 1rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.setup-checklist__toggle:hover {
+  background: color-mix(in srgb, var(--bg-hover, var(--border-subtle)) 55%, transparent);
+}
+
+.setup-checklist__eyebrow {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.setup-checklist__progress {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.setup-checklist__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0.55rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 0.55rem;
+}
+
+.setup-checklist__item {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: start;
+  padding: 0.55rem 0.55rem;
+  border-radius: 0.45rem;
+  text-decoration: none;
+  color: inherit;
+  border: 1px solid transparent;
+}
+
+a.setup-checklist__item:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border-subtle));
+}
+
+.setup-checklist__item--done {
+  opacity: 0.72;
+}
+
+.setup-checklist__item--locked {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.setup-checklist__item--current {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.setup-checklist__marker {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--bg-app);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.setup-checklist__marker--done {
+  color: var(--bg-app);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.setup-checklist__marker--locked {
+  color: var(--text-subtle);
+  background: var(--bg-surface);
+}
+
+.setup-checklist__marker--done svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.setup-checklist__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.setup-checklist__title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.setup-checklist__desc {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.setup-checklist__chevron {
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.3rem;
+  color: var(--text-subtle);
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .main-layout__fab-stack {
+    right: 0.75rem;
+    bottom: 0.75rem;
+  }
+
+  .setup-checklist {
+    width: min(20rem, calc(100vw - 1.5rem));
+  }
 }
 
 /* Sidebar */

@@ -1,6 +1,8 @@
 import { useRef } from "react";
 import { Outlet } from "react-router-dom";
 
+import { SetupChecklistPanel } from "@/features/setup/SetupChecklistPanel";
+
 import { BackToTopButton } from "./BackToTopButton";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -20,7 +22,10 @@ export function MainLayout() {
           <Outlet />
         </main>
       </div>
-      <BackToTopButton scrollRootRef={pageRef} />
+      <div className="main-layout__fab-stack">
+        <SetupChecklistPanel />
+        <BackToTopButton scrollRootRef={pageRef} />
+      </div>
     </div>
   );
 }
