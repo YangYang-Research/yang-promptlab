@@ -6533,13 +6533,19 @@ a.setup-checklist__item:hover {
     box-shadow 0.15s ease,
     color 0.15s ease;
 }
-.wizard-auth-btn:hover {
+.wizard-auth-btn:hover:not(:disabled) {
   color: var(--text);
   border-color: color-mix(in srgb, var(--border) 60%, var(--text-muted));
 }
-.wizard-auth-btn:focus-visible {
+.wizard-auth-btn:focus-visible:not(:disabled) {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+.wizard-auth-btn--disabled,
+.wizard-auth-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  color: var(--text-muted);
 }
 .wizard-auth-btn--selected.wizard-auth-btn--none {
   color: #cbd5e1;

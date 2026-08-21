@@ -158,6 +158,8 @@ export type ReportDto = {
   status: string;
   file_path: string | null;
   finding_count: number;
+  /** True when saved via Downloads export — not in-app generate / post-scan report. */
+  exported?: boolean;
   created_at: string;
   updated_at: string;
 };

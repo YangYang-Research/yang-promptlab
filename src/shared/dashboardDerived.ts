@@ -127,10 +127,11 @@ export function deriveActivity(
     const format = formatReportLabel(report.format);
     const scanLabel = report.scanName && report.scanName !== "—" ? report.scanName : "scan";
     const projectSuffix = report.projectName ? ` (${report.projectName})` : "";
+    const verb = report.exported ? "Exported" : "Generated";
     items.push({
       id: `report-${report.id}`,
       type: "report",
-      message: `Exported ${format} report: ${scanLabel}${projectSuffix}`,
+      message: `${verb} ${format} report: ${scanLabel}${projectSuffix}`,
       timestamp: report.createdAt,
     });
   }

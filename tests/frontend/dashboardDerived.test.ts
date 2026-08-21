@@ -200,7 +200,50 @@ describe("deriveActivity", () => {
     expect(activity[0]?.timestamp).toBe("2026-07-06T11:00:00.000Z");
   });
 
-  it("includes exported report events", () => {
+  it("includes generated report events for in-app reports", () => {
+    const activity = deriveActivity(
+      [],
+      [],
+      [],
+      [
+        {
+          id: "proj-1",
+          name: "Demo",
+          description: "",
+          status: "active",
+          createdAt: "2026-06-01T00:00:00.000Z",
+          updatedAt: "2026-06-01T00:00:00.000Z",
+          targetCount: 0,
+          findingCount: 0,
+          healthScore: null,
+          owner: "",
+        },
+      ],
+      [
+        {
+          id: "rep-1",
+          projectId: "proj-1",
+          projectName: "Demo",
+          scanId: "scan-1",
+          scanName: "Scan (standard)",
+          title: "PromptLab - Security Scan Report",
+          format: "html",
+          status: "completed",
+          findingCount: 3,
+          createdAt: "2026-07-06T13:00:00.000Z",
+          sizeBytes: 0,
+          exported: false,
+        },
+      ],
+      [],
+    );
+
+    expect(activity).toHaveLength(1);
+    expect(activity[0]?.type).toBe("report");
+    expect(activity[0]?.message).toBe("Generated HTML report: Scan (standard) (Demo)");
+  });
+
+  it("includes exported report events only when marked exported", () => {
     const activity = deriveActivity(
       [],
       [],
@@ -232,6 +275,7 @@ describe("deriveActivity", () => {
           findingCount: 3,
           createdAt: "2026-07-06T13:00:00.000Z",
           sizeBytes: 0,
+          exported: true,
         },
       ],
       [],

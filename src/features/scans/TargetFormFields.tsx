@@ -69,20 +69,28 @@ export function TargetFormFields({
         <div className="wizard-auth-buttons">
           {AUTH_METHOD_OPTIONS.map((option) => {
             const isActive = form.authKind === option.value;
+            const isDisabled = Boolean(option.disabled);
             return (
               <button
                 key={option.value}
                 type="button"
                 role="radio"
                 aria-checked={isActive}
+                aria-disabled={isDisabled}
+                disabled={isDisabled}
+                title={isDisabled ? option.hint : undefined}
                 className={[
                   "wizard-auth-btn",
                   isActive ? AUTH_BUTTON_CLASS[option.value] : "",
                   isActive ? "wizard-auth-btn--selected" : "",
+                  isDisabled ? "wizard-auth-btn--disabled" : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
-                onClick={() => selectAuthKind(onChange, option.value)}
+                onClick={() => {
+                  if (isDisabled) return;
+                  selectAuthKind(onChange, option.value);
+                }}
               >
                 {option.label}
               </button>

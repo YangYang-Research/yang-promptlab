@@ -52,19 +52,23 @@ export const AUTH_METHOD_OPTIONS: Array<{
   label: string;
   engine: AuthEngineKind;
   hint: string;
+  /** When true, shown in Targets / Scan wizard but not selectable. */
+  disabled?: boolean;
 }> = [
   { value: "none", label: "None", engine: "none", hint: "No authentication" },
   {
     value: "username_password",
     label: "Username / Password",
     engine: "playwright",
-    hint: "Browser login via Playwright (form fill + session capture)",
+    hint: "Temporarily unavailable",
+    disabled: true,
   },
   {
     value: "sso",
     label: "SSO",
     engine: "playwright",
-    hint: "Interactive browser login via Playwright (OAuth / OIDC / SAML)",
+    hint: "Temporarily unavailable",
+    disabled: true,
   },
   {
     value: "basic",
@@ -85,6 +89,11 @@ export const AUTH_METHOD_OPTIONS: Array<{
     hint: "Configured JWT bearer token (AuthEngine credential auth)",
   },
 ];
+
+/** Auth kinds currently selectable in Targets / Scan wizard. */
+export function selectableAuthKinds(): TargetAuthKind[] {
+  return AUTH_METHOD_OPTIONS.filter((option) => !option.disabled).map((option) => option.value);
+}
 
 export function authEngineForKind(kind: TargetAuthKind): AuthEngineKind {
   return AUTH_METHOD_OPTIONS.find((option) => option.value === kind)?.engine ?? "none";
@@ -238,16 +247,11 @@ export function migrateTargetForm(form: Partial<TargetFormState> & Record<string
     next.browserSessionReady = true;
   }
 
-  const allowed: TargetAuthKind[] = [
-    "none",
-    "username_password",
-    "sso",
-    "basic",
-    "api_key",
-    "jwt",
-  ];
+  const allowed = selectableAuthKinds();
   if (!allowed.includes(next.authKind)) {
     next.authKind = "none";
+    next.browserSessionReady = false;
+    next.browserSessionId = null;
   }
 
   return next;

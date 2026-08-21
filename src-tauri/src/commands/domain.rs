@@ -829,6 +829,7 @@ pub async fn report_generate_op(
             metadata_json: Some(serde_json::json!({
                 "findings": findings_len,
                 "kind": generated.kind.as_str(),
+                "exported": false,
             })),
         })
         .await

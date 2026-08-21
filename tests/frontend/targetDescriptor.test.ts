@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildTargetDescriptor,
+  migrateTargetForm,
   validateTargetStep,
   type TargetFormState,
 } from "@/features/scans/targetDescriptor";
@@ -160,6 +161,24 @@ describe("buildTargetDescriptor", () => {
         session_id: "session-2",
       },
     });
+  });
+});
+
+describe("migrateTargetForm", () => {
+  it("resets disabled username/password and sso to none", () => {
+    expect(migrateTargetForm({ authKind: "username_password" }).authKind).toBe("none");
+    expect(migrateTargetForm({ authKind: "sso", browserSessionReady: true }).authKind).toBe(
+      "none",
+    );
+    expect(migrateTargetForm({ authKind: "sso", browserSessionReady: true }).browserSessionReady).toBe(
+      false,
+    );
+  });
+
+  it("keeps selectable auth kinds", () => {
+    expect(migrateTargetForm({ authKind: "basic" }).authKind).toBe("basic");
+    expect(migrateTargetForm({ authKind: "api_key" }).authKind).toBe("api_key");
+    expect(migrateTargetForm({ authKind: "jwt" }).authKind).toBe("jwt");
   });
 });
 

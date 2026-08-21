@@ -200,6 +200,7 @@ export function mapReports(
     findingCount: r.finding_count,
     createdAt: r.created_at,
     sizeBytes: 0,
+    exported: Boolean(r.exported),
   }));
 }
 

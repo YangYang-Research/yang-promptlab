@@ -116,6 +116,8 @@ export type Report = {
   findingCount: number;
   createdAt: string;
   sizeBytes: number;
+  /** User export to Downloads; false/undefined = in-app generated report. */
+  exported?: boolean;
 };
 
 export type LocalModel = {

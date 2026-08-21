@@ -336,6 +336,9 @@ pub struct ReportDto {
     pub status: String,
     pub file_path: Option<String>,
     pub finding_count: u64,
+    /// True when the user exported the report to Downloads (not in-app generate).
+    #[serde(default)]
+    pub exported: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -347,9 +350,17 @@ fn finding_count_from_metadata(metadata_json: Option<&str>) -> u64 {
         .unwrap_or(0)
 }
 
+fn exported_from_metadata(metadata_json: Option<&str>) -> bool {
+    metadata_json
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .and_then(|v| v.get("exported").and_then(|f| f.as_bool()))
+        .unwrap_or(false)
+}
+
 impl From<Report> for ReportDto {
     fn from(r: Report) -> Self {
         let finding_count = finding_count_from_metadata(r.metadata_json.as_deref());
+        let exported = exported_from_metadata(r.metadata_json.as_deref());
         Self {
             id: r.id,
             project_id: r.project_id,
@@ -359,6 +370,7 @@ impl From<Report> for ReportDto {
             status: r.status,
             file_path: r.file_path,
             finding_count,
+            exported,
             created_at: ts(r.created_at),
             updated_at: ts(r.updated_at),
         }
