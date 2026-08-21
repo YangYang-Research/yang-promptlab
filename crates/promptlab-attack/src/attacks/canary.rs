@@ -1,7 +1,7 @@
 //! Stamp and detect `PROMPTLAB-<SUITE>-<PAYLOAD_ID>-<NONCE>` canaries on attack payloads.
 
 use promptlab_core::canary::{
-    ensure_in_content, find_in, mint_for_category, response_contains, suite_for_category,
+    ensure_in_content, find_in, mint_stable_for_category, response_contains, suite_for_category,
 };
 
 use crate::types::{AttackEvaluation, AttackPayload, AttackResponse, FindingSeverity};
@@ -21,13 +21,17 @@ pub fn payload_canary(payload: &AttackPayload) -> Option<String> {
 }
 
 /// Mint (if needed) and embed canary into payload content + metadata.
+///
+/// Prefers an existing `PROMPTLAB-…` token already present in content (factory defaults)
+/// so seed canaries stay stable instead of being reminted each run.
 pub fn stamp_payload_canary(payload: &mut AttackPayload) {
     let canary = payload
         .metadata
         .get(META_KEY)
         .and_then(|v| v.as_str())
         .map(str::to_string)
-        .unwrap_or_else(|| mint_for_category(payload.category.as_str(), &payload.id));
+        .or_else(|| find_in(&payload.content))
+        .unwrap_or_else(|| mint_stable_for_category(payload.category.as_str(), &payload.id));
 
     payload.content = ensure_in_content(&payload.content, &canary);
     payload

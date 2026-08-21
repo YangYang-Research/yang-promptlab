@@ -10,8 +10,10 @@ pub mod proxy;
 
 pub use canary::{
     ensure_in_content as ensure_canary_in_content, find_in as find_canary_in, mint as mint_canary,
-    mint_for_category as mint_canary_for_category, response_contains as response_contains_canary,
-    sanitize_payload_id, suite_for_category, CANARY_PLACEHOLDER,
+    mint_for_category as mint_canary_for_category, mint_stable as mint_stable_canary,
+    mint_stable_for_category as mint_stable_canary_for_category,
+    response_contains as response_contains_canary, sanitize_payload_id, suite_for_category,
+    CANARY_PLACEHOLDER,
 };
 pub use environment::{
     bootstrap_environment, ensure_environment, load_environment_config, resolve_db_path,

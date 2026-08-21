@@ -67,6 +67,17 @@ fn mint_nonce() -> String {
         .collect()
 }
 
+/// Deterministic 12-hex nonce from payload id (stable across restarts / seed).
+pub fn stable_nonce(payload_id: &str) -> String {
+    // FNV-1a 64-bit
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in payload_id.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")[..12].to_string()
+}
+
 /// Mint `PROMPTLAB-<SUITE>-<PAYLOAD_ID>-<NONCE>`.
 pub fn mint(suite: &str, payload_id: &str) -> String {
     let suite = suite
@@ -87,9 +98,34 @@ pub fn mint(suite: &str, payload_id: &str) -> String {
     )
 }
 
+/// Stable canary for factory defaults / catalog seed (same id → same token).
+pub fn mint_stable(suite: &str, payload_id: &str) -> String {
+    let suite = suite
+        .trim()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_uppercase())
+        .collect::<String>();
+    let suite = if suite.is_empty() {
+        "GEN".to_string()
+    } else {
+        suite
+    };
+    format!(
+        "PROMPTLAB-{suite}-{}-{}",
+        sanitize_payload_id(payload_id),
+        stable_nonce(payload_id)
+    )
+}
+
 /// Mint using category id string (`prompt_injection`, …).
 pub fn mint_for_category(category: &str, payload_id: &str) -> String {
     mint(suite_for_category(category), payload_id)
+}
+
+/// Stable mint from category + payload id.
+pub fn mint_stable_for_category(category: &str, payload_id: &str) -> String {
+    mint_stable(suite_for_category(category), payload_id)
 }
 
 fn is_canary_char(c: char) -> bool {
@@ -172,5 +208,14 @@ mod tests {
     fn suite_map() {
         assert_eq!(suite_for_category("prompt_injection"), "PI");
         assert_eq!(suite_for_category("mcp_abuse"), "MCP");
+    }
+
+    #[test]
+    fn mint_stable_is_deterministic() {
+        let a = mint_stable_for_category("prompt_injection", "pi-direct-override");
+        let b = mint_stable_for_category("prompt_injection", "pi-direct-override");
+        assert_eq!(a, b);
+        assert!(a.starts_with("PROMPTLAB-PI-PI-DIRECT-OVERRIDE-"));
+        assert_eq!(a.len(), "PROMPTLAB-PI-PI-DIRECT-OVERRIDE-".len() + 12);
     }
 }

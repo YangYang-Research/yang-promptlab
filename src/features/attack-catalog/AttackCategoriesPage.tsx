@@ -286,11 +286,6 @@ export function AttackCategoriesPage() {
       const generated = await generateAttackCatalogPrompt(selected.id);
       setDraft(generated.content);
       setYazgGenerated(true);
-      setSavedHint(
-        generated.canary
-          ? `Yazg generated a new prompt (canary ${generated.canary}) — review and save to apply`
-          : "Yazg generated a new prompt — review and save to apply",
-      );
     } catch (err) {
       setError(toAppError(err).message);
     } finally {
