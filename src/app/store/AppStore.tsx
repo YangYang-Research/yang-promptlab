@@ -33,6 +33,7 @@ import {
 import { toAppError } from "@/shared/errors";
 import { createLogger } from "@/shared/logging";
 import { computeDashboardStats } from "@/shared/stats";
+import { LOCAL_ACTIVITY_CHANGED_EVENT } from "@/shared/activity/localActivity";
 import {
   deriveActivity,
   deriveAttackRuns,
@@ -143,6 +144,17 @@ function appReducer(state: AppDataState, action: AppAction): AppDataState {
       return {
         ...state,
         settings: { ...state.settings, [action.key]: action.value },
+      };
+    case "REFRESH_ACTIVITY":
+      return {
+        ...state,
+        activity: deriveActivity(
+          state.findings,
+          state.scans,
+          state.targets,
+          state.projects,
+          state.reports,
+        ),
       };
     default:
       return state;
@@ -309,6 +321,16 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
       void unlisten?.();
     };
   }, [refresh]);
+
+  useEffect(() => {
+    function onLocalActivityChanged() {
+      dispatch({ type: "REFRESH_ACTIVITY" });
+    }
+    window.addEventListener(LOCAL_ACTIVITY_CHANGED_EVENT, onLocalActivityChanged);
+    return () => {
+      window.removeEventListener(LOCAL_ACTIVITY_CHANGED_EVENT, onLocalActivityChanged);
+    };
+  }, []);
 
   const value = useMemo<AppStoreValue>(() => {
     const stats = computeDashboardStats(

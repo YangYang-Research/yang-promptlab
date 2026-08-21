@@ -14,6 +14,7 @@ import {
   RefreshButton,
 } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
+import { recordLocalActivity } from "@/shared/activity/localActivity";
 import { useAiInferenceRoute } from "@/shared/hooks/useAiInferenceRoute";
 import { useRuntimeModelLoading } from "@/shared/hooks/useRuntimeModelLoading";
 import { isYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
@@ -524,6 +525,13 @@ export function AIRuntimePage() {
         setLocalRamWarning(null);
       }
       await setRoute(route);
+      recordLocalActivity({
+        type: "runtime",
+        message:
+          route === "local"
+            ? "Selected AI Runtime mode: Local"
+            : "Selected AI Runtime mode: Third-party",
+      });
       await refreshLocalData();
     } catch (err) {
       const message = toAppError(err).message;
@@ -540,6 +548,12 @@ export function AIRuntimePage() {
     setTestingModelId(modelId);
     try {
       const result = await setRoute("third_party", modelId);
+      const modelName =
+        (settings?.thirdPartyModels ?? []).find((model) => model.id === modelId)?.name ?? modelId;
+      recordLocalActivity({
+        type: "runtime",
+        message: `Selected AI Runtime model: ${modelName}`,
+      });
       if (result?.settings.connectivityTestOk === false && result.settings.connectivityTestDetail) {
         notify(result.settings.connectivityTestDetail, "error");
       }
@@ -573,6 +587,12 @@ export function AIRuntimePage() {
     try {
       await loadRuntimeModel(modelId);
       await refreshAll();
+      const modelName =
+        (settings?.localModels ?? []).find((model) => model.id === modelId)?.name ?? modelId;
+      recordLocalActivity({
+        type: "runtime",
+        message: `Used model: ${modelName}`,
+      });
       notify("Model loaded into runtime", "success");
     } catch (err) {
       const message = toAppError(err).message;

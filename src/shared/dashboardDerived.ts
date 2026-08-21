@@ -1,4 +1,5 @@
 import type { ScanStatusDto } from "@/shared/ipc";
+import { listLocalActivity } from "@/shared/activity/localActivity";
 import type {
   ActivityItem,
   AttackRun,
@@ -62,8 +63,9 @@ export function deriveActivity(
   targets: Target[],
   projects: Project[],
   reports: Report[] = [],
+  localActivity: ActivityItem[] = listLocalActivity(),
 ): ActivityItem[] {
-  const items: ActivityItem[] = [];
+  const items: ActivityItem[] = [...localActivity];
 
   const sortedFindings = [...findings].sort((a, b) =>
     b.discoveredAt.localeCompare(a.discoveredAt),

@@ -136,6 +136,8 @@ describe("deriveActivity", () => {
       [scan({ id: "scan-1", status: "completed", completedAt: "2026-07-05T10:00:00.000Z" })],
       [target({ id: "target-1", createdAt: "2026-06-30T08:00:00.000Z" })],
       projects,
+      [],
+      [],
     );
 
     expect(activity[0]?.id).toBe("finding-f-new");
@@ -149,6 +151,8 @@ describe("deriveActivity", () => {
       [scan({ id: "scan-run", status: "running", startedAt: "2026-07-06T09:30:00.000Z" })],
       [],
       [],
+      [],
+      [],
     );
 
     expect(activity).toHaveLength(1);
@@ -160,6 +164,8 @@ describe("deriveActivity", () => {
     const activity = deriveActivity(
       [],
       [scan({ id: "agent-run", status: "running", name: "Agent Scan (deep)" })],
+      [],
+      [],
       [],
       [],
     );
@@ -180,6 +186,8 @@ describe("deriveActivity", () => {
           retries: [{ at: "2026-07-06T11:00:00.000Z", mode: "continue" }],
         }),
       ],
+      [],
+      [],
       [],
       [],
     );
@@ -226,6 +234,7 @@ describe("deriveActivity", () => {
           sizeBytes: 0,
         },
       ],
+      [],
     );
 
     expect(activity).toHaveLength(1);
@@ -233,6 +242,35 @@ describe("deriveActivity", () => {
     expect(activity[0]?.id).toBe("report-rep-1");
     expect(activity[0]?.message).toBe("Exported PDF report: Scan (standard) (Demo)");
     expect(activity[0]?.timestamp).toBe("2026-07-06T13:00:00.000Z");
+  });
+
+  it("includes local runtime and model activity", () => {
+    const activity = deriveActivity(
+      [],
+      [],
+      [],
+      [],
+      [],
+      [
+        {
+          id: "local-runtime-1",
+          type: "runtime",
+          message: "Selected AI Runtime mode: Local",
+          timestamp: "2026-07-06T14:00:00.000Z",
+        },
+        {
+          id: "local-model-1",
+          type: "model",
+          message: "Added model: llama-3",
+          timestamp: "2026-07-06T13:30:00.000Z",
+        },
+      ],
+    );
+
+    expect(activity.map((item) => item.message)).toEqual([
+      "Selected AI Runtime mode: Local",
+      "Added model: llama-3",
+    ]);
   });
 });
 

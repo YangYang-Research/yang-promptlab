@@ -9,6 +9,7 @@ import {
   RefreshButton,
 } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
+import { recordLocalActivity } from "@/shared/activity/localActivity";
 import {
   browseModels,
   cancelModelDownload,
@@ -176,6 +177,10 @@ export function ModelsPage() {
         setDownloadingId(null);
         await refreshModels();
         notify(`Installed ${status.installed.name}`, "success");
+        recordLocalActivity({
+          type: "model",
+          message: `Added model: ${status.installed.name}`,
+        });
         return;
       }
       if (status.progress) {
@@ -383,6 +388,10 @@ export function ModelsPage() {
       await refreshModels();
       setAddModelOpen(false);
       notify("Model imported", "success");
+      recordLocalActivity({
+        type: "model",
+        message: `Added model: ${importName.trim()}`,
+      });
     } catch (err) {
       setError(toAppError(err).message);
     } finally {

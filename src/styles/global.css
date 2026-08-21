@@ -1528,6 +1528,8 @@ a.setup-checklist__item:hover {
 .activity-list__dot--attack { background: var(--warning); }
 .activity-list__dot--target { background: var(--info); }
 .activity-list__dot--report { background: var(--success); }
+.activity-list__dot--runtime { background: var(--accent); }
+.activity-list__dot--model { background: color-mix(in srgb, var(--accent) 55%, var(--info)); }
 
 .activity-list__body {
   flex: 1;

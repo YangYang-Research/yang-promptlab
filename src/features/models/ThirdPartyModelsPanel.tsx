@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { Button, IconButton, IconExternalLink } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
+import { recordLocalActivity } from "@/shared/activity/localActivity";
 import {
   saveThirdPartyModelForm,
   testThirdPartyModelConnectivity,
@@ -149,6 +150,12 @@ export function ThirdPartyModelsPanel({
           : "Third-party model saved",
         "success",
       );
+      if (!editingModelId) {
+        recordLocalActivity({
+          type: "model",
+          message: `Added model: ${savedForm.model || "Third-party model"}`,
+        });
+      }
       onSaved?.();
     } catch (err) {
       const message = toAppError(err).message;

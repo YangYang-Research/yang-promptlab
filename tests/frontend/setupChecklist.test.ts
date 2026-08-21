@@ -20,8 +20,9 @@ describe("deriveSetupSteps", () => {
       "/runtime",
       "/models",
       "/runtime",
-      "/scans/new",
+      "/projects",
     ]);
+    expect(steps[3]?.linkState).toEqual({ openNewProject: true });
   });
 
   it("does not count later steps done until prior steps finish", () => {
@@ -72,7 +73,24 @@ describe("deriveSetupSteps", () => {
       "load-model",
     ]);
     expect(steps.map((s) => s.locked)).toEqual([false, false, false, false]);
+    expect(steps[3]?.to).toBe("/projects");
+    expect(steps[3]?.linkState).toEqual({ openNewProject: true });
     expect(setupProgress(steps).allDone).toBe(false);
+  });
+
+  it("routes step 4 to scan wizard when a project already exists", () => {
+    const steps = deriveSetupSteps({
+      mode: "local",
+      initialized: true,
+      localModelCount: 1,
+      configuredThirdPartyCount: 0,
+      selectedModelId: "m1",
+      modelLoaded: true,
+      projectCount: 1,
+      scanCount: 0,
+    });
+    expect(steps[3]?.to).toBe("/scans/new");
+    expect(steps[3]?.linkState).toBeUndefined();
   });
 
   it("completes when project and scan exist", () => {
@@ -88,5 +106,6 @@ describe("deriveSetupSteps", () => {
     });
     expect(setupProgress(steps).allDone).toBe(true);
     expect(steps.every((s) => !s.locked)).toBe(true);
+    expect(steps[3]?.to).toBe("/scans/new");
   });
 });

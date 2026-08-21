@@ -9,6 +9,8 @@ export type SetupStep = {
   title: string;
   description: string;
   to: string;
+  /** Optional react-router location state (e.g. open create-project modal). */
+  linkState?: Record<string, unknown>;
   done: boolean;
   /** True when a prior step is still incomplete — not clickable yet. */
   locked: boolean;
@@ -39,19 +41,19 @@ const STEP_META: Array<{
   },
   {
     id: "add-model",
-    title: "Add Model",
-    description: "Install a local model or configure an API model.",
+    title: "Register a model",
+    description: "Add a local or third-party model for AI Runtime.",
     to: "/models",
   },
   {
     id: "load-model",
-    title: "Load model into AI Runtime",
-    description: "Select and activate the model for inference.",
+    title: "Choose a model for AI Runtime",
+    description: "Pick which registered model AI Runtime should use.",
     to: "/runtime",
   },
   {
     id: "first-project-scan",
-    title: "Create a Project and first scan",
+    title: "Let's start",
     description: "Create a project, then start your first scan.",
     to: "/scans/new",
   },
@@ -78,6 +80,16 @@ export function deriveSetupSteps(input: SetupProgressInput): SetupStep[] {
   return STEP_META.map((meta, index) => {
     const done = sequentialDone[index] ?? false;
     const locked = index > 0 && !(sequentialDone[index - 1] ?? false);
+    if (meta.id === "first-project-scan") {
+      const hasProject = input.projectCount > 0;
+      return {
+        ...meta,
+        to: hasProject ? "/scans/new" : "/projects",
+        linkState: hasProject ? undefined : { openNewProject: true },
+        done,
+        locked,
+      };
+    }
     return { ...meta, done, locked };
   });
 }

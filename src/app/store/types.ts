@@ -65,7 +65,8 @@ export type AppAction =
   | { type: "SET_SELECTED_PROJECT"; projectId: string | null }
   | { type: "SET_SEVERITY_FILTER"; severity: string | null }
   | { type: "UPDATE_FINDING_STATUS"; findingId: string; status: Finding["status"] }
-  | { type: "UPDATE_SETTING"; key: keyof AppSettings; value: AppSettings[keyof AppSettings] };
+  | { type: "UPDATE_SETTING"; key: keyof AppSettings; value: AppSettings[keyof AppSettings] }
+  | { type: "REFRESH_ACTIVITY" };
 
 export type AppActions = {
   refresh: () => Promise<void>;

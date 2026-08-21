@@ -91,6 +91,7 @@ export function SetupChecklistPanel() {
               <li key={step.id}>
                 <Link
                   to={step.to}
+                  state={step.linkState}
                   className="setup-checklist__item setup-checklist__item--current"
                   aria-label={`Step ${index + 1}: ${step.title}`}
                 >

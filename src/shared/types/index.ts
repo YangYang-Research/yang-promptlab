@@ -132,7 +132,7 @@ export type LocalModel = {
 
 export type ActivityItem = {
   id: string;
-  type: "attack" | "finding" | "report" | "target";
+  type: "attack" | "finding" | "report" | "target" | "runtime" | "model";
   message: string;
   timestamp: string;
   severity?: Severity;
