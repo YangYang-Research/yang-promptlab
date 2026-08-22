@@ -1,103 +1,54 @@
-# PromptLab Platform Architecture — Execution Harness Layer
+# PromptLab — Harness (AI I/O bus)
 
-## Target pipeline
+Harness is the **app-wide AI I/O layer**. Every completion goes through `HarnessFactory::execute`. New protocols register a provider; new features set `HarnessPurpose`. Analog: DeepSeek Harness `ctx.llm.stream` + `registerAdapter`.
 
-```mermaid
-flowchart TB
-    D[Discovery] --> F[Fingerprint]
-    F --> A[Attack Engine]
-    A --> HT[HarnessTransport]
-    HT --> HF[HarnessFactory]
-    HF --> H[Harness]
-    H --> N[NormalizedResponse]
-    N --> J[Judge Engine]
-    J --> FD[Findings]
-    FD --> R[Reports]
-```
+## What goes through harness
+
+| Caller | `HarnessPurpose` | Notes |
+|--------|------------------|--------|
+| Attack / scan | `attack` | Judge consumes `NormalizedResponse` |
+| Wizard verify / capability probe | `verify` | Same descriptor + provider as scan |
+| Discovery HTTP | `discover` | Crawl + API probes; surface `rest_api` |
+| Fingerprint live probes | `fingerprint` | Reserved; offline fingerprint stays local |
+| Assistant (Yazg) | `assistant` | Chat-native `messages[]` + tools |
+| Judge / classifier / attacker LLM | `judge` | Same factory; vault auth |
+| Wizard planner / endpoint classify | `wizard` | Token cap applied in factory policy |
+| Attack planner | `planner` | |
+| Prompt generator | `generator` | |
+| Reports / summaries / recommend | `report` | |
+| Connectivity / `test_chat` | `health` | |
+| Future surfaces | `HarnessPurpose::named("…")` | No crate bump |
+
+**Not harness:** HuggingFace downloads and llama-server **process** lifecycle (`promptlab-runtime`). Harness *calls* the runtime; feature crates do not open `reqwest` or `RemoteProviderAdapter` HTTP.
 
 ## Single execution path
 
-All production attack delivery follows one chain:
-
 ```
-AttackExecutor
-  → TargetTransport (HarnessTransport)
-    → HarnessAttackTransport
-      → HarnessFactory::execute
-        → HttpHarness | OpenAiHarness | PlaywrightHarness
-          → NormalizedResponse
+Caller (attack | assistant | judge | …)
+  → HarnessFactory::execute(descriptor, request)
+    → purpose policy (token caps; not model-visible retries)
+    → interceptors (attack plugins skip non-attack)
+      → registered Harness (http | openai | anthropic | gemini | bedrock | llama | …)
+        → NormalizedResponse (redacted, byte-capped)
 ```
 
-There is **no** direct `reqwest` transport in `promptlab-attack`. HTTP I/O lives inside `promptlab-harness` providers only.
+Chat-native requests set `messages[]`, `model`, `max_tokens`, `tools`. Attack still maps `payload` → default probe body when those fields are empty.
 
-| Layer | Crate / module |
-|-------|----------------|
-| Attack orchestration | `promptlab-attack` (`AttackExecutor`, `PayloadRunner`) |
-| Transport trait impl | `promptlab-attack::HarnessTransport` |
-| Harness resolution | `promptlab-harness::HarnessFactory` |
-| Target delivery | `promptlab-harness` providers |
-| Judge input | `promptlab-harness::NormalizedResponse` (end-to-end, no reconstruction) |
+## Extension
 
-## New crates
+1. Add `crates/promptlab-harness/src/providers/<name>.rs` implementing `Harness`.
+2. `registry.register` in `HarnessFactory::new` (or `factory.register` at runtime).
+3. Map `TargetSurface` / `TargetProvider` → `HarnessKind`.
+4. Callers keep using `execute()` — they do not grow HTTP clients.
 
-| Crate | Role |
-|-------|------|
-| `promptlab-harness` | Unified attack delivery (`HttpHarness`, `OpenAiHarness`, `PlaywrightHarness`) |
-| `promptlab-browser` | Persistent browser auth sessions (`AuthSessions/` vault) |
-| `promptlab-runtime` | Embedded runtime supervisor + offline model registry |
-
-## Harness trait
-
-All targets are reached through:
-
-```rust
-pub trait Harness {
-    async fn execute(&self, request: AttackRequest) -> Result<NormalizedResponse>;
-}
-```
-
-The Judge Engine consumes **only** the original `NormalizedResponse` from the transport layer via `JudgeEngine::judge_normalized()`. The IPC attack path reads `attempt.response.normalized` — it must not rebuild normalization from raw HTTP bodies.
-
-## Harness selection
-
-`HarnessFactory::resolve()` reads `TargetDescriptor` (from target JSON) and selects:
-
-| Surface | Harness |
-|---------|---------|
-| REST / MCP HTTP | `HttpHarness` |
-| OpenAI-compatible API | `OpenAiHarness` |
-| Browser session / chat UI | `PlaywrightHarness` |
+`HarnessPurpose` is a string newtype. Product inference values: `assistant`, `judge`, `wizard`, `planner`, `generator`, `report`, `health`.
 
 ## Auth sessions
 
-Browser sessions are stored under platform data roots:
+Browser sessions: `record_session` / `validate_session`. Playwright harness is registered per-scan on an **isolated** factory so it does not leak onto AppState.
 
-- Windows: `%LOCALAPPDATA%/PromptLab/AuthSessions`
-- macOS: `~/Library/Application Support/PromptLab/AuthSessions`
-- Linux: `~/.local/share/promptlab/AuthSessions`
-
-APIs: `record_session`, `finish_record_session`, `validate_session`, `load_session`, `delete_session`.
-
-## Local runtime
-
-`promptlab-runtime` bundles:
-
-- `RuntimeSupervisor` — starts/monitors embedded Ollama binary when present under `runtime/`
-- `EmbeddedModelProvider` — wraps `LocalModelManager` from `promptlab-models`
-- `BuiltinModelRegistry` — loads `resources/models.json` offline-first; optional remote merge
-
-## Integration points
-
-- **Attack path**: `src-tauri/src/harness_runtime.rs` builds `promptlab_attack::HarnessTransport` with session-aware `HarnessFactory`
-- **Scanner**: `promptlab-attack::PromptInjectionScanner` builds `HarnessTransport::for_attack_target` per scan
-- **Discovery**: unchanged HTTP/browser auth injection via `session_auth.rs`
-- **Judge**: `attempt.response.normalized` → `judge_normalized()`
-- **Scan wizard**: Playwright recording IPC unchanged; sessions reusable via descriptor `auth.session_id`
+Model vault credentials become `AuthMaterial` on the request (assistant/judge). Target descriptor auth is only for attack/verify/discover.
 
 ## Test doubles
 
-`MockTransport` remains in `promptlab-attack` for unit tests only. It returns a synthetic `NormalizedResponse` alongside canned HTTP bodies.
-
-## Extension without rewriting attacks
-
-Add a provider under `crates/promptlab-harness/src/providers/`, register in `HarnessFactory` + `HarnessRegistry`, map surface in `TargetDescriptor::preferred_harness()`.
+`MockTransport` remains in `promptlab-attack` for unit tests. Harness integration tests use wiremock against `HarnessFactory::execute`.

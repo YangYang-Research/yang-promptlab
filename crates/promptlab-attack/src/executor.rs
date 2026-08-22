@@ -279,16 +279,7 @@ async fn run_work_item<T: TargetTransport>(
                     headers: HashMap::new(),
                     body: body.clone(),
                     duration_ms,
-                    normalized: NormalizedResponse {
-                        content: String::new(),
-                        raw_response: body.clone(),
-                        status_code: None,
-                        headers: HashMap::new(),
-                        metadata: HashMap::from([
-                            ("error".into(), "transport".into()),
-                            ("harness".into(), "soft_fail".into()),
-                        ]),
-                    },
+                    normalized: NormalizedResponse::transport_error(body.clone(), "soft_fail"),
                 },
                 // `AttackError::Transport` already prefixes "transport error:".
                 evaluation: AttackEvaluation::negative(body),

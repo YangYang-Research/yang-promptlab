@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use promptlab_agent::{
     AttackAttemptObservation, AttackExecutionLlms, AttackExecutionRequest, AttackExecutionTools,
     AdaptPlanOutcome, EndpointPacing, MemoryContext, SequentialAttackExecutionRequest,
-    YazgSupervisor,
+    YazgSupervisor, batch_needs_degraded_pacing, degrade_pacing_for_next_category,
 };
 use promptlab_attack::{AttackCategory, AttackPayload};
 use promptlab_inference::InferenceRuntimeManager;
@@ -50,6 +50,8 @@ pub struct ScanExecutionConfig {
     pub generator_mode: Option<String>,
     /// Delay before payload generation so the wizard attack screen can render.
     pub pipeline_warmup_secs: u32,
+    /// Seed serial pacing from LTM last_failure (Retry Scan / restart only).
+    pub seed_from_prior_failure: bool,
 }
 
 impl ScanExecutionConfig {
@@ -73,6 +75,7 @@ impl ScanExecutionConfig {
             payload_strategy,
             generator_mode,
             pipeline_warmup_secs: 3,
+            seed_from_prior_failure: false,
         }
     }
 }
@@ -486,6 +489,7 @@ pub const MAX_CATEGORY_AUTO_RETRIES: u32 = 3;
 pub struct ScanPacingCache {
     by_category: HashMap<String, EndpointPacing>,
     last: Option<EndpointPacing>,
+    had_healthy_endpoint: bool,
 }
 
 impl ScanPacingCache {
@@ -502,6 +506,43 @@ impl ScanPacingCache {
             .insert(category.to_string(), pacing.clone());
         self.last = Some(pacing);
     }
+
+    fn mark_healthy(&mut self) {
+        self.had_healthy_endpoint = true;
+    }
+}
+
+fn remember_scan_pacing(
+    cache: &mut ScanPacingCache,
+    category: AttackCategory,
+    current: EndpointPacing,
+    result: Option<&CategoryRunResult>,
+    emitter: &ScanProgressEmitter,
+) {
+    let mut pacing = current;
+    if let Some(result) = result {
+        if batch_needs_degraded_pacing(
+            result.attempts as u64,
+            result.http_successes,
+            result.transport_errors,
+            result.server_errors,
+            result.rate_limited,
+            result.avg_latency_ms,
+        ) {
+            let next = degrade_pacing_for_next_category(&pacing);
+            emitter.info(format!(
+                "Endpoint strained on {} (http_ok={} transport_err={}) — next category inherits {}",
+                category.display_name(),
+                result.http_successes,
+                result.transport_errors,
+                next.summary()
+            ));
+            pacing = next;
+        } else if result.http_successes > 0 && !result.endpoint_unhealthy {
+            cache.mark_healthy();
+        }
+    }
+    cache.remember(category.as_str(), pacing);
 }
 
 pub struct TargetProfileScanContext<'a> {
@@ -1022,12 +1063,20 @@ async fn run_category_pass(
         )
         .await
     } else {
-        run_sequential_category(ctx, category, generated_payloads, run_options.as_ref()).await
+        run_sequential_category(
+            ctx,
+            config,
+            category,
+            generated_payloads,
+            run_options.as_ref(),
+        )
+        .await
     }
 }
 
 async fn run_sequential_category(
     ctx: &TargetProfileScanContext<'_>,
+    config: &ScanExecutionConfig,
     category: AttackCategory,
     generated_payloads: &HashMap<AttackCategory, Vec<AttackPayload>>,
     run_options: Option<&CategoryRunOptions>,
@@ -1070,6 +1119,12 @@ async fn run_sequential_category(
     let request = SequentialAttackExecutionRequest {
         category: category.as_str().to_string(),
         max_tool_turns: 24,
+        seed_from_prior_failure: config.seed_from_prior_failure,
+        endpoint_healthy_this_scan: ctx
+            .pacing_cache
+            .lock()
+            .map(|cache| cache.had_healthy_endpoint)
+            .unwrap_or(false),
     };
 
     let llm_ready = {
@@ -1102,7 +1157,13 @@ async fn run_sequential_category(
 
     if let Ok(mut cache) = ctx.pacing_cache.lock() {
         if let Ok(state) = tools.state.lock() {
-            cache.remember(category.as_str(), state.pacing.clone());
+            remember_scan_pacing(
+                &mut cache,
+                category,
+                state.pacing.clone(),
+                state.last_result.as_ref(),
+                &ctx.emitter,
+            );
         }
     }
 
@@ -1351,6 +1412,12 @@ async fn run_agentic_category(
         max_tool_turns: (config.max_attempts.max(1) as usize)
             .saturating_mul(8)
             .max(16),
+        seed_from_prior_failure: config.seed_from_prior_failure,
+        endpoint_healthy_this_scan: ctx
+            .pacing_cache
+            .lock()
+            .map(|cache| cache.had_healthy_endpoint)
+            .unwrap_or(false),
     };
 
     ctx.emitter.info(format!(
@@ -1374,7 +1441,13 @@ async fn run_agentic_category(
 
     if let Ok(mut cache) = ctx.pacing_cache.lock() {
         if let Ok(state) = tools.state.lock() {
-            cache.remember(category.as_str(), state.pacing.clone());
+            remember_scan_pacing(
+                &mut cache,
+                category,
+                state.pacing.clone(),
+                state.last_result.as_ref(),
+                &ctx.emitter,
+            );
         }
     }
 

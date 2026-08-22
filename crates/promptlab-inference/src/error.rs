@@ -26,6 +26,12 @@ impl From<promptlab_models::error::ModelError> for InferenceError {
     }
 }
 
+impl From<promptlab_harness::HarnessError> for InferenceError {
+    fn from(value: promptlab_harness::HarnessError) -> Self {
+        Self::Provider(value.to_string())
+    }
+}
+
 impl From<promptlab_runtime::error::RuntimeError> for InferenceError {
     fn from(value: promptlab_runtime::error::RuntimeError) -> Self {
         Self::Internal(value.to_string())

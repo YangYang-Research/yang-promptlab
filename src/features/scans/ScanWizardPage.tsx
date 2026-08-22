@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
 import { mapProjects, mapTargets } from "@/app/store/mappers";
+import { findLatestHtmlReport } from "@/features/reports/reportDownloads";
 import { Button, Card, PageHeader, Badge, YazgBadge, IconAi } from "@/shared/components";
 import { getProject, getScanStatus, pauseScan, resumeScan, startScan, updateTargetDescriptor } from "@/shared/ipc";
 import { createWizardScan, loadWizardScan, saveWizardScan } from "@/shared/ipc/scanWizard";
@@ -14,7 +15,6 @@ import { assertYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
 import type { Project, Target } from "@/shared/types";
 
 import { ImportApiModal } from "./components/ImportApiModal";
-import { ReportExportDropdown } from "./components/ReportExportDropdown";
 import { ReviewAttackPlanStep } from "./steps/ReviewAttackPlanStep";
 import { AttackPlanPlanningState } from "./steps/AttackPlanPlanningState";
 import { AuthVerificationStep } from "./steps/AuthVerificationStep";
@@ -110,7 +110,7 @@ export function ScanWizardPage() {
     targetId: lockedTargetId,
     step: requestedStep,
   });
-  const { projects, targets, scans, findings, loading, error, dispatch, actions } = useAppStore();
+  const { projects, targets, scans, findings, reports, loading, error, dispatch, actions } = useAppStore();
   const { notify, dismiss } = useToast();
   const deepLinkApplied = useRef(false);
   const deepLinkTargetId = useRef<string | null>(null);
@@ -787,12 +787,12 @@ export function ScanWizardPage() {
   ) : (
     "Configure a new security scan"
   );
-  const resultsFindingsCount = useMemo(
+  const resultsReport = useMemo(
     () =>
       session.submittedScanId
-        ? findings.filter((finding) => finding.scanId === session.submittedScanId).length
-        : 0,
-    [findings, session.submittedScanId],
+        ? findLatestHtmlReport(reports, session.submittedScanId)
+        : null,
+    [reports, session.submittedScanId],
   );
   const showFooterNext =
     session.currentStep < 5 &&
@@ -809,7 +809,7 @@ export function ScanWizardPage() {
     (submittedStatus.status === "failed" ||
       submittedStatus.status === "stopped" ||
       submittedStatus.status === "cancelled");
-  const showDone = session.currentStep === 6;
+  const showViewReport = session.currentStep === 6;
   const attackScanActive =
     session.currentStep === 5 &&
     session.submittedScanId !== null &&
@@ -1262,6 +1262,11 @@ export function ScanWizardPage() {
 
   function handleCancel() {
     navigate("/scans");
+  }
+
+  function handleViewReport() {
+    if (!resultsReport) return;
+    navigate(`/reports/${resultsReport.id}`);
   }
 
   async function handleScanPause() {
@@ -1747,13 +1752,6 @@ export function ScanWizardPage() {
                 Import
               </Button>
             ) : null}
-            {session.currentStep === 6 && activeProjectId && session.submittedScanId ? (
-              <ReportExportDropdown
-                projectId={activeProjectId}
-                scanId={session.submittedScanId}
-                findingsCount={resultsFindingsCount}
-              />
-            ) : null}
           </div>
         </header>
 
@@ -1800,9 +1798,13 @@ export function ScanWizardPage() {
                 </Button>
               </>
             )}
-            {showDone && (
-              <Button variant="primary" onClick={handleCancel}>
-                Done
+            {showViewReport && (
+              <Button
+                variant="primary"
+                disabled={!resultsReport}
+                onClick={handleViewReport}
+              >
+                View Report
               </Button>
             )}
             {showFooterNext && (

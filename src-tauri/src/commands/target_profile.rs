@@ -6,8 +6,9 @@ use promptlab_auth::{resolve_descriptor_for_wizard, SecretStore};
 use promptlab_core::{PromptLabError, LogCategory};
 use promptlab_storage::TargetRepository;
 use promptlab_target_profile::{
-    execute_capability_probe, execute_verify_http, has_ai_response, list_provider_templates,
-    TargetProfile, VerificationError, VerifyHttpSuccess,
+    execute_capability_probe_with_factory, execute_verify_http_with_factory, has_ai_response,
+    list_provider_templates, CONNECT_PROBE_PROMPT, TargetProfile, VerificationError,
+    VerifyHttpSuccess,
 };
 use promptlab_agent::{MemoryContext, YazgDelegation, YazgSupervisor};
 use serde::{Deserialize, Serialize};
@@ -321,7 +322,14 @@ pub async fn target_profile_verify_connect_op(
         CommandError::invalid_input(format!("invalid target profile: {err}"))
     })?;
 
-    match execute_verify_http(&profile, auth_headers).await {
+    match execute_verify_http_with_factory(
+        state.harness_factory(),
+        &profile,
+        auth_headers,
+        CONNECT_PROBE_PROMPT,
+        std::time::Duration::from_secs(30),
+    )
+    .await {
         Ok(snapshot) => Ok(TargetProfileConnectVerifyResponse {
             success: true,
             message: snapshot.console.message.clone(),
@@ -425,7 +433,12 @@ pub async fn target_profile_verify_capability_op(
         CommandError::invalid_input(format!("invalid target profile: {err}"))
     })?;
 
-    let http = match execute_capability_probe(&profile, auth_headers).await {
+    let http = match execute_capability_probe_with_factory(
+        state.harness_factory(),
+        &profile,
+        auth_headers,
+    )
+    .await {
         Ok(snapshot) => snapshot,
         Err(attempt) => {
             let message = attempt.console.message.clone();

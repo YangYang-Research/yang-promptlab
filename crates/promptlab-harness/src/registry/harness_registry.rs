@@ -6,6 +6,7 @@ use crate::models::HarnessKind;
 use crate::traits::Harness;
 
 /// Registry of named harness implementations.
+#[derive(Clone)]
 pub struct HarnessRegistry {
     entries: HashMap<String, Arc<dyn Harness>>,
 }

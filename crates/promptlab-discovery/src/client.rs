@@ -2,37 +2,39 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use promptlab_core::{PromptLabError, PromptLabResult};
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, USER_AGENT};
-use reqwest::{Client, Method, Response, StatusCode};
+use promptlab_harness::{
+    HarnessFactory, HarnessPurpose, HarnessRequest, HttpMethod, TargetDescriptor, TargetSurface,
+};
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::StatusCode;
 use tracing::instrument;
 
 use crate::config::DiscoveryConfig;
-use crate::retry::{is_retryable_status, with_reqwest_retry};
+use crate::retry::{is_retryable_status, with_retry};
 use crate::types::HttpSnapshot;
 
-/// Shared HTTP client with timeouts, size limits, and retry semantics.
+/// Shared HTTP client — target I/O goes through [`HarnessFactory`], not a private reqwest stack.
 #[derive(Clone)]
 pub struct HttpClient {
-    inner: Client,
+    factory: HarnessFactory,
     config: Arc<DiscoveryConfig>,
     auth_headers: HashMap<String, String>,
 }
 
 impl HttpClient {
     pub fn new(config: DiscoveryConfig) -> PromptLabResult<Self> {
-        let config = Arc::new(config);
-        let inner = promptlab_core::build_http_client(
-            promptlab_core::HttpClientOptions::default()
-                .with_user_agent(config.user_agent.clone())
-                .with_timeout(config.request_timeout)
-                .with_redirect_limit(5),
-        )?;
-
+        let factory = HarnessFactory::new()
+            .map_err(|err| PromptLabError::internal(format!("harness factory: {err}")))?;
         Ok(Self {
-            inner,
-            config,
+            factory,
+            config: Arc::new(config),
             auth_headers: HashMap::new(),
         })
+    }
+
+    pub fn with_factory(mut self, factory: HarnessFactory) -> Self {
+        self.factory = factory;
+        self
     }
 
     pub fn with_auth_headers(mut self, headers: HashMap<String, String>) -> Self {
@@ -46,95 +48,87 @@ impl HttpClient {
 
     #[instrument(skip(self), fields(url = %url))]
     pub async fn get(&self, url: &str) -> PromptLabResult<HttpSnapshot> {
-        self.request(Method::GET, url, None).await
+        self.request(HttpMethod::Get, url, None).await
     }
 
     #[instrument(skip(self, body), fields(url = %url))]
     pub async fn post_json(&self, url: &str, body: &str) -> PromptLabResult<HttpSnapshot> {
-        self.request(Method::POST, url, Some(body)).await
+        self.request(HttpMethod::Post, url, Some(body)).await
     }
 
     async fn request(
         &self,
-        method: Method,
+        method: HttpMethod,
         url: &str,
         json_body: Option<&str>,
     ) -> PromptLabResult<HttpSnapshot> {
-        let label = format!("{method} {url}");
+        let label = format!("{} {url}", method.as_str());
         let config = self.config.clone();
-        let client = self.inner.clone();
+        let factory = self.factory.clone();
         let auth_headers = self.auth_headers.clone();
-        let method_clone = method.clone();
+        let user_agent = self.config.user_agent.clone();
         let url = url.to_string();
         let body = json_body.map(str::to_string);
+        let timeout_ms = config.request_timeout.as_millis().max(1) as u64;
+        let max_body_bytes = config.max_body_bytes;
 
-        let response = with_reqwest_retry(&label, &config.retry, || {
-            let client = client.clone();
-            let method = method_clone.clone();
+        let snapshot = with_retry(&label, &config.retry, || {
+            let factory = factory.clone();
             let url = url.clone();
             let body = body.clone();
             let auth_headers = auth_headers.clone();
+            let user_agent = user_agent.clone();
             async move {
-                let mut req = client.request(method, &url);
-                if let Some(payload) = body {
-                    req = req
-                        .header("Content-Type", "application/json")
-                        .body(payload);
+                let mut request = HarnessRequest::from_payload(&url, body.clone().unwrap_or_default())
+                    .with_purpose(HarnessPurpose::discover());
+                request.method = method;
+                request.body = body;
+                request.timeout_ms = timeout_ms;
+                request.headers = auth_headers;
+                if !request
+                    .headers
+                    .keys()
+                    .any(|k| k.eq_ignore_ascii_case("user-agent"))
+                {
+                    request.headers.insert("User-Agent".into(), user_agent);
                 }
-                for (key, value) in &auth_headers {
-                    if let (Ok(name), Ok(val)) = (
-                        HeaderName::from_bytes(key.as_bytes()),
-                        HeaderValue::from_str(value),
-                    ) {
-                        req = req.header(name, val);
-                    }
+                let descriptor = TargetDescriptor {
+                    url: url.clone(),
+                    surface: TargetSurface::RestApi,
+                    method,
+                    ..TargetDescriptor::default()
+                };
+                let normalized = factory
+                    .execute(&descriptor, request)
+                    .await
+                    .map_err(|err| PromptLabError::internal(format!("HTTP request failed: {err}")))?;
+                let status = normalized.status_code.unwrap_or(0);
+                if is_retryable_status(status) {
+                    return Err(PromptLabError::internal(format!(
+                        "HTTP {status} after retries"
+                    )));
                 }
-                req.send().await
+                if normalized.raw_response.len() > max_body_bytes {
+                    return Err(PromptLabError::invalid_input(format!(
+                        "response body exceeds max_body_bytes ({max_body_bytes})"
+                    )));
+                }
+                let content_type = normalized
+                    .headers
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+                    .map(|(_, v)| v.clone());
+                Ok(HttpSnapshot {
+                    url,
+                    status,
+                    content_type,
+                    body: normalized.raw_response,
+                })
             }
         })
-        .await
-        .map_err(|err| PromptLabError::internal(format!("HTTP request failed: {err}")))?;
+        .await?;
 
-        let status = response.status();
-        if is_retryable_status(status.as_u16()) {
-            return Err(PromptLabError::internal(format!(
-                "HTTP {} after retries",
-                status.as_u16()
-            )));
-        }
-
-        self.snapshot(response).await
-    }
-
-    async fn snapshot(&self, response: Response) -> PromptLabResult<HttpSnapshot> {
-        let url = response.url().to_string();
-        let status = response.status().as_u16();
-        let content_type = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_string);
-
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|err| PromptLabError::internal(format!("failed to read body: {err}")))?;
-
-        if bytes.len() > self.config.max_body_bytes {
-            return Err(PromptLabError::invalid_input(format!(
-                "response body exceeds max_body_bytes ({})",
-                self.config.max_body_bytes
-            )));
-        }
-
-        let body = String::from_utf8_lossy(&bytes).into_owned();
-
-        Ok(HttpSnapshot {
-            url,
-            status,
-            content_type,
-            body,
-        })
+        Ok(snapshot)
     }
 
     pub fn default_headers(&self) -> HeaderMap {

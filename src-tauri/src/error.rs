@@ -40,6 +40,12 @@ impl From<PromptLabError> for CommandError {
 
 impl From<promptlab_harness::HarnessError> for CommandError {
     fn from(value: promptlab_harness::HarnessError) -> Self {
+        if matches!(value, promptlab_harness::HarnessError::Cancelled) {
+            return Self {
+                code: ErrorCode::InvalidInput.as_str().to_string(),
+                message: "cancelled".into(),
+            };
+        }
         Self {
             code: ErrorCode::Internal.as_str().to_string(),
             message: value.to_string(),

@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use reqwest::{Method, StatusCode};
+use promptlab_harness::{
+    HarnessError, HarnessFactory, HarnessPurpose, HarnessRequest, HttpMethod as HarnessHttpMethod,
+};
+use reqwest::StatusCode;
 use time::OffsetDateTime;
 
+use crate::harness::descriptor_for_profile;
 use crate::prompt::replace_prompt;
 use crate::types::{HttpMethod, TargetProfile, VerificationResult};
 
@@ -170,18 +173,6 @@ fn merge_profile_and_auth_headers(
     headers
 }
 
-fn build_header_map(headers: &HashMap<String, String>) -> Result<HeaderMap, VerificationError> {
-    let mut map = HeaderMap::new();
-    for (key, value) in headers {
-        let name = HeaderName::from_bytes(key.as_bytes())
-            .map_err(|e| VerificationError::ConnectionFailed(e.to_string()))?;
-        let val = HeaderValue::from_str(value)
-            .map_err(|e| VerificationError::ConnectionFailed(e.to_string()))?;
-        map.insert(name, val);
-    }
-    Ok(map)
-}
-
 fn preflight_console(
     profile: &TargetProfile,
     headers: &HashMap<String, String>,
@@ -210,16 +201,6 @@ fn attempt_failure(
     VerificationAttempt {
         console: preflight_console(profile, headers, body, error.to_string()),
         result: Err(error),
-    }
-}
-
-fn reqwest_method(method: HttpMethod) -> Method {
-    match method {
-        HttpMethod::Get => Method::GET,
-        HttpMethod::Post => Method::POST,
-        HttpMethod::Put => Method::PUT,
-        HttpMethod::Patch => Method::PATCH,
-        HttpMethod::Delete => Method::DELETE,
     }
 }
 
@@ -334,8 +315,8 @@ pub fn has_ai_response(body: &str, status: StatusCode) -> bool {
     body.trim().len() > 2
 }
 
-fn map_status_error(status: StatusCode) -> VerificationError {
-    match status.as_u16() {
+fn map_status_error(status: u16) -> VerificationError {
+    match status {
         401 => VerificationError::Unauthorized,
         403 => VerificationError::Forbidden,
         404 => VerificationError::NotFound,
@@ -345,8 +326,29 @@ fn map_status_error(status: StatusCode) -> VerificationError {
     }
 }
 
-/// Execute the real HTTP verify probe with a custom prompt and timeout.
+/// Execute the verify probe through the app harness (not a private reqwest client).
 pub async fn execute_verify_http_with_prompt(
+    profile: &TargetProfile,
+    auth_headers: HashMap<String, String>,
+    prompt: &str,
+    timeout: std::time::Duration,
+) -> Result<VerifyHttpSuccess, VerificationAttempt> {
+    let factory = match HarnessFactory::new() {
+        Ok(factory) => factory,
+        Err(err) => {
+            return Err(attempt_failure(
+                profile,
+                &profile.headers,
+                "",
+                VerificationError::ConnectionFailed(err.to_string()),
+            ));
+        }
+    };
+    execute_verify_http_with_factory(&factory, profile, auth_headers, prompt, timeout).await
+}
+
+pub async fn execute_verify_http_with_factory(
+    factory: &HarnessFactory,
     profile: &TargetProfile,
     auth_headers: HashMap<String, String>,
     prompt: &str,
@@ -389,73 +391,30 @@ pub async fn execute_verify_http_with_prompt(
         }
     }
 
-    let client = match promptlab_core::build_http_client(
-        promptlab_core::HttpClientOptions::default().with_timeout(timeout),
-    ) {
-        Ok(client) => client,
-        Err(e) => {
+    let mut request =
+        HarnessRequest::from_payload(&url, prompt).with_purpose(HarnessPurpose::verify());
+    request.method =
+        HarnessHttpMethod::parse(profile.method.as_str()).unwrap_or(HarnessHttpMethod::Post);
+    request.headers = headers.clone();
+    request.body = Some(body.clone());
+    request.timeout_ms = timeout.as_millis().max(1) as u64;
+
+    let descriptor = descriptor_for_profile(profile);
+    let started = Instant::now();
+    let normalized = match factory.execute(&descriptor, request).await {
+        Ok(response) => response,
+        Err(err) => {
             return Err(attempt_failure(
                 profile,
                 &headers,
                 &body,
-                VerificationError::ConnectionFailed(e.to_string()),
+                map_harness_error(err),
             ));
         }
     };
-
-    let header_map = match build_header_map(&headers) {
-        Ok(map) => map,
-        Err(error) => return Err(attempt_failure(profile, &headers, &body, error)),
-    };
-
-    let started = Instant::now();
-    let mut request = client
-        .request(reqwest_method(profile.method), &url)
-        .headers(header_map);
-
-    if profile.method != HttpMethod::Get {
-        request = request.body(body.clone());
-    }
-
-    let response = match request.send().await {
-        Ok(response) => response,
-        Err(e) => {
-            let error = if e.is_timeout() {
-                VerificationError::Timeout
-            } else {
-                VerificationError::ConnectionFailed(e.to_string())
-            };
-            return Err(attempt_failure(profile, &headers, &body, error));
-        }
-    };
-
-    let status = response.status();
-    let response_text = match response.text().await {
-        Ok(text) => text,
-        Err(e) => {
-            let elapsed = started.elapsed().as_millis() as u64;
-            let error = if e.is_timeout() {
-                VerificationError::Timeout
-            } else {
-                VerificationError::ConnectionFailed(format!("failed to read response body: {e}"))
-            };
-            return Err(VerificationAttempt {
-                console: VerificationConsoleEntry {
-                    method: profile.method.as_str().into(),
-                    url: url.clone(),
-                    headers: mask_headers(&headers),
-                    body: body.clone(),
-                    status_code: status.as_u16(),
-                    response_time_ms: elapsed,
-                    response_preview: None,
-                    success: false,
-                    message: error.to_string(),
-                },
-                result: Err(error),
-            });
-        }
-    };
     let elapsed = started.elapsed().as_millis() as u64;
+    let status = normalized.status_code.unwrap_or(0);
+    let response_text = normalized.raw_response;
     let preview = if response_text.len() > 8000 {
         Some(format!("{}…", &response_text[..8000]))
     } else if response_text.is_empty() {
@@ -469,25 +428,24 @@ pub async fn execute_verify_http_with_prompt(
         url: url.clone(),
         headers: mask_headers(&headers),
         body: body.clone(),
-        status_code: status.as_u16(),
+        status_code: status,
         response_time_ms: elapsed,
         response_preview: preview,
         success: false,
         message: String::new(),
     };
 
-    if !status.is_success() {
-        let message = map_status_error(status).to_string();
+    if !(200..300).contains(&status) {
+        let error = map_status_error(status);
         return Err(VerificationAttempt {
             console: VerificationConsoleEntry {
-                message,
+                message: error.to_string(),
                 ..console
             },
-            result: Err(map_status_error(status)),
+            result: Err(error),
         });
     }
 
-    // HTTP success = connectivity + auth OK. AI content checks belong to Step 2.
     Ok(VerifyHttpSuccess {
         console: VerificationConsoleEntry {
             success: true,
@@ -497,8 +455,20 @@ pub async fn execute_verify_http_with_prompt(
         response_text,
         request_body: body,
         response_time_ms: elapsed,
-        status_code: status.as_u16(),
+        status_code: status,
     })
+}
+
+fn map_harness_error(err: HarnessError) -> VerificationError {
+    let message = err.to_string();
+    if matches!(err, HarnessError::Cancelled)
+        || message.contains("timed out")
+        || message.contains("timeout")
+    {
+        VerificationError::Timeout
+    } else {
+        VerificationError::ConnectionFailed(message)
+    }
 }
 
 /// Step 1 connectivity/auth probe — tiny "Hello" prompt for speed.
@@ -525,6 +495,21 @@ pub async fn execute_capability_probe(
         auth_headers,
         VERIFY_PROMPT,
         // Free / reasoning models can take well over 30s to stream a full completion.
+        std::time::Duration::from_secs(120),
+    )
+    .await
+}
+
+pub async fn execute_capability_probe_with_factory(
+    factory: &HarnessFactory,
+    profile: &TargetProfile,
+    auth_headers: HashMap<String, String>,
+) -> Result<VerifyHttpSuccess, VerificationAttempt> {
+    execute_verify_http_with_factory(
+        factory,
+        profile,
+        auth_headers,
+        VERIFY_PROMPT,
         std::time::Duration::from_secs(120),
     )
     .await

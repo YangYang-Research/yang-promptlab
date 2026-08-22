@@ -11,6 +11,7 @@ rust-version.workspace = true
 promptlab-core = { workspace = true }
 promptlab-models = { workspace = true }
 promptlab-runtime = { workspace = true }
+promptlab-harness = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

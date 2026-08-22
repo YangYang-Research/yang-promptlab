@@ -38,9 +38,7 @@ mod tests {
         let normalized = NormalizedResponse {
             content: String::new(),
             raw_response: "raw-body".into(),
-            status_code: Some(200),
-            headers: Default::default(),
-            metadata: Default::default(),
+            ..Default::default()
         };
         let result = DefaultResponseNormalizer
             .normalize(&request, normalized)

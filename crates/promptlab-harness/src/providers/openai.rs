@@ -34,17 +34,39 @@ impl Harness for OpenAiHarness {
     async fn execute(&self, mut request: AttackRequest) -> HarnessResult<NormalizedResponse> {
         request.method = HttpMethod::Post;
         if request.body.is_none() {
-            request.body = Some(
-                serde_json::json!({
-                    "model": "promptlab-probe",
-                    "messages": [
-                        { "role": "user", "content": "{{payload}}" }
-                    ]
-                })
-                .to_string(),
-            );
+            if request.has_chat_native() {
+                request.body = Some(request.openai_chat_body());
+            } else {
+                request.body = Some(
+                    serde_json::json!({
+                        "model": "promptlab-probe",
+                        "messages": [
+                            { "role": "user", "content": "{{payload}}" }
+                        ]
+                    })
+                    .to_string(),
+                );
+            }
         }
-        let mut response = self.inner.execute(request).await?;
+        if request.url.to_ascii_lowercase().contains("openrouter.ai") {
+            if !request
+                .headers
+                .keys()
+                .any(|key| key.eq_ignore_ascii_case("http-referer"))
+            {
+                request
+                    .headers
+                    .insert("HTTP-Referer".into(), "https://promptlab.local".into());
+            }
+            if !request
+                .headers
+                .keys()
+                .any(|key| key.eq_ignore_ascii_case("x-title"))
+            {
+                request.headers.insert("X-Title".into(), "PromptLab".into());
+            }
+        }
+        let mut response = self.inner.execute_raw(&request, self.id()).await?;
         response.metadata.insert("api_format".into(), "openai_compatible".into());
         Ok(response)
     }

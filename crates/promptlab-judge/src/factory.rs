@@ -126,6 +126,7 @@ impl InferenceRuntime for ClientRuntime {
                     tools: Vec::new(),
                     tool_choice: None,
                     messages: Vec::new(),
+                    purpose: None,
                 })
                 .await
                 .map(|text| promptlab_models::types::InferenceResponse {

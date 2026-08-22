@@ -1,7 +1,9 @@
 //! Desktop bridge to [`promptlab_inference::AiInferenceGateway`].
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
+
+use promptlab_harness::CancelFlag;
 
 use promptlab_auth::SecretStore;
 use promptlab_core::PromptLabError;
@@ -25,6 +27,32 @@ use crate::third_party_credentials::{
 
 pub fn models_vault_path(data_dir: &Path) -> PathBuf {
     data_dir.join("models")
+}
+
+fn assistant_cancel_slot() -> &'static Mutex<CancelFlag> {
+    static SLOT: OnceLock<Mutex<CancelFlag>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(CancelFlag::new()))
+}
+
+pub fn begin_assistant_turn() -> CancelFlag {
+    let flag = CancelFlag::new();
+    if let Ok(mut slot) = assistant_cancel_slot().lock() {
+        *slot = flag.clone();
+    }
+    flag
+}
+
+pub fn stop_assistant_turn() {
+    if let Ok(slot) = assistant_cancel_slot().lock() {
+        slot.cancel();
+    }
+}
+
+pub fn current_assistant_cancel() -> CancelFlag {
+    assistant_cancel_slot()
+        .lock()
+        .map(|slot| slot.clone())
+        .unwrap_or_default()
 }
 
 pub fn open_model_manager(
@@ -92,6 +120,10 @@ pub async fn open_gateway_session<'a>(
             model_provider,
             model_entry: entry,
             remote_settings: remote,
+            harness_factory: promptlab_harness::HarnessFactory::new().unwrap_or_else(|_| {
+                promptlab_harness::HarnessFactory::from_registry(Default::default())
+            }),
+            cancel: current_assistant_cancel(),
         },
     })
 }
@@ -160,6 +192,7 @@ pub async fn gateway_complete(
             tools: Vec::new(),
             tool_choice: None,
             messages: Vec::new(),
+            purpose: None,
         })
         .await
         .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
@@ -280,6 +313,7 @@ pub async fn gateway_complete_outcome_messages_as(
                 tools,
                 tool_choice,
                 messages,
+                purpose: Some(agent_id.clone()),
             })
             .await
             .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
@@ -1139,6 +1173,10 @@ pub async fn test_connectivity_with_remote(
             model_provider,
             model_entry: entry,
             remote_settings: remote,
+            harness_factory: promptlab_harness::HarnessFactory::new().unwrap_or_else(|_| {
+                promptlab_harness::HarnessFactory::from_registry(Default::default())
+            }),
+            cancel: current_assistant_cancel(),
         },
     };
     session
@@ -1167,6 +1205,10 @@ pub async fn test_inference_for_entry(
             model_provider,
             model_entry: entry,
             remote_settings: remote,
+            harness_factory: promptlab_harness::HarnessFactory::new().unwrap_or_else(|_| {
+                promptlab_harness::HarnessFactory::from_registry(Default::default())
+            }),
+            cancel: current_assistant_cancel(),
         },
     };
     session

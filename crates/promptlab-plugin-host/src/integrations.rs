@@ -79,6 +79,24 @@ pub async fn mutate_attack_payload(
     manager: &mut PluginManager,
     payload: &str,
 ) -> PluginResult<String> {
+    Ok(intercept_attack_pre(manager, payload.to_string(), None)
+        .await?
+        .payload)
+}
+
+/// Pre-execute intercept: mutate payload/body or deny the request.
+#[derive(Debug, Clone, Default)]
+pub struct AttackInterceptResult {
+    pub payload: String,
+    pub body: Option<String>,
+    pub deny: Option<String>,
+}
+
+pub async fn intercept_attack_pre(
+    manager: &mut PluginManager,
+    payload: String,
+    body: Option<String>,
+) -> PluginResult<AttackInterceptResult> {
     let ids: Vec<String> = manager
         .by_type(PluginType::Attack)
         .into_iter()
@@ -86,16 +104,78 @@ pub async fn mutate_attack_payload(
         .map(|record| record.id.clone())
         .collect();
 
-    let mut current = payload.to_string();
+    let mut current = AttackInterceptResult {
+        payload,
+        body,
+        deny: None,
+    };
     for id in ids {
         let result = manager
-            .invoke(&id, serde_json::json!({ "payload": current }))
+            .invoke(
+                &id,
+                serde_json::json!({
+                    "stage": "pre",
+                    "payload": current.payload,
+                    "body": current.body,
+                }),
+            )
             .await?;
+        if result
+            .result
+            .get("deny")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            let reason = result
+                .result
+                .get("reason")
+                .and_then(|v| v.as_str())
+                .unwrap_or("denied by attack plugin")
+                .to_string();
+            current.deny = Some(reason);
+            return Ok(current);
+        }
         if let Some(next) = result.result.get("payload").and_then(|v| v.as_str()) {
-            current = next.to_string();
+            current.payload = next.to_string();
+        }
+        if let Some(next) = result.result.get("body").and_then(|v| v.as_str()) {
+            current.body = Some(next.to_string());
         }
     }
     Ok(current)
+}
+
+/// Post-execute intercept: optional content rewrite.
+pub async fn intercept_attack_post(
+    manager: &mut PluginManager,
+    content: &str,
+    raw_response: &str,
+) -> PluginResult<Option<String>> {
+    let ids: Vec<String> = manager
+        .by_type(PluginType::Attack)
+        .into_iter()
+        .filter(|record| record.enabled)
+        .map(|record| record.id.clone())
+        .collect();
+    let mut current = content.to_string();
+    let mut changed = false;
+    for id in ids {
+        let result = manager
+            .invoke(
+                &id,
+                serde_json::json!({
+                    "stage": "post",
+                    "content": current,
+                    "raw_response": raw_response,
+                }),
+            )
+            .await?;
+        if let Some(next) = result.result.get("content").and_then(|v| v.as_str()) {
+            current = next.to_string();
+            changed = true;
+        }
+    }
+    Ok(if changed { Some(current) } else { None })
 }
 
 /// Evaluate response text with enabled judge plugins.

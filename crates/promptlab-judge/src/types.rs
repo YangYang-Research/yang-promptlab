@@ -194,6 +194,10 @@ impl JudgeRequest {
                 "raw_response": normalized.raw_response,
                 "status_code": normalized.status_code,
                 "harness_metadata": normalized.metadata,
+                "tool_calls": normalized.tool_calls,
+                "stop_reason": normalized.stop_reason,
+                "conversation_id": normalized.conversation_id,
+                "error_class": normalized.error_class,
             }),
         }
     }

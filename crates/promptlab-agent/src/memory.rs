@@ -395,6 +395,25 @@ pub async fn remember_attack_category_outcome(
     }
 
     if !is_attack_failure_outcome(stopped_reason, endpoint_unhealthy, endpoint_error) {
+        if let Some(target_id) = ctx.target_id.as_ref().filter(|s| !s.is_empty()) {
+            remember_ltm(
+                Some(store),
+                LtmWrite {
+                    agent_id,
+                    scope_type: MemoryScopeType::Target,
+                    scope_id: target_id.clone(),
+                    memory_key: format!("attack.{category}.last_failure"),
+                    content: "cleared — previous failure invalidated after healthy run".into(),
+                    content_json: Some(serde_json::json!({
+                        "cleared": true,
+                        "failure": false,
+                        "category": category,
+                    })),
+                    importance: 0.4,
+                },
+            )
+            .await;
+        }
         return;
     }
 
@@ -487,6 +506,12 @@ pub async fn load_prior_attack_failure_block(
                 Ok(entries) => {
                     for entry in entries {
                         if entry.memory_key != failure_key {
+                            continue;
+                        }
+                        let content = entry.content.trim();
+                        if content.is_empty()
+                            || content.to_ascii_lowercase().starts_with("cleared")
+                        {
                             continue;
                         }
                         let dedupe =

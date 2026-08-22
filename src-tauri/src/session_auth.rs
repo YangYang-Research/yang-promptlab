@@ -13,6 +13,7 @@ use promptlab_storage::Database;
 
 use crate::error::{CommandError, CommandResult};
 use crate::harness_runtime::build_harness_attack_runtime_parts;
+use crate::plugin_interceptor::PluginHarnessInterceptor;
 use crate::plugin_transport::PluginAwareTransport;
 use crate::state::AppState;
 
@@ -137,6 +138,10 @@ pub async fn build_attack_runtime_parts(
         probe_url,
     )
     .await?;
+
+    let _ = runtime.factory.add_interceptor(std::sync::Arc::new(
+        PluginHarnessInterceptor::new(plugin_manager.clone()),
+    ));
 
     Ok(AttackRuntime {
         transport: PluginAwareTransport::new(runtime.transport, plugin_manager),

@@ -6,12 +6,11 @@
 use std::sync::Arc;
 
 use promptlab_planner::PlannerLlm;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::attack_execution::{
     emit_and_record, AttackAttemptObservation, AttackExecutionOutcome, AttackExecutionTools,
 };
-use crate::attack_execution_pick::{pick_sequential_action, AttackPickAction};
 use crate::endpoint_recovery::{
     error_is_endpoint_recoverable, heuristic_recovery, observation_needs_recovery,
     seed_pacing_from_prior_failure, MAX_ENDPOINT_RECOVERIES,
@@ -30,6 +29,8 @@ const DEFAULT_MAX_REACT_STEPS: usize = 24;
 pub struct SequentialAttackExecutionRequest {
     pub category: String,
     pub max_tool_turns: usize,
+    pub seed_from_prior_failure: bool,
+    pub endpoint_healthy_this_scan: bool,
 }
 
 impl Default for SequentialAttackExecutionRequest {
@@ -37,6 +38,8 @@ impl Default for SequentialAttackExecutionRequest {
         Self {
             category: String::new(),
             max_tool_turns: DEFAULT_MAX_REACT_STEPS,
+            seed_from_prior_failure: false,
+            endpoint_healthy_this_scan: false,
         }
     }
 }
@@ -69,6 +72,8 @@ impl SequentialAttackExecutionAgent {
         }
 
         let max_steps = request.max_tool_turns.max(8);
+        let _orchestrator = orchestrator;
+        let _llm_ready = llm_ready;
         let mut events = Vec::new();
         emit_and_record(
             tools,
@@ -109,13 +114,18 @@ impl SequentialAttackExecutionAgent {
             Some(request.category.as_str()),
         )
         .await;
-        let prior_failure = load_prior_attack_failure_block(
-            memory,
-            &memory_ctx,
-            AgentId::SequentialAttackExecution,
-            &request.category,
-        )
-        .await;
+        let prior_failure = if request.seed_from_prior_failure && !request.endpoint_healthy_this_scan
+        {
+            load_prior_attack_failure_block(
+                memory,
+                &memory_ctx,
+                AgentId::SequentialAttackExecution,
+                &request.category,
+            )
+            .await
+        } else {
+            String::new()
+        };
         if !prior_failure.is_empty() {
             remember_stm(
                 memory,
@@ -214,71 +224,33 @@ impl SequentialAttackExecutionAgent {
                 break;
             }
 
-            let action = if llm_ready {
-                if let Some(llm) = orchestrator.as_ref() {
-                    match pick_sequential_action(llm.clone(), &transcript, step, max_steps).await
-                    {
-                        Ok((thought, pick_action)) => {
-                            let action = map_seq_pick_action(pick_action);
-                            emit_and_record(
-                                tools,
-                                &mut events,
-                                AgentEvent::react(
-                                    AgentId::SequentialAttackExecution,
-                                    format!("Thought: {thought}"),
-                                ),
-                            )
-                            .await;
-                            transcript.push_str(&format!(
-                                "\n--- Step {step} ---\nThought: {thought}\nAction: {action:?}\n"
-                            ));
-                            action
-                        }
-                        Err(err) => {
-                            warn!(
-                                error = %err,
-                                "SequentialAttackExecutionAgent action pick failed; using policy"
-                            );
-                            transcript.push_str(&format!(
-                                "\n--- Step {step} ---\nInvalid tool choice: {err}\n\
-                                 Valid tools: generate|attack|recover. Using policy.\n"
-                            ));
-                            policy_next_action(
-                                generated,
-                                attacked,
-                                needs_recover,
-                                recoveries_used,
-                                &last_obs,
-                            )
-                        }
-                    }
-                } else {
-                    policy_next_action(
-                        generated,
-                        attacked,
-                        needs_recover,
-                        recoveries_used,
-                        &last_obs,
-                    )
-                }
-            } else {
+            let policy_action = gate_seq_action(
                 policy_next_action(
                     generated,
                     attacked,
                     needs_recover,
                     recoveries_used,
                     &last_obs,
-                )
-            };
-            // Hard-gate: recover only after an unhealthy observation; never Finish before attack.
-            let action = gate_seq_action(
-                action,
+                ),
                 generated,
                 attacked,
                 needs_recover,
                 recoveries_used,
                 &last_obs,
             );
+            let action = policy_action;
+            emit_and_record(
+                tools,
+                &mut events,
+                AgentEvent::react(
+                    AgentId::SequentialAttackExecution,
+                    "Thought: (policy)".to_string(),
+                ),
+            )
+            .await;
+            transcript.push_str(&format!(
+                "\n--- Step {step} ---\nThought: (policy)\nAction: {action:?}\n"
+            ));
 
             emit_and_record(
                 tools,
@@ -803,16 +775,6 @@ fn gate_seq_action(
     }
     action
 }
-
-fn map_seq_pick_action(action: AttackPickAction) -> SeqAction {
-    match action {
-        AttackPickAction::Generate => SeqAction::Generate,
-        AttackPickAction::Attack => SeqAction::Attack,
-        AttackPickAction::Recover => SeqAction::Recover,
-        AttackPickAction::Reflect | AttackPickAction::Adapt | AttackPickAction::Finish => SeqAction::Finish,
-    }
-}
-
 
 fn parse_seq_action(raw: &str) -> Result<SeqAction, String> {
     match raw.trim().to_ascii_lowercase().replace('-', "_").as_str() {

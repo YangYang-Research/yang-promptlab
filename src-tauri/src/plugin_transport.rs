@@ -1,24 +1,28 @@
-//! Transport wrapper that applies enabled attack plugins before delivery.
+//! Transport wrapper around harness delivery. Payload mutation lives on the
+//! harness interceptor pipeline (`PluginHarnessInterceptor`).
 
 use std::sync::Arc;
 
 use promptlab_attack::{
     AttackResult, HarnessTransport, TargetTransport, TransportRequest, TransportResponse,
 };
-use promptlab_plugin_host::{mutate_attack_payload, PluginManager};
+use promptlab_plugin_host::PluginManager;
 use async_trait::async_trait;
 use tauri::async_runtime::Mutex as AsyncMutex;
 
-/// Production attack transport: harness delivery with optional plugin payload mutation.
+/// Production attack transport: harness delivery (plugins run inside factory interceptors).
 #[derive(Clone)]
 pub struct PluginAwareTransport {
     inner: HarnessTransport,
-    plugins: Arc<AsyncMutex<PluginManager>>,
+    _plugins: Arc<AsyncMutex<PluginManager>>,
 }
 
 impl PluginAwareTransport {
     pub fn new(inner: HarnessTransport, plugins: Arc<AsyncMutex<PluginManager>>) -> Self {
-        Self { inner, plugins }
+        Self {
+            inner,
+            _plugins: plugins,
+        }
     }
 
     pub fn inner(&self) -> &HarnessTransport {
@@ -28,18 +32,16 @@ impl PluginAwareTransport {
     pub fn into_inner(self) -> HarnessTransport {
         self.inner
     }
+
+    pub fn with_cancel(mut self, cancel: promptlab_harness::CancelFlag) -> Self {
+        self.inner = self.inner.with_cancel(cancel);
+        self
+    }
 }
 
 #[async_trait]
 impl TargetTransport for PluginAwareTransport {
     async fn send(&self, request: TransportRequest) -> AttackResult<TransportResponse> {
-        let mut req = request;
-        if let Some(body) = req.body.clone() {
-            let mut manager = self.plugins.lock().await;
-            if let Ok(mutated) = mutate_attack_payload(&mut manager, &body).await {
-                req.body = Some(mutated);
-            }
-        }
-        self.inner.send(req).await
+        self.inner.send(request).await
     }
 }

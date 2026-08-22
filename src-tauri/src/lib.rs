@@ -16,6 +16,7 @@ pub mod inference_settings;
 pub mod model_registry;
 pub mod third_party_credentials;
 pub mod embedded_runtime;
+pub mod plugin_interceptor;
 pub mod plugin_service;
 pub mod plugin_transport;
 pub mod playwright_runtime;
@@ -322,6 +323,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::target_profile::target_profile_get,
             commands::target_profile::planner_generate_from_profile,
             commands::yazg::yazg_chat,
+            commands::yazg::yazg_stop,
             commands::yazg::yazg_generate_chat_title,
             commands::yazg::yazg_resolve_hilt,
             commands::scan_recommendations::scan_recommendations_generate,

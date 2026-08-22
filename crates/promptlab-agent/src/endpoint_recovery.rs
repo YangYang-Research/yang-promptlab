@@ -272,6 +272,36 @@ pub fn seed_pacing_from_prior_failure(current: &EndpointPacing) -> RecoveryPlan 
     plan
 }
 
+/// True when this batch was slow or lossy enough that the *next* category should
+/// inherit serial pacing — without Recover/re-attack on the current category.
+pub fn batch_needs_degraded_pacing(
+    attempts: u64,
+    http_successes: u64,
+    transport_errors: u64,
+    server_errors: u64,
+    rate_limited: u64,
+    avg_latency_ms: u64,
+) -> bool {
+    if rate_limited > 0 {
+        return true;
+    }
+    let hard = transport_errors.saturating_add(server_errors);
+    if attempts == 0 {
+        return false;
+    }
+    if hard == 0 {
+        return avg_latency_ms >= 20_000;
+    }
+    (hard >= 3 && hard.saturating_mul(5) >= attempts)
+        || hard >= http_successes
+        || avg_latency_ms >= 20_000
+}
+
+/// Serial pacing for the next category after a strained batch. Does not consume a recover slot.
+pub fn degrade_pacing_for_next_category(current: &EndpointPacing) -> EndpointPacing {
+    seed_pacing_from_prior_failure(current).pacing
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -369,6 +399,17 @@ mod tests {
         assert!(plan.pacing.serial_wait);
         assert_eq!(plan.pacing.effective_concurrency(), 1);
         assert!(plan.notes.iter().any(|n| n.contains("not counted as recover")));
+    }
+
+    #[test]
+    fn strained_batch_inherits_serial_without_recovery() {
+        assert!(batch_needs_degraded_pacing(30, 23, 7, 0, 0, 70_000));
+        assert!(batch_needs_degraded_pacing(30, 17, 13, 0, 0, 85_000));
+        assert!(!batch_needs_degraded_pacing(12, 12, 0, 0, 0, 8_000));
+        assert!(!batch_needs_degraded_pacing(30, 29, 1, 0, 0, 3_000));
+        let next = degrade_pacing_for_next_category(&EndpointPacing::default());
+        assert!(next.serial_wait);
+        assert_eq!(next.effective_concurrency(), 1);
     }
 
     #[test]

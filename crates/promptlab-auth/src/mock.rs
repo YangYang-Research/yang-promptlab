@@ -121,16 +121,11 @@ impl PlaywrightDriver for MockPlaywrightDriver {
         })
     }
 
-    async fn send_chat_prompt(
+    async fn send_chat_prompt_ex(
         &self,
-        _url: &str,
-        prompt: &str,
-        _input_selector: &str,
-        _submit_selector: &str,
-        _response_selector: &str,
-        _storage_state_path: Option<&std::path::Path>,
+        args: crate::playwright::ChatPromptArgs<'_>,
     ) -> PromptLabResult<String> {
-        Ok(format!("mock-response:{prompt}"))
+        Ok(format!("mock-response:{}", args.prompt))
     }
 }
 

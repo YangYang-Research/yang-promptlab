@@ -16,7 +16,7 @@ use promptlab_runtime::{RuntimeManager, SharedModelProvider};
 use promptlab_storage::{
     AttackResultRepository, CreateAttackResult, CreateFinding, Endpoint,
     EndpointRepository, FindingRepository, JudgeRoleWeightsRepository, Repositories,
-    ScanRepository, TargetRepository, UpdateScan,
+    ScanRepository, TargetRepository, UpdateFinding, UpdateScan,
 };
 use time::OffsetDateTime;
 use tracing::{info, instrument, warn};
@@ -192,12 +192,19 @@ fn merge_descriptor_auth_target(
 
 fn harness_surface_for_provider(provider: TargetProvider) -> &'static str {
     match provider {
-        TargetProvider::GenericHttp
-        | TargetProvider::Mcp
-        | TargetProvider::Dify
-        | TargetProvider::Langflow => "rest_api",
+        TargetProvider::GenericHttp => "rest_api",
+        TargetProvider::Mcp => "mcp_server",
+        TargetProvider::Dify => "dify",
         TargetProvider::AnthropicClaude => "anthropic_compatible",
-        _ => "openai_compatible",
+        TargetProvider::GoogleGemini => "gemini",
+        TargetProvider::AwsBedrock => "bedrock",
+        TargetProvider::GenericWebSocket => "websocket",
+        TargetProvider::OpenAiCompatible
+        | TargetProvider::OpenRouter
+        | TargetProvider::AzureOpenAi
+        | TargetProvider::GitHubCopilot
+        | TargetProvider::OpenWebUi
+        | TargetProvider::Langflow => "openai_compatible",
     }
 }
 
@@ -245,33 +252,254 @@ fn finding_evidence_json(
     value
 }
 
-fn evidence_payload_id(evidence_json: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(evidence_json)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("payload_id")
-                .and_then(|id| id.as_str())
-                .map(str::to_string)
-        })
+fn technique_key(payload_id: &str) -> String {
+    payload_id
+        .split(':')
+        .next()
+        .unwrap_or(payload_id)
+        .trim()
+        .to_string()
 }
 
-async fn finding_already_recorded(
-    repos: &Repositories,
-    scan_id: &str,
-    payload_id: &str,
-) -> bool {
-    match repos.findings().list_by_scan(scan_id).await {
-        Ok(findings) => findings.iter().any(|finding| {
-            finding
-                .evidence_json
-                .as_deref()
-                .and_then(evidence_payload_id)
-                .as_deref()
-                == Some(payload_id)
-        }),
-        Err(_) => false,
+const CLUSTER_MIN_CONFIDENCE: f32 = 0.75;
+
+fn verdict_has_canary_echoed(verdict: &JudgeVerdict) -> bool {
+    verdict.evidence.iter().any(|e| {
+        e == "canary_echoed" || e.starts_with("canary_echoed:")
+    })
+}
+
+/// Weak / payload-echo votes stay on the attack result; they do not become findings.
+fn finding_qualifies_for_cluster(verdict: &JudgeVerdict) -> bool {
+    verdict.vulnerable
+        && (verdict.confidence >= CLUSTER_MIN_CONFIDENCE || verdict_has_canary_echoed(verdict))
+}
+
+fn clustered_finding_description(
+    max_confidence: f32,
+    variant_count: usize,
+    canary_hits: usize,
+) -> String {
+    let pct = (max_confidence * 100.0).round().clamp(0.0, 100.0) as u32;
+    let mut out = format!("Vulnerability detected with {pct}% confidence");
+    if variant_count > 1 {
+        out.push_str(&format!("; {variant_count} variant(s)"));
     }
+    if canary_hits > 0 {
+        out.push_str(&format!("; {canary_hits} canary hit(s)"));
+    }
+    out
+}
+
+fn cluster_variant_stats(evidence: &serde_json::Value) -> (f32, usize, usize, String) {
+    let variants = evidence
+        .get("variants")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let variant_count = variants.len().max(1);
+    let mut max_conf = evidence
+        .get("confidence")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0) as f32;
+    let mut canary_hits = 0usize;
+    let mut max_severity = "info".to_string();
+    for variant in &variants {
+        if let Some(conf) = variant.get("confidence").and_then(|v| v.as_f64()) {
+            max_conf = max_conf.max(conf as f32);
+        }
+        if variant
+            .get("canary_echoed")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            canary_hits += 1;
+        }
+        if let Some(sev) = variant.get("severity").and_then(|v| v.as_str()) {
+            if severity_rank(sev) > severity_rank(&max_severity) {
+                max_severity = sev.to_string();
+            }
+        }
+    }
+    (max_conf, variant_count, canary_hits, max_severity)
+}
+
+fn evidence_technique_key(evidence_json: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(evidence_json).ok()?;
+    if let Some(key) = value.get("technique_id").and_then(|id| id.as_str()) {
+        let key = key.trim();
+        if !key.is_empty() {
+            return Some(key.to_string());
+        }
+    }
+    value
+        .get("payload_id")
+        .and_then(|id| id.as_str())
+        .map(technique_key)
+}
+
+fn severity_rank(severity: &str) -> u8 {
+    match severity.trim().to_ascii_lowercase().as_str() {
+        "critical" => 4,
+        "high" => 3,
+        "medium" => 2,
+        "low" => 1,
+        _ => 0,
+    }
+}
+
+fn variant_evidence_entry(
+    attempt: &PayloadAttempt,
+    verdict: &JudgeVerdict,
+    severity: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "payload_id": attempt.payload_id,
+        "confidence": verdict.confidence,
+        "summary": verdict.summary,
+        "status": attempt.response.status,
+        "duration_ms": attempt.response.duration_ms,
+        "severity": severity,
+        "canary_echoed": verdict_has_canary_echoed(verdict),
+    })
+}
+
+async fn persist_clustered_finding(
+    env: &CategoryJudgeEnv<'_>,
+    attempt: &PayloadAttempt,
+    verdict: &JudgeVerdict,
+    eval_indicators: &[String],
+    judge_json: &serde_json::Value,
+    severity: &str,
+) -> CommandResult<(FindingDto, bool)> {
+    let technique = technique_key(&attempt.payload_id);
+    let indicators = if verdict.evidence.is_empty() {
+        eval_indicators
+    } else {
+        &verdict.evidence
+    };
+    let mut evidence = finding_evidence_json(
+        env.endpoint_url,
+        env.method,
+        env.body_template,
+        env.request_headers,
+        attempt,
+        &verdict.summary,
+        verdict.confidence,
+        indicators,
+        judge_json,
+        env.provider,
+    );
+    if let Some(obj) = evidence.as_object_mut() {
+        obj.insert("technique_id".into(), serde_json::json!(technique));
+        obj.insert(
+            "variants".into(),
+            serde_json::json!([variant_evidence_entry(attempt, verdict, severity)]),
+        );
+    }
+
+    let existing = env
+        .repos
+        .findings()
+        .list_by_scan(env.scan_id)
+        .await
+        .map_err(CommandError::from)?;
+    if let Some(found) = existing.iter().find(|finding| {
+        finding
+            .evidence_json
+            .as_deref()
+            .and_then(evidence_technique_key)
+            .as_deref()
+            == Some(technique.as_str())
+    }) {
+        let mut merged = found
+            .evidence_json
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let Some(obj) = merged.as_object_mut() {
+            let variants = obj
+                .entry("variants")
+                .or_insert_with(|| serde_json::json!([]));
+            if let Some(list) = variants.as_array_mut() {
+                list.push(variant_evidence_entry(attempt, verdict, severity));
+            }
+            obj.insert("technique_id".into(), serde_json::json!(technique));
+        }
+        let (max_conf, variant_count, canary_hits, variant_severity) =
+            cluster_variant_stats(&merged);
+        if let Some(obj) = merged.as_object_mut() {
+            obj.insert("confidence".into(), serde_json::json!(max_conf));
+            obj.insert(
+                "explanation".into(),
+                serde_json::json!(clustered_finding_description(
+                    max_conf,
+                    variant_count,
+                    canary_hits
+                )),
+            );
+        }
+        let next_severity = if severity_rank(severity) > severity_rank(&found.severity) {
+            severity.to_string()
+        } else if severity_rank(&variant_severity) > severity_rank(&found.severity) {
+            variant_severity
+        } else {
+            found.severity.clone()
+        };
+        let finding = env
+            .repos
+            .findings()
+            .update(
+                &found.id,
+                UpdateFinding {
+                    severity: Some(next_severity),
+                    description: Some(clustered_finding_description(
+                        max_conf,
+                        variant_count,
+                        canary_hits,
+                    )),
+                    evidence_json: Some(merged),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(CommandError::from)?;
+        return Ok((FindingDto::from(finding), false));
+    }
+
+    let (max_conf, variant_count, canary_hits, _) = cluster_variant_stats(&evidence);
+    if let Some(obj) = evidence.as_object_mut() {
+        obj.insert("confidence".into(), serde_json::json!(max_conf));
+        obj.insert(
+            "explanation".into(),
+            serde_json::json!(clustered_finding_description(
+                max_conf,
+                variant_count,
+                canary_hits
+            )),
+        );
+    }
+    let finding = env
+        .repos
+        .findings()
+        .create(CreateFinding {
+            scan_id: env.scan_id.to_string(),
+            project_id: env.project_id.to_string(),
+            target_id: env.target_id.clone(),
+            title: format!("{}: {}", env.category.display_name(), attempt.payload_name),
+            severity: severity.to_string(),
+            category: Some(env.category_name.into()),
+            description: Some(clustered_finding_description(
+                max_conf,
+                variant_count,
+                canary_hits,
+            )),
+            evidence_json: Some(evidence),
+            status: None,
+        })
+        .await
+        .map_err(CommandError::from)?;
+    Ok((FindingDto::from(finding), true))
 }
 
 fn severity_str(severity: FindingSeverity) -> &'static str {
@@ -573,56 +801,47 @@ async fn judge_single_attempt(
         .await
         .map_err(CommandError::from)?;
 
-    if verdict.vulnerable {
+    if verdict.vulnerable && finding_qualifies_for_cluster(&verdict) {
         accum.successes += 1;
-        if !finding_already_recorded(env.repos, env.scan_id, &attempt.payload_id).await {
-            let severity = verdict
-                .severity
-                .map(judge_severity_str)
-                .or_else(|| eval.severity.map(severity_str))
-                .unwrap_or("medium");
-            let finding = env
-                .repos
-                .findings()
-                .create(CreateFinding {
-                    scan_id: env.scan_id.to_string(),
-                    project_id: env.project_id.to_string(),
-                    target_id: env.target_id.clone(),
-                    title: format!("{}: {}", env.category.display_name(), attempt.payload_name),
-                    severity: severity.to_string(),
-                    category: Some(env.category_name.into()),
-                    description: Some(verdict.summary.clone()),
-                    evidence_json: Some(finding_evidence_json(
-                        env.endpoint_url,
-                        env.method,
-                        env.body_template,
-                        env.request_headers,
-                        &attempt,
-                        &verdict.summary,
-                        verdict.confidence,
-                        if verdict.evidence.is_empty() {
-                            &eval.indicators
-                        } else {
-                            &verdict.evidence
-                        },
-                        &judge_json,
-                        env.provider,
-                    )),
-                    status: None,
-                })
-                .await
-                .map_err(CommandError::from)?;
-            let finding_dto = FindingDto::from(finding);
+        let severity = verdict
+            .severity
+            .map(judge_severity_str)
+            .or_else(|| eval.severity.map(severity_str))
+            .unwrap_or("medium");
+        let (finding_dto, created) = persist_clustered_finding(
+            env,
+            &attempt,
+            &verdict,
+            &eval.indicators,
+            &judge_json,
+            severity,
+        )
+        .await?;
+        if created {
             accum.created_findings.push(finding_dto.clone());
-            if let Some(emitter) = env.progress {
-                emitter.detailed(
-                    ScanProgressLevel::Info,
-                    emitter
-                        .event(ScanProgressLevel::Info, "Saved finding")
-                        .endpoint(env.endpoint_url)
-                        .finding_id(&finding_dto.id),
-                );
-            }
+        }
+        if let Some(emitter) = env.progress {
+            let message = if created {
+                "Saved finding"
+            } else {
+                "Updated finding (variant clustered)"
+            };
+            emitter.detailed(
+                ScanProgressLevel::Info,
+                emitter
+                    .event(ScanProgressLevel::Info, message)
+                    .endpoint(env.endpoint_url)
+                    .finding_id(&finding_dto.id),
+            );
+        }
+    } else if verdict.vulnerable {
+        accum.successes += 1;
+        if let Some(emitter) = env.progress {
+            emitter.info(format!(
+                "Skipped finding for {} (confidence {:.0}%, no canary_echoed)",
+                attempt.payload_name,
+                verdict.confidence * 100.0
+            ));
         }
     }
 
@@ -1405,7 +1624,7 @@ pub async fn run_category_on_target_profile(
 
 #[cfg(test)]
 mod tests {
-    use super::truncate_console_payload;
+    use super::{cluster_variant_stats, clustered_finding_description, truncate_console_payload};
 
     #[test]
     fn truncate_console_payload_respects_char_boundaries() {
@@ -1418,5 +1637,33 @@ mod tests {
         assert!(truncated.ends_with('…'));
         assert!(truncated.len() <= 500 + '…'.len_utf8());
         assert!(std::str::from_utf8(truncated.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn clustered_description_uses_max_confidence() {
+        assert_eq!(
+            clustered_finding_description(0.694, 5, 0),
+            "Vulnerability detected with 69% confidence; 5 variant(s)"
+        );
+        assert_eq!(
+            clustered_finding_description(1.0, 3, 2),
+            "Vulnerability detected with 100% confidence; 3 variant(s); 2 canary hit(s)"
+        );
+    }
+
+    #[test]
+    fn cluster_stats_take_max_confidence_and_canary_hits() {
+        let evidence = serde_json::json!({
+            "confidence": 0.55,
+            "variants": [
+                {"confidence": 0.55, "severity": "medium", "canary_echoed": false},
+                {"confidence": 0.91, "severity": "high", "canary_echoed": true},
+            ]
+        });
+        let (conf, count, canary, sev) = cluster_variant_stats(&evidence);
+        assert!((conf - 0.91).abs() < 0.001);
+        assert_eq!(count, 2);
+        assert_eq!(canary, 1);
+        assert_eq!(sev, "high");
     }
 }

@@ -1,9 +1,9 @@
 //! Unified AI inference gateway for PromptLab.
 //!
-//! All AI capabilities (judge, planner, generator, reports, future modules)
-//! must obtain inference through [`GatewaySession`] (setup) and/or
-//! [`InferenceClient`] (cloneable hot-path completions). Do not call
-//! [`ProviderAdapter`] from feature crates.
+//! All AI capabilities (judge, planner, generator, reports, Assistant)
+//! must obtain inference through [`GatewaySession`] / [`InferenceClient`].
+//! Completions go through [`promptlab_harness::HarnessFactory::execute`].
+//! Do not call [`ProviderAdapter`] HTTP from feature crates.
 
 pub mod capabilities;
 pub mod config;

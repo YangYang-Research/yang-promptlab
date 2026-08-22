@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use promptlab_auth::SharedPlaywrightDriver;
+use promptlab_auth::{ChatPromptArgs, SharedPlaywrightDriver};
 
 use crate::error::{HarnessError, HarnessResult};
 use crate::models::{AttackRequest, NormalizedResponse};
@@ -122,14 +122,19 @@ impl PlaywrightHarness {
 
         let chat_response = self
             .driver
-            .send_chat_prompt(
-                &request.url,
-                &request.payload,
-                &input,
-                &submit,
-                &response,
-                storage_path,
-            )
+            .send_chat_prompt_ex(ChatPromptArgs {
+                url: &request.url,
+                prompt: &request.payload,
+                input_selector: &input,
+                submit_selector: &submit,
+                response_selector: &response,
+                storage_state_path: storage_path,
+                file_input_selector: selectors.get("file").map(String::as_str),
+                file_path: request.file_path.as_deref(),
+                keep_page: request.keep_page,
+                wait_stable_ms: request.wait_stable_ms,
+                timeout_ms: request.timeout_ms,
+            })
             .await
             .map_err(|err| HarnessError::transport(err.client_message()))?;
 

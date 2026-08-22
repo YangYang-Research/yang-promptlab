@@ -364,6 +364,10 @@ async fn run_scan_job(
     } else {
         default_runtime
     };
+    let mut attack_runtime = attack_runtime;
+    attack_runtime.transport = attack_runtime
+        .transport
+        .with_cancel(promptlab_harness::CancelFlag::from_shared(cancel.clone()));
 
     let total = scan_progress_total(&categories, &disabled_tests, &execution_config);
     let mut findings_total = 0u64;
@@ -541,6 +545,9 @@ async fn run_scan_job(
 
     jobs.remove(&scan_id);
     emit_app_data_changed(&app, "scan_completed");
+    progress_emitter.info(format!(
+        "Scan {final_status} — {findings_total} finding(s)"
+    ));
     info!(scan_id = %scan_id, status = final_status, findings = findings_total, "scan job finished");
 }
 
@@ -738,6 +745,7 @@ pub async fn scan_start_op(
 
         let is_draft = existing.status == crate::commands::wizard_scan::WIZARD_SCAN_STATUS;
         let is_restart = is_restartable_scan_status(&existing.status);
+        execution_config.seed_from_prior_failure = is_restart || retry_failed_only;
         let existing_progress = progress_from_playbook(existing.playbook_json.as_deref());
         let running_without_job = !is_draft
             && existing.status == "running"

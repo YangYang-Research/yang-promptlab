@@ -895,7 +895,16 @@ fn turn_to_response(
 }
 
 fn map_agent_err(err: promptlab_agent::AgentError) -> CommandError {
-    CommandError::invalid_input(err.to_string())
+    let text = err.to_string();
+    if text.to_ascii_lowercase().contains("cancelled")
+        || text.to_ascii_lowercase().contains("canceled")
+    {
+        return CommandError {
+            code: promptlab_core::ErrorCode::InvalidInput.as_str().to_string(),
+            message: "cancelled".into(),
+        };
+    }
+    CommandError::invalid_input(text)
 }
 
 pub async fn yazg_chat_op(
@@ -903,6 +912,7 @@ pub async fn yazg_chat_op(
     request: YazgChatRequest,
 ) -> CommandResult<YazgChatResponse> {
     let intent_hint = SupervisorIntent::parse(request.intent.as_deref().unwrap_or("auto"));
+    crate::inference_host::begin_assistant_turn();
 
     let (profile, auth_headers, project_id) = if let Some(target_id) = request.target_id.as_ref() {
         let target = state
@@ -1147,6 +1157,12 @@ pub async fn yazg_generate_chat_title_op(
 }
 
 #[tauri::command]
+pub async fn yazg_stop() -> CommandResult<()> {
+    crate::inference_host::stop_assistant_turn();
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn yazg_chat(
     state: State<'_, AppState>,
     request: YazgChatRequest,
@@ -1258,6 +1274,7 @@ async fn run_hilt_followup_turn(
     created_project: Option<CreatedProject>,
     session_id: Option<String>,
 ) -> CommandResult<YazgChatResponse> {
+    crate::inference_host::begin_assistant_turn();
     let inference = state.inference_manager().lock().await;
     let runtime_ready = is_inference_ready(&inference);
     let model_label = {

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use promptlab_harness::{AttackRequest, Harness, HarnessResult, NormalizedResponse};
 use promptlab_models::runtime::InferenceRuntime;
 use promptlab_models::types::InferenceRequest;
 use tokio::sync::Mutex;
@@ -31,6 +32,36 @@ impl LlamaCppAdapter {
 }
 
 #[async_trait]
+impl Harness for LlamaCppAdapter {
+    fn id(&self) -> &'static str {
+        "llama"
+    }
+
+    async fn execute(&self, request: AttackRequest) -> HarnessResult<NormalizedResponse> {
+        request.cancel.check()?;
+        let (system, prompt) = request.system_and_user_prompt();
+        let runtime = self.runtime.lock().await;
+        let response = runtime
+            .complete(InferenceRequest {
+                system,
+                prompt,
+                max_tokens: request.max_tokens.unwrap_or(1024),
+                temperature: request.temperature.unwrap_or(0.0),
+            })
+            .await
+            .map_err(|err| promptlab_harness::HarnessError::transport(err.to_string()))?;
+        let mut normalized = NormalizedResponse::from_chat(response.text, self.id());
+        if response.tokens_predicted > 0 {
+            normalized.usage_output_tokens = Some(response.tokens_predicted as u64);
+        }
+        if normalized.content.trim().is_empty() {
+            normalized.error_class = Some("empty".into());
+        }
+        Ok(normalized)
+    }
+}
+
+#[async_trait]
 impl ProviderAdapter for LlamaCppAdapter {
     fn provider_id(&self) -> &str {
         self.provider.as_str()
@@ -51,32 +82,18 @@ impl ProviderAdapter for LlamaCppAdapter {
         max_tokens: u32,
         temperature: f32,
     ) -> InferenceResult<String> {
-        // Leaf choke point for local AI Runtime completions (agents / gateway / judge).
-        crate::traffic::record_sent();
-        let runtime = self.runtime.lock().await;
-        let response = runtime
-            .complete(InferenceRequest {
-                system: system.map(str::to_string),
-                prompt: prompt.to_string(),
-                max_tokens,
-                temperature,
-            })
-            .await;
-        match response {
-            Ok(response) => {
-                crate::traffic::record_received();
-                let input = crate::token_usage::estimate_tokens(system.unwrap_or(""))
-                    .saturating_add(crate::token_usage::estimate_tokens(prompt));
-                let output = if response.tokens_predicted > 0 {
-                    response.tokens_predicted as u64
-                } else {
-                    crate::token_usage::estimate_tokens(&response.text)
-                };
-                crate::token_usage::record_completion(input, output);
-                Ok(response.text)
-            }
-            Err(err) => Err(err.into()),
+        let mut request = AttackRequest::from_payload("local://llama", prompt);
+        request.purpose = promptlab_harness::HarnessPurpose::assistant();
+        request.system = system.map(str::to_string);
+        request.max_tokens = Some(max_tokens);
+        request.temperature = Some(temperature);
+        let response = Harness::execute(self, request)
+            .await
+            .map_err(|err| InferenceError::Provider(err.to_string()))?;
+        if response.content.trim().is_empty() {
+            return Err(InferenceError::Provider("empty local completion".into()));
         }
+        Ok(response.content)
     }
 
     async fn health(&self) -> InferenceResult<bool> {

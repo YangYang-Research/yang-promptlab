@@ -48,7 +48,7 @@ export const WIZARD_STEPS: WizardStepDefinition[] = [
     id: 6,
     label: "Results",
     title: "Results",
-    hint: "Review findings and export reports",
+    hint: "Review findings",
   },
 ];
 

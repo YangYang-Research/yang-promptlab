@@ -18,6 +18,22 @@ use crate::playwright::protocol::{
 };
 use crate::types::{CookieRecord, ExtractedToken, RecordLoginOptions, ReplayOptions};
 
+/// Arguments for a chat-UI probe (supports multi-turn and file upload).
+#[derive(Debug, Clone)]
+pub struct ChatPromptArgs<'a> {
+    pub url: &'a str,
+    pub prompt: &'a str,
+    pub input_selector: &'a str,
+    pub submit_selector: &'a str,
+    pub response_selector: &'a str,
+    pub storage_state_path: Option<&'a Path>,
+    pub file_input_selector: Option<&'a str>,
+    pub file_path: Option<&'a str>,
+    pub keep_page: bool,
+    pub wait_stable_ms: u64,
+    pub timeout_ms: u64,
+}
+
 /// Playwright automation driver (subprocess JSON-lines protocol).
 #[async_trait]
 pub trait PlaywrightDriver: Send + Sync {
@@ -62,7 +78,24 @@ pub trait PlaywrightDriver: Send + Sync {
         submit_selector: &str,
         response_selector: &str,
         storage_state_path: Option<&Path>,
-    ) -> PromptLabResult<String>;
+    ) -> PromptLabResult<String> {
+        self.send_chat_prompt_ex(ChatPromptArgs {
+            url,
+            prompt,
+            input_selector,
+            submit_selector,
+            response_selector,
+            storage_state_path,
+            file_input_selector: None,
+            file_path: None,
+            keep_page: false,
+            wait_stable_ms: 0,
+            timeout_ms: 30_000,
+        })
+        .await
+    }
+
+    async fn send_chat_prompt_ex(&self, args: ChatPromptArgs<'_>) -> PromptLabResult<String>;
 }
 
 pub struct PlaywrightClient {
@@ -386,20 +419,42 @@ impl PlaywrightDriver for PlaywrightClient {
         response_selector: &str,
         storage_state_path: Option<&Path>,
     ) -> PromptLabResult<String> {
+        self.send_chat_prompt_ex(ChatPromptArgs {
+            url,
+            prompt,
+            input_selector,
+            submit_selector,
+            response_selector,
+            storage_state_path,
+            file_input_selector: None,
+            file_path: None,
+            keep_page: false,
+            wait_stable_ms: 0,
+            timeout_ms: 30_000,
+        })
+        .await
+    }
+
+    async fn send_chat_prompt_ex(&self, args: ChatPromptArgs<'_>) -> PromptLabResult<String> {
         let result: serde_json::Value = self
             .call(
                 "send_chat_prompt",
                 serde_json::json!({
-                    "url": url,
-                    "prompt": prompt,
-                    "input_selector": input_selector,
-                    "submit_selector": submit_selector,
-                    "response_selector": response_selector,
-                    "storage_state_path": storage_state_path.map(|p| p.to_string_lossy().into_owned()),
+                    "url": args.url,
+                    "prompt": args.prompt,
+                    "input_selector": args.input_selector,
+                    "submit_selector": args.submit_selector,
+                    "response_selector": args.response_selector,
+                    "storage_state_path": args.storage_state_path.map(|p| p.to_string_lossy().into_owned()),
+                    "file_input_selector": args.file_input_selector,
+                    "file_path": args.file_path,
+                    "keep_page": args.keep_page,
+                    "wait_stable_ms": args.wait_stable_ms,
                     "options": PlaywrightOptions {
                         headless: false,
                         headed: true,
-                        storage_state_path: storage_state_path.map(|p| p.to_string_lossy().into_owned()),
+                        storage_state_path: args.storage_state_path.map(|p| p.to_string_lossy().into_owned()),
+                        timeout_ms: args.timeout_ms,
                         ..Default::default()
                     },
                 }),

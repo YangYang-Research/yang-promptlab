@@ -72,7 +72,13 @@ impl HarnessTransport {
     pub fn with_factory(mut self, factory: HarnessFactory) -> Self {
         let endpoint = self.inner.endpoint_url().to_string();
         let descriptor = self.inner.descriptor().clone();
-        self.inner = HarnessAttackTransport::new(factory, descriptor, endpoint);
+        let cancel = self.inner.cancel_flag().clone();
+        self.inner = HarnessAttackTransport::new(factory, descriptor, endpoint).with_cancel(cancel);
+        self
+    }
+
+    pub fn with_cancel(mut self, cancel: promptlab_harness::CancelFlag) -> Self {
+        self.inner = self.inner.with_cancel(cancel);
         self
     }
 }
@@ -112,7 +118,8 @@ fn attack_target_to_descriptor(target: &AttackTarget) -> TargetDescriptor {
         .unwrap_or_else(|| match target.kind {
             TargetKind::LlmApi => TargetSurface::OpenAiCompatible,
             TargetKind::Chatbot => TargetSurface::BrowserChat,
-            TargetKind::Agent | TargetKind::Rag | TargetKind::Mcp => TargetSurface::RestApi,
+            TargetKind::Mcp => TargetSurface::McpServer,
+            TargetKind::Agent | TargetKind::Rag => TargetSurface::RestApi,
         });
 
     let method = target
@@ -133,8 +140,7 @@ fn attack_target_to_descriptor(target: &AttackTarget) -> TargetDescriptor {
         headers: target.headers.clone(),
         body_template: target.body_template.clone(),
         auth,
-        browser_session_id: None,
-        chat_selectors: Default::default(),
+        ..TargetDescriptor::default()
     }
 }
 

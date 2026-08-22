@@ -146,6 +146,10 @@ pub struct AttackExecutionRequest {
     pub variants_per_test: u8,
     pub response_adaptation: bool,
     pub max_tool_turns: usize,
+    /// Seed serial pacing from LTM last_failure (Retry Scan only).
+    pub seed_from_prior_failure: bool,
+    /// Previous category in this scan already proved the endpoint healthy.
+    pub endpoint_healthy_this_scan: bool,
 }
 
 impl Default for AttackExecutionRequest {
@@ -160,6 +164,8 @@ impl Default for AttackExecutionRequest {
             variants_per_test: 3,
             response_adaptation: false,
             max_tool_turns: DEFAULT_MAX_REACT_STEPS,
+            seed_from_prior_failure: false,
+            endpoint_healthy_this_scan: false,
         }
     }
 }
@@ -248,13 +254,18 @@ impl AgenticAttackExecutionAgent {
             Some(request.category.as_str()),
         )
         .await;
-        let prior_failure = load_prior_attack_failure_block(
-            memory,
-            &memory_ctx,
-            AgentId::AgenticAttackExecution,
-            &request.category,
-        )
-        .await;
+        let prior_failure = if request.seed_from_prior_failure && !request.endpoint_healthy_this_scan
+        {
+            load_prior_attack_failure_block(
+                memory,
+                &memory_ctx,
+                AgentId::AgenticAttackExecution,
+                &request.category,
+            )
+            .await
+        } else {
+            String::new()
+        };
         if !prior_failure.is_empty() {
             remember_stm(
                 memory,
@@ -363,54 +374,7 @@ impl AgenticAttackExecutionAgent {
                 break;
             }
 
-            let action = if llms.llm_ready {
-                match pick_agentic_action(
-                    llms.orchestrator.clone(),
-                    &transcript,
-                    step,
-                    max_steps,
-                )
-                .await
-                {
-                    Ok((thought, pick_action)) => {
-                        let action = map_pick_action(pick_action);
-                        emit_and_record(
-                            tools,
-                            &mut events,
-                            AgentEvent::react(
-                                AgentId::AgenticAttackExecution,
-                                format!("Thought: {thought}"),
-                            ),
-                        )
-                        .await;
-                        transcript.push_str(&format!(
-                            "\n--- Step {step} ---\nThought: {thought}\nAction: {:?}\n",
-                            action
-                        ));
-                        action
-                    }
-                    Err(err) => {
-                        warn!(error = %err, "AgenticAttackExecutionAgent action pick failed; using policy");
-                        transcript.push_str(&format!(
-                            "\n--- Step {step} ---\nInvalid tool choice: {err}\n\
-                             Valid tools: generate|attack|recover|reflect|adapt. Using policy.\n"
-                        ));
-                        policy_next_action(
-                            request,
-                            attempt,
-                            max_attempts,
-                            generated_for_attempt,
-                            attacked_for_attempt,
-                            reflected_for_attempt,
-                            adapted_after_attempt,
-                            last_reflection.as_ref(),
-                            needs_recover,
-                            recoveries_used,
-                            &last_obs,
-                        )
-                    }
-                }
-            } else {
+            let policy_action = coerce_exec_action(
                 policy_next_action(
                     request,
                     attempt,
@@ -423,7 +387,70 @@ impl AgenticAttackExecutionAgent {
                     needs_recover,
                     recoveries_used,
                     &last_obs,
+                ),
+                request,
+                attempt,
+                max_attempts,
+                generated_for_attempt,
+                attacked_for_attempt,
+                reflected_for_attempt,
+                adapted_after_attempt,
+                last_reflection.as_ref(),
+                needs_recover,
+                recoveries_used,
+                &last_obs,
+            );
+            let ask_llm = llms.llm_ready && orchestrator_llm_needed(policy_action);
+            let action = if ask_llm {
+                match pick_agentic_action(
+                    llms.orchestrator.clone(),
+                    &transcript,
+                    step,
+                    max_steps,
                 )
+                .await
+                {
+                    Ok((thought, pick_action)) => {
+                        let thought = sanitize_orchestrator_thought(&thought);
+                        emit_and_record(
+                            tools,
+                            &mut events,
+                            AgentEvent::react(
+                                AgentId::AgenticAttackExecution,
+                                format!("Thought: {thought}"),
+                            ),
+                        )
+                        .await;
+                        transcript.push_str(&format!(
+                            "\n--- Step {step} ---\nThought: {thought}\nAction: {:?}\n",
+                            map_pick_action(pick_action)
+                        ));
+                        map_pick_action(pick_action)
+                    }
+                    Err(err) => {
+                        warn!(error = %err, "AgenticAttackExecutionAgent action pick failed; using policy");
+                        transcript.push_str(&format!(
+                            "\n--- Step {step} ---\nInvalid tool choice: {err}\n\
+                             Valid tools: generate|attack|recover|reflect|adapt. Using policy.\n"
+                        ));
+                        policy_action
+                    }
+                }
+            } else {
+                emit_and_record(
+                    tools,
+                    &mut events,
+                    AgentEvent::react(
+                        AgentId::AgenticAttackExecution,
+                        "Thought: (policy)".to_string(),
+                    ),
+                )
+                .await;
+                transcript.push_str(&format!(
+                    "\n--- Step {step} ---\nThought: (policy)\nAction: {:?}\n",
+                    policy_action
+                ));
+                policy_action
             };
             // Hard-gate: recover only when unhealthy; never Finish before attack;
             // never skip Reflection after an attack (LLM often Finish/Generate like sequential).
@@ -1157,6 +1184,33 @@ fn map_pick_action(action: AttackPickAction) -> ExecAction {
     }
 }
 
+fn orchestrator_llm_needed(action: ExecAction) -> bool {
+    !matches!(
+        action,
+        ExecAction::Generate
+            | ExecAction::Attack
+            | ExecAction::Reflect
+            | ExecAction::Recover
+            | ExecAction::Finish
+    )
+}
+
+fn sanitize_orchestrator_thought(thought: &str) -> String {
+    let trimmed = thought.trim();
+    if trimmed.is_empty() {
+        return "(orchestrator)".into();
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.contains("\"status\":429")
+        || lower.contains("too many requests")
+        || lower.contains("rate_limit")
+        || (trimmed.starts_with('{') && lower.contains("status"))
+    {
+        return "(orchestrator)".into();
+    }
+    trimmed.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1246,5 +1300,19 @@ mod tests {
             &healthy_obs(),
         );
         assert_eq!(action, ExecAction::Finish);
+    }
+
+    #[test]
+    fn policy_skips_llm_on_deterministic_steps() {
+        assert!(!orchestrator_llm_needed(ExecAction::Generate));
+        assert!(!orchestrator_llm_needed(ExecAction::Attack));
+        assert!(!orchestrator_llm_needed(ExecAction::Reflect));
+        assert!(!orchestrator_llm_needed(ExecAction::Recover));
+        assert!(!orchestrator_llm_needed(ExecAction::Finish));
+        assert!(orchestrator_llm_needed(ExecAction::Adapt));
+        assert_eq!(
+            sanitize_orchestrator_thought(r#"{"status":429,"title":"Too Many Requests"}"#),
+            "(orchestrator)"
+        );
     }
 }

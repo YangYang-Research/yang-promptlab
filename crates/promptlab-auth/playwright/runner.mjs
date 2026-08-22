@@ -343,10 +343,15 @@ async function cmdSendChatPrompt(req) {
     submit_selector: submitSelector,
     response_selector: responseSelector,
     storage_state_path: storageStatePath,
+    file_input_selector: fileInputSelector,
+    file_path: filePath,
+    keep_page: keepPage,
+    wait_stable_ms: waitStableMs,
     options,
   } = req;
 
-  if (context) {
+  const timeout = options?.timeout_ms ?? 30000;
+  if (!keepPage && context) {
     await context.close();
     context = null;
     page = null;
@@ -360,18 +365,40 @@ async function cmdSendChatPrompt(req) {
   await ensureBrowser(launchOpts);
   if (!page) throw new Error('page not initialized');
 
-  await page.goto(url, {
-    waitUntil: 'domcontentloaded',
-    timeout: options?.timeout_ms ?? 30000,
-  });
+  const alreadyOnUrl = keepPage && page.url() && page.url() !== 'about:blank';
+  if (!alreadyOnUrl) {
+    await page.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout,
+    });
+  }
+
+  if (fileInputSelector && filePath) {
+    await page.setInputFiles(fileInputSelector, filePath);
+  }
 
   await page.fill(inputSelector, prompt ?? '');
   await Promise.all([
-    page.waitForSelector(responseSelector, { timeout: options?.timeout_ms ?? 30000 }),
+    page.waitForSelector(responseSelector, { timeout }),
     page.click(submitSelector),
   ]);
 
-  const responseText = await page.locator(responseSelector).last().innerText();
+  const locator = page.locator(responseSelector).last();
+  const stableWait = Number(waitStableMs) || 0;
+  if (stableWait > 0) {
+    let previous = '';
+    const deadline = Date.now() + stableWait;
+    while (Date.now() < deadline) {
+      const current = (await locator.innerText()) ?? '';
+      if (current && current === previous) {
+        break;
+      }
+      previous = current;
+      await page.waitForTimeout(Math.min(400, Math.max(50, stableWait / 5)));
+    }
+  }
+
+  const responseText = await locator.innerText();
   return { response_text: responseText };
 }
 

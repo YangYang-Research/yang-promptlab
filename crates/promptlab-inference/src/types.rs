@@ -99,6 +99,9 @@ pub struct CompleteRequest {
     /// When non-empty, providers should prefer this over `system` + `prompt`.
     #[serde(default)]
     pub messages: Vec<serde_json::Value>,
+    /// Harness purpose (`assistant`, `judge`, …). Defaults to the client's purpose.
+    #[serde(default)]
+    pub purpose: Option<String>,
 }
 
 impl CompleteRequest {
@@ -111,6 +114,7 @@ impl CompleteRequest {
             tools: Vec::new(),
             tool_choice: None,
             messages: Vec::new(),
+            purpose: None,
         }
     }
 }

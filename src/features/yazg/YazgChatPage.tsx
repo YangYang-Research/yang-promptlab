@@ -12,6 +12,7 @@ import {
   IconPlus,
   IconRobot,
   IconSend,
+  IconStop,
   IconTrash,
   Modal,
   PageHeader,
@@ -34,6 +35,7 @@ import {
   sendYazgChatMessage,
   setYazgChatHostHooks,
   startNewYazgChat,
+  stopYazgChat,
   subscribeYazgChatSession,
 } from "./yazgChatSession";
 import type { YazgHiltPendingActionDto } from "@/shared/ipc/yazg";
@@ -102,7 +104,7 @@ export function YazgChatPage() {
     getYazgChatSessionSnapshot,
     getYazgChatSessionSnapshot,
   );
-  const { store, busy, pendingThreadId } = session;
+  const { store, busy, stopping, pendingThreadId } = session;
 
   const [draft, setDraft] = useState("");
   const [renameThreadId, setRenameThreadId] = useState<string | null>(null);
@@ -434,7 +436,9 @@ export function YazgChatPage() {
               </article>
             ))}
             {activePending ? (
-              <p className="yazg-chat-page__typing text-muted text-sm">Yazg is working…</p>
+              <p className="yazg-chat-page__typing text-muted text-sm">
+                {stopping ? "Stopping…" : "Yazg is working…"}
+              </p>
             ) : null}
             <div ref={bottomRef} />
           </div>
@@ -462,15 +466,30 @@ export function YazgChatPage() {
                     }
                   }}
                 />
-                <IconButton
-                  type="submit"
-                  ariaLabel="Send message"
-                  variant="primary"
-                  size="sm"
-                  disabled={!backendConnected || busy || !draft.trim()}
-                >
-                  <IconSend />
-                </IconButton>
+                {busy ? (
+                  <IconButton
+                    type="button"
+                    ariaLabel={stopping ? "Stopping" : "Stop"}
+                    variant="danger"
+                    size="sm"
+                    disabled={!backendConnected || stopping}
+                    onClick={() => {
+                      void stopYazgChat();
+                    }}
+                  >
+                    <IconStop />
+                  </IconButton>
+                ) : (
+                  <IconButton
+                    type="submit"
+                    ariaLabel="Send message"
+                    variant="primary"
+                    size="sm"
+                    disabled={!backendConnected || !draft.trim()}
+                  >
+                    <IconSend />
+                  </IconButton>
+                )}
               </div>
             </form>
             <p className="yazg-chat-page__composer-hint">

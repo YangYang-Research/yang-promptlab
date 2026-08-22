@@ -5,6 +5,8 @@ import {
   yazgChat,
   yazgGenerateChatTitle,
   yazgResolveHilt,
+  yazgStop,
+  isYazgCancelledError,
   type YazgAgentEventDto,
   type YazgHiltPendingActionDto,
   type YazgIntent,
@@ -45,12 +47,13 @@ export type ChatStore = {
 export type YazgChatSessionState = {
   store: ChatStore;
   busy: boolean;
+  stopping: boolean;
   /** Thread currently waiting on Yazg ReAct (survives route changes). */
   pendingThreadId: string | null;
 };
 
 type YazgChatHostHooks = {
-  notify?: (message: string, level: "success" | "error") => void;
+  notify?: (message: string, level: "success" | "error" | "info") => void;
   refresh?: () => void;
 };
 
@@ -184,6 +187,7 @@ type Listener = () => void;
 let state: YazgChatSessionState = {
   store: loadStore(),
   busy: false,
+  stopping: false,
   pendingThreadId: null,
 };
 
@@ -346,6 +350,7 @@ function appendYazgMessage(
   // Apply reply + clear busy in one snapshot so the UI never sticks on "working…".
   setState({
     busy: false,
+    stopping: false,
     pendingThreadId: null,
     store: {
       ...state.store,
@@ -421,6 +426,7 @@ export async function sendYazgChatMessage(options: {
   setState({
     ...state,
     busy: true,
+    stopping: false,
     pendingThreadId: threadId,
   });
 
@@ -462,6 +468,14 @@ export async function sendYazgChatMessage(options: {
       });
     }
   } catch (err) {
+    if (isYazgCancelledError(err)) {
+      hostHooks.notify?.("Stopped.", "info");
+      appendYazgMessage(threadId, {
+        text: "Stopped.",
+        events: [{ agent: "yazg", kind: "cancelled", message: "Stopped." }],
+      });
+      return;
+    }
     const messageText = toAppError(err).message;
     hostHooks.notify?.(messageText, "error");
     appendYazgMessage(threadId, {
@@ -483,9 +497,22 @@ export async function sendYazgChatMessage(options: {
       setState({
         ...state,
         busy: false,
+        stopping: false,
         pendingThreadId: null,
       });
     }
+  }
+}
+
+/** Cooperative cancel for the in-flight Assistant turn (`yazg_stop`). */
+export async function stopYazgChat(): Promise<void> {
+  if (!state.busy || state.stopping) return;
+  setState({ ...state, stopping: true });
+  try {
+    await yazgStop();
+  } catch (err) {
+    setState({ ...state, stopping: false });
+    hostHooks.notify?.(toAppError(err).message, "error");
   }
 }
 
@@ -511,6 +538,7 @@ export async function resolveYazgHiltAction(options: {
   setState({
     ...state,
     busy: true,
+    stopping: false,
     pendingThreadId: options.threadId,
   });
 
@@ -562,11 +590,20 @@ export async function resolveYazgHiltAction(options: {
       hostHooks.notify?.("Approval expired (15 min)", "error");
     }
   } catch (err) {
+    if (isYazgCancelledError(err)) {
+      hostHooks.notify?.("Stopped.", "info");
+      appendYazgMessage(options.threadId, {
+        text: "Stopped.",
+        events: [{ agent: "yazg", kind: "cancelled", message: "Stopped." }],
+      });
+      return;
+    }
     const messageText = toAppError(err).message;
     hostHooks.notify?.(messageText, "error");
     setState({
       ...state,
       busy: false,
+      stopping: false,
       pendingThreadId: null,
     });
   }

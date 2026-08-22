@@ -31,9 +31,14 @@ impl DiscoveryEngine {
 
     /// Attach authenticated session cookies/tokens and optional Playwright storageState.
     pub fn with_session_auth(mut self, auth: SessionAuthMaterial) -> PromptLabResult<Self> {
-        self.client = HttpClient::new(self.config.clone())?.with_auth_headers(auth.headers.clone());
+        self.client = self.client.with_auth_headers(auth.headers.clone());
         self.session_auth = Some(auth);
         Ok(self)
+    }
+
+    pub fn with_harness_factory(mut self, factory: promptlab_harness::HarnessFactory) -> Self {
+        self.client = self.client.clone().with_factory(factory);
+        self
     }
 
     pub fn with_defaults() -> PromptLabResult<Self> {

@@ -4354,6 +4354,17 @@ a.setup-checklist__item:hover {
   color: var(--accent);
 }
 
+.icon-btn--danger {
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-elevated));
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+}
+
+.icon-btn--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 22%, var(--bg-elevated));
+}
+
 .icon-refresh--spinning {
   animation: icon-refresh-spin 0.8s linear infinite;
 }
@@ -11430,6 +11441,22 @@ a.setup-checklist__item:hover {
 .yazg-chat-page__input-shell .icon-btn:disabled {
   opacity: 0.35;
   background: var(--text-subtle);
+  color: var(--bg-elevated, #fff);
+}
+
+.yazg-chat-page__input-shell .icon-btn--danger {
+  background: var(--danger, #dc2626);
+  color: var(--bg-elevated, #fff);
+}
+
+.yazg-chat-page__input-shell .icon-btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger, #dc2626) 88%, #000);
+  color: var(--bg-elevated, #fff);
+}
+
+.yazg-chat-page__input-shell .icon-btn--danger:disabled {
+  opacity: 0.55;
+  background: var(--danger, #dc2626);
   color: var(--bg-elevated, #fff);
 }
 

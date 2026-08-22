@@ -15,8 +15,9 @@ pub use lifecycle::PluginLifecycle;
 pub use manifest::{PluginManifest, MANIFEST_FILE, HOST_API_VERSION};
 pub use manager::PluginManager;
 pub use integrations::{
-    collect_discovery_endpoints, evaluate_with_judge_plugins, invoke_enabled_by_type,
-    mutate_attack_payload, PluginDiscoveryEndpoint, PluginJudgeSignal,
+    collect_discovery_endpoints, evaluate_with_judge_plugins, intercept_attack_post,
+    intercept_attack_pre, invoke_enabled_by_type, mutate_attack_payload, AttackInterceptResult,
+    PluginDiscoveryEndpoint, PluginJudgeSignal,
 };
 pub use persistence::{load_enabled_ids, persist_enabled, restore_enabled, state_file_path};
 pub use permissions::PermissionGuard;

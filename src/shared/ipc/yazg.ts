@@ -90,3 +90,21 @@ export function yazgResolveHilt(
 ): Promise<YazgChatResponse> {
   return invokeCommand<YazgChatResponse>("yazg_resolve_hilt", { request });
 }
+
+export function yazgStop(): Promise<void> {
+  return invokeCommand<void>("yazg_stop");
+}
+
+/** Harness/LLM cooperative cancel from `yazg_stop`. */
+export function isYazgCancelledError(error: unknown): boolean {
+  const message =
+    error && typeof error === "object" && "message" in error
+      ? String((error as { message: unknown }).message)
+      : String(error ?? "");
+  const normalized = message.toLowerCase();
+  return (
+    normalized === "cancelled" ||
+    normalized.includes("cancelled") ||
+    normalized.includes("canceled")
+  );
+}

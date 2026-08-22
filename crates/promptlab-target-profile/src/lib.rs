@@ -20,7 +20,10 @@ pub mod verification;
 pub mod verification_llm;
 
 pub use capabilities::{default_capabilities_for_provider, effective_capabilities};
-pub use harness::harness_kind_for_profile;
+pub use harness::{
+    descriptor_for_profile, harness_id_for_profile, harness_kind_for_profile,
+    target_surface_for_provider,
+};
 pub use payload_strategy::{
     all_attack_mutator_ids, capability_influences_strategy, payload_strategy_for_attack_profile,
     recommend_payload_strategy, MutationLevel, PayloadGenerationStrategy, PayloadStrategy,
@@ -50,7 +53,8 @@ pub use prompt::{contains_prompt_placeholder, replace_prompt, PROMPT_PLACEHOLDER
 pub use templates::{list_provider_templates, template_for_provider};
 pub use types::*;
 pub use verification::{
-    execute_capability_probe, execute_verify_http, execute_verify_http_with_prompt, has_ai_response,
+    execute_capability_probe, execute_capability_probe_with_factory, execute_verify_http,
+    execute_verify_http_with_factory, execute_verify_http_with_prompt, has_ai_response,
     verify_target_profile, CONNECT_PROBE_PROMPT, VERIFY_PROMPT, VerificationAttempt,
     VerificationConsoleEntry, VerificationError, VerifyHttpSuccess,
 };

@@ -2,15 +2,17 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use promptlab_core::{build_http_client, current_proxy_settings, HttpClientOptions, ProxySettings};
 use reqwest::Client;
 use tracing::debug;
 
 use crate::error::{HarnessError, HarnessResult};
-use crate::models::{AttackRequest, NormalizedResponse};
+use crate::models::{AttackRequest, HttpMethod, NormalizedResponse};
+use crate::sse::{consume_sse_chunk, request_wants_stream};
 use crate::traits::Harness;
 
-/// Generic HTTP harness for REST and MCP-over-HTTP targets.
+/// Generic HTTP harness for REST targets.
 #[derive(Clone)]
 pub struct HttpHarness {
     /// Rebuilds when Settings → Proxy changes so attack traffic always follows current policy.
@@ -24,7 +26,7 @@ impl HttpHarness {
         })
     }
 
-    fn client(&self) -> HarnessResult<Client> {
+    pub fn client(&self) -> HarnessResult<Client> {
         let current = current_proxy_settings();
         let mut guard = self
             .cache
@@ -39,6 +41,77 @@ impl HttpHarness {
             .map_err(|e| HarnessError::config(e.to_string()))?;
         *guard = Some((current, client.clone()));
         Ok(client)
+    }
+
+    pub async fn execute_raw(
+        &self,
+        request: &AttackRequest,
+        harness_id: &str,
+    ) -> HarnessResult<NormalizedResponse> {
+        request.cancel.check()?;
+        let started = Instant::now();
+        let url = request.auth.apply_query_key(&request.url);
+        let headers = request.merged_headers();
+        let method = request.method.as_str();
+        let body = request.effective_body();
+        let client = self.client()?;
+        let stream = request_wants_stream(request.body.as_deref(), request.stream);
+
+        let mut builder = client
+            .request(
+                reqwest::Method::from_bytes(method.as_bytes())
+                    .map_err(|e| HarnessError::config(e.to_string()))?,
+                &url,
+            )
+            .timeout(Duration::from_millis(request.timeout_ms.max(1)));
+
+        for (key, value) in &headers {
+            builder = builder.header(key, value);
+        }
+        if stream && !headers.keys().any(|k| k.eq_ignore_ascii_case("accept")) {
+            builder = builder.header("Accept", "text/event-stream");
+        }
+        if !matches!(request.method, HttpMethod::Get) {
+            builder = builder.body(body);
+        }
+
+        let response = builder.send().await?;
+        request.cancel.check()?;
+        let status = response.status().as_u16();
+        let response_headers = collect_response_headers(response.headers());
+        let content_type = response_headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            .map(|(_, v)| v.as_str())
+            .unwrap_or("");
+        let sse = stream || content_type.contains("text/event-stream");
+
+        let raw = if sse {
+            read_sse_body(response, request).await?
+        } else {
+            response.text().await.unwrap_or_default()
+        };
+
+        debug!(
+            harness = harness_id,
+            url = %url,
+            status,
+            duration_ms = started.elapsed().as_millis(),
+            "harness execute complete"
+        );
+
+        let mut normalized = NormalizedResponse::from_http_headers(
+            status,
+            response_headers,
+            raw,
+            harness_id,
+        );
+        if let Some(session) = response_session_header(&normalized) {
+            normalized
+                .metadata
+                .insert("mcp_session_id".into(), session);
+        }
+        Ok(normalized)
     }
 }
 
@@ -55,47 +128,41 @@ impl Harness for HttpHarness {
     }
 
     async fn execute(&self, request: AttackRequest) -> HarnessResult<NormalizedResponse> {
-        let started = Instant::now();
-        let headers = request.merged_headers();
-        let method = request.method.as_str();
-        let body = request.effective_body();
-        let client = self.client()?;
+        self.execute_raw(&request, self.id()).await
+    }
+}
 
-        let mut builder = client
-            .request(
-                reqwest::Method::from_bytes(method.as_bytes())
-                    .map_err(|e| HarnessError::config(e.to_string()))?,
-                &request.url,
-            )
-            .timeout(Duration::from_millis(request.timeout_ms.max(1)));
+fn response_session_header(response: &NormalizedResponse) -> Option<String> {
+    response
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("mcp-session-id"))
+        .map(|(_, v)| v.clone())
+}
 
-        for (key, value) in headers {
-            builder = builder.header(key, value);
+async fn read_sse_body(
+    response: reqwest::Response,
+    request: &AttackRequest,
+) -> HarnessResult<String> {
+    let mut buffer = String::new();
+    let mut assembled = String::new();
+    let mut raw = String::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        request.cancel.check()?;
+        let bytes = chunk.map_err(HarnessError::from)?;
+        let text = String::from_utf8_lossy(&bytes);
+        raw.push_str(&text);
+        let before = assembled.len();
+        consume_sse_chunk(&mut buffer, &text, &mut assembled);
+        if assembled.len() > before {
+            request.emit_stream(&assembled[before..]);
         }
-
-        if !matches!(request.method, crate::models::HttpMethod::Get) {
-            builder = builder.body(body);
-        }
-
-        let response = builder.send().await?;
-        let status = response.status().as_u16();
-        let headers = collect_response_headers(response.headers());
-        let raw = response.text().await.unwrap_or_default();
-
-        debug!(
-            harness = "http",
-            url = %request.url,
-            status,
-            duration_ms = started.elapsed().as_millis(),
-            "harness execute complete"
-        );
-
-        Ok(NormalizedResponse::from_http_headers(
-            status,
-            headers,
-            raw,
-            self.id(),
-        ))
+    }
+    if assembled.trim().is_empty() {
+        Ok(raw)
+    } else {
+        Ok(serde_json::json!({ "answer": assembled, "raw_sse": raw }).to_string())
     }
 }
 

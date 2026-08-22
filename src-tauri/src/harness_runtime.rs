@@ -85,7 +85,7 @@ pub async fn build_harness_attack_runtime_parts(
     }
 
     let descriptor = promptlab_harness::adapter::descriptor_from_parts(&descriptor_json, probe_url, auth.clone());
-    let mut factory = base_factory.clone();
+    let mut factory = base_factory.isolated();
 
     if descriptor.preferred_harness() == promptlab_harness::HarnessKind::Playwright {
         if let Some(ctx) = &session {

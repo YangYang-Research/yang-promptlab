@@ -12,8 +12,15 @@ pub enum TargetSurface {
     RestApi,
     OpenAiCompatible,
     AnthropicCompatible,
+    Gemini,
+    Dify,
     BrowserChat,
     McpServer,
+    WebSocket,
+    Bedrock,
+    LlamaCpp,
+    Ollama,
+    LocalRuntime,
 }
 
 impl TargetSurface {
@@ -22,8 +29,15 @@ impl TargetSurface {
             "rest_api" | "rest" | "http" | "api" => Some(Self::RestApi),
             "openai_compatible" | "openai" | "llm_api" => Some(Self::OpenAiCompatible),
             "anthropic_compatible" | "anthropic" => Some(Self::AnthropicCompatible),
+            "gemini" | "google_gemini" => Some(Self::Gemini),
+            "dify" => Some(Self::Dify),
             "browser_chat" | "chat_ui" | "browser" => Some(Self::BrowserChat),
             "mcp_server" | "mcp" => Some(Self::McpServer),
+            "websocket" | "generic_websocket" | "ws" => Some(Self::WebSocket),
+            "bedrock" | "aws_bedrock" => Some(Self::Bedrock),
+            "llama_cpp" | "llama.cpp" | "llama" => Some(Self::LlamaCpp),
+            "ollama" => Some(Self::Ollama),
+            "local_runtime" | "callback" | "adapter" => Some(Self::LocalRuntime),
             _ => None,
         }
     }
@@ -35,7 +49,14 @@ impl TargetSurface {
 pub enum HarnessKind {
     Http,
     OpenAi,
+    Anthropic,
+    Gemini,
+    Dify,
+    Mcp,
+    WebSocket,
+    Bedrock,
     Playwright,
+    Llama,
 }
 
 impl HarnessKind {
@@ -43,7 +64,14 @@ impl HarnessKind {
         match self {
             Self::Http => "http",
             Self::OpenAi => "openai",
+            Self::Anthropic => "anthropic",
+            Self::Gemini => "gemini",
+            Self::Dify => "dify",
+            Self::Mcp => "mcp",
+            Self::WebSocket => "websocket",
+            Self::Bedrock => "bedrock",
             Self::Playwright => "playwright",
+            Self::Llama => "llama",
         }
     }
 }
@@ -65,6 +93,12 @@ pub struct TargetDescriptor {
     pub browser_session_id: Option<String>,
     #[serde(default)]
     pub chat_selectors: HashMap<String, String>,
+    #[serde(default)]
+    pub stream: bool,
+    pub conversation_id: Option<String>,
+    pub mcp_method: Option<String>,
+    pub mcp_session_id: Option<String>,
+    pub ws_subprotocol: Option<String>,
 }
 
 impl Default for TargetDescriptor {
@@ -78,6 +112,11 @@ impl Default for TargetDescriptor {
             auth: AuthMaterial::default(),
             browser_session_id: None,
             chat_selectors: HashMap::new(),
+            stream: false,
+            conversation_id: None,
+            mcp_method: None,
+            mcp_session_id: None,
+            ws_subprotocol: None,
         }
     }
 }
@@ -148,6 +187,31 @@ impl TargetDescriptor {
             }
         }
 
+        let stream = value
+            .get("stream")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let conversation_id = value
+            .get("conversation_id")
+            .or_else(|| value.get("conversationId"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let mcp_method = value
+            .get("mcp_method")
+            .or_else(|| value.get("mcpMethod"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let mcp_session_id = value
+            .get("mcp_session_id")
+            .or_else(|| value.get("mcpSessionId"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let ws_subprotocol = value
+            .get("ws_subprotocol")
+            .or_else(|| value.get("wsSubprotocol"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
         Self {
             url,
             surface,
@@ -157,6 +221,11 @@ impl TargetDescriptor {
             auth,
             browser_session_id,
             chat_selectors,
+            stream,
+            conversation_id,
+            mcp_method,
+            mcp_session_id,
+            ws_subprotocol,
         }
     }
 
@@ -165,11 +234,18 @@ impl TargetDescriptor {
             return HarnessKind::Playwright;
         }
         match self.surface {
-            TargetSurface::OpenAiCompatible | TargetSurface::AnthropicCompatible => {
-                HarnessKind::OpenAi
-            }
+            TargetSurface::OpenAiCompatible => HarnessKind::OpenAi,
+            TargetSurface::AnthropicCompatible => HarnessKind::Anthropic,
+            TargetSurface::Gemini => HarnessKind::Gemini,
+            TargetSurface::Dify => HarnessKind::Dify,
             TargetSurface::BrowserChat => HarnessKind::Playwright,
-            TargetSurface::RestApi | TargetSurface::McpServer => HarnessKind::Http,
+            TargetSurface::McpServer => HarnessKind::Mcp,
+            TargetSurface::WebSocket => HarnessKind::WebSocket,
+            TargetSurface::Bedrock => HarnessKind::Bedrock,
+            TargetSurface::LlamaCpp | TargetSurface::Ollama | TargetSurface::LocalRuntime => {
+                HarnessKind::Llama
+            }
+            TargetSurface::RestApi => HarnessKind::Http,
         }
     }
 }
@@ -183,8 +259,13 @@ fn infer_surface(value: &serde_json::Value) -> TargetSurface {
     {
         return TargetSurface::BrowserChat;
     }
-    if value.get("type").and_then(|v| v.as_str()) == Some("llm_api") {
-        return TargetSurface::OpenAiCompatible;
+    if let Some(kind) = value.get("type").and_then(|v| v.as_str()) {
+        if let Some(parsed) = TargetSurface::parse(kind) {
+            return parsed;
+        }
+        if kind == "llm_api" {
+            return TargetSurface::OpenAiCompatible;
+        }
     }
     TargetSurface::RestApi
 }
@@ -207,13 +288,75 @@ fn parse_auth(value: &serde_json::Value, auth: &mut AuthMaterial) {
                 .and_then(|v| v.as_str())
                 .map(str::to_string);
         }
-        "bearer" | "api_key" | "jwt" => {
+        "bearer" | "jwt" => {
             auth.bearer_token = value
                 .get("token")
                 .or_else(|| value.get("api_key"))
                 .or_else(|| value.get("jwt"))
                 .and_then(|v| v.as_str())
                 .map(str::to_string);
+        }
+        "api_key" | "anthropic" | "gemini" => {
+            auth.api_key = value
+                .get("api_key")
+                .or_else(|| value.get("token"))
+                .or_else(|| value.get("key"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            auth.api_key_header = value
+                .get("header")
+                .or_else(|| value.get("header_name"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .or_else(|| match method {
+                    "anthropic" => Some("x-api-key".into()),
+                    "gemini" => Some("x-goog-api-key".into()),
+                    _ => Some("x-api-key".into()),
+                });
+            if method == "gemini" {
+                auth.query_key_name = Some("key".into());
+                auth.query_key_value = auth.api_key.clone();
+            }
+        }
+        "query_key" => {
+            auth.query_key_name = value
+                .get("name")
+                .or_else(|| value.get("query_name"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .or(Some("key".into()));
+            auth.query_key_value = value
+                .get("value")
+                .or_else(|| value.get("api_key"))
+                .or_else(|| value.get("token"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+        }
+        "aws" | "sigv4" | "bedrock" => {
+            auth.aws_access_key_id = value
+                .get("access_key_id")
+                .or_else(|| value.get("accessKeyId"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            auth.aws_secret_access_key = value
+                .get("secret_access_key")
+                .or_else(|| value.get("secretAccessKey"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            auth.aws_session_token = value
+                .get("session_token")
+                .or_else(|| value.get("sessionToken"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            auth.aws_region = value
+                .get("region")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            auth.aws_service = value
+                .get("service")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .or(Some("bedrock".into()));
         }
         "playwright" | "browser_session" => {
             if let Some(path) = value.get("storage_state_path").and_then(|v| v.as_str()) {
@@ -245,5 +388,26 @@ mod tests {
         let descriptor = TargetDescriptor::from_descriptor_json(json).unwrap();
         assert_eq!(descriptor.browser_session_id.as_deref(), Some("sess-1"));
         assert_eq!(descriptor.preferred_harness(), HarnessKind::Playwright);
+    }
+
+    #[test]
+    fn maps_anthropic_surface_to_anthropic_harness() {
+        let json = r#"{"url":"https://api.anthropic.com/v1/messages","surface":"anthropic_compatible"}"#;
+        let descriptor = TargetDescriptor::from_descriptor_json(json).unwrap();
+        assert_eq!(descriptor.preferred_harness(), HarnessKind::Anthropic);
+    }
+
+    #[test]
+    fn maps_mcp_and_websocket_surfaces() {
+        let mcp = TargetDescriptor {
+            surface: TargetSurface::McpServer,
+            ..TargetDescriptor::default()
+        };
+        assert_eq!(mcp.preferred_harness(), HarnessKind::Mcp);
+        let ws = TargetDescriptor {
+            surface: TargetSurface::WebSocket,
+            ..TargetDescriptor::default()
+        };
+        assert_eq!(ws.preferred_harness(), HarnessKind::WebSocket);
     }
 }
