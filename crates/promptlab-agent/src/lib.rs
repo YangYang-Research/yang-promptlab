@@ -60,6 +60,7 @@ pub use attack_execution::{
     emit_and_record, AgenticAttackExecutionAgent, AttackAttemptObservation, AttackExecutionLlms,
     AttackExecutionOutcome, AttackExecutionRequest, AttackExecutionTools,
 };
+pub use attack_execution_pick::{pick_scan_execution_agent, ScanExecutionAgentPick};
 pub use endpoint_recovery::{
     batch_needs_degraded_pacing, degrade_pacing_for_next_category, heuristic_recovery,
     observation_needs_recovery, seed_pacing_from_prior_failure, EndpointPacing, RecoveryPlan,

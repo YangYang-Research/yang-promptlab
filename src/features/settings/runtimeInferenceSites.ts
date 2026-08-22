@@ -33,21 +33,21 @@ export const RUNTIME_INFERENCE_SITES: RuntimeInferenceSite[] = [
     title: "Agentic scan execution",
     location: "Scan execution · Agentic · AgenticAttackExecutionAgent",
     description:
-      "When the attack plan uses agentic execution, Yazg delegates to AgenticAttackExecutionAgent, which ReActs across generate → attack → ReflectionAgent → AttackPlanAgent adapt → retry. HTTP attack stays a host harness tool (cancel/pause safe).",
+      "Yazg ReActs on the attack plan to pick this agent, then AgenticAttackExecutionAgent ReActs across generate → attack → ReflectionAgent → AttackPlanAgent adapt → retry. HTTP attack stays a host harness tool (cancel/pause safe).",
   },
   {
     id: "sequential-execution",
     title: "Sequential scan execution",
     location: "Scan execution · Sequential · SequentialAttackExecutionAgent",
     description:
-      "When the attack plan uses sequential execution, Yazg delegates to SequentialAttackExecutionAgent for a single generate → attack(+JudgeCoordinator) pass per category. No reflection/adapt loop.",
+      "Yazg ReActs on the attack plan to pick this agent, then SequentialAttackExecutionAgent ReActs generate → attack(+JudgeCoordinator) → recover. No reflection/adapt loop.",
   },
   {
     id: "judge",
     title: "Response judging",
     location: "Scan execution · Judge phase · JudgeCoordinatorAgent",
     description:
-      "Yazg delegates to JudgeCoordinatorAgent, which runs JudgeWorker, ClassifierWorker, and AttackerWorker, then returns a consensus verdict (severity, confidence, reasoning) used to write findings.",
+      "Yazg delegates to JudgeCoordinatorAgent, which ReActs to call JudgeWorker, ClassifierWorker, and AttackerWorker tools, then synthesizes a consensus verdict used to write findings.",
   },
   {
     id: "recommendations",

@@ -196,6 +196,8 @@ pub struct YazgLlms {
     pub prompt: Arc<dyn PlannerLlm>,
     pub recommend: Arc<dyn PlannerLlm>,
     pub summary: Arc<dyn PlannerLlm>,
+    /// JudgeCoordinator orchestrator completions (not the supervisor chat LLM).
+    pub judge: Arc<dyn PlannerLlm>,
 }
 
 impl YazgLlms {
@@ -206,6 +208,7 @@ impl YazgLlms {
             prompt: supervisor.clone(),
             recommend: supervisor.clone(),
             summary: supervisor.clone(),
+            judge: supervisor.clone(),
             supervisor,
         }
     }

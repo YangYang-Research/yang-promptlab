@@ -428,6 +428,7 @@ pub struct HostYazgReactLlm {
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+    agent_id: String,
 }
 
 impl Clone for HostYazgReactLlm {
@@ -438,6 +439,7 @@ impl Clone for HostYazgReactLlm {
             model_manager: self.model_manager.clone(),
             model_provider: self.model_provider.clone(),
             runtime_manager: self.runtime_manager.clone(),
+            agent_id: self.agent_id.clone(),
         }
     }
 }
@@ -456,7 +458,19 @@ impl HostYazgReactLlm {
             model_manager,
             model_provider,
             runtime_manager,
+            agent_id: "yazg".into(),
         }
+    }
+
+    pub fn with_agent_id(mut self, agent_id: impl Into<String>) -> Self {
+        let id = agent_id.into();
+        let trimmed = id.trim();
+        self.agent_id = if trimmed.is_empty() {
+            "yazg".into()
+        } else {
+            trimmed.to_string()
+        };
+        self
     }
 }
 
@@ -485,7 +499,7 @@ impl PlannerLlm for HostYazgReactLlm {
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
-            "yazg",
+            &self.agent_id,
             Some(system),
             prompt,
             1024,
@@ -535,7 +549,7 @@ impl PlannerLlm for HostYazgReactLlm {
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
-            "yazg",
+            &self.agent_id,
             Some(system),
             prompt,
             1024,
@@ -583,7 +597,7 @@ impl PlannerLlm for HostYazgReactLlm {
             &manager,
             self.model_provider.clone(),
             &mut runtime_mgr,
-            "yazg",
+            &self.agent_id,
             messages.to_vec(),
             1024,
             0.2,
@@ -924,6 +938,7 @@ impl YazgHostLlms {
     }
 
     pub fn into_yazg_llms(self) -> promptlab_agent::YazgLlms {
+        let judge = self.supervisor.clone().with_agent_id("judge_coordinator");
         promptlab_agent::YazgLlms {
             supervisor: Arc::new(self.supervisor),
             analyze: Arc::new(self.analyze),
@@ -931,6 +946,7 @@ impl YazgHostLlms {
             prompt: Arc::new(self.prompt),
             recommend: Arc::new(self.recommend),
             summary: Arc::new(self.summary),
+            judge: Arc::new(judge),
         }
     }
 }
@@ -1000,6 +1016,7 @@ impl YazgHostLlmsScanSummary {
     }
 
     pub fn into_yazg_llms(self) -> promptlab_agent::YazgLlms {
+        let judge = self.supervisor.clone().with_agent_id("judge_coordinator");
         promptlab_agent::YazgLlms {
             supervisor: Arc::new(self.supervisor),
             analyze: Arc::new(self.analyze),
@@ -1007,6 +1024,7 @@ impl YazgHostLlmsScanSummary {
             prompt: Arc::new(self.prompt),
             recommend: Arc::new(self.recommend),
             summary: Arc::new(self.summary),
+            judge: Arc::new(judge),
         }
     }
 }

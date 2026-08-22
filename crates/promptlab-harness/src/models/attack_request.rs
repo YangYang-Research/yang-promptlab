@@ -66,9 +66,10 @@ impl HarnessPurpose {
             "fingerprint" => Self::fingerprint(),
             "health" | "test_chat" | "test_connectivity" | "test_inference" => Self::health(),
             "attack" => Self::attack(),
-            "agentic_attack_execution" | "sequential_attack_execution" | "reflection" => {
-                Self::planner()
-            }
+            "agentic_attack_execution"
+            | "sequential_attack_execution"
+            | "reflection"
+            | "judge_coordinator" => Self::planner(),
             other if other.is_empty() => Self::assistant(),
             other => Self::named(other),
         }
@@ -612,6 +613,10 @@ mod tests {
         assert_eq!(HarnessPurpose::from_agent_id("summary"), HarnessPurpose::report());
         assert_eq!(
             HarnessPurpose::from_agent_id("agentic_attack_execution"),
+            HarnessPurpose::planner()
+        );
+        assert_eq!(
+            HarnessPurpose::from_agent_id("judge_coordinator"),
             HarnessPurpose::planner()
         );
         assert!(HarnessPurpose::assistant().is_product_inference());

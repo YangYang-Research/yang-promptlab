@@ -10,6 +10,7 @@ use promptlab_target_profile::{TargetProfile, TargetProvider};
 use promptlab_auth::{resolve_descriptor_for_runtime, resolve_descriptor_for_wizard, AuthSessionManager, SecretStore};
 use promptlab_agent::JudgeCoordinatorAgent;
 use promptlab_judge::{JudgeRequest, JudgeVerdict, Severity as JudgeSeverity};
+use promptlab_planner::PlannerLlm;
 use promptlab_plugin_host::evaluate_with_judge_plugins;
 use promptlab_inference::InferenceRuntimeManager;
 use promptlab_runtime::{RuntimeManager, SharedModelProvider};
@@ -269,10 +270,20 @@ fn verdict_has_canary_echoed(verdict: &JudgeVerdict) -> bool {
     })
 }
 
+fn verdict_has_payload_echo(verdict: &JudgeVerdict) -> bool {
+    verdict.evidence.iter().any(|e| e == "canary_payload_echo")
+}
+
 /// Weak / payload-echo votes stay on the attack result; they do not become findings.
+/// A true `canary_echoed` vote still qualifies even if another worker also tagged payload_echo.
 fn finding_qualifies_for_cluster(verdict: &JudgeVerdict) -> bool {
-    verdict.vulnerable
-        && (verdict.confidence >= CLUSTER_MIN_CONFIDENCE || verdict_has_canary_echoed(verdict))
+    if !verdict.vulnerable {
+        return false;
+    }
+    if verdict_has_payload_echo(verdict) && !verdict_has_canary_echoed(verdict) {
+        return false;
+    }
+    verdict.confidence >= CLUSTER_MIN_CONFIDENCE || verdict_has_canary_echoed(verdict)
 }
 
 fn clustered_finding_description(
@@ -609,6 +620,25 @@ pub(crate) async fn build_judge_for_category(
     Ok(judge)
 }
 
+pub(crate) fn judge_coordinator_llm(
+    data_dir: &std::path::Path,
+    inference_manager: Arc<AsyncMutex<InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<promptlab_models::LocalModelManager>>,
+    model_provider: SharedModelProvider,
+    runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+) -> Arc<dyn PlannerLlm> {
+    Arc::new(
+        crate::inference_host::HostYazgReactLlm::new(
+            data_dir.to_path_buf(),
+            inference_manager,
+            model_manager,
+            model_provider,
+            runtime_manager,
+        )
+        .with_agent_id("judge_coordinator"),
+    )
+}
+
 struct CategoryJudgeAccum {
     successes: u64,
     created_findings: Vec<FindingDto>,
@@ -697,7 +727,8 @@ struct CategoryJudgeEnv<'a> {
     body_template: Option<&'a str>,
     request_headers: &'a std::collections::HashMap<String, String>,
     provider: Option<&'a str>,
-    judge: &'a promptlab_judge::JudgeEngine,
+    judge: Arc<promptlab_judge::JudgeEngine>,
+    orchestrator: Arc<dyn PlannerLlm>,
     plugin_manager: &'a Arc<AsyncMutex<promptlab_plugin_host::PluginManager>>,
     progress: Option<&'a ScanProgressEmitter>,
     progress_state: Option<&'a Arc<Mutex<ScanProgress>>>,
@@ -727,7 +758,12 @@ async fn judge_single_attempt(
         }
         req
     };
-    let mut verdict: JudgeVerdict = match JudgeCoordinatorAgent::run(&judge_request, env.judge).await
+    let mut verdict: JudgeVerdict = match JudgeCoordinatorAgent::run_with_orchestrator(
+        &judge_request,
+        Arc::clone(&env.judge),
+        Arc::clone(&env.orchestrator),
+    )
+    .await
     {
         Ok(out) => out.verdict,
         Err(err) => {
@@ -1470,15 +1506,24 @@ pub async fn run_category_on_endpoint(
         None,
     );
 
-    let judge = build_judge_for_category(
+    let orchestrator = judge_coordinator_llm(
         data_dir,
-        inference_manager,
-        model_manager,
+        Arc::clone(&inference_manager),
+        Arc::clone(&model_manager),
         model_provider.clone(),
-        runtime_manager,
-        repos,
-    )
-    .await?;
+        Arc::clone(&runtime_manager),
+    );
+    let judge = Arc::new(
+        build_judge_for_category(
+            data_dir,
+            inference_manager,
+            model_manager,
+            model_provider.clone(),
+            runtime_manager,
+            repos,
+        )
+        .await?,
+    );
     let endpoint_metadata = metadata_from_endpoint(endpoint);
     let body_template = endpoint_metadata
         .as_ref()
@@ -1496,7 +1541,8 @@ pub async fn run_category_on_endpoint(
         body_template: body_template.as_deref(),
         request_headers: &request_headers,
         provider: None,
-        judge: &judge,
+        judge,
+        orchestrator,
         plugin_manager: &plugin_manager,
         progress,
         progress_state,
@@ -1590,15 +1636,24 @@ pub async fn run_category_on_target_profile(
         None,
     );
 
-    let judge = build_judge_for_category(
+    let orchestrator = judge_coordinator_llm(
         data_dir,
-        inference_manager,
-        model_manager,
+        Arc::clone(&inference_manager),
+        Arc::clone(&model_manager),
         model_provider.clone(),
-        runtime_manager,
-        repos,
-    )
-    .await?;
+        Arc::clone(&runtime_manager),
+    );
+    let judge = Arc::new(
+        build_judge_for_category(
+            data_dir,
+            inference_manager,
+            model_manager,
+            model_provider.clone(),
+            runtime_manager,
+            repos,
+        )
+        .await?,
+    );
     let request_headers = ctx.target.headers.clone();
     let judge_env = CategoryJudgeEnv {
         repos,
@@ -1612,7 +1667,8 @@ pub async fn run_category_on_target_profile(
         body_template: Some(profile.request_template.as_str()),
         request_headers: &request_headers,
         provider: Some(profile.provider.as_str()),
-        judge: &judge,
+        judge,
+        orchestrator,
         plugin_manager: &plugin_manager,
         progress,
         progress_state,
@@ -1624,7 +1680,36 @@ pub async fn run_category_on_target_profile(
 
 #[cfg(test)]
 mod tests {
-    use super::{cluster_variant_stats, clustered_finding_description, truncate_console_payload};
+    use super::{
+        cluster_variant_stats, clustered_finding_description, finding_qualifies_for_cluster,
+        truncate_console_payload,
+    };
+    use promptlab_judge::{ConsensusReport, JudgeMode, JudgeVerdict};
+    use time::OffsetDateTime;
+
+    fn verdict(vulnerable: bool, confidence: f32, evidence: &[&str]) -> JudgeVerdict {
+        JudgeVerdict {
+            probe_id: "p".into(),
+            vulnerable,
+            confidence,
+            severity: None,
+            category: None,
+            summary: String::new(),
+            reasoning: String::new(),
+            evidence: evidence.iter().map(|s| (*s).to_string()).collect(),
+            verdict: String::new(),
+            mode: JudgeMode::LocalLlm,
+            consensus: ConsensusReport {
+                agreement_ratio: 1.0,
+                participating_evaluators: 1,
+                vulnerable_votes: usize::from(vulnerable),
+                dissent: false,
+                method: "test".into(),
+            },
+            evaluator_results: Vec::new(),
+            judged_at: OffsetDateTime::now_utc(),
+        }
+    }
 
     #[test]
     fn truncate_console_payload_respects_char_boundaries() {
@@ -1665,5 +1750,28 @@ mod tests {
         assert_eq!(count, 2);
         assert_eq!(canary, 1);
         assert_eq!(sev, "high");
+    }
+
+    #[test]
+    fn payload_echo_without_echoed_does_not_qualify() {
+        assert!(!finding_qualifies_for_cluster(&verdict(
+            true,
+            1.0,
+            &["canary_payload_echo"]
+        )));
+    }
+
+    #[test]
+    fn high_confidence_without_payload_echo_qualifies() {
+        assert!(finding_qualifies_for_cluster(&verdict(true, 0.9, &["print"])));
+    }
+
+    #[test]
+    fn echoed_qualifies_even_with_payload_echo() {
+        assert!(finding_qualifies_for_cluster(&verdict(
+            true,
+            0.4,
+            &["canary_echoed", "canary_payload_echo"]
+        )));
     }
 }

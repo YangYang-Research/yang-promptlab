@@ -699,17 +699,30 @@ pub async fn finding_rejudge_op(state: &AppState, id: String) -> CommandResult<F
 
     let judge_request = judge_request_from_finding(&finding, &evidence_value)?;
 
-    let judge = crate::commands::attack::build_judge_for_category(
+    let judge = Arc::new(
+        crate::commands::attack::build_judge_for_category(
+            state.data_dir(),
+            Arc::clone(state.inference_manager()),
+            Arc::clone(state.model_manager()),
+            state.model_provider().clone(),
+            Arc::clone(state.runtime_manager()),
+            &repos,
+        )
+        .await?,
+    );
+    let orchestrator = crate::commands::attack::judge_coordinator_llm(
         state.data_dir(),
         Arc::clone(state.inference_manager()),
         Arc::clone(state.model_manager()),
         state.model_provider().clone(),
         Arc::clone(state.runtime_manager()),
-        &repos,
-    )
-    .await?;
+    );
 
-    let outcome = promptlab_agent::JudgeCoordinatorAgent::run(&judge_request, &judge)
+    let outcome = promptlab_agent::JudgeCoordinatorAgent::run_with_orchestrator(
+        &judge_request,
+        judge,
+        orchestrator,
+    )
         .await
         .map_err(|err| {
             CommandError::from(PromptLabError::internal(format!(

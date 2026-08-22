@@ -187,7 +187,7 @@ impl YazgSupervisor {
                 )
             }
             SupervisorIntent::ExecuteAttack => {
-                Some("Hint: agentic scan execution may fit.")
+                Some("Hint: ReAct to pick SequentialAttackExecutionAgent or AgenticAttackExecutionAgent.")
             }
             // Keep Auto as the raw user message — system preamble already covers routing.
             SupervisorIntent::Chat | SupervisorIntent::Auto => None,
@@ -672,7 +672,7 @@ impl YazgSupervisor {
         })
     }
 
-    /// Consensus judge a single probe via JudgeCoordinatorAgent workers.
+    /// Consensus judge a single probe via JudgeCoordinatorAgent ReAct → workers.
     pub async fn react_judge(
         judge_request: &JudgeRequest,
         judge_engine: Arc<JudgeEngine>,

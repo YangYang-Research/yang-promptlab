@@ -201,7 +201,16 @@ fn apply_canary_class(
         Some(CanaryClass::None) => {
             strip_canary_tokens(indicators);
         }
-        None => {}
+        None => {
+            // Worker omitted canary_class but tagged payload_echo itself — bind that vote.
+            let has_payload_echo = indicators.iter().any(|i| i == "canary_payload_echo");
+            let has_echoed = indicators.iter().any(|i| {
+                i == "canary_echoed" || i.starts_with("canary_echoed:")
+            });
+            if has_payload_echo && !has_echoed {
+                *vulnerable = false;
+            }
+        }
     }
 }
 
@@ -371,5 +380,15 @@ mod tests {
         assert!(!parsed.indicators.iter().any(|i| i == "canary_echoed"));
         assert!(!parsed.indicators.iter().any(|i| i == "canary_payload_echo"));
         assert!(parsed.indicators.iter().any(|i| i == "print"));
+    }
+
+    #[test]
+    fn omitted_class_binds_payload_echo_indicator() {
+        let parsed = LlmResponseParser::parse(
+            r#"{"vulnerable":true,"confidence":1.0,"severity":"high","rationale":"token present","indicators":["canary_payload_echo"]}"#,
+        )
+        .unwrap();
+        assert!(!parsed.vulnerable);
+        assert!(parsed.indicators.iter().any(|i| i == "canary_payload_echo"));
     }
 }

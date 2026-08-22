@@ -223,10 +223,29 @@ pub fn humanize_agent_id(agent_id: &str) -> String {
 }
 
 fn agent_note(agent_id: &str) -> Option<String> {
-    if agent_id == RUNTIME_SYSTEM_AGENT {
-        Some(RUNTIME_SYSTEM_NOTE.to_string())
-    } else {
-        None
+    match agent_id {
+        RUNTIME_SYSTEM_AGENT => Some(RUNTIME_SYSTEM_NOTE.to_string()),
+        "judge_coordinator" => Some(
+            "ReAct turns that dispatch JudgeWorker / ClassifierWorker / AttackerWorker tools."
+                .into(),
+        ),
+        "sequential_attack_execution" => Some(
+            "ReAct generate / attack / recover picks during sequential scans."
+                .into(),
+        ),
+        "agentic_attack_execution" => Some(
+            "Counts Adapt-step orchestrator picks during agentic scans. Generate / attack / reflect / recover stay policy-driven."
+                .into(),
+        ),
+        "reflection" => Some(
+            "Counts when an agentic scan has reflection enabled."
+                .into(),
+        ),
+        "summary" => Some(
+            "Counts when you generate a project or scan summary (Project details or Yazg)."
+                .into(),
+        ),
+        _ => None,
     }
 }
 
@@ -335,6 +354,12 @@ mod tests {
         assert_eq!(system.label, "Runtime system");
         assert!(system.note.as_deref().unwrap_or("").contains("Health checks"));
         assert!(!snap.agents.iter().any(|row| row.agent_id == "unknown"));
+        let sequential = snap
+            .agents
+            .iter()
+            .find(|row| row.agent_id == "sequential_attack_execution")
+            .expect("sequential row");
+        assert!(sequential.note.as_deref().unwrap_or("").contains("ReAct"));
         reset();
     }
 

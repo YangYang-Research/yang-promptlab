@@ -1102,6 +1102,8 @@ fn coerce_exec_action(
     }
     if matches!(action, ExecAction::Recover)
         || (matches!(action, ExecAction::Finish) && attacked_for_attempt.is_none())
+        || (matches!(action, ExecAction::Generate) && generated_for_attempt == Some(attempt))
+        || (matches!(action, ExecAction::Adapt) && !request.adaptive_planning)
     {
         return policy_next_action(
             request,
@@ -1271,6 +1273,59 @@ mod tests {
             &healthy_obs(),
         );
         assert_eq!(action, ExecAction::Reflect);
+    }
+
+    #[test]
+    fn coerce_rewrites_second_generate_to_attack() {
+        let request = AttackExecutionRequest {
+            max_attempts: 3,
+            ..AttackExecutionRequest::default()
+        };
+        let action = coerce_exec_action(
+            ExecAction::Generate,
+            &request,
+            1,
+            3,
+            Some(1),
+            None,
+            None,
+            None,
+            None,
+            false,
+            0,
+            &healthy_obs(),
+        );
+        assert_eq!(action, ExecAction::Attack);
+    }
+
+    #[test]
+    fn coerce_rewrites_adapt_when_adaptive_disabled() {
+        let request = AttackExecutionRequest {
+            max_attempts: 3,
+            adaptive_planning: false,
+            ..AttackExecutionRequest::default()
+        };
+        let reflection = ReflectionOutcome {
+            should_retry: true,
+            reason: "retry".into(),
+            focus_hints: Vec::new(),
+            events: Vec::new(),
+        };
+        let action = coerce_exec_action(
+            ExecAction::Adapt,
+            &request,
+            1,
+            3,
+            Some(1),
+            Some(1),
+            Some(1),
+            None,
+            Some(&reflection),
+            false,
+            0,
+            &healthy_obs(),
+        );
+        assert_eq!(action, ExecAction::Generate);
     }
 
     #[test]

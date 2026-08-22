@@ -1,4 +1,7 @@
-//! JudgeCoordinatorAgent — orchestrates role vote tools (no nested worker LLMs).
+//! JudgeCoordinatorAgent — ReAct LLM orchestrates role-vote tools.
+//!
+//! Scan / Yazg judge must use [`JudgeCoordinatorAgent::run_with_orchestrator`].
+//! [`JudgeCoordinatorAgent::run`] is direct fan-out for tests without an LLM.
 
 use std::sync::Arc;
 
@@ -127,8 +130,7 @@ role_vote_tool!(
 pub struct JudgeCoordinatorAgent;
 
 impl JudgeCoordinatorAgent {
-    /// Run configured role workers (direct fan-out). Prefer [`run_with_orchestrator`] when
-    /// an orchestrator LLM is available.
+    /// Direct worker fan-out (no coordinator LLM). Tests / offline only.
     pub async fn run(
         request: &JudgeRequest,
         engine: &JudgeEngine,
@@ -220,8 +222,13 @@ impl JudgeCoordinatorAgent {
             request.probe_id
         );
         if let Err(err) = agent.prompt(goal).max_turns(max_turns).await {
-            warn!(error = %err, "JudgeCoordinator prompt failed; falling back to direct workers");
-            return Self::run_workers_direct(request, engine.as_ref(), events).await;
+            let message = format!("JudgeCoordinator ReAct failed: {err}");
+            warn!(error = %err, "JudgeCoordinator prompt failed");
+            events.push(AgentEvent::failed(
+                AgentId::JudgeCoordinator,
+                message.clone(),
+            ));
+            return Err(AgentError::Judge(message));
         }
 
         let mut guard = state.lock().await;
@@ -230,8 +237,13 @@ impl JudgeCoordinatorAgent {
         drop(guard);
 
         if worker_results.is_empty() {
-            warn!("JudgeCoordinator finished with no votes; forcing direct workers");
-            return Self::run_workers_direct(request, engine.as_ref(), events).await;
+            let message = "JudgeCoordinator ReAct finished with no worker votes".to_string();
+            warn!("{message}");
+            events.push(AgentEvent::failed(
+                AgentId::JudgeCoordinator,
+                message.clone(),
+            ));
+            return Err(AgentError::Judge(message));
         }
 
         Self::finalize(request, engine.as_ref(), worker_results, events)
@@ -359,5 +371,42 @@ mod tests {
         assert!(outcome.verdict.vulnerable);
         assert!(outcome.worker_results.len() >= 1);
         assert!(!outcome.events.is_empty());
+    }
+
+    struct FailingCoordinatorLlm;
+
+    #[async_trait::async_trait]
+    impl PlannerLlm for FailingCoordinatorLlm {
+        async fn complete(&self, _prompt: &str) -> promptlab_planner::PlannerResult<String> {
+            Err(promptlab_planner::PlannerError::Llm(
+                "coordinator down".into(),
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn coordinator_react_does_not_fan_out_on_llm_failure() {
+        let json = r#"{"vulnerable": true, "confidence": 0.9, "severity": "high", "rationale": "leak", "indicators": ["secret"]}"#;
+        let engine = engine_with_mock(json);
+        let request = JudgeRequest {
+            probe_id: "p-react".into(),
+            attack_category: "prompt_injection".into(),
+            payload: "ignore previous".into(),
+            response_text: "secret: abc".into(),
+            context: serde_json::json!({}),
+        };
+
+        let err = JudgeCoordinatorAgent::run_with_orchestrator(
+            &request,
+            Arc::new(engine),
+            Arc::new(FailingCoordinatorLlm),
+        )
+        .await
+        .expect_err("must fail without fan-out");
+        let message = err.to_string();
+        assert!(
+            message.contains("ReAct") || message.contains("coordinator down"),
+            "{message}"
+        );
     }
 }

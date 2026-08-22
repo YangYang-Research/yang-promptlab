@@ -11,6 +11,7 @@ use tracing::info;
 use crate::attack_execution::{
     emit_and_record, AttackAttemptObservation, AttackExecutionOutcome, AttackExecutionTools,
 };
+use crate::attack_execution_pick::{pick_sequential_action, AttackPickAction};
 use crate::endpoint_recovery::{
     error_is_endpoint_recoverable, heuristic_recovery, observation_needs_recovery,
     seed_pacing_from_prior_failure, MAX_ENDPOINT_RECOVERIES,
@@ -72,8 +73,6 @@ impl SequentialAttackExecutionAgent {
         }
 
         let max_steps = request.max_tool_turns.max(8);
-        let _orchestrator = orchestrator;
-        let _llm_ready = llm_ready;
         let mut events = Vec::new();
         emit_and_record(
             tools,
@@ -238,18 +237,46 @@ impl SequentialAttackExecutionAgent {
                 recoveries_used,
                 &last_obs,
             );
-            let action = policy_action;
+            let (thought, action) = if llm_ready {
+                if let Some(llm) = orchestrator.clone() {
+                    match pick_sequential_action(llm, &transcript, step, max_steps).await {
+                        Ok((thought, pick)) => {
+                            let gated = gate_seq_action(
+                                seq_action_from_pick(pick),
+                                generated,
+                                attacked,
+                                needs_recover,
+                                recoveries_used,
+                                &last_obs,
+                            );
+                            (thought, gated)
+                        }
+                        Err(err) => {
+                            tools
+                                .emit_info(format!(
+                                    "SequentialAttackExecutionAgent: orchestrator pick failed — {err}"
+                                ))
+                                .await;
+                            ("(policy)".into(), policy_action)
+                        }
+                    }
+                } else {
+                    ("(policy)".into(), policy_action)
+                }
+            } else {
+                ("(policy)".into(), policy_action)
+            };
             emit_and_record(
                 tools,
                 &mut events,
                 AgentEvent::react(
                     AgentId::SequentialAttackExecution,
-                    "Thought: (policy)".to_string(),
+                    format!("Thought: {thought}"),
                 ),
             )
             .await;
             transcript.push_str(&format!(
-                "\n--- Step {step} ---\nThought: (policy)\nAction: {action:?}\n"
+                "\n--- Step {step} ---\nThought: {thought}\nAction: {action:?}\n"
             ));
 
             emit_and_record(
@@ -726,6 +753,17 @@ impl SequentialAttackExecutionAgent {
     }
 }
 
+fn seq_action_from_pick(pick: AttackPickAction) -> SeqAction {
+    match pick {
+        AttackPickAction::Generate => SeqAction::Generate,
+        AttackPickAction::Attack => SeqAction::Attack,
+        AttackPickAction::Recover => SeqAction::Recover,
+        AttackPickAction::Reflect | AttackPickAction::Adapt | AttackPickAction::Finish => {
+            SeqAction::Finish
+        }
+    }
+}
+
 fn policy_next_action(
     generated: bool,
     attacked: bool,
@@ -762,18 +800,22 @@ fn gate_seq_action(
     if needs_recover && recoveries_used < MAX_ENDPOINT_RECOVERIES {
         return SeqAction::Recover;
     }
-    if matches!(action, SeqAction::Recover)
-        || (matches!(action, SeqAction::Finish) && !attacked)
-    {
-        return policy_next_action(
-            generated,
-            attacked,
-            needs_recover,
-            recoveries_used,
-            last_obs,
-        );
+    let policy = policy_next_action(
+        generated,
+        attacked,
+        needs_recover,
+        recoveries_used,
+        last_obs,
+    );
+    // LLM often repeats Generate after a successful generate, or Attack after
+    // attack. Those must follow policy (generate once → attack → finish/recover).
+    match action {
+        SeqAction::Generate if generated => policy,
+        SeqAction::Attack if attacked => policy,
+        SeqAction::Recover => policy,
+        SeqAction::Finish if !attacked => policy,
+        other => other,
     }
-    action
 }
 
 fn parse_seq_action(raw: &str) -> Result<SeqAction, String> {
@@ -812,6 +854,22 @@ mod tests {
     }
 
     #[test]
+    fn seq_action_from_pick_drops_agentic_verbs() {
+        assert_eq!(
+            seq_action_from_pick(AttackPickAction::Generate),
+            SeqAction::Generate
+        );
+        assert_eq!(
+            seq_action_from_pick(AttackPickAction::Reflect),
+            SeqAction::Finish
+        );
+        assert_eq!(
+            seq_action_from_pick(AttackPickAction::Adapt),
+            SeqAction::Finish
+        );
+    }
+
+    #[test]
     fn policy_never_finishes_before_attack() {
         let obs = AttackAttemptObservation::default();
         assert_eq!(
@@ -838,6 +896,28 @@ mod tests {
         assert_eq!(
             gate_seq_action(SeqAction::Recover, true, true, true, 0, &obs),
             SeqAction::Recover
+        );
+    }
+
+    #[test]
+    fn second_generate_rewrites_to_attack() {
+        let obs = AttackAttemptObservation::default();
+        assert_eq!(
+            gate_seq_action(SeqAction::Generate, true, false, false, 0, &obs),
+            SeqAction::Attack
+        );
+        assert_eq!(
+            gate_seq_action(SeqAction::Generate, true, true, false, 0, &obs),
+            SeqAction::Finish
+        );
+    }
+
+    #[test]
+    fn attack_after_attack_rewrites_to_finish() {
+        let obs = AttackAttemptObservation::default();
+        assert_eq!(
+            gate_seq_action(SeqAction::Attack, true, true, false, 0, &obs),
+            SeqAction::Finish
         );
     }
 

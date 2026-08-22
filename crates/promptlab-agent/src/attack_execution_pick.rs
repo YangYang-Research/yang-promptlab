@@ -243,3 +243,135 @@ or reply with plain text (no tool) to finish.";
     let prompt_fut = agent.prompt(goal).max_turns(PICK_MAX_TURNS).into_future();
     await_first_pick(rx, prompt_fut).await
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanExecutionAgentPick {
+    Sequential,
+    Agentic,
+}
+
+impl ScanExecutionAgentPick {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Sequential => "sequential",
+            Self::Agentic => "agentic",
+        }
+    }
+}
+
+struct ScanExecPick {
+    action: ScanExecutionAgentPick,
+    reply: oneshot::Sender<String>,
+}
+
+macro_rules! scan_exec_pick_tool {
+    ($name:ident, $const:expr, $action:expr, $desc:expr) => {
+        struct $name {
+            tx: mpsc::Sender<ScanExecPick>,
+        }
+
+        impl Tool for $name {
+            const NAME: &'static str = $const;
+            type Error = PickError;
+            type Args = EmptyArgs;
+            type Output = String;
+
+            fn description(&self) -> String {
+                $desc.into()
+            }
+
+            fn parameters(&self) -> serde_json::Value {
+                json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                })
+            }
+
+            async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
+                let (reply_tx, reply_rx) = oneshot::channel();
+                self.tx
+                    .send(ScanExecPick {
+                        action: $action,
+                        reply: reply_tx,
+                    })
+                    .await
+                    .map_err(|_| PickError("action channel closed".into()))?;
+                reply_rx
+                    .await
+                    .map_err(|_| PickError("action reply dropped".into()))
+            }
+        }
+    };
+}
+
+scan_exec_pick_tool!(
+    SequentialExecAgentTool,
+    "sequential_attack_execution",
+    ScanExecutionAgentPick::Sequential,
+    "Delegate the scan to SequentialAttackExecutionAgent: one generate → attack(+judge) pass per category, recover only on endpoint failure. No reflection/adapt loop."
+);
+scan_exec_pick_tool!(
+    AgenticExecAgentTool,
+    "agentic_attack_execution",
+    ScanExecutionAgentPick::Agentic,
+    "Delegate the scan to AgenticAttackExecutionAgent: generate → attack(+judge) → reflect → adapt/retry across attempts."
+);
+
+/// Yazg ReAct: pick Sequential vs Agentic execution agent from the attack plan.
+pub async fn pick_scan_execution_agent(
+    llm: Arc<dyn PlannerLlm>,
+    plan_brief: &str,
+) -> Result<(String, ScanExecutionAgentPick), String> {
+    let (tx, rx) = mpsc::channel::<ScanExecPick>(1);
+    let tools: Vec<Box<dyn rig::tool::ToolDyn>> = vec![
+        Box::new(SequentialExecAgentTool { tx: tx.clone() }),
+        Box::new(AgenticExecAgentTool { tx: tx.clone() }),
+    ];
+    drop(tx);
+
+    let model = YazgModel::new(llm);
+    let preamble = "\
+You are Yazg, PromptLab's scan orchestrator. Given the attack plan, call exactly one tool \
+to choose the scan execution agent. Do not attack the target yourself. Prefer the plan's \
+recommended_strategy unless it is clearly mismatched (agentic with reflection and adaptive \
+both off → sequential).";
+    let agent = AgentBuilder::new(model)
+        .name("Yazg")
+        .preamble(preamble)
+        .temperature(0.1)
+        .max_tokens(256)
+        .default_max_turns(PICK_MAX_TURNS)
+        .tools(tools)
+        .build();
+
+    let goal = format!(
+        "{plan_brief}\n\nCall sequential_attack_execution or agentic_attack_execution now."
+    );
+    let prompt_fut = agent.prompt(goal).max_turns(PICK_MAX_TURNS).into_future();
+    await_first_scan_exec_pick(rx, prompt_fut).await
+}
+
+async fn await_first_scan_exec_pick(
+    mut rx: mpsc::Receiver<ScanExecPick>,
+    prompt_fut: impl std::future::Future<Output = Result<String, rig::completion::PromptError>>,
+) -> Result<(String, ScanExecutionAgentPick), String> {
+    tokio::pin!(prompt_fut);
+
+    tokio::select! {
+        biased;
+        Some(pick) = rx.recv() => {
+            let action = pick.action;
+            let _ = pick.reply.send("acknowledged — host will execute".into());
+            drop(prompt_fut);
+            drop(rx);
+            Ok((format!("Yazg → {}", action.as_str()), action))
+        }
+        result = &mut prompt_fut => {
+            match result {
+                Ok(_) => Err("Yazg finished without choosing an execution agent".into()),
+                Err(err) => Err(err.to_string()),
+            }
+        }
+    }
+}

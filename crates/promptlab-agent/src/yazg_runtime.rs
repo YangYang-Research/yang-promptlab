@@ -1256,7 +1256,7 @@ fn build_capability_tools(
     if allowed.contains("judge") {
         out.push(Box::new(JudgeTool {
             ctx: specialist,
-            orchestrator: request.llms.supervisor.clone(),
+            orchestrator: request.llms.judge.clone(),
             state: state.clone(),
         }));
     }
