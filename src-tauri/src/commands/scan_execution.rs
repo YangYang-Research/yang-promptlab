@@ -36,7 +36,7 @@ use crate::commands::generator::{
 };
 use crate::events::ScanProgressEmitter;
 use crate::inference_host::{is_inference_ready, HostYazgReactLlm, YazgHostLlms};
-use crate::jobs::{bump_scan_progress, ScanProgress};
+use crate::jobs::{bump_scan_progress, ScanBatchCheckpoint, ScanProgress};
 use crate::scan_playbook::{
     generated_payloads_from_playbook, persist_generated_payloads, persist_playbook_pacing,
     persist_scan_playbook_state, PlaybookPacing,
@@ -99,14 +99,35 @@ pub fn scan_attack_requests_total(
     config: &ScanExecutionConfig,
 ) -> u64 {
     let strategy = config.payload_strategy.clone().unwrap_or_default();
+    // Live Est. requests is one pass. Agentic reflection retries grow the
+    // denominator only when extra HTTP actually fires (`note_attack`).
     estimate_scan_requests(
         categories,
         disabled_tests,
         &strategy,
         config.execution,
-        config.max_attempts,
+        1,
     )
     .max(1) as u64
+}
+
+fn scan_pipeline_units(
+    attack_units: u64,
+    active_categories: u64,
+    config: &ScanExecutionConfig,
+) -> u64 {
+    let cats = active_categories.max(1);
+    let pipeline_units = match config.execution {
+        ExecutionStrategy::Sequential => {
+            // preparing + generate + attack payloads + judge payloads
+            2 + attack_units.saturating_mul(2)
+        }
+        ExecutionStrategy::Agentic => {
+            let reflection_units = if config.reflection_enabled { cats } else { 0 };
+            1 + cats + attack_units.saturating_mul(2) + reflection_units
+        }
+    };
+    pipeline_units.max(1)
 }
 
 pub fn scan_progress_total(
@@ -114,54 +135,12 @@ pub fn scan_progress_total(
     disabled_tests: &[String],
     config: &ScanExecutionConfig,
 ) -> u64 {
-    let strategy = config.payload_strategy.clone().unwrap_or_default();
-    let attack_units = estimate_scan_requests(
-        categories,
-        disabled_tests,
-        &strategy,
-        config.execution,
-        config.max_attempts,
-    )
-    .max(1) as u64;
-
+    let attack_units = scan_attack_requests_total(categories, disabled_tests, config);
     let active_categories = categories
         .iter()
         .filter(|category| enabled_tests_for_category(**category, disabled_tests) > 0)
-        .count()
-        .max(1) as u64;
-    let attempts = u64::from(config.max_attempts.max(1));
-
-    let pipeline_units = match config.execution {
-        ExecutionStrategy::Sequential => {
-            // preparing + generate + attack payloads + judge payloads
-            2 + attack_units.saturating_mul(2)
-        }
-        ExecutionStrategy::Agentic => {
-            let generate_units = active_categories.saturating_mul(attempts);
-            let reflection_units = if config.reflection_enabled {
-                active_categories.saturating_mul(attempts)
-            } else {
-                0
-            };
-            let adaptive_units = if config.adaptive_planning && attempts > 1 {
-                active_categories.saturating_mul(attempts - 1)
-            } else {
-                0
-            };
-            let retry_units = if attempts > 1 {
-                active_categories.saturating_mul(attempts - 1)
-            } else {
-                0
-            };
-            1 + generate_units
-                + attack_units.saturating_mul(2)
-                + reflection_units
-                + adaptive_units
-                + retry_units
-        }
-    };
-
-    pipeline_units.max(1)
+        .count() as u64;
+    scan_pipeline_units(attack_units, active_categories, config)
 }
 
 fn set_scan_phase(
@@ -761,10 +740,9 @@ fn apply_picked_execution(
     let total = scan_progress_total(ctx.categories, ctx.disabled_tests, config);
     let attacks_total = scan_attack_requests_total(ctx.categories, ctx.disabled_tests, config);
     if let Ok(mut state) = ctx.progress.lock() {
-        state.total = total.max(1);
-        state.attacks_total = attacks_total;
+        state.total = total.max(1).max(state.completed);
+        state.attacks_total = attacks_total.max(state.attacks_completed);
         state.agent_mode = matches!(picked, ExecutionStrategy::Agentic);
-        state.completed = state.completed.min(state.total);
     }
 }
 
@@ -1081,6 +1059,25 @@ fn category_checkpoint_present(ctx: &TargetProfileScanContext<'_>) -> bool {
         .unwrap_or(false)
 }
 
+/// True when Retry/Resume will skip HTTP collect for this category (pending_judge / judging_partial).
+fn checkpoint_skips_attack_collect(
+    ctx: &TargetProfileScanContext<'_>,
+    category: AttackCategory,
+) -> bool {
+    let label = category.display_name();
+    ctx.job_controls
+        .as_ref()
+        .and_then(|controls| controls.batch_checkpoint.lock().ok())
+        .and_then(|guard| match guard.as_ref() {
+            Some(ScanBatchCheckpoint::PendingJudge { category, .. })
+            | Some(ScanBatchCheckpoint::JudgingPartial { category, .. }) => Some(
+                category == &label || category.eq_ignore_ascii_case(&label),
+            ),
+            None => Some(false),
+        })
+        .unwrap_or(false)
+}
+
 async fn persist_scan_progress_now(ctx: &TargetProfileScanContext<'_>) {
     let snapshot = ctx.progress.lock().ok().map(|guard| guard.clone());
     let checkpoint = ctx.job_controls.as_ref().and_then(|controls| {
@@ -1123,16 +1120,18 @@ fn recalibrate_progress_from_payloads(
         .as_ref()
         .map(|s| u64::from(s.variants_per_test.max(1)))
         .unwrap_or(1);
-    let attempts = match config.execution {
-        ExecutionStrategy::Agentic => u64::from(config.max_attempts.max(1)),
-        ExecutionStrategy::Sequential => 1,
-    };
-    let http_estimate = payload_count
-        .saturating_mul(variants)
-        .saturating_mul(attempts)
-        .max(1);
+    // Generated objects × attack-time HTTP variants. Do not × max_attempts —
+    // reflection retries that actually fire grow attacks_total via note_attack.
+    let http_estimate = payload_count.saturating_mul(variants).max(1);
+    let cat_count = payloads
+        .values()
+        .filter(|items| !items.is_empty())
+        .count() as u64;
+    let pipeline = scan_pipeline_units(http_estimate, cat_count, config);
     if let Ok(mut state) = progress.lock() {
         state.recalibrate_from_generated_payloads(&source_ids, http_estimate);
+        state.total = pipeline.max(state.completed).max(1);
+        state.attacks_total = state.attacks_total.max(state.attacks_completed);
     }
 }
 
@@ -1144,7 +1143,7 @@ fn record_category_success(
 ) {
     let id = category.as_str();
     if let Ok(mut state) = progress.lock() {
-        state.findings = findings_total;
+        state.findings = state.findings.max(findings_total);
         state.mark_category_success(id);
         if let Some(items) = category_payloads {
             state.mark_testcases(items.iter().map(|p| p.id.as_str()));
@@ -1361,6 +1360,11 @@ impl AttackExecutionTools for SequentialCategoryTools<'_> {
         // "generate" only binds precomputed payloads — do not re-append to phase_trail
         // or the UI shows a misleading second Generate before the next category Attack.
         if phase.eq_ignore_ascii_case("generate") {
+            return;
+        }
+        if phase.eq_ignore_ascii_case("attack")
+            && checkpoint_skips_attack_collect(self.ctx, self.category)
+        {
             return;
         }
         let label = self.category.display_name();
@@ -1665,6 +1669,11 @@ impl AttackExecutionTools for AgenticCategoryTools<'_> {
         // "generate" binds or regenerates payloads — do not re-append a Generate node.
         // Retry / Reflection / Adaptive are the visible agentic loop stages.
         if phase.eq_ignore_ascii_case("generate") {
+            return;
+        }
+        if phase.eq_ignore_ascii_case("attack")
+            && checkpoint_skips_attack_collect(self.ctx, self.category)
+        {
             return;
         }
         let label = self.category.display_name();
@@ -1984,7 +1993,7 @@ mod tests {
     }
 
     #[test]
-    fn agentic_progress_total_includes_generate_reflection_and_retry() {
+    fn agentic_progress_total_is_one_pass() {
         let categories = vec![AttackCategory::PromptInjection];
         let config = ScanExecutionConfig::from_flags(true, 3, true, false, Some(sample_strategy()), None);
         let attack_units = estimate_scan_requests(
@@ -1992,15 +2001,15 @@ mod tests {
             &[],
             &sample_strategy(),
             ExecutionStrategy::Agentic,
-            3,
+            1,
         ) as u64;
         let total = scan_progress_total(&categories, &[], &config);
-        // 1 prepare + 3 generate + 2*attack + 3 reflection + 2 retry
-        assert_eq!(total, 1 + 3 + attack_units * 2 + 3 + 2);
+        // 1 prepare + 1 generate + 2*attack + 1 reflection (retries grow live)
+        assert_eq!(total, 1 + 1 + attack_units * 2 + 1);
     }
 
     #[test]
-    fn agentic_progress_total_includes_adaptive_units() {
+    fn agentic_progress_total_ignores_unused_adaptive_retries() {
         let categories = vec![AttackCategory::PromptInjection];
         let config = ScanExecutionConfig::from_flags(true, 3, true, true, Some(sample_strategy()), None);
         let attack_units = estimate_scan_requests(
@@ -2008,11 +2017,23 @@ mod tests {
             &[],
             &sample_strategy(),
             ExecutionStrategy::Agentic,
-            3,
+            1,
         ) as u64;
         let total = scan_progress_total(&categories, &[], &config);
-        // 1 prepare + 3 generate + 2*attack + 3 reflection + 2 adaptive + 2 retry
-        assert_eq!(total, 1 + 3 + attack_units * 2 + 3 + 2 + 2);
+        assert_eq!(total, 1 + 1 + attack_units * 2 + 1);
+    }
+
+    #[test]
+    fn agentic_attack_requests_total_is_one_pass() {
+        let categories = vec![AttackCategory::PromptInjection];
+        let config_once =
+            ScanExecutionConfig::from_flags(true, 1, true, false, Some(sample_strategy()), None);
+        let config_retry =
+            ScanExecutionConfig::from_flags(true, 3, true, false, Some(sample_strategy()), None);
+        assert_eq!(
+            scan_attack_requests_total(&categories, &[], &config_once),
+            scan_attack_requests_total(&categories, &[], &config_retry)
+        );
     }
 
     #[test]

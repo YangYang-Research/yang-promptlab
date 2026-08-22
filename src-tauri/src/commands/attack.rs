@@ -855,6 +855,11 @@ async fn judge_single_attempt(
         .await?;
         if created {
             accum.created_findings.push(finding_dto.clone());
+            if let Some(progress_state) = env.progress_state {
+                if let Ok(mut state) = progress_state.lock() {
+                    state.note_finding();
+                }
+            }
         }
         if let Some(emitter) = env.progress {
             let message = if created {
@@ -993,10 +998,7 @@ async fn collect_category_attempts(
                 if let Some(progress_state) = progress_state {
                     bump_scan_progress(progress_state, 1);
                     if let Ok(mut state) = progress_state.lock() {
-                        state.attacks_completed = state
-                            .attacks_completed
-                            .saturating_add(1)
-                            .min(state.attacks_total.max(1));
+                        state.note_attack();
                         state.note_testcase(&attempt.payload_id);
                     }
                 }

@@ -111,7 +111,22 @@ impl ScanProgress {
     }
 
     pub fn bump(&mut self, units: u64) {
-        self.completed = self.completed.saturating_add(units).min(self.total);
+        self.completed = self.completed.saturating_add(units);
+        if self.completed > self.total {
+            self.total = self.completed;
+        }
+    }
+
+    /// Count one finished HTTP attack. Grows `attacks_total` when retries exceed the plan.
+    pub fn note_attack(&mut self) {
+        self.attacks_completed = self.attacks_completed.saturating_add(1);
+        if self.attacks_completed > self.attacks_total {
+            self.attacks_total = self.attacks_completed;
+        }
+    }
+
+    pub fn note_finding(&mut self) {
+        self.findings = self.findings.saturating_add(1);
     }
 
     /// Record a phase transition for the live Execution pipeline trail.
@@ -702,6 +717,44 @@ mod tests {
         assert!(progress.should_skip_category("prompt_injection", 0));
         assert!(!progress.should_skip_category("jailbreak", 1));
         assert!(progress.should_skip_category("system_prompt_extraction", 2));
+    }
+
+    #[test]
+    fn bump_grows_total_when_work_exceeds_plan() {
+        let mut progress = ScanProgress::new(4);
+        progress.bump(5);
+        assert_eq!(progress.completed, 5);
+        assert_eq!(progress.total, 5);
+    }
+
+    #[test]
+    fn note_attack_grows_denominator_past_estimate() {
+        let mut progress = ScanProgress::new(4);
+        progress.attacks_total = 2;
+        progress.note_attack();
+        progress.note_attack();
+        progress.note_attack();
+        assert_eq!(progress.attacks_completed, 3);
+        assert_eq!(progress.attacks_total, 3);
+    }
+
+    #[test]
+    fn agentic_retry_still_records_second_attack_pass() {
+        let mut progress = ScanProgress::new(4);
+        progress.apply_phase("attack", Some("Prompt Injection"), Some(1), None);
+        progress.apply_phase("judge", Some("Prompt Injection"), Some(1), None);
+        progress.apply_phase("reflection", Some("Prompt Injection"), Some(1), Some(0));
+        progress.apply_phase("attack", Some("Prompt Injection"), Some(2), Some(1));
+
+        assert_eq!(
+            progress.phase_trail,
+            vec![
+                "attack|Prompt Injection",
+                "judge|Prompt Injection",
+                "reflection|Prompt Injection",
+                "attack|Prompt Injection",
+            ]
+        );
     }
 
     #[test]

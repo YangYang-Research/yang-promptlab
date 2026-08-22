@@ -363,6 +363,23 @@ fn progress_to_dto(scan_id: &str, progress: &ScanProgress) -> ScanStatusDto {
     }
 }
 
+async fn overlay_scan_findings_count(
+    repos: &Repositories,
+    scan_id: &str,
+    mut dto: ScanStatusDto,
+) -> ScanStatusDto {
+    if let Ok(findings) = repos.findings().list_by_scan(scan_id).await {
+        dto.findings_count = dto.findings_count.max(findings.len() as u64);
+    }
+    dto
+}
+
+async fn seed_progress_findings(repos: &Repositories, scan_id: &str, progress: &mut ScanProgress) {
+    if let Ok(findings) = repos.findings().list_by_scan(scan_id).await {
+        progress.findings = progress.findings.max(findings.len() as u64);
+    }
+}
+
 async fn run_scan_job(
     app: AppHandle,
     db: promptlab_storage::Database,
@@ -972,12 +989,8 @@ pub async fn scan_start_op(
     let restored_checkpoint = checkpoint_from_playbook(scan.playbook_json.as_deref());
     let batch_checkpoint = Arc::new(Mutex::new(restored_checkpoint));
     let progress_state = if let Some(mut seeded) = seeded_progress {
-        if seeded.total == 0 {
-            seeded.total = total.max(1);
-        }
-        if seeded.attacks_total == 0 {
-            seeded.attacks_total = attacks_total;
-        }
+        seeded.total = total.max(1).max(seeded.completed);
+        seeded.attacks_total = attacks_total.max(seeded.attacks_completed);
         if seeded.testcases_total == 0 {
             seeded.testcases_total = testcases_total;
         }
@@ -990,6 +1003,8 @@ pub async fn scan_start_op(
         fresh.testcases_total = testcases_total;
         fresh
     };
+    let mut progress_state = progress_state;
+    seed_progress_findings(&repos, &scan.id, &mut progress_state).await;
     let progress = Arc::new(Mutex::new(progress_state));
     state.jobs().register(
         scan.id.clone(),
@@ -1184,12 +1199,13 @@ async fn spawn_resumed_scan_job(
         .unwrap_or_else(|| ScanProgress::new(total.max(1)));
     progress_state.status = "running".into();
     progress_state.pause_pending = false;
-    progress_state.total = total.max(1);
-    progress_state.attacks_total = attacks_total;
-    progress_state.testcases_total = testcases_total;
-    progress_state.completed = progress_state.completed.min(progress_state.total);
+    progress_state.total = total.max(1).max(progress_state.completed);
+    progress_state.attacks_total = attacks_total.max(progress_state.attacks_completed);
+    progress_state.testcases_total = testcases_total.max(progress_state.testcases_total);
     progress_state.sync_testcases_completed();
     backfill_succeeded_categories(&mut progress_state, &params.categories);
+    let repos = state.repositories();
+    seed_progress_findings(&repos, &scan.id, &mut progress_state).await;
 
     let checkpoint = checkpoint_from_playbook(Some(playbook_json));
     let target_id = scan
@@ -1213,7 +1229,6 @@ async fn spawn_resumed_scan_job(
         progress.clone(),
     );
 
-    let repos = state.repositories();
     let _ = repos
         .scans()
         .update(
@@ -1279,7 +1294,9 @@ async fn spawn_resumed_scan_job(
 pub async fn scan_status_op(state: &AppState, scan_id: String) -> CommandResult<ScanStatusDto> {
     if state.jobs().contains(&scan_id) {
         if let Some(progress) = state.jobs().progress(&scan_id) {
-            return Ok(progress_to_dto(&scan_id, &progress));
+            let dto = progress_to_dto(&scan_id, &progress);
+            let repos = state.repositories();
+            return Ok(overlay_scan_findings_count(&repos, &scan_id, dto).await);
         }
         // Job is live even if the progress snapshot is briefly unavailable.
         // Never mark it interrupted — that flips Retry Scan on and double-starts.
@@ -1321,7 +1338,8 @@ async fn scan_status_from_db(
     scan: &promptlab_storage::Scan,
 ) -> CommandResult<ScanStatusDto> {
     if let Some(progress) = progress_from_playbook(scan.playbook_json.as_deref()) {
-        return Ok(progress_to_dto(scan_id, &progress));
+        let dto = progress_to_dto(scan_id, &progress);
+        return Ok(overlay_scan_findings_count(repos, scan_id, dto).await);
     }
 
     let findings_count = repos
