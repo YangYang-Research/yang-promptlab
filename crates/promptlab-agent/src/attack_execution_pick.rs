@@ -257,6 +257,53 @@ impl ScanExecutionAgentPick {
             Self::Agentic => "agentic",
         }
     }
+
+    pub fn agent_name(self) -> &'static str {
+        match self {
+            Self::Sequential => "SequentialAttackExecutionAgent",
+            Self::Agentic => "AgenticAttackExecutionAgent",
+        }
+    }
+}
+
+/// Plan-locked execution agent. `None` = ReAct may choose either tool
+/// (agentic plan with no reflection, adaptive, or extra attempts).
+pub fn locked_scan_execution_pick(
+    recommended: ScanExecutionAgentPick,
+    reflection_enabled: bool,
+    adaptive_planning: bool,
+    max_attempts: u32,
+) -> Option<ScanExecutionAgentPick> {
+    match recommended {
+        ScanExecutionAgentPick::Sequential => Some(ScanExecutionAgentPick::Sequential),
+        ScanExecutionAgentPick::Agentic => {
+            let needs_agentic_loop =
+                reflection_enabled || adaptive_planning || max_attempts > 1;
+            if needs_agentic_loop {
+                Some(ScanExecutionAgentPick::Agentic)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// Clamp a ReAct pick to the attack plan. Weak models must not drop
+/// Agentic + reflection / retries down to a single sequential pass.
+pub fn resolve_scan_execution_pick(
+    recommended: ScanExecutionAgentPick,
+    picked: ScanExecutionAgentPick,
+    reflection_enabled: bool,
+    adaptive_planning: bool,
+    max_attempts: u32,
+) -> ScanExecutionAgentPick {
+    locked_scan_execution_pick(
+        recommended,
+        reflection_enabled,
+        adaptive_planning,
+        max_attempts,
+    )
+    .unwrap_or(picked)
 }
 
 struct ScanExecPick {
@@ -319,23 +366,63 @@ scan_exec_pick_tool!(
 );
 
 /// Yazg ReAct: pick Sequential vs Agentic execution agent from the attack plan.
+///
+/// When the plan requires a loop (agentic + reflection / adaptive / extra attempts)
+/// or is explicitly sequential, only the matching tool is registered so a weak
+/// model cannot override the playbook.
 pub async fn pick_scan_execution_agent(
     llm: Arc<dyn PlannerLlm>,
     plan_brief: &str,
+    recommended: ScanExecutionAgentPick,
+    reflection_enabled: bool,
+    adaptive_planning: bool,
+    max_attempts: u32,
 ) -> Result<(String, ScanExecutionAgentPick), String> {
+    let locked = locked_scan_execution_pick(
+        recommended,
+        reflection_enabled,
+        adaptive_planning,
+        max_attempts,
+    );
     let (tx, rx) = mpsc::channel::<ScanExecPick>(1);
-    let tools: Vec<Box<dyn rig::tool::ToolDyn>> = vec![
-        Box::new(SequentialExecAgentTool { tx: tx.clone() }),
-        Box::new(AgenticExecAgentTool { tx: tx.clone() }),
-    ];
+    let mut tools: Vec<Box<dyn rig::tool::ToolDyn>> = Vec::new();
+    let allow_sequential = locked
+        .map(|pick| pick == ScanExecutionAgentPick::Sequential)
+        .unwrap_or(true);
+    let allow_agentic = locked
+        .map(|pick| pick == ScanExecutionAgentPick::Agentic)
+        .unwrap_or(true);
+    if allow_sequential {
+        tools.push(Box::new(SequentialExecAgentTool { tx: tx.clone() }));
+    }
+    if allow_agentic {
+        tools.push(Box::new(AgenticExecAgentTool { tx: tx.clone() }));
+    }
     drop(tx);
 
+    let (preamble, goal_suffix) = match locked {
+        Some(ScanExecutionAgentPick::Agentic) => (
+            "You are Yazg, PromptLab's scan orchestrator. The attack plan requires \
+             AgenticAttackExecutionAgent (reflection and/or retries). Call \
+             agentic_attack_execution now. Do not attack the target yourself.",
+            "Call agentic_attack_execution now.",
+        ),
+        Some(ScanExecutionAgentPick::Sequential) => (
+            "You are Yazg, PromptLab's scan orchestrator. The attack plan requires \
+             SequentialAttackExecutionAgent. Call sequential_attack_execution now. \
+             Do not attack the target yourself.",
+            "Call sequential_attack_execution now.",
+        ),
+        None => (
+            "You are Yazg, PromptLab's scan orchestrator. Given the attack plan, call \
+             exactly one tool to choose the scan execution agent. Do not attack the \
+             target yourself. Prefer the plan's recommended_strategy unless it is \
+             clearly mismatched (agentic with reflection and adaptive both off → sequential).",
+            "Call sequential_attack_execution or agentic_attack_execution now.",
+        ),
+    };
+
     let model = YazgModel::new(llm);
-    let preamble = "\
-You are Yazg, PromptLab's scan orchestrator. Given the attack plan, call exactly one tool \
-to choose the scan execution agent. Do not attack the target yourself. Prefer the plan's \
-recommended_strategy unless it is clearly mismatched (agentic with reflection and adaptive \
-both off → sequential).";
     let agent = AgentBuilder::new(model)
         .name("Yazg")
         .preamble(preamble)
@@ -345,11 +432,19 @@ both off → sequential).";
         .tools(tools)
         .build();
 
-    let goal = format!(
-        "{plan_brief}\n\nCall sequential_attack_execution or agentic_attack_execution now."
-    );
+    let goal = format!("{plan_brief}\n\n{goal_suffix}");
     let prompt_fut = agent.prompt(goal).max_turns(PICK_MAX_TURNS).into_future();
-    await_first_scan_exec_pick(rx, prompt_fut).await
+    let (thought, pick) = await_first_scan_exec_pick(rx, prompt_fut).await?;
+    Ok((
+        thought,
+        resolve_scan_execution_pick(
+            recommended,
+            pick,
+            reflection_enabled,
+            adaptive_planning,
+            max_attempts,
+        ),
+    ))
 }
 
 async fn await_first_scan_exec_pick(
@@ -373,5 +468,72 @@ async fn await_first_scan_exec_pick(
                 Err(err) => Err(err.to_string()),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agentic_reflection_locks_agentic() {
+        assert_eq!(
+            locked_scan_execution_pick(ScanExecutionAgentPick::Agentic, true, false, 2),
+            Some(ScanExecutionAgentPick::Agentic)
+        );
+        assert_eq!(
+            resolve_scan_execution_pick(
+                ScanExecutionAgentPick::Agentic,
+                ScanExecutionAgentPick::Sequential,
+                true,
+                false,
+                2,
+            ),
+            ScanExecutionAgentPick::Agentic
+        );
+    }
+
+    #[test]
+    fn agentic_extra_attempts_lock_agentic_without_reflection() {
+        assert_eq!(
+            locked_scan_execution_pick(ScanExecutionAgentPick::Agentic, false, false, 2),
+            Some(ScanExecutionAgentPick::Agentic)
+        );
+    }
+
+    #[test]
+    fn sequential_plan_locks_sequential() {
+        assert_eq!(
+            locked_scan_execution_pick(ScanExecutionAgentPick::Sequential, true, true, 5),
+            Some(ScanExecutionAgentPick::Sequential)
+        );
+        assert_eq!(
+            resolve_scan_execution_pick(
+                ScanExecutionAgentPick::Sequential,
+                ScanExecutionAgentPick::Agentic,
+                true,
+                true,
+                5,
+            ),
+            ScanExecutionAgentPick::Sequential
+        );
+    }
+
+    #[test]
+    fn agentic_without_loop_allows_sequential_mismatch() {
+        assert_eq!(
+            locked_scan_execution_pick(ScanExecutionAgentPick::Agentic, false, false, 1),
+            None
+        );
+        assert_eq!(
+            resolve_scan_execution_pick(
+                ScanExecutionAgentPick::Agentic,
+                ScanExecutionAgentPick::Sequential,
+                false,
+                false,
+                1,
+            ),
+            ScanExecutionAgentPick::Sequential
+        );
     }
 }

@@ -1187,14 +1187,10 @@ fn map_pick_action(action: AttackPickAction) -> ExecAction {
 }
 
 fn orchestrator_llm_needed(action: ExecAction) -> bool {
-    !matches!(
-        action,
-        ExecAction::Generate
-            | ExecAction::Attack
-            | ExecAction::Reflect
-            | ExecAction::Recover
-            | ExecAction::Finish
-    )
+    // Match SequentialAttackExecutionAgent: ReAct-pick every live step so usage
+    // attributes to this agent. Finish is a host stop — no extra completion.
+    // coerce_exec_action still hard-gates weak-model tool choices.
+    !matches!(action, ExecAction::Finish)
 }
 
 fn sanitize_orchestrator_thought(thought: &str) -> String {
@@ -1358,13 +1354,13 @@ mod tests {
     }
 
     #[test]
-    fn policy_skips_llm_on_deterministic_steps() {
-        assert!(!orchestrator_llm_needed(ExecAction::Generate));
-        assert!(!orchestrator_llm_needed(ExecAction::Attack));
-        assert!(!orchestrator_llm_needed(ExecAction::Reflect));
-        assert!(!orchestrator_llm_needed(ExecAction::Recover));
-        assert!(!orchestrator_llm_needed(ExecAction::Finish));
+    fn policy_skips_llm_only_on_finish() {
+        assert!(orchestrator_llm_needed(ExecAction::Generate));
+        assert!(orchestrator_llm_needed(ExecAction::Attack));
+        assert!(orchestrator_llm_needed(ExecAction::Reflect));
+        assert!(orchestrator_llm_needed(ExecAction::Recover));
         assert!(orchestrator_llm_needed(ExecAction::Adapt));
+        assert!(!orchestrator_llm_needed(ExecAction::Finish));
         assert_eq!(
             sanitize_orchestrator_thought(r#"{"status":429,"title":"Too Many Requests"}"#),
             "(orchestrator)"

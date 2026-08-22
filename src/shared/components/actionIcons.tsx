@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import {
   IconArrowRight,
   IconExternalLink,
+  IconPlus,
   IconProgress,
   IconRefresh,
 } from "./Icons";
@@ -18,6 +19,8 @@ export function scanOpenActionIcon(label: string): ReactNode {
       return <IconRefresh />;
     case "Change Attack Plan":
       return <IconArrowRight />;
+    case "New Scan":
+      return <IconPlus />;
     default:
       return <IconExternalLink />;
   }

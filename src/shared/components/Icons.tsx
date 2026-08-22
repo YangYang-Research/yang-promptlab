@@ -169,6 +169,21 @@ export function IconWarning({ className }: IconProps) {
   );
 }
 
+export function IconChevronDown({ className }: IconProps) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 18 18" aria-hidden="true">
+      <path
+        d="M4.5 7 9 11.5 13.5 7"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function IconArrowRight({ className }: IconProps) {
   return (
     <svg className={className} width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">

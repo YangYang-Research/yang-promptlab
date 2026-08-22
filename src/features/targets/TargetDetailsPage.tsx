@@ -53,6 +53,11 @@ function isLiveScan(scan: ScanRun): boolean {
   return scan.status === "running" || scan.status === "paused" || scan.status === "pending";
 }
 
+function liveScanMenuLabel(scan: ScanRun): string {
+  if (scan.status === "running") return scan.name;
+  return `${scan.name} · ${scan.status}`;
+}
+
 export function TargetDetailsPage() {
   const { targetId = "" } = useParams();
   const navigate = useNavigate();
@@ -146,10 +151,23 @@ export function TargetDetailsPage() {
     );
   }, [target, scans, wizardSession]);
 
-  const runningScan = useMemo(
-    () => attackScans.find(isLiveScan) ?? null,
+  const liveScans = useMemo(
+    () => attackScans.filter(isLiveScan),
     [attackScans],
   );
+
+  const runningScan = liveScans[0] ?? null;
+
+  const progressMenuItems = useMemo((): ActionsDropdownItem[] => {
+    if (!target) return [];
+    return liveScans.map((scan) => ({
+      id: scan.id,
+      label: liveScanMenuLabel(scan),
+      icon: <IconProgress />,
+      onClick: () =>
+        navigate(buildScanProgressUrl(target.projectId, scan.id, target.id)),
+    }));
+  }, [liveScans, navigate, target]);
 
   const handleDeleteTarget = useCallback(async () => {
     if (!target) return;
@@ -200,13 +218,25 @@ export function TargetDetailsPage() {
     const items: ActionsDropdownItem[] = [];
 
     if (scanAction.kind === "view_scan") {
-      items.push({
-        id: "view-progress",
-        label: "View Scan Progress",
-        icon: <IconProgress />,
-        onClick: () =>
-          navigate(buildScanProgressUrl(target.projectId, scanAction.scanId, target.id)),
-      });
+      if (liveScans.length > 1) {
+        for (const scan of liveScans) {
+          items.push({
+            id: `view-progress-${scan.id}`,
+            label: liveScanMenuLabel(scan),
+            icon: <IconProgress />,
+            onClick: () =>
+              navigate(buildScanProgressUrl(target.projectId, scan.id, target.id)),
+          });
+        }
+      } else {
+        items.push({
+          id: "view-progress",
+          label: "View Scan Progress",
+          icon: <IconProgress />,
+          onClick: () =>
+            navigate(buildScanProgressUrl(target.projectId, scanAction.scanId, target.id)),
+        });
+      }
     }
 
     if (scanAction.kind === "retry") {
@@ -230,6 +260,7 @@ export function TargetDetailsPage() {
       items.push({
         id: "new-scan",
         label: "New Scan",
+        icon: scanOpenActionIcon("New Scan"),
         onClick: startNewScan,
       });
     }
@@ -253,7 +284,7 @@ export function TargetDetailsPage() {
     });
 
     return items;
-  }, [deleting, handleDeleteTarget, navigate, project, scanAction, startNewScan, target]);
+  }, [deleting, handleDeleteTarget, liveScans, navigate, project, scanAction, startNewScan, target]);
 
   if (!target && !loading) {
     return (
@@ -274,7 +305,9 @@ export function TargetDetailsPage() {
   }
 
   const primaryCta =
-    runningScan != null
+    liveScans.length > 1
+      ? null
+      : runningScan != null
       ? {
           label: "View Scan Progress",
           onClick: () =>
@@ -307,9 +340,18 @@ export function TargetDetailsPage() {
         title={target.name}
         actions={
           <div className="page-actions">
-            <Button variant="primary" onClick={primaryCta.onClick}>
-              {primaryCta.label}
-            </Button>
+            {liveScans.length > 1 ? (
+              <ActionsDropdown
+                label="View Scan Progress"
+                buttonLabel="View Scan Progress"
+                buttonVariant="primary"
+                items={progressMenuItems}
+              />
+            ) : primaryCta ? (
+              <Button variant="primary" onClick={primaryCta.onClick}>
+                {primaryCta.label}
+              </Button>
+            ) : null}
             <ActionsDropdown
               label="Target actions"
               disabled={deleting}

@@ -9,7 +9,7 @@ use promptlab_agent::{
     AttackAttemptObservation, AttackExecutionLlms, AttackExecutionRequest, AttackExecutionTools,
     AdaptPlanOutcome, EndpointPacing, MemoryContext, SequentialAttackExecutionRequest,
     YazgSupervisor, batch_needs_degraded_pacing, degrade_pacing_for_next_category,
-    pick_scan_execution_agent, ScanExecutionAgentPick,
+    pick_scan_execution_agent, resolve_scan_execution_pick, ScanExecutionAgentPick,
 };
 use promptlab_attack::{AttackCategory, AttackPayload};
 use promptlab_inference::InferenceRuntimeManager;
@@ -654,10 +654,11 @@ async fn yazg_pick_scan_execution_agent(
     ctx: &TargetProfileScanContext<'_>,
     config: &mut ScanExecutionConfig,
 ) {
-    let recommended = match config.execution {
-        ExecutionStrategy::Agentic => "agentic",
-        ExecutionStrategy::Sequential => "sequential",
+    let recommended_pick = match config.execution {
+        ExecutionStrategy::Agentic => ScanExecutionAgentPick::Agentic,
+        ExecutionStrategy::Sequential => ScanExecutionAgentPick::Sequential,
     };
+    let recommended = recommended_pick.as_str();
     let llm_ready = {
         let inference = ctx.inference_manager.lock().await;
         is_inference_ready(&inference)
@@ -698,19 +699,40 @@ async fn yazg_pick_scan_execution_agent(
         Arc::clone(&ctx.runtime_manager),
     ));
 
-    match pick_scan_execution_agent(llm, &plan_brief).await {
+    match pick_scan_execution_agent(
+        llm,
+        &plan_brief,
+        recommended_pick,
+        config.reflection_enabled,
+        config.adaptive_planning,
+        config.max_attempts,
+    )
+    .await
+    {
         Ok((thought, pick)) => {
-            let picked = match pick {
+            let applied = resolve_scan_execution_pick(
+                recommended_pick,
+                pick,
+                config.reflection_enabled,
+                config.adaptive_planning,
+                config.max_attempts,
+            );
+            let picked = match applied {
                 ScanExecutionAgentPick::Agentic => ExecutionStrategy::Agentic,
                 ScanExecutionAgentPick::Sequential => ExecutionStrategy::Sequential,
             };
-            let agent_name = match pick {
-                ScanExecutionAgentPick::Agentic => "AgenticAttackExecutionAgent",
-                ScanExecutionAgentPick::Sequential => "SequentialAttackExecutionAgent",
-            };
-            ctx.emitter.info(format!(
-                "Yazg ReAct ({thought}) → {agent_name} (plan recommended {recommended})"
-            ));
+            if applied != pick {
+                ctx.emitter.info(format!(
+                    "Yazg ReAct ({thought}) picked {} — following plan {recommended} → {}",
+                    pick.as_str(),
+                    applied.agent_name(),
+                ));
+            } else {
+                ctx.emitter.info(format!(
+                    "Yazg ReAct ({thought}) → {} (plan recommended {recommended})",
+                    applied.agent_name(),
+                ));
+            }
             apply_picked_execution(ctx, config, picked);
         }
         Err(err) => {

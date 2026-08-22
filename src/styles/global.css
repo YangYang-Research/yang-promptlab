@@ -4696,6 +4696,16 @@ a.setup-checklist__item:hover {
   min-width: 0;
 }
 
+.actions-dropdown__menu--wide {
+  min-width: 260px;
+  max-width: min(28rem, calc(100vw - 1rem));
+}
+
+.btn__caret-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
 .detail-list-link {
   border: none;
   background: transparent;

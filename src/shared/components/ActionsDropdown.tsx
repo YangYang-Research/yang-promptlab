@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-import { IconMore } from "./Icons";
+import { IconChevronDown, IconMore } from "./Icons";
 import { IconButton } from "./IconButton";
 
 export type ActionsDropdownItem = {
@@ -17,6 +17,9 @@ type ActionsDropdownProps = {
   label?: string;
   items: ActionsDropdownItem[];
   disabled?: boolean;
+  /** Labeled trigger (e.g. primary CTA). Defaults to the overflow icon button. */
+  buttonLabel?: string;
+  buttonVariant?: "primary" | "secondary" | "ghost";
 };
 
 type MenuPosition = {
@@ -27,7 +30,13 @@ type MenuPosition = {
 const MENU_GAP_PX = 6;
 const VIEWPORT_PADDING_PX = 8;
 
-export function ActionsDropdown({ label = "Actions", items, disabled }: ActionsDropdownProps) {
+export function ActionsDropdown({
+  label = "Actions",
+  items,
+  disabled,
+  buttonLabel,
+  buttonVariant = "secondary",
+}: ActionsDropdownProps) {
   const [open, setOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -94,19 +103,36 @@ export function ActionsDropdown({ label = "Actions", items, disabled }: ActionsD
 
   return (
     <div className="actions-dropdown" ref={rootRef}>
-      <IconButton
-        ariaLabel={label}
-        active={open}
-        disabled={disabled}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <IconMore />
-      </IconButton>
+      {buttonLabel ? (
+        <button
+          type="button"
+          className={`btn btn--${buttonVariant} btn--md`}
+          aria-label={label}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          disabled={disabled}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {buttonLabel}
+          <IconChevronDown className="btn__caret-icon" />
+        </button>
+      ) : (
+        <IconButton
+          ariaLabel={label}
+          active={open}
+          disabled={disabled}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <IconMore />
+        </IconButton>
+      )}
       {open &&
         createPortal(
           <div
             ref={menuRef}
-            className="actions-dropdown__menu actions-dropdown__menu--portal"
+            className={`actions-dropdown__menu actions-dropdown__menu--portal${
+              buttonLabel ? " actions-dropdown__menu--wide" : ""
+            }`}
             role="menu"
             style={
               menuPosition

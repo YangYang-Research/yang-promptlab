@@ -234,8 +234,7 @@ fn agent_note(agent_id: &str) -> Option<String> {
                 .into(),
         ),
         "agentic_attack_execution" => Some(
-            "Counts Adapt-step orchestrator picks during agentic scans. Generate / attack / reflect / recover stay policy-driven."
-                .into(),
+            "ReAct generate / attack / recover / reflect / adapt picks during agentic scans. ReflectionAgent votes are counted separately.".into(),
         ),
         "reflection" => Some(
             "Counts when an agentic scan has reflection enabled."
