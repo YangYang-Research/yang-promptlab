@@ -24,6 +24,6 @@ plugins/
 3. Implement the hook handler using the SDK:
    - Python: `packages/plugin-sdk-python`
    - JavaScript: `packages/plugin-sdk-js`
-4. Enable and invoke via `PluginManager` or future IPC `plugin.*` commands.
+4. Enable via the Plugins page (`plugins_list` / `plugins_enable`) or `PluginManager`.
 
 Sample plugins are self-contained (no SDK install required) and demonstrate the JSON-lines protocol directly.

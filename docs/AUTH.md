@@ -1,227 +1,78 @@
-# PromptLab Authentication Engine
+# Authentication
 
 **Crate:** `promptlab-auth`  
-**Status:** MVP  
-**Browser runtime:** Playwright (Node.js subprocess)
+**Browser:** Playwright Chromium (Node JSON-lines runner)
 
-The Authentication Engine records, replays, and manages authenticated sessions for security testing of web applications, chatbots, and AI portals.
+Records, stores, and replays authenticated sessions for target probes. Single framework for browser login, JWT/API-key, and target-descriptor credentials.
+
+**Last verified:** 2026-08-22
 
 ---
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    subgraph UI["PromptLab Desktop"]
-        IPC[Tauri IPC]
-    end
-
-    subgraph AuthEngine["AuthEngine"]
-        AE[Orchestrator]
-        CM[CookieManager]
-        TE[TokenExtractor]
-    end
-
-    subgraph Providers["Auth Providers"]
-        UP[Username/Password]
-        OA[OAuth]
-        OI[OIDC]
-        SA[SAML]
-        JW[JWT]
-        AK[API Key]
-    end
-
-    subgraph Playwright["Playwright Layer"]
-        PC[PlaywrightClient]
-        RN[runner.mjs]
-        BR[Chromium Browser]
-    end
-
-    subgraph Storage["Session Storage"]
-        DB[(SQLite auth_* tables)]
-        VAULT[storageState JSON vault]
-    end
-
-    IPC --> AE
-    AE --> Providers
-    UP & OA & OI & SA --> PC
-    JW & AK --> TE
-    PC --> RN --> BR
-    AE --> CM & TE
-    AE --> DB & VAULT
+```
+Tauri IPC
+  → AuthEngine (record / replay / extract)
+      → PlaywrightClient → runner.mjs → Chromium
+      → TokenExtractor (JWT / API key — no browser)
+      → SessionStore → SQLite metadata + encrypted vault
+      → SecretStore  → OS keychain
 ```
 
-### Component Responsibilities
-
-| Component | Role |
-|-----------|------|
-| **AuthEngine** | Public API: record, replay, authenticate, extract tokens, manage cookies |
-| **PlaywrightClient** | Rust ↔ Node JSON-lines protocol to `runner.mjs` |
-| **SessionStore** | SQLite metadata + encrypted vault files for Playwright `storageState` |
-| **CookieManager** | Import/export/sync cookie jars |
-| **TokenExtractor** | JWT validation, bearer header formatting, token merge |
-| **MockPlaywrightDriver** | Test double without Node/Playwright |
+| Method | Browser | Notes |
+|--------|---------|-------|
+| Username/password | Yes | Form fill or interactive |
+| OAuth / OIDC / SAML | Yes | Interactive URL wait |
+| JWT | No | Configured token |
+| API key | No | Header + key |
 
 ---
 
-## Supported Authentication Methods
+## Playwright
 
-| Method | Browser | Recording | Token sources |
-|--------|---------|-----------|---------------|
-| **Username/Password** | Yes | Automated form fill | Cookies, storage |
-| **OAuth** | Yes | Interactive / URL wait | OAuth tokens in responses |
-| **OIDC** | Yes | Interactive / URL wait | `access_token`, `id_token` |
-| **SAML** | Yes | Interactive / URL wait | Cookies, SAML artifact URLs |
-| **JWT** | No | N/A | Configured JWT string |
-| **API Key** | No | N/A | Configured key + header |
+JSON-lines stdin/stdout to `crates/promptlab-auth/playwright/runner.mjs`:
+
+| Command | Purpose |
+|---------|---------|
+| `launch` | Chromium + optional `storageState` |
+| `record_login` | Navigate + login |
+| `replay_session` | Restore cookies/storage and open URL |
+| `extract_tokens` | Headers, JSON bodies, web storage |
+| `get_cookies` / `set_cookies` / `close` | Jar + teardown |
+
+Dev: `npm run setup:playwright`. Release: `npm run bundle:playwright` → `src-tauri/resources/playwright/` (gitignored).
+
+IPC: `auth_record_session_start` / `finish` / `cancel`, `auth_session_validate`, `auth_session_status`. Wizard auth step embeds `PlaywrightRecordPanel` (same commands). Diagnostic: `security_audit` / `security_migrate_secrets`.
 
 ---
 
-## Playwright Integration
+## Secret storage
 
-### Protocol
+| Secret | Storage |
+|--------|---------|
+| Profile password / JWT / API key | OS keychain; SQLite holds `credential_reference_id` |
+| Session cookies / bearer | OS keychain |
+| Target descriptor secrets | OS keychain; JSON sanitized at save |
+| Playwright `storageState` | AES-256-GCM file `{session_id}.storage.enc` |
+| Vault master key | Keychain `vault-key:master` |
 
-Rust communicates with `playwright/runner.mjs` via **JSON-lines** on stdin/stdout:
+Platform backends (`keyring`): Windows DPAPI, macOS Keychain, Linux Secret Service. Service: `com.promptlab.app`. Keys: `{scope}:{uuid}` (`session`, `profile`, `target`, `vault-key`).
 
-```json
-{"id":1,"cmd":"record_login","url":"https://app/login","method":"username_password","config":{...},"options":{...}}
-{"id":1,"ok":true,"result":{"steps":[],"storage_state":{},"cookies":[],"tokens":[],"final_url":"..."}}
-```
+**Forbidden:** plaintext passwords/tokens/cookies in SQLite; plaintext `.storage.json` for new sessions; inline secrets in persisted descriptors.
 
-### Commands
+Runtime hydration: `resolve_descriptor_for_runtime` — in-memory only, never written back.
 
-| Command | Description |
-|---------|-------------|
-| `launch` | Start Chromium with optional `storageState` |
-| `record_login` | Navigate + login (automated or interactive) |
-| `replay_session` | Restore cookies/storageState and open URL |
-| `extract_tokens` | Scrape localStorage + captured network tokens |
-| `get_cookies` / `set_cookies` | Cookie jar management |
-| `close` | Tear down browser |
+Vault path: `~/.promptlab/workspaces/AuthSessions/` (`promptlab_auth::auth_sessions_dir`).
 
-### Token Capture
+Startup: `migrate_legacy_auth_data`, `migrate_legacy_target_descriptors`, `migrate_legacy_storage_artifacts`.
 
-During recording/replay, the runner intercepts:
+---
 
-- `Authorization` response headers
-- JSON bodies with `access_token`, `refresh_token`, `id_token`
-- `localStorage` / `sessionStorage` token keys
-
-### Setup
-
-**Development** (system Node.js):
+## Tests
 
 ```bash
-npm run setup:playwright
+cargo test -p promptlab-auth     # MockPlaywrightDriver + mock keyring
 ```
 
-**Release build** bundles Node.js + Playwright + Chromium automatically via `npm run bundle:playwright`
-(wired into `beforeBuildCommand` for `tauri build`). End users do not install Node or Playwright separately.
-
-Manual bundle (optional, also used by dev after bundling once):
-
-```bash
-npm run bundle:playwright
-```
-
-Bundled assets land in `src-tauri/resources/playwright/` (gitignored, ~300MB).
-
----
-
-## Session Storage
-
-### SQLite (`promptlab-storage` migration 002)
-
-| Table | Purpose |
-|-------|---------|
-| `auth_profiles` | Named auth configuration per project |
-| `auth_sessions` | Active sessions with cookie/token JSON |
-| `auth_recordings` | Recorded login step sequences |
-
-### File Vault
-
-Playwright `storageState` JSON saved to:
-
-```
-{vault_dir}/{session_id}.storage.json
-```
-
-Referenced by `auth_sessions.storage_state_path`.
-
----
-
-## Usage
-
-```rust
-use promptlab_auth::{
-    AuthConfig, AuthEngine, AuthEngineConfig, AuthMethod, AuthProfile,
-    RecordLoginOptions, SessionStore,
-};
-use promptlab_storage::Database;
-
-#[tokio::main]
-async fn main() -> promptlab_core::PromptLabResult<()> {
-    let db = Database::connect("sqlite://promptlab.db").await?;
-    let store = SessionStore::new(db, "./data/auth-vault").await?;
-    let engine = AuthEngine::new(AuthEngineConfig::default(), store, None).await?;
-
-    let profile = AuthProfile {
-        id: "profile-1".into(),
-        project_id: Some("project-1".into()),
-        name: "App Login".into(),
-        method: AuthMethod::UsernamePassword,
-        config: AuthConfig::UsernamePassword {
-            login_url: "https://app.example.com/login".into(),
-            username: Some("tester@example.com".into()),
-            password: Some("***".into()),
-            username_selector: "#email".into(),
-            password_selector: "#password".into(),
-            submit_selector: "button[type=submit]".into(),
-        },
-    };
-
-    let (session, recording) = engine
-        .record_login(&profile, RecordLoginOptions { headed: true, ..Default::default() })
-        .await?;
-
-    let tokens = engine.extract_tokens(&session.id, None).await?;
-    let cookies = engine.export_cookies(&session.id).await?;
-
-    let replay = engine
-        .replay_session(&session.id, "https://app.example.com/chat", Default::default())
-        .await?;
-
-    engine.close().await?;
-    Ok(())
-}
-```
-
----
-
-## Security Considerations
-
-| Control | Implementation |
-|---------|----------------|
-| Credential storage | Passwords in profile config should reference OS keychain in production builds |
-| Session vault | Files under user-controlled `vault_dir`; restrict permissions |
-| Browser isolation | Ephemeral Playwright contexts per recording |
-| JWT validation | Structure-only validation at MVP; signature verification delegated to target policy |
-| SSRF | Auth engine does not re-validate URLs — combine with discovery engine URL policy |
-
----
-
-## Testing
-
-```bash
-cargo test -p promptlab-auth          # unit tests with MockPlaywrightDriver
-cargo test -p promptlab-storage       # auth table CRUD
-```
-
-Integration tests with real Playwright require Node.js + `npm install` in `playwright/`.
-
----
-
-## Related Documents
-
-- `docs/ARCHITECTURE.md` — Playwright manager, keychain secrets
-- `docs/DATABASE.md` — core schema (auth tables in migration 002)
+Schema: [ARCHITECTURE.md](ARCHITECTURE.md#sqlite-promptlab-storage).

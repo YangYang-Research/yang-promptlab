@@ -1,6 +1,8 @@
-# PromptLab Plugin SDK
+# Plugins
 
 Extend PromptLab with custom **discovery**, **attack**, **judge**, and **report** plugins in **Python** or **JavaScript**. Plugins run in a sandboxed subprocess with explicit capability permissions and a JSON-lines host protocol.
+
+**Last verified:** 2026-08-22
 
 ## Architecture
 
@@ -30,11 +32,17 @@ flowchart LR
 | JavaScript SDK | `packages/plugin-sdk-js` | Same API surface for Node |
 | Samples | `plugins/samples/` | Reference plugins (all four types) |
 
+Desktop: `AppState.plugin_manager`. Attack plugins mutate payloads via `PluginAwareTransport` **before** harness delivery (they do not replace HTTP/OpenAI/Playwright). Judge plugins may elevate confidence after `judge_normalized`. Type `discovery` remains in the manifest/SDK; the desktop app has no crawler to invoke it.
+
+On first launch, bundled `plugins/samples/` are copied into `~/.promptlab/plugins/` if empty. Enable state: `plugins_state.json`.
+
+IPC: `plugins_list`, `plugins_refresh`, `plugins_enable`, `plugins_disable`, `plugins_info`. UI: **System → Plugins**.
+
 ## Plugin types
 
 | Type | Default hook | Purpose |
 |------|--------------|---------|
-| `discovery` | `discover` | Enumerate endpoints, paths, AI surfaces |
+| `discovery` | `discover` | Legacy crawl hook — unused by the desktop wizard |
 | `attack` | `execute_attack` | Generate or mutate attack payloads |
 | `judge` | `evaluate` | Score model responses for vulnerability |
 | `report` | `render_report` | Custom report formats |
@@ -232,9 +240,4 @@ cargo test -p promptlab-plugin-host
 
 Integration tests invoke real sample plugins when `python3` and `node` are on `PATH`.
 
-## Future work
-
-- WASM runtime (enterprise)
-- IPC `plugin.list` / `plugin.enable` from Tauri shell
-- Marketplace signing and `promptlab-plugin` CLI
-- Persistence via `promptlab-storage` `plugins` table
+Harness vs plugins: [ARCHITECTURE.md](ARCHITECTURE.md#harness-ai-io).

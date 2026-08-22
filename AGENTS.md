@@ -4,7 +4,7 @@
 
 PromptLab is a Tauri 2 desktop app: React + TypeScript + Vite frontend (`src/`) in a Rust
 backend shell (`src-tauri/`), plus a Rust workspace of library crates (`crates/`).
-Standard commands live in `package.json` and `docs/PROJECT_STRUCTURE.md`.
+Standard commands live in `package.json` and `docs/ARCHITECTURE.md`. Doc index: `docs/README.md`.
 
 ### Toolchain / system requirements (already provisioned in this VM)
 - **Rust stable is required (>= 1.85).** `Cargo.toml`'s `rust-version = "1.77"` is inaccurate:
@@ -20,7 +20,7 @@ Standard commands live in `package.json` and `docs/PROJECT_STRUCTURE.md`.
   (`health` / `app_info`) is reachable.
 - Application data root: `~/.promptlab/` (not Tauri app_data_dir).
 - Browser-only UI: `npm run dev` (serves `http://localhost:5173`). With no Tauri IPC the UI
-  falls back to mock data and shows **"Mock mode"**.
+  runs an empty workspace (no mock fixtures) and shows **"Mock mode"** / disconnected.
 
 ### Headless WebKitGTK rendering caveat (non-obvious)
 Under software rendering in this VM, export these before `npm run tauri dev` for stable rendering:

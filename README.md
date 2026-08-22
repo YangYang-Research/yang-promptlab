@@ -91,6 +91,12 @@ Application data root: **`~/.promptlab/`** (SQLite, models, logs, auth vault). T
 
 ---
 
+## Documentation
+
+Engineering docs start at [`docs/README.md`](docs/README.md).
+
+---
+
 ## Authorized use
 
 PromptLab is a security testing tool. Use it only against systems you own or have explicit permission to test (pentest engagements, bug bounty programs, internal labs). Unauthorized scanning or exploitation is out of scope.
