@@ -79,7 +79,7 @@ Plan → Generate → Attack → Judge → Retry?
 
 Stop: `vulnerable: true`, max attempts (default 5), or user cancel. Retry escalates generator: initial → `TemplateMutation` → `LocalLlm`.
 
-Playbook: `agent_mode: true`, `max_agent_attempts`. `scan_start` then runs `run_agent_scan_job`. Host: `src-tauri` scan execution (`pick_scan_execution_agent`: sequential vs agentic, reflection, endpoint pacing after failures).
+Playbook: `agent_mode: true`, `max_agent_attempts`. `scan_start` then runs `run_agent_scan_job`. Host: `src-tauri` scan execution (`pick_scan_execution_agent`: sequential vs agentic, reflection, endpoint pacing after failures). Sub-agents vs tools: [YAZG.md](YAZG.md#sub-agents), [YAZG.md](YAZG.md#tools).
 
 ---
 
@@ -93,7 +93,7 @@ Rules + regex + optional LLM roles (judge / classifier / attacker) → consensus
 | Local / remote LLM | Gateway / harness |
 | Consensus | Deterministic + LLM |
 
-Weights (`judge_role_weights`): 0.85 / 0.80 / 0.75 / 0.65. Threshold 0.55, floor 0.45. LLM JSON: `vulnerable`, `confidence`, `severity`, `category`, `rationale`, `indicators`. Plugin judges may raise confidence ([PLUGINS.md](PLUGINS.md)).
+Weights (`judge_role_weights`): 0.85 / 0.80 / 0.75 / 0.65. Threshold 0.55, floor 0.45. LLM JSON: `vulnerable`, `confidence`, `severity`, `category`, `rationale`, `indicators`.
 
 ```bash
 cargo test -p promptlab-judge

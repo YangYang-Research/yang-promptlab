@@ -1,5 +1,7 @@
 # Sample Plugins
 
+Leftover samples for `promptlab-plugin-host` tests — **not a product feature**.
+
 Reference implementations for all four plugin types. Each directory contains:
 
 - `promptlab-plugin.toml` — manifest (type, language, capabilities, hooks)

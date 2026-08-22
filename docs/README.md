@@ -8,9 +8,8 @@
 | [RUNTIME.md](RUNTIME.md) | In-process libllama, GGUF vault, catalog |
 | [DISCOVERY.md](DISCOVERY.md) | Target Profile + verify (replaces crawl) |
 | [ATTACK.md](ATTACK.md) | Planner, payloads, executor, agentic loop, judge, reports |
-| [YAZG.md](YAZG.md) | Assistant capability routing + AgentTrace |
-| [AUTH.md](AUTH.md) | Playwright sessions + keychain |
-| [PLUGINS.md](PLUGINS.md) | SDK, manifest, host IPC |
+| [YAZG.md](YAZG.md) | Supervisor, sub-agents, tools, AgentTrace |
+| [AUTH.md](AUTH.md) | Target credentials + keychain (Playwright leftover) |
 
 Root [README.md](../README.md) is clone/build. [AGENTS.md](../AGENTS.md) is Cloud VM toolchain.
 

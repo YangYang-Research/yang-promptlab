@@ -1,78 +1,61 @@
 # Authentication
 
-**Crate:** `promptlab-auth`  
-**Browser:** Playwright Chromium (Node JSON-lines runner)
+**Last verified:** 2026-08-23
 
-Records, stores, and replays authenticated sessions for target probes. Single framework for browser login, JWT/API-key, and target-descriptor credentials.
+Wizard / target auth is **HTTP credentials on the Target Profile**, stored in `targets.descriptor_json` (sanitized). Verify and attack hydrate secrets in memory only.
 
-**Last verified:** 2026-08-22
-
----
-
-## Architecture
+Playwright login is **not selectable** in the wizard (`username_password` / `SSO` = disabled, “Temporarily unavailable”). Crate + IPC still compile.
 
 ```
-Tauri IPC
-  → AuthEngine (record / replay / extract)
-      → PlaywrightClient → runner.mjs → Chromium
-      → TokenExtractor (JWT / API key — no browser)
-      → SessionStore → SQLite metadata + encrypted vault
-      → SecretStore  → OS keychain
+Wizard: none | basic | api_key | jwt
+  → sanitize_target_descriptor → OS keychain + credential_reference_id
+  → SQLite descriptor without plaintext
+  → resolve_descriptor_for_runtime / wizard (in-memory)
+  → harness headers on verify + attack
 ```
 
-| Method | Browser | Notes |
-|--------|---------|-------|
-| Username/password | Yes | Form fill or interactive |
-| OAuth / OIDC / SAML | Yes | Interactive URL wait |
-| JWT | No | Configured token |
-| API key | No | Header + key |
+IPC (credential path): target CRUD + `target_profile_verify*`. Diagnostic: `security_audit` / `security_migrate_secrets`.
+
+SSOT for the endpoint itself: [DISCOVERY.md](DISCOVERY.md). Scan: [ATTACK.md](ATTACK.md).
 
 ---
 
-## Playwright
+## Product methods
 
-JSON-lines stdin/stdout to `crates/promptlab-auth/playwright/runner.mjs`:
+| Kind | How it applies |
+|------|----------------|
+| `none` | No auth headers |
+| `basic` | `Authorization: Basic …` |
+| `api_key` | Named header + optional prefix |
+| `jwt` | Bearer (or custom header/prefix) |
 
-| Command | Purpose |
-|---------|---------|
-| `launch` | Chromium + optional `storageState` |
-| `record_login` | Navigate + login |
-| `replay_session` | Restore cookies/storage and open URL |
-| `extract_tokens` | Headers, JSON bodies, web storage |
-| `get_cookies` / `set_cookies` / `close` | Jar + teardown |
-
-Dev: `npm run setup:playwright`. Release: `npm run bundle:playwright` → `src-tauri/resources/playwright/` (gitignored).
-
-IPC: `auth_record_session_start` / `finish` / `cancel`, `auth_session_validate`, `auth_session_status`. Wizard auth step embeds `PlaywrightRecordPanel` (same commands). Diagnostic: `security_audit` / `security_migrate_secrets`.
+Headers may be inferred from Step 2 profile (`inferAuthFromProfileHeaders`) or cURL import. UI: wizard Auth/Verify (`TargetFormFields`).
 
 ---
 
-## Secret storage
+## Secrets
 
 | Secret | Storage |
 |--------|---------|
-| Profile password / JWT / API key | OS keychain; SQLite holds `credential_reference_id` |
-| Session cookies / bearer | OS keychain |
-| Target descriptor secrets | OS keychain; JSON sanitized at save |
-| Playwright `storageState` | AES-256-GCM file `{session_id}.storage.enc` |
+| Target basic / JWT / API key | OS keychain; SQLite holds `credential_reference_id` |
+| Third-party model / judge keys | Keychain scopes `model`, `judge` |
 | Vault master key | Keychain `vault-key:master` |
+| Playwright `storageState` (leftover) | AES-256-GCM `{session_id}.storage.enc` under `~/.promptlab/workspaces/AuthSessions/` |
 
-Platform backends (`keyring`): Windows DPAPI, macOS Keychain, Linux Secret Service. Service: `com.promptlab.app`. Keys: `{scope}:{uuid}` (`session`, `profile`, `target`, `vault-key`).
+Platform: `keyring` — Windows DPAPI, macOS Keychain, Linux Secret Service. Service: `com.promptlab.app`. Keys: `{scope}:{uuid}` (`target`, `profile`, `session`, `vault-key`, `model`, `judge`).
 
-**Forbidden:** plaintext passwords/tokens/cookies in SQLite; plaintext `.storage.json` for new sessions; inline secrets in persisted descriptors.
+**Forbidden:** plaintext passwords/tokens in SQLite; plaintext `.storage.json` for new sessions; inline secrets in persisted descriptors.
 
-Runtime hydration: `resolve_descriptor_for_runtime` — in-memory only, never written back.
-
-Vault path: `~/.promptlab/workspaces/AuthSessions/` (`promptlab_auth::auth_sessions_dir`).
-
-Startup: `migrate_legacy_auth_data`, `migrate_legacy_target_descriptors`, `migrate_legacy_storage_artifacts`.
+Runtime: `resolve_descriptor_for_runtime` — never written back. Startup: `migrate_legacy_auth_data`, `migrate_legacy_target_descriptors`, `migrate_legacy_storage_artifacts`.
 
 ---
 
-## Tests
+## Leftover Playwright (`promptlab-auth`)
+
+Not a wizard feature. Runner: `crates/promptlab-auth/playwright/runner.mjs` (JSON-lines). IPC still registered: `auth_record_session_start` / `finish` / `cancel`, `auth_session_validate`, `auth_session_status`. UI panel exists behind the disabled radios.
+
+Crate methods `username_password` / `oauth` / `oidc` / `saml` (browser) and JWT/API-key via `AuthEngine` / `TokenExtractor` remain for tests and replay. Dev: `npm run setup:playwright`. Release bundle: `npm run bundle:playwright` → `src-tauri/resources/playwright/` (gitignored).
 
 ```bash
 cargo test -p promptlab-auth     # MockPlaywrightDriver + mock keyring
 ```
-
-Schema: [ARCHITECTURE.md](ARCHITECTURE.md#sqlite-promptlab-storage).

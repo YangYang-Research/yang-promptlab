@@ -8,7 +8,7 @@ PromptLab is an offline-first Tauri 2 desktop app for authorized AI security tes
 |-----------|----------------|
 | Offline-first | SQLite + local GGUF via in-process libllama |
 | Local data sovereignty | All state under `~/.promptlab/` (`PROMPTLAB_ROOT`) |
-| Extensibility | Subprocess plugins + harness providers |
+| Extensibility | Harness providers |
 | Auditability | Scan console, AgentTrace SQLite, structured logs |
 
 Platforms: **Windows**, **macOS**, **Linux**. There is **no** `llama-server` and **no** embedded Ollama.
@@ -27,7 +27,7 @@ promptlab-desktop (src-tauri)  commands/* → AppState → crates
 
 Browser-only `npm run dev` has **no IPC** — empty workspace, not mock fixtures.
 
-Routes: `/`, `/projects`, `/scans`, `/scans/new`, `/targets`, `/findings`, `/reports`, `/runtime`, `/yazg`, `/models`, `/plugins`, `/attack-categories`, `/mutators`, `/agent-trace`, `/settings`.
+Routes: `/`, `/projects`, `/scans`, `/scans/new`, `/targets`, `/findings`, `/reports`, `/runtime`, `/yazg`, `/models`, `/attack-categories`, `/mutators`, `/agent-trace`, `/settings`. Leftover route: `/plugins`.
 
 First-run **Getting started** checklist (dashboard): runtime mode → add model → load model → first project/scan.
 
@@ -44,8 +44,8 @@ yang-promptlab/
 ├── src/                        # React UI
 ├── src-tauri/                  # promptlab-desktop
 ├── crates/                     # engines (table below)
-├── packages/plugin-sdk-{python,js}/
-├── plugins/                    # template + samples
+├── packages/plugin-sdk-{python,js}/  # leftover
+├── plugins/                    # leftover samples
 ├── resources/models.json       # GGUF catalog
 ├── runtime/                    # libllama notes
 └── tests/{frontend,integration}/
@@ -85,10 +85,10 @@ npm run bundle:playwright
 | `promptlab-planner` | Attack-plan types |
 | `promptlab-payload` / `promptlab-generator` | Catalog + plan → probes |
 | `promptlab-attack` / `promptlab-judge` | Execute / verdict |
-| `promptlab-agent` / `promptlab-agenttrace` | Agentic loop, Yazg, spans |
+| `promptlab-agent` / `promptlab-agenttrace` | Yazg supervisor + sub-agents, spans |
 | `promptlab-report` | HTML / PDF / JSON / SARIF / CSV |
 | `promptlab-auth` | Playwright + keychain |
-| `promptlab-plugin-host` | Plugin sandbox |
+| `promptlab-plugin-host` | **Unused by product** (leftover sandbox crate) |
 | `promptlab-desktop` | `src-tauri` |
 | `promptlab-integration-tests` | `tests/integration` |
 | `promptlab-discovery` / `promptlab-fingerprint` / `promptlab-endpoint-metadata` | **Unused by desktop** (crawl-era libraries) |
@@ -143,14 +143,14 @@ Every completion: `HarnessFactory::execute` + `HarnessPurpose`. Feature crates m
 ```
 Caller → HarnessFactory::execute
   → purpose policy (token caps)
-  → interceptors (attack plugins skip non-attack)
+  → interceptors
   → Harness (http | openai | anthropic | gemini | bedrock | llama | dify | mcp | websocket | playwright)
   → NormalizedResponse
 ```
 
 Playwright harness is registered **per-scan** on an isolated factory. Target-descriptor auth is for attack/verify; vault credentials are `AuthMaterial` for assistant/judge.
 
-Add a provider: implement `Harness` under `crates/promptlab-harness/src/providers/`, `registry.register`. Details: [RUNTIME.md](RUNTIME.md), [PLUGINS.md](PLUGINS.md).
+Add a provider: implement `Harness` under `crates/promptlab-harness/src/providers/`, `registry.register`. Details: [RUNTIME.md](RUNTIME.md).
 
 ---
 
@@ -195,4 +195,4 @@ Handlers in `src-tauri/src/lib.rs`. Clients: `src/shared/ipc/`.
 | Auth | `auth_record_session_*`, `auth_session_validate/status` |
 | Models / runtime | `models_*`, `runtime_*`, `mutator_settings_*` |
 | Yazg | `yazg_*`, `agenttrace_*`, `agent_memory_*` |
-| Plugins / catalog | `plugins_*`, `attack_catalog_*` |
+| Catalog | `attack_catalog_*` |
