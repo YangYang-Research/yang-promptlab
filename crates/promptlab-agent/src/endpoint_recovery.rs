@@ -3,6 +3,8 @@
 //! Used by SequentialAttackExecutionAgent and AgenticAttackExecutionAgent when HTTP
 //! transport fails, rate-limits, or the endpoint shows unhealthy latency.
 
+use serde::{Deserialize, Serialize};
+
 use crate::attack_execution::AttackAttemptObservation;
 
 pub const DEFAULT_ATTACK_CONCURRENCY: usize = 10;
@@ -10,7 +12,7 @@ pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 pub const MAX_ENDPOINT_RECOVERIES: u32 = 3;
 
 /// Live request pacing applied by the host before the next attack attempt.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EndpointPacing {
     pub max_concurrent_requests: usize,
     pub inter_request_delay_ms: u64,
@@ -447,5 +449,8 @@ mod tests {
         escalated.inter_request_delay_ms = 5_500;
         escalated.timeout_ms = 120_000;
         assert!(!escalated.is_default());
+        let json = serde_json::to_value(&escalated).expect("serialize pacing");
+        let restored: EndpointPacing = serde_json::from_value(json).expect("deserialize pacing");
+        assert_eq!(restored, escalated);
     }
 }

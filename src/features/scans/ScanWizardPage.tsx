@@ -61,6 +61,8 @@ import {
   saveWizardSession,
   type ScanWizardSession,
   buildScanWizardUrl,
+  isLiveScanStatus,
+  shouldAutoStartRetry,
 } from "./wizardState";
 import {
   canNavigateToStep,
@@ -1448,7 +1450,21 @@ export function ScanWizardPage() {
     const params = new URLSearchParams(searchParams);
     params.delete("autoStart");
     navigate(`/scans/new?${params.toString()}`, { replace: true });
-    void handleRetryScan();
+    const scanId = session.submittedScanId ?? session.draftScanId ?? lockedScanId;
+    void (async () => {
+      if (scanId) {
+        try {
+          const live = await getScanStatus(scanId);
+          if (isLiveScanStatus(live.status) || !shouldAutoStartRetry(live.status)) {
+            updateSession({ submittedScanId: scanId, currentStep: 5 });
+            return;
+          }
+        } catch {
+          // Backend Retry Scan still cancel-waits if a job is live.
+        }
+      }
+      await handleRetryScan();
+    })();
   }, [
     autoStartRequested,
     wizardResumeLoading,

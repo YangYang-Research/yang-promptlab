@@ -1220,6 +1220,19 @@ async fn execute_category_then_judge(
                 }
             };
             if let Some(checkpoint) = restored_checkpoint {
+                if let Some(emitter) = env.progress {
+                    let (resume_len, resume_index) = match &checkpoint {
+                        ScanBatchCheckpoint::PendingJudge { attempts, .. } => (attempts.len(), 0usize),
+                        ScanBatchCheckpoint::JudgingPartial {
+                            attempts,
+                            next_judge_index,
+                            ..
+                        } => (attempts.len(), *next_judge_index),
+                    };
+                    emitter.info(format!(
+                        "Resuming {category_label} from checkpoint — judging from {resume_index}/{resume_len} (skipping attack collect)"
+                    ));
+                }
                 match checkpoint {
                     ScanBatchCheckpoint::PendingJudge { attempts, .. } => (attempts, 0usize),
                     ScanBatchCheckpoint::JudgingPartial {
@@ -1238,20 +1251,20 @@ async fn execute_category_then_judge(
                     env.progress_state,
                 )
                 .await?;
+                if !collected.is_empty() {
+                    persist_interrupt_checkpoint(
+                        ctrl,
+                        ScanBatchCheckpoint::PendingJudge {
+                            category: category_label.to_string(),
+                            attempts: collected.clone(),
+                        },
+                        env.repos,
+                        env.scan_id,
+                        env.progress_state,
+                    )
+                    .await;
+                }
                 if ctrl.cancel.load(Ordering::Relaxed) {
-                    if !collected.is_empty() {
-                        persist_interrupt_checkpoint(
-                            ctrl,
-                            ScanBatchCheckpoint::PendingJudge {
-                                category: category_label.to_string(),
-                                attempts: collected.clone(),
-                            },
-                            env.repos,
-                            env.scan_id,
-                            env.progress_state,
-                        )
-                        .await;
-                    }
                     return Ok(category_result_from_accum(&accum));
                 }
                 if ctrl.pause_requested.load(Ordering::Relaxed) {
@@ -1352,10 +1365,39 @@ async fn execute_category_then_judge(
                 if let Some(progress_state) = env.progress_state {
                     bump_scan_progress(progress_state, 1);
                 }
+                if let Some(ctrl) = env.job_controls {
+                    persist_interrupt_checkpoint(
+                        ctrl,
+                        ScanBatchCheckpoint::JudgingPartial {
+                            category: category_label.to_string(),
+                            attempts: attempts.clone(),
+                            next_judge_index: seq + 1,
+                        },
+                        env.repos,
+                        env.scan_id,
+                        env.progress_state,
+                    )
+                    .await;
+                }
                 continue;
             }
 
             judge_single_attempt(env, seq, attempts[seq].clone(), &mut accum).await?;
+
+            if let Some(ctrl) = env.job_controls {
+                persist_interrupt_checkpoint(
+                    ctrl,
+                    ScanBatchCheckpoint::JudgingPartial {
+                        category: category_label.to_string(),
+                        attempts: attempts.clone(),
+                        next_judge_index: seq + 1,
+                    },
+                    env.repos,
+                    env.scan_id,
+                    env.progress_state,
+                )
+                .await;
+            }
 
             if let Some(ctrl) = env.job_controls {
                 if ctrl.pause_requested.load(Ordering::Relaxed) {

@@ -4,6 +4,7 @@ import {
   applyWizardEntryStep,
   createInitialSession,
   createSessionForTargetScan,
+  shouldAutoStartRetry,
 } from "@/features/scans/wizardState";
 import type { Target } from "@/shared/types";
 
@@ -90,5 +91,18 @@ describe("applyWizardEntryStep", () => {
     const next = applyWizardEntryStep(session, 5);
     expect(next.currentStep).toBe(5);
     expect(next.submittedScanId).toBe("scan-1");
+  });
+});
+
+describe("shouldAutoStartRetry", () => {
+  it("starts Retry Scan only for terminal retryable statuses", () => {
+    expect(shouldAutoStartRetry("failed")).toBe(true);
+    expect(shouldAutoStartRetry("cancelled")).toBe(true);
+    expect(shouldAutoStartRetry("stopped")).toBe(true);
+    expect(shouldAutoStartRetry("running")).toBe(false);
+    expect(shouldAutoStartRetry("paused")).toBe(false);
+    expect(shouldAutoStartRetry("pending")).toBe(false);
+    expect(shouldAutoStartRetry("completed")).toBe(false);
+    expect(shouldAutoStartRetry(null)).toBe(false);
   });
 });

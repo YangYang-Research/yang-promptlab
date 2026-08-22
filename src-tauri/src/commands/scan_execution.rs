@@ -38,7 +38,8 @@ use crate::events::ScanProgressEmitter;
 use crate::inference_host::{is_inference_ready, HostYazgReactLlm, YazgHostLlms};
 use crate::jobs::{bump_scan_progress, ScanProgress};
 use crate::scan_playbook::{
-    generated_payloads_from_playbook, persist_generated_payloads, persist_scan_playbook_state,
+    generated_payloads_from_playbook, persist_generated_payloads, persist_playbook_pacing,
+    persist_scan_playbook_state, PlaybookPacing,
 };
 use crate::session_auth::AttackRuntime;
 
@@ -494,6 +495,38 @@ pub struct ScanPacingCache {
 }
 
 impl ScanPacingCache {
+    pub fn from_playbook(snapshot: Option<PlaybookPacing>) -> Self {
+        let Some(snapshot) = snapshot else {
+            return Self::default();
+        };
+        Self {
+            by_category: snapshot.by_category,
+            last: snapshot.last,
+            had_healthy_endpoint: snapshot.had_healthy_endpoint,
+        }
+    }
+
+    pub fn to_playbook(&self) -> PlaybookPacing {
+        PlaybookPacing {
+            by_category: self.by_category.clone(),
+            last: self.last.clone(),
+            had_healthy_endpoint: self.had_healthy_endpoint,
+        }
+    }
+
+    pub fn is_idle(&self) -> bool {
+        self.by_category.is_empty()
+            && self.last.as_ref().map(EndpointPacing::is_default).unwrap_or(true)
+            && !self.had_healthy_endpoint
+    }
+
+    pub fn summary(&self) -> String {
+        self.last
+            .as_ref()
+            .map(EndpointPacing::summary)
+            .unwrap_or_else(|| EndpointPacing::default().summary())
+    }
+
     fn resolve_initial(&self, category: &str) -> EndpointPacing {
         self.by_category
             .get(category)
@@ -544,6 +577,18 @@ fn remember_scan_pacing(
         }
     }
     cache.remember(category.as_str(), pacing);
+}
+
+async fn persist_ctx_pacing(ctx: &TargetProfileScanContext<'_>) {
+    let snapshot = ctx
+        .pacing_cache
+        .lock()
+        .ok()
+        .map(|cache| cache.to_playbook());
+    let Some(snapshot) = snapshot else {
+        return;
+    };
+    let _ = persist_playbook_pacing(ctx.repos, ctx.scan_id, &snapshot).await;
 }
 
 pub struct TargetProfileScanContext<'a> {
@@ -1271,6 +1316,7 @@ async fn run_sequential_category(
             );
         }
     }
+    persist_ctx_pacing(ctx).await;
 
     match agent_result {
         Ok(_) => {
@@ -1421,8 +1467,14 @@ impl AttackExecutionTools for SequentialCategoryTools<'_> {
     }
 
     async fn apply_pacing(&self, pacing: &EndpointPacing) -> Result<(), String> {
-        let mut state = self.state.lock().map_err(|e| e.to_string())?;
-        state.pacing = pacing.clone();
+        {
+            let mut state = self.state.lock().map_err(|e| e.to_string())?;
+            state.pacing = pacing.clone();
+        }
+        if let Ok(mut cache) = self.ctx.pacing_cache.lock() {
+            cache.remember(self.category.as_str(), pacing.clone());
+        }
+        persist_ctx_pacing(self.ctx).await;
         self.ctx.emitter.info(format!(
             "Sequential pacing updated: {}",
             pacing.summary()
@@ -1563,6 +1615,7 @@ async fn run_agentic_category(
             );
         }
     }
+    persist_ctx_pacing(ctx).await;
 
     match agent_result {
         Ok(_) => {
@@ -1837,8 +1890,14 @@ impl AttackExecutionTools for AgenticCategoryTools<'_> {
     }
 
     async fn apply_pacing(&self, pacing: &EndpointPacing) -> Result<(), String> {
-        let mut state = self.state.lock().map_err(|e| e.to_string())?;
-        state.pacing = pacing.clone();
+        {
+            let mut state = self.state.lock().map_err(|e| e.to_string())?;
+            state.pacing = pacing.clone();
+        }
+        if let Ok(mut cache) = self.ctx.pacing_cache.lock() {
+            cache.remember(self.category.as_str(), pacing.clone());
+        }
+        persist_ctx_pacing(self.ctx).await;
         self.ctx
             .emitter
             .info(format!("Agentic pacing updated: {}", pacing.summary()));
@@ -1954,5 +2013,25 @@ mod tests {
         let total = scan_progress_total(&categories, &[], &config);
         // 1 prepare + 3 generate + 2*attack + 3 reflection + 2 adaptive + 2 retry
         assert_eq!(total, 1 + 3 + attack_units * 2 + 3 + 2 + 2);
+    }
+
+    #[test]
+    fn pacing_cache_roundtrips_playbook_and_resolves_category() {
+        let mut serial = EndpointPacing::default();
+        serial.serial_wait = true;
+        serial.max_concurrent_requests = 1;
+        serial.timeout_ms = 120_000;
+        let mut cache = ScanPacingCache::default();
+        cache.remember("prompt_injection", serial.clone());
+        cache.mark_healthy();
+        assert!(!cache.is_idle());
+
+        let restored = ScanPacingCache::from_playbook(Some(cache.to_playbook()));
+        assert!(restored.had_healthy_endpoint);
+        let inherited = restored.resolve_initial("jailbreak");
+        assert!(inherited.serial_wait);
+        assert_eq!(inherited.max_concurrent_requests, 1);
+        assert_eq!(inherited.timeout_ms, 120_000);
+        assert!(ScanPacingCache::from_playbook(None).is_idle());
     }
 }

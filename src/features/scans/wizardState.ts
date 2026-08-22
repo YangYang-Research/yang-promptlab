@@ -339,6 +339,11 @@ export function isRetryableScanStatus(status: string): boolean {
   return status === "failed" || status === "cancelled" || status === "stopped";
 }
 
+/** Retry Scan deep-link (`autoStart=1`) only for terminal retryable states — never a live job. */
+export function shouldAutoStartRetry(status: string | null | undefined): boolean {
+  return isRetryableScanStatus(status ?? "");
+}
+
 export function isScanResultsReady(status: string | null | undefined): boolean {
   return status === "completed";
 }

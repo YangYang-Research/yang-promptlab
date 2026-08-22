@@ -1,5 +1,8 @@
 //! Persist scan progress and batch checkpoints in `playbook_json`.
 
+use std::collections::HashMap;
+
+use promptlab_agent::EndpointPacing;
 use promptlab_storage::{Repositories, ScanRepository, UpdateScan};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -61,6 +64,53 @@ pub fn checkpoint_from_playbook(playbook_json: Option<&str>) -> Option<ScanBatch
     let raw = playbook_json?;
     let value: Value = serde_json::from_str(raw).ok()?;
     serde_json::from_value(value.get("batch_checkpoint")?.clone()).ok()
+}
+
+/// Persisted endpoint pacing so Retry Scan in a new process keeps serial limits.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct PlaybookPacing {
+    #[serde(default)]
+    pub by_category: HashMap<String, EndpointPacing>,
+    #[serde(default)]
+    pub last: Option<EndpointPacing>,
+    #[serde(default)]
+    pub had_healthy_endpoint: bool,
+}
+
+pub fn pacing_from_playbook(playbook_json: Option<&str>) -> Option<PlaybookPacing> {
+    let raw = playbook_json?;
+    let value: Value = serde_json::from_str(raw).ok()?;
+    serde_json::from_value(value.get("endpoint_pacing")?.clone()).ok()
+}
+
+pub async fn persist_playbook_pacing(
+    repos: &Repositories,
+    scan_id: &str,
+    pacing: &PlaybookPacing,
+) -> Result<(), promptlab_core::PromptLabError> {
+    let scan = repos.scans().get(scan_id).await?;
+    let mut playbook = scan
+        .playbook_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let Some(obj) = playbook.as_object_mut() {
+        obj.insert(
+            "endpoint_pacing".into(),
+            serde_json::to_value(pacing).unwrap_or(Value::Null),
+        );
+    }
+    repos
+        .scans()
+        .update(
+            scan_id,
+            UpdateScan {
+                playbook_json: Some(playbook),
+                ..Default::default()
+            },
+        )
+        .await?;
+    Ok(())
 }
 
 pub fn generated_payloads_from_playbook(
@@ -208,5 +258,22 @@ mod tests {
         let restored = generated_payloads_from_playbook(Some(&playbook.to_string())).unwrap();
         assert_eq!(restored.get(&AttackCategory::Jailbreak).unwrap().len(), 1);
         assert!(generated_payloads_from_playbook(Some("{}")).is_none());
+    }
+
+    #[test]
+    fn pacing_from_playbook_roundtrip() {
+        let mut pacing = EndpointPacing::default();
+        pacing.serial_wait = true;
+        pacing.max_concurrent_requests = 1;
+        pacing.timeout_ms = 120_000;
+        let snapshot = PlaybookPacing {
+            by_category: std::collections::HashMap::from([("jailbreak".into(), pacing.clone())]),
+            last: Some(pacing.clone()),
+            had_healthy_endpoint: true,
+        };
+        let playbook = serde_json::json!({ "endpoint_pacing": snapshot });
+        let restored = pacing_from_playbook(Some(&playbook.to_string())).unwrap();
+        assert_eq!(restored, snapshot);
+        assert!(pacing_from_playbook(Some("{}")).is_none());
     }
 }

@@ -50,7 +50,7 @@ pub fn run() {
                     if reconciled > 0 {
                         tracing::info!(
                             reconciled,
-                            "marked interrupted scans as failed on shutdown"
+                            "marked interrupted scans as stopped on shutdown"
                         );
                     }
                     let mut manager = state.runtime_manager().lock().await;
@@ -189,7 +189,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 commands::scan::reconcile_interrupted_scans(startup_state.inner(), false),
             );
             if reconciled > 0 {
-                tracing::info!(reconciled, "marked interrupted scans as failed on startup");
+                tracing::info!(reconciled, "marked interrupted scans as stopped on startup");
             }
 
             let app_handle = app.handle().clone();

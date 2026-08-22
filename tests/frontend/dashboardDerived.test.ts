@@ -240,7 +240,7 @@ describe("deriveActivity", () => {
 
     expect(activity).toHaveLength(1);
     expect(activity[0]?.type).toBe("report");
-    expect(activity[0]?.message).toBe("Generated HTML report: Scan (standard) (Demo)");
+    expect(activity[0]?.message).toBe("Report generated: Scan (standard) (Demo)");
   });
 
   it("includes exported report events only when marked exported", () => {

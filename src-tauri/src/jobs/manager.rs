@@ -354,7 +354,7 @@ impl ScanJobManager {
         batch_checkpoint: Arc<Mutex<Option<ScanBatchCheckpoint>>>,
         progress: Arc<Mutex<ScanProgress>>,
     ) {
-        self.inner.lock().unwrap().insert(
+        let previous = self.inner.lock().unwrap().insert(
             scan_id,
             JobHandle {
                 cancel,
@@ -364,6 +364,11 @@ impl ScanJobManager {
                 progress,
             },
         );
+        if let Some(old) = previous {
+            old.cancel.store(true, Ordering::Relaxed);
+            old.paused.store(false, Ordering::Relaxed);
+            old.pause_requested.store(false, Ordering::Relaxed);
+        }
     }
 
     pub fn controls(&self, scan_id: &str) -> Option<ScanJobControls> {
@@ -383,12 +388,36 @@ impl ScanJobManager {
         self.inner.lock().unwrap().contains_key(scan_id)
     }
 
-    pub fn progress(&self, scan_id: &str) -> Option<ScanProgress> {
+    /// Snapshot live jobs so shutdown can persist progress + checkpoint before exit.
+    pub fn live_snapshots(&self) -> Vec<(String, ScanProgress, Option<ScanBatchCheckpoint>)> {
         self.inner
             .lock()
             .unwrap()
-            .get(scan_id)
-            .and_then(|handle| handle.progress.lock().ok().map(|p| p.clone()))
+            .iter()
+            .map(|(scan_id, handle)| {
+                let progress = handle
+                    .progress
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone();
+                let checkpoint = handle
+                    .batch_checkpoint
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone();
+                (scan_id.clone(), progress, checkpoint)
+            })
+            .collect()
+    }
+
+    pub fn progress(&self, scan_id: &str) -> Option<ScanProgress> {
+        self.inner.lock().unwrap().get(scan_id).map(|handle| {
+            handle
+                .progress
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
+        })
     }
 
     pub fn is_cancelled(&self, scan_id: &str) -> bool {
@@ -496,6 +525,57 @@ mod tests {
         manager.request_cancel("scan-1");
         assert!(cancel.load(Ordering::Relaxed));
         assert_eq!(manager.progress("scan-1").unwrap().status, "cancelled");
+    }
+
+    #[test]
+    fn live_snapshots_include_progress_and_checkpoint() {
+        let manager = ScanJobManager::default();
+        let checkpoint = ScanBatchCheckpoint::PendingJudge {
+            category: "Jailbreak".into(),
+            attempts: vec![],
+        };
+        manager.register(
+            "scan-live".into(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(Some(checkpoint))),
+            Arc::new(Mutex::new(ScanProgress::new(8))),
+        );
+        let snapshots = manager.live_snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].0, "scan-live");
+        assert_eq!(snapshots[0].1.total, 8);
+        assert!(matches!(
+            snapshots[0].2,
+            Some(ScanBatchCheckpoint::PendingJudge { .. })
+        ));
+    }
+
+    #[test]
+    fn register_cancels_replaced_job_handle() {
+        let manager = ScanJobManager::default();
+        let first_cancel = Arc::new(AtomicBool::new(false));
+        manager.register(
+            "scan-1".into(),
+            first_cancel.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(None)),
+            Arc::new(Mutex::new(ScanProgress::new(1))),
+        );
+        let second_cancel = Arc::new(AtomicBool::new(false));
+        manager.register(
+            "scan-1".into(),
+            second_cancel.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(None)),
+            Arc::new(Mutex::new(ScanProgress::new(1))),
+        );
+        assert!(first_cancel.load(Ordering::Relaxed));
+        assert!(!second_cancel.load(Ordering::Relaxed));
+        assert!(manager.contains("scan-1"));
     }
 
     #[test]

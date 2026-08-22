@@ -2,6 +2,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use promptlab_auth::AuthEngineConfig;
 use promptlab_attack::AttackCategory;
@@ -31,7 +32,7 @@ use crate::error::{CommandError, CommandResult};
 use crate::jobs::{ScanJobManager, ScanProgress};
 use crate::scan_console_log;
 use crate::scan_playbook::{
-    append_scan_retry, checkpoint_from_playbook, persist_playbook_progress,
+    append_scan_retry, checkpoint_from_playbook, pacing_from_playbook, persist_playbook_progress,
     persist_scan_playbook_state, progress_from_playbook,
 };
 use crate::state::AppState;
@@ -112,6 +113,28 @@ fn is_interrupted_scan_status(status: &str) -> bool {
     matches!(status, "running" | "paused" | "pending")
 }
 
+/// Terminal status for scans interrupted by shutdown or a crashed job (not a scan failure).
+const INTERRUPTED_TERMINAL_STATUS: &str = "stopped";
+
+/// Stop a live job before Retry Scan / retry-failed spawns a second pipeline.
+/// Overwriting JobHandle without this leaves the old tokio task attacking the target.
+async fn cancel_and_await_live_job(jobs: &ScanJobManager, scan_id: &str) -> CommandResult<()> {
+    if !jobs.contains(scan_id) {
+        return Ok(());
+    }
+    jobs.request_cancel(scan_id);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+    while jobs.contains(scan_id) {
+        if tokio::time::Instant::now() >= deadline {
+            return Err(CommandError::invalid_input(
+                "scan is still running; stop it before Retry Scan",
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    Ok(())
+}
+
 async fn ensure_default_html_report(app: &AppHandle, project_id: &str, scan_id: &str) {
     let Some(state) = app.try_state::<AppState>() else {
         warn!(scan_id = %scan_id, "app state unavailable; default report was not generated");
@@ -177,7 +200,10 @@ async fn mark_scan_interrupted(
 
     if let Some(obj) = playbook.as_object_mut() {
         if let Some(progress) = obj.get_mut("progress").and_then(|value| value.as_object_mut()) {
-            progress.insert("status".into(), serde_json::json!("failed"));
+            progress.insert(
+                "status".into(),
+                serde_json::json!(INTERRUPTED_TERMINAL_STATUS),
+            );
             progress.insert("current_endpoint".into(), serde_json::Value::Null);
             progress.insert("current_test".into(), serde_json::Value::Null);
         }
@@ -189,7 +215,7 @@ async fn mark_scan_interrupted(
         .update(
             &scan.id,
             UpdateScan {
-                status: Some("failed".into()),
+                status: Some(INTERRUPTED_TERMINAL_STATUS.into()),
                 completed_at: Some(Some(OffsetDateTime::now_utc())),
                 playbook_json: Some(playbook),
                 ..Default::default()
@@ -199,8 +225,44 @@ async fn mark_scan_interrupted(
     Ok(())
 }
 
+/// Flush in-memory progress + checkpoint so a Tauri rebuild can resume judge, not re-attack.
+async fn persist_live_jobs_to_playbook(state: &AppState) {
+    let snapshots = state.jobs().live_snapshots();
+    if snapshots.is_empty() {
+        return;
+    }
+    let repos = state.repositories();
+    for (scan_id, mut progress, checkpoint) in snapshots {
+        progress.status = INTERRUPTED_TERMINAL_STATUS.into();
+        progress.current_endpoint = None;
+        progress.current_test = None;
+        if let Err(err) = persist_scan_playbook_state(
+            &repos,
+            &scan_id,
+            Some(&progress),
+            checkpoint.as_ref().map(|cp| Some(cp)),
+        )
+        .await
+        {
+            warn!(scan_id = %scan_id, error = %err, "failed to persist live scan checkpoint on shutdown");
+        } else {
+            info!(
+                scan_id = %scan_id,
+                has_checkpoint = checkpoint.is_some(),
+                "persisted live scan checkpoint on shutdown"
+            );
+        }
+    }
+}
+
 /// Mark scans that were left active in the database but have no in-memory job.
+/// `force` is shutdown: persist live JobHandle state first, then mark `stopped`
+/// (not `failed`) so Retry Scan resumes instead of looking like a scan error.
 pub async fn reconcile_interrupted_scans(state: &AppState, force: bool) -> usize {
+    if force {
+        persist_live_jobs_to_playbook(state).await;
+    }
+
     let repos = state.repositories();
     let scans = match repos.scans().list_interrupted().await {
         Ok(scans) => scans,
@@ -220,7 +282,7 @@ pub async fn reconcile_interrupted_scans(state: &AppState, force: bool) -> usize
         }
         match mark_scan_interrupted(&repos, &scan).await {
             Ok(()) => {
-                info!(scan_id = %scan.id, previous_status = %scan.status, "marked interrupted scan as failed");
+                info!(scan_id = %scan.id, previous_status = %scan.status, "marked interrupted scan as stopped");
                 reconciled += 1;
             }
             Err(err) => {
@@ -259,6 +321,7 @@ fn merge_scan_execution_playbook(
             obj.remove("progress");
             obj.remove("batch_checkpoint");
             obj.remove("generated_payloads");
+            obj.remove("endpoint_pacing");
         }
         if let Some(execution) = execution_playbook.as_object() {
             for (key, value) in execution {
@@ -384,6 +447,18 @@ async fn run_scan_job(
         }
     };
 
+    let restored_pacing = match repos.scans().get(&scan_id).await {
+        Ok(scan) => pacing_from_playbook(scan.playbook_json.as_deref()),
+        Err(_) => None,
+    };
+    let pacing_cache = ScanPacingCache::from_playbook(restored_pacing);
+    if !pacing_cache.is_idle() {
+        progress_emitter.info(format!(
+            "Restored endpoint pacing from playbook — {}",
+            pacing_cache.summary()
+        ));
+    }
+
     if let Some((tid, target_profile)) = profile_ref {
         let outcome = run_target_profile_attack_scan(
             TargetProfileScanContext {
@@ -408,7 +483,7 @@ async fn run_scan_job(
                 progress: progress.clone(),
                 emitter: progress_emitter.clone(),
                 skip_completed_categories,
-                pacing_cache: Arc::new(Mutex::new(ScanPacingCache::default())),
+                pacing_cache: Arc::new(Mutex::new(pacing_cache)),
             },
             execution_config,
         )
@@ -613,23 +688,26 @@ pub async fn scan_start_op(
         if existing.project_id != project_id {
             return Err(CommandError::invalid_input("draft scan project mismatch"));
         }
+        if existing.status == "paused" {
+            return Err(CommandError::invalid_input(
+                "scan is paused; resume it instead of retrying failed categories",
+            ));
+        }
+        if state.jobs().contains(draft_id) {
+            cancel_and_await_live_job(state.jobs(), draft_id).await?;
+        }
+        let existing = repos
+            .scans()
+            .get(draft_id)
+            .await
+            .map_err(CommandError::from)?;
         if !is_restartable_scan_status(&existing.status)
-            && !(existing.status == "running" && !state.jobs().contains(draft_id))
+            && existing.status != "running"
         {
             return Err(CommandError::invalid_input(format!(
                 "scan cannot retry failed categories from status '{}'",
                 existing.status
             )));
-        }
-        if existing.status == "running" && state.jobs().contains(draft_id) {
-            return Err(CommandError::invalid_input(
-                "scan is still running; wait for it to finish before retrying failed categories",
-            ));
-        }
-        if existing.status == "paused" {
-            return Err(CommandError::invalid_input(
-                "scan is paused; resume it instead of retrying failed categories",
-            ));
         }
 
         let progress = progress_from_playbook(existing.playbook_json.as_deref()).ok_or_else(|| {
@@ -734,7 +812,7 @@ pub async fn scan_start_op(
     let mut clear_console_log = false;
     let mut continue_from_progress = false;
     let scan = if let Some(draft_id) = draft_scan_id.filter(|id| !id.trim().is_empty()) {
-        let existing = repos
+        let mut existing = repos
             .scans()
             .get(&draft_id)
             .await
@@ -744,7 +822,23 @@ pub async fn scan_start_op(
         }
 
         let is_draft = existing.status == crate::commands::wizard_scan::WIZARD_SCAN_STATUS;
-        let is_restart = is_restartable_scan_status(&existing.status);
+        let mut is_restart = is_restartable_scan_status(&existing.status);
+        if !is_draft && state.jobs().contains(&draft_id) {
+            if continue_requested || retry_failed_only || is_restart {
+                cancel_and_await_live_job(state.jobs(), &draft_id).await?;
+                existing = repos
+                    .scans()
+                    .get(&draft_id)
+                    .await
+                    .map_err(CommandError::from)?;
+                is_restart = is_restartable_scan_status(&existing.status);
+            } else {
+                return Ok(ScanStartDto {
+                    scan_id: draft_id.clone(),
+                });
+            }
+        }
+
         execution_config.seed_from_prior_failure = is_restart || retry_failed_only;
         let existing_progress = progress_from_playbook(existing.playbook_json.as_deref());
         let running_without_job = !is_draft
@@ -1183,8 +1277,19 @@ async fn spawn_resumed_scan_job(
 }
 
 pub async fn scan_status_op(state: &AppState, scan_id: String) -> CommandResult<ScanStatusDto> {
-    if let Some(progress) = state.jobs().progress(&scan_id) {
-        return Ok(progress_to_dto(&scan_id, &progress));
+    if state.jobs().contains(&scan_id) {
+        if let Some(progress) = state.jobs().progress(&scan_id) {
+            return Ok(progress_to_dto(&scan_id, &progress));
+        }
+        // Job is live even if the progress snapshot is briefly unavailable.
+        // Never mark it interrupted — that flips Retry Scan on and double-starts.
+        let repos = state.repositories();
+        let scan = repos
+            .scans()
+            .get(&scan_id)
+            .await
+            .map_err(CommandError::from)?;
+        return scan_status_from_db(&repos, &scan_id, &scan).await;
     }
 
     let repos = state.repositories();
@@ -1529,6 +1634,34 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    async fn cancel_and_await_is_noop_without_live_job() {
+        let jobs = ScanJobManager::default();
+        cancel_and_await_live_job(&jobs, "missing").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancel_and_await_waits_until_job_removed() {
+        let jobs = ScanJobManager::default();
+        let cancel = Arc::new(AtomicBool::new(false));
+        jobs.register(
+            "scan-1".into(),
+            cancel.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(None)),
+            Arc::new(Mutex::new(ScanProgress::new(1))),
+        );
+        let jobs_clone = jobs.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            jobs_clone.remove("scan-1");
+        });
+        cancel_and_await_live_job(&jobs, "scan-1").await.unwrap();
+        assert!(!jobs.contains("scan-1"));
+        assert!(cancel.load(Ordering::Relaxed));
+    }
+
     #[test]
     fn interrupted_scan_statuses_include_active_states() {
         assert!(is_interrupted_scan_status("running"));
@@ -1536,6 +1669,8 @@ mod tests {
         assert!(is_interrupted_scan_status("pending"));
         assert!(!is_interrupted_scan_status("failed"));
         assert!(!is_interrupted_scan_status("completed"));
+        assert!(!is_interrupted_scan_status("stopped"));
+        assert_eq!(INTERRUPTED_TERMINAL_STATUS, "stopped");
     }
 
     #[test]
@@ -1549,7 +1684,8 @@ mod tests {
         let existing = serde_json::json!({
             "wizard": { "step": 4 },
             "progress": { "completed": 3, "total": 5 },
-            "generated_payloads": { "jailbreak": [] }
+            "generated_payloads": { "jailbreak": [] },
+            "endpoint_pacing": { "had_healthy_endpoint": true }
         });
         let mut execution = serde_json::json!({
             "profile": "standard",
@@ -1566,6 +1702,7 @@ mod tests {
         assert_eq!(merged["profile"], "standard");
         assert!(merged.get("progress").is_none());
         assert!(merged.get("generated_payloads").is_none());
+        assert!(merged.get("endpoint_pacing").is_none());
         assert_eq!(
             execution["wizard_snapshot"],
             serde_json::json!({ "step": 4 })
@@ -1583,7 +1720,8 @@ mod tests {
                 "categories_failed": ["jailbreak"]
             },
             "batch_checkpoint": { "kind": "pending_judge" },
-            "generated_payloads": { "prompt_injection": [{ "id": "p1" }] }
+            "generated_payloads": { "prompt_injection": [{ "id": "p1" }] },
+            "endpoint_pacing": { "had_healthy_endpoint": true }
         });
         let mut execution = serde_json::json!({
             "profile": "standard",
@@ -1599,6 +1737,7 @@ mod tests {
         assert!(merged.get("progress").is_some());
         assert!(merged.get("batch_checkpoint").is_some());
         assert!(merged.get("generated_payloads").is_some());
+        assert!(merged.get("endpoint_pacing").is_some());
         assert_eq!(merged["wizard"], serde_json::json!({ "step": 4 }));
     }
 
