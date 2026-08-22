@@ -11,6 +11,6 @@
 | [YAZG.md](YAZG.md) | Supervisor, sub-agents, tools, AgentTrace |
 | [AUTH.md](AUTH.md) | Target credentials + keychain (Playwright leftover) |
 
-Root [README.md](../README.md) is clone/build. [AGENTS.md](../AGENTS.md) is Cloud VM toolchain.
+Root [README.md](../README.md) is product overview + clone/build. [AGENTS.md](../AGENTS.md) is Cloud VM toolchain.
 
 Filenames: `SCREAMING_SNAKE.md` except `README.md`.
