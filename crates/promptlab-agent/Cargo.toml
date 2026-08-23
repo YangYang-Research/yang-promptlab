@@ -18,7 +18,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-rig = "0.40.0"
+# Use rig-core only (not the `rig` facade) so optional companions like
+# rig-bedrock / AWS legacy rustls 0.21 stay out of the dependency graph.
+rig = { package = "rig-core", version = "0.40.0" }
 schemars = "1"
 tokio = { workspace = true, features = ["sync"] }
 

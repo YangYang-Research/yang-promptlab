@@ -12,7 +12,7 @@ promptlab-core = { workspace = true }
 promptlab-storage = { workspace = true }
 async-trait = { workspace = true }
 base64 = "0.22"
-jsonwebtoken = "9"
+jsonwebtoken = { version = "10.3", default-features = false }
 keyring = { workspace = true }
 aes-gcm = { workspace = true }
 rand = { workspace = true }
