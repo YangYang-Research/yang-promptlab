@@ -76,10 +76,11 @@ Yazg, planning, and judging use the model you register in Models / Settings. Loc
 
 ### Providers
 
-| | |
-|---|---|
+| Model | Provider |
+|-------|----------|
 | Local | GGUF via in-process libllama |
 | Remote | OpenAI, Anthropic, Google, Azure, AWS Bedrock, NVIDIA, OpenRouter, Custom (`/v1`) |
+|-------|----------|
 
 ---
 
