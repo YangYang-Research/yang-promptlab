@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/YangYang-Research/yang-promptlab/blob/main/SECURITY.md
+    about: Report a security issue in PromptLab itself (private disclosure). Do not open a public issue with exploit details.
+  - name: Product docs
+    url: https://github.com/YangYang-Research/yang-promptlab/blob/main/docs/README.md
+    about: Architecture, target profile, attack pipeline, Yazg, runtime, auth.

@@ -1,20 +1,22 @@
 ---
 name: Feature request
-about: Suggest an idea for this project
-title: ''
-labels: ''
-assignees: ''
-
+about: Suggest an improvement to PromptLab
+title: "[feat] "
+labels: ["enhancement"]
+assignees: ""
 ---
 
-**Is your feature request related to a problem? Please describe.**
-A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
+**Problem**
+What is hard or missing today?
 
-**Describe the solution you'd like**
-A clear and concise description of what you want to happen.
+**Proposal**
+What you want PromptLab to do.
 
-**Describe alternatives you've considered**
-A clear and concise description of any alternative solutions or features you've considered.
+**Where it fits**
+(e.g. scan wizard, target profile, Yazg, AI Runtime, Attack Factory, Agent Trace, reports, settings)
+
+**Alternatives**
+Other approaches you considered, if any.
 
 **Additional context**
-Add any other context or screenshots about the feature request here.
+Screenshots, provider names, or links to docs. Keep authorized-assessment scope — see [CONTRIBUTING.md](../../CONTRIBUTING.md).
