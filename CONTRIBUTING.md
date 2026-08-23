@@ -1,6 +1,6 @@
 # Contributing
 
-Issues and pull requests are welcome. PromptLab is an authorized AI security testing tool — keep that scope.
+Issues and pull requests are welcome. PromptLab is an authorized AI security testing tool — keep that scope. Product vulnerabilities: [SECURITY.md](SECURITY.md).
 
 Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before changing crates or IPC. Doc index: [docs/README.md](docs/README.md).
 

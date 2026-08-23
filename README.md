@@ -148,6 +148,8 @@ More: [`docs/screenshots/`](docs/screenshots/).
 
 Issues and pull requests are welcome. How to build, where to change things, and PR expectations: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+Security issues in PromptLab itself: [`SECURITY.md`](SECURITY.md) (private disclosure — do not file public exploit issues).
+
 ---
 
 ## Disclaimer
