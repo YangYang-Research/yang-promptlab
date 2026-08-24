@@ -20,11 +20,21 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            os_name: macOS
+            os_name: macOS Apple Silicon
+            args: --target aarch64-apple-darwin
+            rust_target: aarch64-apple-darwin
+          - platform: macos-13
+            os_name: macOS Intel
+            args: --target x86_64-apple-darwin
+            rust_target: x86_64-apple-darwin
           - platform: ubuntu-22.04
             os_name: Linux
+            args: ""
+            rust_target: x86_64-unknown-linux-gnu
           - platform: windows-latest
             os_name: Windows
+            args: ""
+            rust_target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout
@@ -38,6 +48,8 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -72,12 +84,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: .
+          args: ${{ matrix.args }}
           tagName: v__VERSION__-pr.${{ github.event.pull_request.number }}
           releaseName: PromptLab v__VERSION__ (PR #${{ github.event.pull_request.number }})
           releaseBody: |
             Draft from PR #${{ github.event.pull_request.number }} (`${{ github.event.pull_request.head.sha }}`).
 
-            Bundles: macOS `.dmg`, Windows `.msi` / `.exe`, Linux `.deb` / AppImage.
+            Bundles:
+            - macOS Apple Silicon `.dmg` (M1+)
+            - macOS Intel `.dmg` (x86_64)
+            - Windows x64 `.msi` / `.exe`
+            - Linux x64 `.deb` / AppImage
 
             Review the installers, then publish this release when ready.
           releaseDraft: true

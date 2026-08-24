@@ -12,6 +12,8 @@
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](#quick-start)
 [![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![Node](https://img.shields.io/badge/Node-18%2B-green?logo=node.js&logoColor=white)](#start-from-source-code)
+[![Dependency Graph](https://github.com/YangYang-Research/yang-promptlab/actions/workflows/dependabot/update-graph/badge.svg)](https://github.com/YangYang-Research/yang-promptlab/actions/workflows/dependabot/update-graph)
+[![Release](https://github.com/YangYang-Research/yang-promptlab/actions/workflows/release.yml/badge.svg)](https://github.com/YangYang-Research/yang-promptlab/actions/workflows/release.yml)
 
 </div>
 
