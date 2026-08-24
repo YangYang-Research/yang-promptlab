@@ -23,19 +23,27 @@ jobs:
             os_name: macOS Apple Silicon
             args: --target aarch64-apple-darwin
             rust_target: aarch64-apple-darwin
+            macos_deployment_target: "11.0"
           - platform: macos-13
             os_name: macOS Intel
             args: --target x86_64-apple-darwin
             rust_target: x86_64-apple-darwin
+            macos_deployment_target: "11.0"
           - platform: ubuntu-22.04
             os_name: Linux
             args: ""
             rust_target: x86_64-unknown-linux-gnu
+            macos_deployment_target: ""
           - platform: windows-latest
             os_name: Windows
             args: ""
             rust_target: x86_64-pc-windows-msvc
+            macos_deployment_target: ""
     runs-on: ${{ matrix.platform }}
+    env:
+      # llama-cpp/ggml need std::filesystem (macOS ≥10.15). Tauri's default
+      # min version is lower and breaks cmake on Apple Silicon CI.
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_deployment_target }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
