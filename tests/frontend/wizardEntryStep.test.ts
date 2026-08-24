@@ -32,7 +32,7 @@ describe("applyWizardEntryStep", () => {
     const next = applyWizardEntryStep(session, 2);
     expect(next.currentStep).toBe(2);
     expect(next.savedTargetId).toBeNull();
-    expect(next.targetForm.url || next.targetForm.baseUrl || "").toBe("");
+    expect(next.targetForm.url || "").toBe("");
   });
 
   it("keeps existing target data when starting a new scan at step 2", () => {
@@ -51,7 +51,7 @@ describe("applyWizardEntryStep", () => {
     const next = applyWizardEntryStep(base, 2);
     expect(next.currentStep).toBe(2);
     expect(next.savedTargetId).toBe("target-1");
-    expect(next.targetForm.url || next.targetForm.baseUrl).toContain("example.com");
+    expect(next.targetForm.url).toContain("example.com");
     expect(next.draftScanId).toBeNull();
     expect(next.submittedScanId).toBeNull();
     expect(next.attackPlan).toBeNull();

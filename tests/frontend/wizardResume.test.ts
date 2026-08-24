@@ -6,6 +6,7 @@ import {
   sessionReadyForWizardEntry,
 } from "@/features/scans/wizardResume";
 import { createInitialSession } from "@/features/scans/wizardState";
+import { createEmptyVerification } from "@/features/scans/targetProfile";
 import type { Target } from "@/shared/types";
 
 describe("wizardResume", () => {
@@ -51,6 +52,7 @@ describe("wizardResume", () => {
       targetProfile: {
         ...createInitialSession("project-1").targetProfile,
         verification: {
+          ...createEmptyVerification(),
           verified: true,
           status: "success",
           verifiedAt: "2026-01-01T00:00:00Z",

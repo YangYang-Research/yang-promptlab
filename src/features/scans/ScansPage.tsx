@@ -293,7 +293,7 @@ export function ScansPage() {
       key: "actions",
       header: "",
       width: "56px",
-      align: "right",
+      align: "right" as const,
       render: (scan: ScanRun) => (
         <span className="table-actions" onClick={(event) => event.stopPropagation()}>
           <ActionsDropdown

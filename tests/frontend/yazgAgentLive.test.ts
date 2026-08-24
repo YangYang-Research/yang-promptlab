@@ -24,7 +24,7 @@ function baseConfig(
     runtimeStatus: {
       modelLoaded: false,
       requiresAttention: false,
-      message: null,
+      message: "",
       loadedModelPath: null,
       runtimeVersion: null,
     },
@@ -50,10 +50,10 @@ describe("isYazgAgentLive", () => {
           runtimeStatus: {
             modelLoaded: false,
             requiresAttention: false,
-            message: null,
+            message: "",
             loadedModelPath: null,
             runtimeVersion: null,
-          },
+          } as RuntimeConfigurationDto["runtimeStatus"],
         }),
       ),
     ).toBe(false);

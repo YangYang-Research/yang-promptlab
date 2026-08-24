@@ -112,6 +112,7 @@ export function sessionFromPersistedWizard(
       ? persisted.attackPlanSource ?? "generated"
       : null,
     submittedScanId: persisted.submittedScanId,
+    importAutoAdvance: false,
   };
 }
 
