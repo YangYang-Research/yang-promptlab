@@ -33,7 +33,7 @@ import {
 import { toAppError } from "@/shared/errors";
 import { createLogger } from "@/shared/logging";
 import { computeDashboardStats } from "@/shared/stats";
-import { LOCAL_ACTIVITY_CHANGED_EVENT } from "@/shared/activity/localActivity";
+import { LOCAL_ACTIVITY_CHANGED_EVENT, hydrateLocalActivity } from "@/shared/activity/localActivity";
 import {
   deriveActivity,
   deriveAttackRuns,
@@ -201,6 +201,7 @@ async function loadAll(): Promise<LoadedData> {
   );
 
   const reports = mapReports(reportDtos, projectDtos, scanDtos);
+  const localActivity = await hydrateLocalActivity();
 
   return {
     projects,
@@ -210,7 +211,7 @@ async function loadAll(): Promise<LoadedData> {
     reports,
     models: mapLocalModels(modelEntries),
     attackRuns: deriveAttackRuns(scans, targets, liveStatusMap),
-    activity: deriveActivity(findings, scans, targets, projects, reports),
+    activity: deriveActivity(findings, scans, targets, projects, reports, localActivity),
   };
 }
 

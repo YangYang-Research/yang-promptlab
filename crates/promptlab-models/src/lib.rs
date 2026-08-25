@@ -1,20 +1,17 @@
 //! PromptLab model registry and vault helpers.
 //!
-//! Remote/third-party provider registry, optional HuggingFace download plumbing,
-//! and Ollama-over-HTTP smoke tests. Embedded llama.cpp / in-process GGUF is removed.
+//! Remote/third-party provider registry and Ollama-over-HTTP smoke tests.
+//! Embedded llama.cpp / in-process GGUF and HuggingFace GGUF downloads are removed.
 //! The built-in GGUF `models.json` catalog has been removed — Remote-only.
 
-pub mod download;
 pub mod error;
 pub mod hardware;
-pub mod import_pack;
 pub mod manager;
 pub mod registry;
 pub mod runtime;
 pub mod types;
 pub mod verify;
 
-pub use download::{DownloadControl, DownloadCoordinator, DownloadManager, DownloadOptions, HuggingFaceClient, huggingface_url, PipelinePhase};
 pub use error::{ModelError, ModelResult};
 pub use hardware::detect_hardware;
 pub use manager::LocalModelManager;

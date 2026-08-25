@@ -1,9 +1,9 @@
 //! Embedded AI runtime IPC — lifecycle, health, benchmark, logs, hardware.
 
-use promptlab_models::{ModelEntry, ModelProvider};
+use promptlab_models::ModelEntry;
 use promptlab_runtime::{
     hardware::HardwareDetector, RuntimeBenchmarkResult, RuntimeHardwareProfile,
-    RuntimeHealthReport, RuntimeLogEntry, RuntimeLifecycleState, RuntimeStatusSnapshot,
+    RuntimeHealthReport, RuntimeLogEntry, RuntimeStatusSnapshot,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -13,8 +13,8 @@ use time::OffsetDateTime;
 use promptlab_inference::config::{AiRuntimeConfiguration, InferenceMode};
 use crate::inference_settings::{
     apply_third_party_health_check, config_to_dto, config_to_dto_with_connectivity_test,
-    format_health_check_timestamp, is_local_model, is_third_party_model, parse_route,
-    reconcile_config, third_party_status_label, AiInferenceSettingsDto,
+    format_health_check_timestamp, is_third_party_model, parse_route, reconcile_config,
+    third_party_status_label, AiInferenceSettingsDto,
 };
 use crate::inference_host::{connectivity_to_judge, open_gateway_session};
 use crate::commands::models::test_third_party_model_connection;
@@ -99,13 +99,6 @@ pub struct RuntimeConfigurationDto {
     pub runtime_status: RuntimeStatusDto,
 }
 
-fn local_runtime_display_name(backend: Option<&str>) -> Option<String> {
-    match backend.map(str::trim).filter(|value| !value.is_empty()) {
-        Some(backend) => Some(format!("llama.cpp - {backend}")),
-        None => None,
-    }
-}
-
 fn snapshot_to_dto(snap: RuntimeStatusSnapshot, recommended_runtime: Option<String>) -> RuntimeStatusDto {
     RuntimeStatusDto {
         lifecycle_state: snap.lifecycle_state,
@@ -160,10 +153,6 @@ pub async fn runtime_repair(
     Err(CommandError::invalid_input(
         "embedded llama.cpp runtime repair has been removed — configure a remote AI provider",
     ))
-}
-
-async fn runtime_repair_inner(_app: AppHandle, state: &AppState) -> CommandResult<RuntimeStatusDto> {
-    runtime_status_op(state).await
 }
 
 #[tauri::command]
@@ -468,63 +457,6 @@ async fn inference_settings_for_state(state: &AppState) -> CommandResult<AiInfer
     ))
 }
 
-/// Local embedded runtime: health check is a state probe, not HTTP — avoid fake `Reachable (0 ms)`.
-fn local_inference_connectivity_label(
-    lifecycle: &str,
-    model_loaded: bool,
-    last_health: Option<&promptlab_runtime::RuntimeHealthReport>,
-) -> String {
-    if matches!(lifecycle, "starting") {
-        return "Loading model".into();
-    }
-    if model_loaded {
-        if let Some(h) = last_health {
-            if h.endpoint_reachable {
-                return if h.latency_ms > 0 {
-                    format!("In-process ({} ms)", h.latency_ms)
-                } else {
-                    "In-process".into()
-                };
-            }
-            return "Unavailable".into();
-        }
-        return "In-process".into();
-    }
-    if matches!(lifecycle, "running" | "busy") {
-        return "No model loaded".into();
-    }
-    if let Some(h) = last_health {
-        if h.model_loaded && !h.endpoint_reachable {
-            return "Unavailable".into();
-        }
-    }
-    "Not checked".into()
-}
-
-fn local_status_label(
-    lifecycle: &str,
-    binary_available: bool,
-    manifest_installed: bool,
-    model_loaded: bool,
-) -> String {
-    if manifest_installed && !binary_available {
-        return "Repair Required".into();
-    }
-    match lifecycle {
-        "running" | "busy" if model_loaded => "Running".into(),
-        "running" | "busy" => "Ready".into(),
-        "starting" if !model_loaded => "Loading model".into(),
-        "starting" => "Starting".into(),
-        "stopping" => "Stopping".into(),
-        "stopped" => "Stopped".into(),
-        "installed" => "Idle".into(),
-        "not_installed" => "Not Installed".into(),
-        "downloading" | "installing" => "Installing".into(),
-        "failed" => "Failed".into(),
-        other => other.replace('_', " "),
-    }
-}
-
 async fn store_runtime_configuration_cache(state: &AppState, dto: &RuntimeConfigurationDto) {
     *state.runtime_config_cache().lock().await = Some(dto.clone());
 }
@@ -662,9 +594,6 @@ fn apply_model_testing_overlay(dto: &mut RuntimeConfigurationDto, testing_model_
     dto.status_label = "Verifying model".into();
     dto.settings.selected_model_id = Some(model_id.to_string());
 }
-
-/// Reserved for startup auto-resume; loading UI is driven by `runtime_model_loading_id`.
-pub(crate) async fn prime_loading_configuration_cache(_state: &AppState, _model_id: &str) {}
 
 /// Refresh the configuration cache while the runtime manager lock is already held.
 pub(crate) async fn prime_runtime_configuration_cache(
@@ -855,10 +784,9 @@ pub async fn runtime_set_inference_route(
     config = reconcile_config(config, &models);
 
     if run_connectivity_test {
-        let mut connectivity_test: Option<(bool, String)> = None;
         if let Some(id) = config.selected_model_id.clone() {
             drop(inference);
-            connectivity_test = Some(
+            let connectivity_test = Some(
                 run_third_party_connectivity_test_for_config(state.inner(), &mut config, &id)
                     .await,
             );

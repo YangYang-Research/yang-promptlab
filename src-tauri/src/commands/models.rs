@@ -1,19 +1,17 @@
 //! Local model vault commands — browse, install, remove, verify, inference test.
 
-use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use promptlab_auth::SecretStore;
 use promptlab_core::{PromptLabError, LogCategory};
 use promptlab_models::{
-    DownloadManager, DownloadProgress, DownloadStatus, LocalModelManager, ModelCatalogEntry,
-    ModelEntry, ModelFormat, ModelProvider, ModelSource, VerificationResult, remote_entry_id,
+    ModelCatalogEntry, ModelEntry, ModelFormat, ModelProvider, ModelSource, VerificationResult,
+    remote_entry_id,
 };
 use promptlab_inference::prompts::PromptRegistry;
 use promptlab_runtime::{InferRequest, RuntimeError};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use tauri::async_runtime::Mutex as AsyncMutex;
 use tauri::State;
 
 use crate::inference_host::test_remote_connectivity_only;
@@ -121,26 +119,6 @@ pub struct ModelRegistryDiagnosticsDto {
     pub invalid_ids: Vec<String>,
     pub issues: Vec<RegistryValidationIssueDto>,
     pub healthy: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelInstallRequest {
-    pub catalog_id: String,
-    pub ollama_base_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelImportRequest {
-    pub name: String,
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelDownloadRequest {
-    pub catalog_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -504,36 +482,12 @@ fn staging_remote_entry(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ModelDownloadProgressDto {
-    pub catalog_id: String,
-    pub status: String,
-    pub downloaded_bytes: u64,
-    pub total_bytes: Option<u64>,
-    pub remaining_bytes: Option<u64>,
-    pub percent: Option<f64>,
-    pub speed_bytes_per_sec: Option<f64>,
-    pub eta_seconds: Option<u64>,
-    pub resumed: bool,
-    pub destination: String,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ModelVaultStatsDto {
     pub vault_path: String,
     pub registered_count: usize,
     pub installed_local_count: usize,
     pub installed_bytes: u64,
     pub installed_gb: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelDownloadStatusDto {
-    pub active: bool,
-    pub progress: Option<ModelDownloadProgressDto>,
-    pub installed: Option<ModelEntryDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -616,175 +570,6 @@ fn catalog_to_dto(entry: &ModelCatalogEntry) -> ModelCatalogEntryDto {
     }
 }
 
-fn status_str(status: DownloadStatus) -> &'static str {
-    match status {
-        DownloadStatus::Pending => "pending",
-        DownloadStatus::Downloading => "downloading",
-        DownloadStatus::Paused => "paused",
-        DownloadStatus::Verifying => "verifying",
-        DownloadStatus::AwaitingVerify => "downloaded",
-        DownloadStatus::VerifyFailed => "verify_failed",
-        DownloadStatus::Completed => "completed",
-        DownloadStatus::Failed => "failed",
-        DownloadStatus::Verified => "verified",
-    }
-}
-
-fn progress_to_dto(progress: &DownloadProgress) -> ModelDownloadProgressDto {
-    let percent = progress.total_bytes.and_then(|total| {
-        if total == 0 {
-            None
-        } else {
-            Some((progress.downloaded_bytes as f64 / total as f64) * 100.0)
-        }
-    });
-    let remaining_bytes = progress
-        .total_bytes
-        .map(|total| total.saturating_sub(progress.downloaded_bytes));
-    ModelDownloadProgressDto {
-        catalog_id: progress.model_id.clone(),
-        status: status_str(progress.status).into(),
-        downloaded_bytes: progress.downloaded_bytes,
-        total_bytes: progress.total_bytes,
-        remaining_bytes,
-        percent,
-        speed_bytes_per_sec: progress.speed_bytes_per_sec,
-        eta_seconds: progress.eta_seconds,
-        resumed: progress.resumed,
-        destination: progress.destination.to_string_lossy().into_owned(),
-        error: progress.error.clone(),
-    }
-}
-
-async fn progress_to_dto_enriched(progress: &DownloadProgress) -> ModelDownloadProgressDto {
-    let mut dto = progress_to_dto(progress);
-    if progress.status == DownloadStatus::Completed
-        && DownloadManager::is_post_download_awaiting_verify(&progress.destination).await
-    {
-        dto.status = "downloaded".to_string();
-    }
-    dto
-}
-
-fn finalize_lock() -> &'static AsyncMutex<()> {
-    static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| AsyncMutex::new(()))
-}
-
-static PENDING_INSTALL: Mutex<Option<ModelEntryDto>> = Mutex::new(None);
-
-fn take_pending_install() -> Option<ModelEntryDto> {
-    PENDING_INSTALL.lock().ok()?.take()
-}
-
-fn store_pending_install(dto: ModelEntryDto) {
-    if let Ok(mut guard) = PENDING_INSTALL.lock() {
-        *guard = Some(dto);
-    }
-}
-
-async fn run_download_finalize(
-    model_manager: Arc<AsyncMutex<LocalModelManager>>,
-) -> CommandResult<Option<ModelEntryDto>> {
-    let _finalize_guard = finalize_lock().lock().await;
-
-    let plan = {
-        let mut manager = model_manager.lock().await;
-        manager
-            .prepare_finalize()
-            .await
-            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?
-    };
-
-    let Some(plan) = plan else {
-        return Ok(None);
-    };
-
-    let expected_sha256 = plan.catalog.sha256.as_deref().filter(|s| !s.is_empty());
-    if expected_sha256.is_none() {
-        tracing::warn!(
-            catalog_id = %plan.catalog_id,
-            "registry entry has no sha256; installing without integrity verification"
-        );
-    }
-
-    let verification = match promptlab_models::VerificationEngine::verify_file(
-        &plan.destination,
-        expected_sha256,
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(err) => {
-            let message = format!("verify error: {err}");
-            let mut manager = model_manager.lock().await;
-            let _ = manager
-                .record_verify_error(&plan.destination, message)
-                .await;
-            return Ok(None);
-        }
-    };
-
-    let mut manager = model_manager.lock().await;
-    let entry = manager
-        .complete_finalize(plan, verification)
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-
-    let vault = manager.vault_path().to_path_buf();
-    Ok(entry.map(|item| entry_to_dto(&item, &vault)))
-}
-
-fn spawn_download_finalize(state: &AppState) {
-    let model_manager = state.model_manager().clone();
-    tauri::async_runtime::spawn(async move {
-        match run_download_finalize(model_manager).await {
-            Ok(Some(dto)) => store_pending_install(dto),
-            Ok(None) => {}
-            Err(err) => tracing::warn!(error = %err, "background download finalize failed"),
-        }
-    });
-}
-
-async fn download_status_snapshot(
-    state: &AppState,
-    kick_finalize: bool,
-) -> CommandResult<ModelDownloadStatusDto> {
-    if let Some(installed) = take_pending_install() {
-        return Ok(ModelDownloadStatusDto {
-            active: false,
-            progress: None,
-            installed: Some(installed),
-        });
-    }
-
-    {
-        let mut manager = state.model_manager().lock().await;
-        if manager.download_status().await.is_none() {
-            let _ = manager.restore_persisted_pipelines().await;
-        }
-    }
-
-    if kick_finalize {
-        spawn_download_finalize(state);
-    }
-
-    let manager = state.model_manager().lock().await;
-    let progress = if let Some(active) = manager.download_status().await {
-        Some(progress_to_dto_enriched(&active).await)
-    } else if let Some(persisted) = manager.persisted_pipeline_progress().await {
-        Some(progress_to_dto_enriched(&persisted).await)
-    } else {
-        None
-    };
-
-    Ok(ModelDownloadStatusDto {
-        active: progress.is_some(),
-        progress,
-        installed: None,
-    })
-}
-
 #[tauri::command]
 pub async fn models_list(state: State<'_, AppState>) -> CommandResult<Vec<ModelEntryDto>> {
     models_list_op(state.inner()).await
@@ -848,16 +633,6 @@ pub async fn models_browse_op(state: &AppState) -> CommandResult<Vec<ModelCatalo
         .iter()
         .map(catalog_to_dto)
         .collect())
-}
-
-#[tauri::command]
-pub async fn models_install(
-    _state: State<'_, AppState>,
-    _request: ModelInstallRequest,
-) -> CommandResult<ModelEntryDto> {
-    Err(CommandError::invalid_input(
-        "GGUF catalog install has been removed — add a remote third-party provider instead",
-    ))
 }
 
 #[tauri::command]
@@ -1109,89 +884,6 @@ async fn persist_third_party_model_connectivity(
 }
 
 #[tauri::command]
-pub async fn models_import_gguf(
-    _state: State<'_, AppState>,
-    _request: ModelImportRequest,
-) -> CommandResult<ModelEntryDto> {
-    Err(CommandError::invalid_input(
-        "GGUF import has been removed — add a remote third-party provider instead",
-    ))
-}
-
-#[tauri::command]
-pub async fn models_import_zip(
-    _state: State<'_, AppState>,
-    _request: ModelImportRequest,
-) -> CommandResult<ModelEntryDto> {
-    Err(CommandError::invalid_input(
-        "GGUF zip import has been removed — add a remote third-party provider instead",
-    ))
-}
-
-#[tauri::command]
-pub async fn models_download_start(
-    _state: State<'_, AppState>,
-    _request: ModelDownloadRequest,
-) -> CommandResult<ModelDownloadProgressDto> {
-    Err(CommandError::invalid_input(
-        "GGUF download has been removed — add a remote third-party provider instead",
-    ))
-}
-
-#[tauri::command]
-pub async fn models_download_status(
-    _state: State<'_, AppState>,
-) -> CommandResult<ModelDownloadStatusDto> {
-    Ok(ModelDownloadStatusDto {
-        active: false,
-        progress: None,
-        installed: None,
-    })
-}
-
-#[tauri::command]
-pub async fn models_download_pause(
-    _state: State<'_, AppState>,
-) -> CommandResult<ModelDownloadProgressDto> {
-    Err(CommandError::invalid_input(
-        "GGUF download has been removed",
-    ))
-}
-
-#[tauri::command]
-pub async fn models_download_resume(
-    _state: State<'_, AppState>,
-) -> CommandResult<ModelDownloadProgressDto> {
-    Err(CommandError::invalid_input(
-        "GGUF download has been removed",
-    ))
-}
-
-#[tauri::command]
-pub async fn models_download_retry_verify(
-    _state: State<'_, AppState>,
-    _request: ModelDownloadRequest,
-) -> CommandResult<ModelDownloadStatusDto> {
-    Err(CommandError::invalid_input(
-        "GGUF download verify has been removed",
-    ))
-}
-
-#[tauri::command]
-pub async fn models_download_cancel_verify(
-    _state: State<'_, AppState>,
-) -> CommandResult<ModelDownloadProgressDto> {
-    Err(CommandError::invalid_input(
-        "GGUF download verify has been removed",
-    ))
-}
-
-#[tauri::command]
-pub async fn models_download_cancel(_state: State<'_, AppState>) -> CommandResult<()> {
-    Ok(())
-}
-
-#[tauri::command]
 pub async fn models_remove(
     state: State<'_, AppState>,
     model_id: String,
@@ -1313,7 +1005,7 @@ pub async fn models_test_inference(
             }
         }
 
-        let mut runtime_mgr = state.runtime_manager().lock().await;
+        let runtime_mgr = state.runtime_manager().lock().await;
         if !runtime_mgr.supervisor().runtime_available() {
             return Err(runtime_unavailable_error());
         }
@@ -1409,30 +1101,4 @@ pub async fn models_vault_stats_op(state: &AppState) -> CommandResult<ModelVault
         installed_bytes: stats.installed_bytes,
         installed_gb: stats.installed_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn progress_percent_computes() {
-        let dto = progress_to_dto(&DownloadProgress {
-            model_id: "hf-llama3-8b-q4".into(),
-            status: DownloadStatus::Downloading,
-            url: String::new(),
-            destination: std::path::PathBuf::from("/tmp/model.gguf"),
-            downloaded_bytes: 500,
-            total_bytes: Some(1000),
-            speed_bytes_per_sec: Some(100.0),
-            eta_seconds: Some(5),
-            resumed: false,
-            updated_at: time::OffsetDateTime::now_utc(),
-            error: None,
-        });
-        assert_eq!(dto.percent, Some(50.0));
-        assert_eq!(dto.remaining_bytes, Some(500));
-        assert_eq!(dto.speed_bytes_per_sec, Some(100.0));
-        assert_eq!(dto.eta_seconds, Some(5));
-    }
 }

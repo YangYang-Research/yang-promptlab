@@ -84,3 +84,10 @@ export {
   type ModelInferenceTestResult,
   type ModelCapabilitiesDto,
 } from "./models";
+export {
+  listRecentActivity,
+  recordRecentActivity,
+  replaceRecentActivity,
+  type ActivityItemDto,
+  type ActivityRecordRequest,
+} from "./activity";

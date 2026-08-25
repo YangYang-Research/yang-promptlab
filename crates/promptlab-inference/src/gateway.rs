@@ -70,7 +70,7 @@ impl DefaultAiInferenceGateway {
 
 #[async_trait]
 impl AiInferenceGateway for DefaultAiInferenceGateway {
-    async fn chat(&self, request: ChatRequest) -> InferenceResult<ChatResponse> {
+    async fn chat(&self, _request: ChatRequest) -> InferenceResult<ChatResponse> {
         Err(InferenceError::Unsupported(
             "chat requires InferenceSession — use gateway_session()".into(),
         ))

@@ -106,22 +106,6 @@ pub enum ModelSource {
     },
 }
 
-/// Download job lifecycle state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DownloadStatus {
-    Pending,
-    Downloading,
-    Paused,
-    Verifying,
-    /// Download complete; waiting for user-triggered SHA256 verify.
-    AwaitingVerify,
-    Completed,
-    VerifyFailed,
-    Failed,
-    Verified,
-}
-
 /// Registered model metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelEntry {
@@ -249,43 +233,12 @@ pub struct ModelCatalogEntry {
     pub size_label: Option<String>,
 }
 
-/// HuggingFace download request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HuggingFaceDownloadRequest {
-    pub name: String,
-    pub repo: String,
-    pub filename: String,
-    pub revision: Option<String>,
-    pub expected_sha256: Option<String>,
-    pub expected_size_bytes: Option<u64>,
-}
-
-/// Download progress snapshot.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DownloadProgress {
-    pub model_id: String,
-    pub status: DownloadStatus,
-    pub url: String,
-    pub destination: PathBuf,
-    pub downloaded_bytes: u64,
-    pub total_bytes: Option<u64>,
-    #[serde(default)]
-    pub speed_bytes_per_sec: Option<f64>,
-    #[serde(default)]
-    pub eta_seconds: Option<u64>,
-    pub resumed: bool,
-    pub updated_at: OffsetDateTime,
-    /// Human-readable failure reason when `status == Failed`.
-    #[serde(default)]
-    pub error: Option<String>,
-}
-
 /// Vault storage summary for desktop UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultStats {
     /// All registered models (public, import, third-party).
     pub registered_count: usize,
-    /// Local GGUF models only (public catalog + import).
+    /// Non-remote entries remaining in the vault (legacy local / Ollama refs).
     pub installed_local_count: usize,
     pub installed_bytes: u64,
     pub vault_path: PathBuf,

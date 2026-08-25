@@ -293,18 +293,6 @@ pub async fn reconcile_interrupted_scans(state: &AppState, force: bool) -> usize
     reconciled
 }
 
-fn user_facing_scan_error(raw: &str) -> String {
-    if raw.contains("secret not found in secure storage")
-        || raw.contains("No matching entry found in secure storage")
-    {
-        return "stored API credentials are missing from the system keychain — re-save authentication in Step 3 and verify again".into();
-    }
-    if raw.contains("transport error") {
-        return format!("could not reach target ({raw})");
-    }
-    raw.to_string()
-}
-
 fn merge_scan_execution_playbook(
     existing_playbook_json: Option<&str>,
     execution_playbook: &mut serde_json::Value,
@@ -1689,12 +1677,6 @@ mod tests {
         assert!(!is_interrupted_scan_status("completed"));
         assert!(!is_interrupted_scan_status("stopped"));
         assert_eq!(INTERRUPTED_TERMINAL_STATUS, "stopped");
-    }
-
-    #[test]
-    fn user_facing_scan_error_maps_missing_vault_secret() {
-        let msg = user_facing_scan_error("[NOT_FOUND] secret not found in secure storage");
-        assert!(msg.contains("Step 3"));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Persist AI Runtime token usage totals (per agent) in SQLite `app_settings`.
+//! Persist AI Runtime token usage totals (per agent) in SQLite `token_usage`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -7,7 +7,7 @@ use promptlab_inference::{
     AgentTokenUsage, TokenUsageSnapshot, token_usage_export_map, token_usage_migrate_unattributed,
     token_usage_replace_all, token_usage_reset, token_usage_snapshot, token_usage_take_dirty,
 };
-use promptlab_storage::{AppSettingsRepository, Database, SETTING_TOKEN_USAGE};
+use promptlab_storage::{Database, JsonDocumentRepository};
 use tauri::{AppHandle, Manager};
 use tracing::{info, warn};
 
@@ -80,12 +80,12 @@ fn retire_legacy_file(data_dir: &Path) {
 async fn load_from_db(db: &Database) -> Result<Option<BTreeMap<String, AgentTokenUsage>>, String> {
     let record = db
         .repositories()
-        .app_settings()
-        .get(SETTING_TOKEN_USAGE)
+        .token_usage()
+        .get()
         .await
         .map_err(|e| e.to_string())?;
     match record {
-        Some(row) => Ok(Some(parse_stored(&row.value_json)?)),
+        Some(row) => Ok(Some(parse_stored(&row.data_json)?)),
         None => Ok(None),
     }
 }
@@ -93,8 +93,8 @@ async fn load_from_db(db: &Database) -> Result<Option<BTreeMap<String, AgentToke
 async fn save_to_db(db: &Database, map: &BTreeMap<String, AgentTokenUsage>) -> Result<(), String> {
     let raw = serialize_stored(map)?;
     db.repositories()
-        .app_settings()
-        .upsert(SETTING_TOKEN_USAGE, &raw)
+        .token_usage()
+        .upsert(&raw)
         .await
         .map_err(|e| e.to_string())?;
     Ok(())

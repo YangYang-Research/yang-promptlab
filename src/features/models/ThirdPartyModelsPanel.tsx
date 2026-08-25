@@ -154,7 +154,7 @@ export function ThirdPartyModelsPanel({
         recordLocalActivity({
           type: "model",
           message: `Added model: ${savedForm.model || "Third-party model"}`,
-        });
+        }).catch(() => undefined);
       }
       onSaved?.();
     } catch (err) {

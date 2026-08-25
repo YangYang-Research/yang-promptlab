@@ -12,8 +12,6 @@ use crate::util::now;
 pub const SETTING_ENVIRONMENT: &str = "environment";
 /// Key for AI runtime / inference configuration JSON.
 pub const SETTING_AI_RUNTIME_CONFIG: &str = "ai_runtime_config";
-/// Key for lifetime AI Runtime token usage totals JSON.
-pub const SETTING_TOKEN_USAGE: &str = "token_usage";
 
 #[derive(Clone)]
 pub struct SqliteAppSettingsRepository {

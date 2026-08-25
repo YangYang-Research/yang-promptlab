@@ -385,7 +385,28 @@ CREATE TABLE IF NOT EXISTS hardware_profile (
     updated_at    TEXT NOT NULL
 );
 
--- Generic key/value JSON settings (environment, ai_runtime_config, token_usage, …).
+-- Lifetime AI Runtime token usage totals (per agent).
+CREATE TABLE IF NOT EXISTS token_usage (
+    id          TEXT PRIMARY KEY NOT NULL,
+    data_json   TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- Dashboard Recent Activity (runtime / model local events).
+CREATE TABLE IF NOT EXISTS recent_activity (
+    id          TEXT PRIMARY KEY NOT NULL,
+    data_json   TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- Yazg Assistant chat threads / messages.
+CREATE TABLE IF NOT EXISTS yazg_chat_threads (
+    id          TEXT PRIMARY KEY NOT NULL,
+    data_json   TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- App settings only (environment overrides, ai_runtime_config, …).
 CREATE TABLE IF NOT EXISTS app_settings (
     key         TEXT PRIMARY KEY NOT NULL,
     value_json  TEXT NOT NULL,

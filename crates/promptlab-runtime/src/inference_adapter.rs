@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use promptlab_models::runtime::InferenceRuntime;
 use promptlab_models::types::{InferenceRequest, InferenceResponse, RuntimeState};
 
-use crate::error::RuntimeResult;
 use crate::provider::ModelProvider;
 
 /// Bridges [`ModelProvider`] to the [`InferenceRuntime`] contract used by the judge.
@@ -67,6 +66,7 @@ impl InferenceRuntime for ModelProviderRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::RuntimeResult;
     use crate::provider::ModelProviderHealth;
 
     struct MockProvider;

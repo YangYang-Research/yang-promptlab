@@ -5,7 +5,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::error::{ModelError, ModelResult};
-use crate::runtime::{infer_capabilities, infer_provider, infer_version};
+use crate::runtime::{infer_capabilities, infer_version};
 use crate::types::{ModelEntry, ModelFormat, ModelProvider, ModelSource};
 
 const REGISTRY_VERSION: u32 = 1;
@@ -95,49 +95,6 @@ impl ModelRegistry {
 
     pub fn get_mut(&mut self, id: &str) -> Option<&mut ModelEntry> {
         self.entries.get_mut(id)
-    }
-
-    pub fn register_local(
-        &mut self,
-        name: impl Into<String>,
-        path: impl AsRef<Path>,
-    ) -> ModelResult<ModelEntry> {
-        let path = path.as_ref().to_path_buf();
-        if !path.exists() {
-            return Err(ModelError::invalid(format!(
-                "model file not found: {}",
-                path.display()
-            )));
-        }
-
-        let format = ModelFormat::from_path(&path)
-            .ok_or_else(|| ModelError::invalid("only .gguf models are supported"))?;
-
-        let source = ModelSource::Local { path: path.clone() };
-        let provider = infer_provider(&source);
-        let size_bytes = std::fs::metadata(&path).ok().map(|m| m.len());
-        let now = OffsetDateTime::now_utc();
-        let id = Uuid::new_v4().to_string();
-
-        let entry = ModelEntry {
-            id: id.clone(),
-            name: name.into(),
-            format,
-            provider,
-            version: infer_version(&source),
-            capabilities: infer_capabilities(provider),
-            source,
-            file_path: path,
-            size_bytes,
-            checksum_sha256: None,
-            verified: false,
-            created_at: now,
-            updated_at: now,
-            metadata: serde_json::json!({}),
-        };
-
-        self.entries.insert(id, entry.clone());
-        Ok(entry)
     }
 
     pub fn register_ollama(
@@ -409,19 +366,6 @@ mod tests {
     }
 
     #[test]
-    fn register_local_gguf() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("test.gguf");
-        std::fs::write(&path, b"gguf-stub").unwrap();
-
-        let mut registry = ModelRegistry::new();
-        let entry = registry.register_local("test-model", &path).unwrap();
-        assert_eq!(entry.format, ModelFormat::Gguf);
-        assert_eq!(entry.provider, ModelProvider::Gguf);
-        assert_eq!(registry.len(), 1);
-    }
-
-    #[test]
     fn migrates_legacy_model_storage() {
         let dir = tempdir().unwrap();
         let vault = dir.path().join("vault");
@@ -459,24 +403,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_gguf() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("model.bin");
-        std::fs::write(&path, b"x").unwrap();
-
-        let mut registry = ModelRegistry::new();
-        assert!(registry.register_local("bad", &path).is_err());
-    }
-
-    #[test]
     fn persists_registry() {
         let dir = tempdir().unwrap();
         let vault = dir.path().join("vault");
-        let path = dir.path().join("test.gguf");
-        std::fs::write(&path, b"gguf-stub").unwrap();
 
         let mut registry = ModelRegistry::new();
-        registry.register_local("test-model", &path).unwrap();
+        registry.register_remote("openai", "gpt-4o", None, None);
         registry.save_to_vault(&vault).unwrap();
 
         let loaded = ModelRegistry::load_from_vault(&vault).unwrap();

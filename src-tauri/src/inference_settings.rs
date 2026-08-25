@@ -80,14 +80,6 @@ fn third_party_connectivity(config: &AiRuntimeConfiguration) -> Option<&str> {
     }
 }
 
-fn third_party_last_health_check(config: &AiRuntimeConfiguration) -> Option<&str> {
-    if config.mode == InferenceMode::ThirdParty {
-        config.health.checked_at.as_deref()
-    } else {
-        None
-    }
-}
-
 fn local_model_option(entry: &ModelEntry, configured: bool) -> AiInferenceModelOptionDto {
     AiInferenceModelOptionDto {
         id: entry.id.clone(),

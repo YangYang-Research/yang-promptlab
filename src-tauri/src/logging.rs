@@ -1,5 +1,4 @@
 use promptlab_core::{init_logging, EnvironmentPaths, LogGuard, LogOptions};
-use tauri::App;
 
 use crate::error::CommandResult;
 

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use promptlab_core::{
     ensure_environment, list_log_files, load_environment_config, read_log_tail, resolve_paths,
-    save_environment_config, EnvironmentConfig, EnvironmentPaths, LogCategory, OcsfEvent,
+    save_environment_config, EnvironmentPaths, LogCategory, OcsfEvent,
     OcsfSeverity,
 };
 use serde::{Deserialize, Serialize};

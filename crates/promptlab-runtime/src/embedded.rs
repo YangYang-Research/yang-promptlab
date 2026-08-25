@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use promptlab_models::runtime::InferenceRuntime;
 use promptlab_models::{InferenceRequest, LocalModelManager};
 use tokio::sync::Mutex;
 
@@ -30,10 +29,11 @@ impl ModelProvider for EmbeddedModelProvider {
             .collect())
     }
 
-    async fn install_model(&self, model_id: &str) -> RuntimeResult<()> {
-        let mut manager = self.manager.lock().await;
-        manager.install_catalog(model_id, None).await?;
-        Ok(())
+    async fn install_model(&self, _model_id: &str) -> RuntimeResult<()> {
+        Err(crate::error::RuntimeError::Model(
+            "builtin GGUF catalog has been removed — add a remote third-party provider instead"
+                .into(),
+        ))
     }
 
     async fn remove_model(&self, model_id: &str) -> RuntimeResult<()> {

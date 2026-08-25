@@ -23,7 +23,7 @@ pub use repositories::{
 };
 
 pub use repositories::sqlite::{
-    SETTING_AI_RUNTIME_CONFIG, SETTING_ENVIRONMENT, SETTING_TOKEN_USAGE,
+    JsonDocumentRecord, JsonDocumentRepository, SETTING_AI_RUNTIME_CONFIG, SETTING_ENVIRONMENT,
 };
 
 #[cfg(test)]

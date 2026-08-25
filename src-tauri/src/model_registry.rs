@@ -42,19 +42,6 @@ pub async fn open_model_manager_with_registry(
     let mut manager = crate::inference_host::open_model_manager(data_dir, db)
         .await
         .map_err(|err| promptlab_core::PromptLabError::internal(err.to_string()))?;
-    let recovered = manager
-        .recover_orphan_downloads()
-        .await
-        .unwrap_or_else(|err| {
-            tracing::warn!(error = %err, "orphan download recovery skipped");
-            0
-        });
-    if recovered > 0 {
-        info!(recovered, "registered recovered model downloads on startup");
-    }
-    if let Err(err) = manager.restore_persisted_pipelines().await {
-        tracing::warn!(error = %err, "pipeline restore skipped");
-    }
     if let Ok(secrets) = promptlab_auth::SecretStore::new() {
         match crate::third_party_credentials::migrate_third_party_model_credentials(
             data_dir,

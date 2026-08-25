@@ -15,12 +15,12 @@ use promptlab_plugin_host::evaluate_with_judge_plugins;
 use promptlab_inference::InferenceRuntimeManager;
 use promptlab_runtime::{RuntimeManager, SharedModelProvider};
 use promptlab_storage::{
-    AttackResultRepository, CreateAttackResult, CreateFinding, Endpoint,
-    EndpointRepository, FindingRepository, JudgeRoleWeightsRepository, Repositories,
-    ScanRepository, TargetRepository, UpdateFinding, UpdateScan,
+    AttackResultRepository, CreateAttackResult, CreateFinding, Endpoint, FindingRepository,
+    JudgeRoleWeightsRepository, Repositories, ScanRepository, TargetRepository, UpdateFinding,
+    UpdateScan,
 };
 use time::OffsetDateTime;
-use tracing::{info, instrument, warn};
+use tracing::{info, warn};
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -39,7 +39,6 @@ use crate::inference_host::build_judge_engine_from_gateway;
 use crate::session_auth::{attack_executor_with_variants, AttackRuntime};
 use crate::jobs::{bump_scan_progress, ScanBatchCheckpoint, ScanJobControls, ScanProgress};
 use crate::scan_playbook::persist_scan_playbook_state;
-use crate::state::AppState;
 
 #[derive(Clone)]
 pub struct CategoryRunOptions {

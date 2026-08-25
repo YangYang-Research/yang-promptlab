@@ -7,9 +7,7 @@ use promptlab_storage::{
     FindingRepository, ProjectRepository, ScanRepository, TargetRepository, UpdateProject,
 };
 use promptlab_target_profile::{
-    build_attack_results_summary, ensure_failed_project_summary_action,
-    ensure_failed_scan_action_recommendation, is_retryable_scan_status, FindingSummaryInput,
-    SummaryAction, SummaryBundle,
+    ensure_failed_project_summary_action, is_retryable_scan_status, SummaryAction, SummaryBundle,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;

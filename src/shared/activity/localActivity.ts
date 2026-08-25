@@ -1,7 +1,12 @@
 import type { ActivityItem } from "@/shared/types";
+import {
+  listRecentActivity,
+  recordRecentActivity,
+  replaceRecentActivity,
+  type ActivityItemDto,
+} from "@/shared/ipc/activity";
 
-const STORAGE_KEY = "promptlab:local-activity";
-const MAX_ITEMS = 50;
+const LEGACY_STORAGE_KEY = "promptlab:local-activity";
 export const LOCAL_ACTIVITY_CHANGED_EVENT = "promptlab:local-activity";
 
 export type LocalActivityType = "runtime" | "model";
@@ -13,10 +18,22 @@ export type LocalActivityInput = {
   id?: string;
 };
 
-function readAll(): ActivityItem[] {
+let cache: ActivityItem[] = [];
+let hydrated = false;
+
+function asActivityItem(dto: ActivityItemDto): ActivityItem {
+  return {
+    id: dto.id,
+    type: dto.type,
+    message: dto.message,
+    timestamp: dto.timestamp,
+  };
+}
+
+function readLegacyLocalStorage(): ActivityItem[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as ActivityItem[];
     if (!Array.isArray(parsed)) return [];
@@ -33,34 +50,84 @@ function readAll(): ActivityItem[] {
   }
 }
 
-function writeAll(items: ActivityItem[]): void {
+function clearLegacyLocalStorage() {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items.slice(0, MAX_ITEMS)));
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
   } catch {
-    // Ignore quota / private-mode errors.
+    // ignore
+  }
+}
+
+function notifyChanged() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(LOCAL_ACTIVITY_CHANGED_EVENT));
+  }
+}
+
+/** Load from SQLite; one-shot migrate legacy localStorage into DB. */
+export async function hydrateLocalActivity(): Promise<ActivityItem[]> {
+  try {
+    let items = (await listRecentActivity()).map(asActivityItem);
+    const legacy = readLegacyLocalStorage();
+    if (items.length === 0 && legacy.length > 0) {
+      items = (
+        await replaceRecentActivity(
+          legacy.map((item) => ({
+            id: item.id,
+            type: item.type as LocalActivityType,
+            message: item.message,
+            timestamp: item.timestamp,
+          })),
+        )
+      ).map(asActivityItem);
+    }
+    if (legacy.length > 0) {
+      clearLegacyLocalStorage();
+    }
+    cache = items;
+    hydrated = true;
+    notifyChanged();
+    return cache;
+  } catch {
+    // Mock / disconnected UI: fall back to legacy localStorage only.
+    cache = readLegacyLocalStorage();
+    hydrated = true;
+    return cache;
   }
 }
 
 export function listLocalActivity(): ActivityItem[] {
-  return readAll();
+  return cache;
 }
 
-export function recordLocalActivity(input: LocalActivityInput): ActivityItem {
-  const timestamp = new Date().toISOString();
-  const item: ActivityItem = {
-    id: input.id ?? `local-${input.type}-${timestamp}`,
-    type: input.type,
-    message: input.message,
-    timestamp,
-  };
-  const next = [item, ...readAll().filter((existing) => existing.id !== item.id)].slice(
-    0,
-    MAX_ITEMS,
-  );
-  writeAll(next);
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event(LOCAL_ACTIVITY_CHANGED_EVENT));
+export async function recordLocalActivity(
+  input: LocalActivityInput,
+): Promise<ActivityItem> {
+  if (!hydrated) {
+    await hydrateLocalActivity();
   }
-  return item;
+  try {
+    const dto = await recordRecentActivity({
+      type: input.type,
+      message: input.message,
+      id: input.id,
+    });
+    const item = asActivityItem(dto);
+    cache = [item, ...cache.filter((existing) => existing.id !== item.id)].slice(0, 50);
+    notifyChanged();
+    return item;
+  } catch {
+    // Offline / mock: keep optimistic local-only cache.
+    const timestamp = new Date().toISOString();
+    const item: ActivityItem = {
+      id: input.id ?? `local-${input.type}-${timestamp}`,
+      type: input.type,
+      message: input.message,
+      timestamp,
+    };
+    cache = [item, ...cache.filter((existing) => existing.id !== item.id)].slice(0, 50);
+    notifyChanged();
+    return item;
+  }
 }

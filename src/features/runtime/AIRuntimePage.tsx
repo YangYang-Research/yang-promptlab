@@ -87,7 +87,7 @@ export function AIRuntimePage() {
       recordLocalActivity({
         type: "runtime",
         message: `Selected AI Runtime model: ${modelName}`,
-      });
+      }).catch(() => undefined);
       if (result?.settings.connectivityTestOk === false && result.settings.connectivityTestDetail) {
         notify(result.settings.connectivityTestDetail, "error");
       }

@@ -169,7 +169,7 @@ export function ModelsPage() {
       recordLocalActivity({
         type: "model",
         message: `Removed model: ${removed.name}`,
-      });
+      }).catch(() => undefined);
     } catch (err) {
       setError(toAppError(err).message);
     } finally {
