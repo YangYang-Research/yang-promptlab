@@ -59,14 +59,13 @@ impl EnvironmentPaths {
         self.config.join(ENV_CONFIG_FILE)
     }
 
-    pub fn all_dirs(&self) -> [&Path; 9] {
+    pub fn all_dirs(&self) -> [&Path; 8] {
         [
             &self.config,
             &self.workspaces,
             &self.models,
             &self.runtime,
             &self.logs,
-            &self.plugins,
             &self.cache,
             &self.temp,
             &self.backups,
