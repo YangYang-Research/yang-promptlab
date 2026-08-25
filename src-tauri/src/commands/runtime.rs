@@ -265,14 +265,15 @@ pub async fn runtime_traffic_stats(
 pub async fn runtime_token_usage(
     state: State<'_, AppState>,
 ) -> CommandResult<promptlab_inference::TokenUsageSnapshot> {
-    Ok(crate::token_usage_persist::usage_snapshot(state.data_dir()))
+    Ok(crate::token_usage_persist::usage_snapshot(state.database()).await)
 }
 
 #[tauri::command]
 pub async fn runtime_token_usage_reset(
     state: State<'_, AppState>,
 ) -> CommandResult<promptlab_inference::TokenUsageSnapshot> {
-    crate::token_usage_persist::reset_usage(state.data_dir())
+    crate::token_usage_persist::reset_usage(state.database())
+        .await
         .map_err(CommandError::invalid_input)
 }
 
@@ -304,7 +305,7 @@ pub async fn hardware_refresh(state: State<'_, AppState>) -> CommandResult<Runti
         return Ok(profile.into());
     }
 
-    let profile = HardwareDetector::new(state.data_dir())
+    let profile = HardwareDetector::with_db(state.data_dir(), state.database().clone())
         .detect_and_persist()
         .await
         .map_err(map_runtime_err)?;
@@ -318,7 +319,7 @@ pub async fn runtime_hardware(state: State<'_, AppState>) -> CommandResult<Optio
             return Ok(Some(profile.clone().into()));
         }
     }
-    let profile = HardwareDetector::new(state.data_dir())
+    let profile = HardwareDetector::with_db(state.data_dir(), state.database().clone())
         .load()
         .await
         .map_err(map_runtime_err)?;

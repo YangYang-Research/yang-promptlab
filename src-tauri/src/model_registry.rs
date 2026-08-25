@@ -5,18 +5,21 @@ use std::path::Path;
 use promptlab_core::PromptLabResult;
 use promptlab_models::LocalModelManager;
 use promptlab_runtime::{EmbeddedModelProvider, SharedModelProvider};
+use promptlab_storage::Database;
 use tauri::AppHandle;
 use tracing::info;
 
-pub fn open_test_model_stack(
+pub async fn open_test_model_stack(
     data_dir: &Path,
+    db: &Database,
 ) -> PromptLabResult<(
     std::sync::Arc<tokio::sync::Mutex<LocalModelManager>>,
     SharedModelProvider,
     promptlab_harness::HarnessFactory,
     std::sync::Arc<tauri::async_runtime::Mutex<promptlab_plugin_host::PluginManager>>,
 )> {
-    let manager = crate::inference_host::open_model_manager(data_dir)
+    let manager = crate::inference_host::open_model_manager(data_dir, db)
+        .await
         .map_err(|err| promptlab_core::PromptLabError::internal(err.to_string()))?;
     let manager = std::sync::Arc::new(tokio::sync::Mutex::new(manager));
     let provider = std::sync::Arc::new(EmbeddedModelProvider::new(manager.clone()));
@@ -34,8 +37,10 @@ pub fn open_test_model_stack(
 pub async fn open_model_manager_with_registry(
     _app: &AppHandle,
     data_dir: &Path,
+    db: &Database,
 ) -> PromptLabResult<LocalModelManager> {
-    let mut manager = crate::inference_host::open_model_manager(data_dir)
+    let mut manager = crate::inference_host::open_model_manager(data_dir, db)
+        .await
         .map_err(|err| promptlab_core::PromptLabError::internal(err.to_string()))?;
     let recovered = manager
         .recover_orphan_downloads()

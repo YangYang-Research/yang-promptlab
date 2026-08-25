@@ -10,11 +10,31 @@ use tracing::info;
 
 use crate::error::{RuntimeError, RuntimeResult};
 use crate::hardware::RuntimeHardwareProfile;
-use crate::manifest::RuntimeBackend;
 use crate::runtime::gguf::{detect_quantization, GgufQuantization};
 
 const UNAVAILABLE: &str =
     "embedded GGUF / llama.cpp runtime has been removed — configure a remote AI provider or Ollama over HTTP";
+
+/// Resolved runtime compute backend (legacy local-runtime field).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeBackend {
+    Cpu,
+    Cuda,
+    Metal,
+    Vulkan,
+}
+
+impl RuntimeBackend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cpu => "cpu",
+            Self::Cuda => "cuda",
+            Self::Metal => "metal",
+            Self::Vulkan => "vulkan",
+        }
+    }
+}
 
 /// User-selectable GPU/CPU backend (retained for config compatibility).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

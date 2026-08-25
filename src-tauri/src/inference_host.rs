@@ -55,8 +55,12 @@ pub fn current_assistant_cancel() -> CancelFlag {
         .unwrap_or_default()
 }
 
-pub fn open_model_manager(data_dir: &Path) -> CommandResult<LocalModelManager> {
-    LocalModelManager::new(models_vault_path(data_dir))
+pub async fn open_model_manager(
+    data_dir: &Path,
+    db: &promptlab_storage::Database,
+) -> CommandResult<LocalModelManager> {
+    LocalModelManager::new_with_db(models_vault_path(data_dir), db.clone())
+        .await
         .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 

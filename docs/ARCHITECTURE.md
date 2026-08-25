@@ -99,7 +99,7 @@ cargo test -p promptlab-core
 config/          environment.json, ai_runtime_config.json, plugins_state.json
 workspaces/      promptlab.db, reports/, AuthSessions/*.storage.enc
 models/          GGUF vault
-runtime/         hardware.json, manifest.json
+runtime/         (legacy local-runtime dir; hardware profile is in SQLite)
 logs/  plugins/  cache/  temp/  backups/
 agenttrace/agenttrace.db
 ```

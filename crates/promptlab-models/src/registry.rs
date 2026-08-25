@@ -29,8 +29,20 @@ impl ModelRegistry {
         Self::default()
     }
 
+    pub fn from_entries(entries: impl IntoIterator<Item = ModelEntry>) -> Self {
+        let mut registry = Self::new();
+        for entry in entries {
+            registry.entries.insert(entry.id.clone(), entry);
+        }
+        registry
+    }
+
     pub fn registry_path(vault: &Path) -> PathBuf {
         vault.join("registry.json")
+    }
+
+    pub fn migrated_registry_path(vault: &Path) -> PathBuf {
+        vault.join("registry.json.migrated")
     }
 
     pub fn load_from_vault(vault: &Path) -> ModelResult<Self> {

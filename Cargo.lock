@@ -4229,6 +4229,7 @@ dependencies = [
  "libc",
  "promptlab-core",
  "promptlab-models",
+ "promptlab-storage",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

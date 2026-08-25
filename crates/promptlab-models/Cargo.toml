@@ -9,11 +9,10 @@ rust-version.workspace = true
 
 [features]
 default = []
-storage = ["dep:promptlab-storage"]
 
 [dependencies]
 promptlab-core = { workspace = true }
-promptlab-storage = { workspace = true, optional = true }
+promptlab-storage = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true, features = ["stream"] }
 serde = { workspace = true }

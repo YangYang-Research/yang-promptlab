@@ -89,7 +89,7 @@ async fn manager_import_verify_flow() {
     tokio::fs::write(&model, b"local-gguf").await.unwrap();
 
     let mut mgr = LocalModelManager::new(dir.path().join("vault")).unwrap();
-    let entry = mgr.import_local("local", &model).unwrap();
+    let entry = mgr.import_local("local", &model).await.unwrap();
     let result = mgr.verify_model(&entry.id).await.unwrap();
     assert!(result.valid);
     assert!(mgr.list_models()[0].verified);

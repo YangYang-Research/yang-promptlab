@@ -127,7 +127,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             })?;
 
             let mut model_manager = tauri::async_runtime::block_on(
-                model_registry::open_model_manager_with_registry(app.handle(), &root),
+                model_registry::open_model_manager_with_registry(app.handle(), &root, &database),
             )
             .map_err(crate::error::CommandError::from)?;
 
@@ -138,6 +138,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 tauri::async_runtime::block_on(embedded_runtime::bootstrap_runtime_manager(
                     app.handle(),
                     &root,
+                    &database,
                 ))
                 .map_err(crate::error::CommandError::from)?;
 

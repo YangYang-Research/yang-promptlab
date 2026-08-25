@@ -293,6 +293,7 @@ pub async fn migrate_third_party_model_credentials(
         if changed {
             manager
                 .update_model_metadata(&model_id, metadata)
+                .await
                 .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
             migrated += 1;
             info!(model_id = %model_id, "migrated third-party model credentials to encrypted vault");

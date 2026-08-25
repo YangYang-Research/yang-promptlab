@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
+use promptlab_storage::{Database, ModelRepository, UpsertModelEntry};
 use time::OffsetDateTime;
-use tracing::{info, instrument, warn};
+use tracing::{info, instrument};
 use uuid::Uuid;
 
 use crate::download::{DownloadCoordinator, DownloadManager, DownloadOptions, PipelinePhase, ResumeState};
@@ -30,29 +31,50 @@ pub struct FinalizePlan {
 pub struct LocalModelManager {
     vault_path: PathBuf,
     registry: ModelRegistry,
+    /// When set, registry is persisted to SQLite (`models` table). Absent in unit tests.
+    db: Option<Database>,
     downloader: DownloadManager,
     download_coordinator: DownloadCoordinator,
     hardware: HardwareProfile,
 }
 
 impl LocalModelManager {
+    /// In-memory manager (no SQLite). Used by unit tests and helpers that do not need persistence.
     pub fn new(vault_path: impl AsRef<Path>) -> ModelResult<Self> {
         let vault_path = vault_path.as_ref().to_path_buf();
         std::fs::create_dir_all(&vault_path).map_err(ModelError::Io)?;
 
         let hardware = detect_hardware()?;
-        let mut registry = ModelRegistry::load_from_vault(&vault_path)?;
-        if ModelRegistry::migrate_storage_layout(&vault_path, &mut registry)? {
-            registry.save_to_vault(&vault_path)?;
-        }
-
         Ok(Self {
             vault_path,
-            registry,
+            registry: ModelRegistry::new(),
+            db: None,
             downloader: DownloadManager::with_defaults(),
             download_coordinator: DownloadCoordinator::new(DownloadManager::with_defaults()),
             hardware,
         })
+    }
+
+    /// Load registry from SQLite, one-shot migrating `registry.json` when the table is empty.
+    pub async fn new_with_db(vault_path: impl AsRef<Path>, db: Database) -> ModelResult<Self> {
+        let vault_path = vault_path.as_ref().to_path_buf();
+        std::fs::create_dir_all(&vault_path).map_err(ModelError::Io)?;
+
+        let hardware = detect_hardware()?;
+        let (registry, dirty) = load_registry_with_migration(&vault_path, &db).await?;
+
+        let mut mgr = Self {
+            vault_path,
+            registry,
+            db: Some(db),
+            downloader: DownloadManager::with_defaults(),
+            download_coordinator: DownloadCoordinator::new(DownloadManager::with_defaults()),
+            hardware,
+        };
+        if dirty {
+            mgr.persist().await?;
+        }
+        Ok(mgr)
     }
 
     pub fn with_download_options(
@@ -81,8 +103,22 @@ impl LocalModelManager {
         &self.hardware
     }
 
-    fn persist(&self) -> ModelResult<()> {
-        self.registry.save_to_vault(&self.vault_path)
+    async fn persist(&self) -> ModelResult<()> {
+        let Some(db) = self.db.as_ref() else {
+            return Ok(());
+        };
+        let entries = self
+            .registry
+            .list()
+            .into_iter()
+            .map(|entry| model_entry_to_upsert(entry))
+            .collect::<ModelResult<Vec<_>>>()?;
+        db.repositories()
+            .models()
+            .replace_all(entries)
+            .await
+            .map_err(ModelError::from)?;
+        Ok(())
     }
 
     pub fn download_coordinator(&self) -> &DownloadCoordinator {
@@ -95,16 +131,20 @@ impl LocalModelManager {
     }
 
     /// Import an existing local GGUF file into the vault registry.
-    pub fn import_local(&mut self, name: impl Into<String>, path: impl AsRef<Path>) -> ModelResult<ModelEntry> {
+    pub async fn import_local(
+        &mut self,
+        name: impl Into<String>,
+        path: impl AsRef<Path>,
+    ) -> ModelResult<ModelEntry> {
         let path = path.as_ref();
         validate_gguf_path(path)?;
         let entry = self.registry.register_local(name, path)?;
-        self.persist()?;
+        self.persist().await?;
         info!(id = %entry.id, path = %path.display(), "imported local model");
         Ok(entry)
     }
 
-    pub fn import_zip_package(
+    pub async fn import_zip_package(
         &mut self,
         name: impl Into<String>,
         zip_path: impl AsRef<Path>,
@@ -114,7 +154,7 @@ impl LocalModelManager {
         let model_dir = ModelRegistry::model_dir(&self.vault_path, &model_id);
         let extracted = extract_gguf_from_zip(zip_path, &model_dir)?;
         let entry = self.registry.register_local(name, &extracted)?;
-        self.persist()?;
+        self.persist().await?;
         info!(id = %entry.id, zip = %zip_path.display(), "imported zip model package");
         Ok(entry)
     }
@@ -411,7 +451,7 @@ impl LocalModelManager {
         };
 
         self.registry.register_entry(entry.clone())?;
-        self.persist()?;
+        self.persist().await?;
         Ok(Some(entry))
     }
 
@@ -555,13 +595,13 @@ impl LocalModelManager {
         };
 
         self.registry.register_entry(entry.clone())?;
-        self.persist()?;
+        self.persist().await?;
         info!(id = %entry.id, "model registered after download");
         Ok(entry)
     }
 
     /// Register or update a third-party cloud model in the vault registry.
-    pub fn register_third_party(
+    pub async fn register_third_party(
         &mut self,
         provider: impl Into<String>,
         model: impl Into<String>,
@@ -569,7 +609,7 @@ impl LocalModelManager {
         region: Option<String>,
     ) -> ModelResult<ModelEntry> {
         let entry = self.registry.register_remote(provider, model, base_url, region);
-        self.persist()?;
+        self.persist().await?;
         Ok(entry)
     }
 
@@ -582,7 +622,7 @@ impl LocalModelManager {
                 .await
                 .map_err(ModelError::Io)?;
         }
-        self.persist()?;
+        self.persist().await?;
         info!(id = %model_id, "removed model");
         Ok(entry)
     }
@@ -610,7 +650,7 @@ impl LocalModelManager {
             let ok = engine.health().await.unwrap_or(false);
             if ok {
                 self.registry.update_verification(model_id, "ollama-ok".into(), true)?;
-                self.persist()?;
+                self.persist().await?;
             }
             return Ok(VerificationResult {
                 file_path: entry.file_path,
@@ -631,7 +671,7 @@ impl LocalModelManager {
         if result.valid {
             self.registry
                 .update_verification(model_id, result.actual_sha256.clone(), true)?;
-            self.persist()?;
+            self.persist().await?;
         }
 
         Ok(result)
@@ -731,7 +771,7 @@ impl LocalModelManager {
         })
     }
 
-    pub fn update_model_metadata(
+    pub async fn update_model_metadata(
         &mut self,
         model_id: &str,
         metadata: serde_json::Value,
@@ -742,24 +782,114 @@ impl LocalModelManager {
             .ok_or_else(|| ModelError::not_found(model_id))?;
         entry.metadata = metadata;
         entry.updated_at = OffsetDateTime::now_utc();
-        self.persist()?;
+        self.persist().await?;
         Ok(self.registry.get(model_id).expect("entry exists"))
     }
 
-    pub fn set_model_verified(&mut self, model_id: &str, verified: bool) -> ModelResult<&ModelEntry> {
+    pub async fn set_model_verified(
+        &mut self,
+        model_id: &str,
+        verified: bool,
+    ) -> ModelResult<&ModelEntry> {
         let entry = self
             .registry
             .get_mut(model_id)
             .ok_or_else(|| ModelError::not_found(model_id))?;
         entry.verified = verified;
         entry.updated_at = OffsetDateTime::now_utc();
-        self.persist()?;
+        self.persist().await?;
         Ok(self.registry.get(model_id).expect("entry exists"))
     }
 
     pub fn get_model(&self, model_id: &str) -> Option<&ModelEntry> {
         self.registry.get(model_id)
     }
+}
+
+fn model_entry_to_upsert(entry: &ModelEntry) -> ModelResult<UpsertModelEntry> {
+    let entry_json =
+        serde_json::to_string(entry).map_err(|e| ModelError::invalid(e.to_string()))?;
+    let metadata_json = if entry.metadata.is_null() {
+        None
+    } else {
+        Some(
+            serde_json::to_string(&entry.metadata)
+                .map_err(|e| ModelError::invalid(e.to_string()))?,
+        )
+    };
+    Ok(UpsertModelEntry {
+        id: entry.id.clone(),
+        name: entry.name.clone(),
+        provider: entry.provider.as_str().to_string(),
+        format: entry.format.as_str().to_string(),
+        file_path: entry.file_path.to_string_lossy().into_owned(),
+        checksum_sha256: entry.checksum_sha256.clone(),
+        size_bytes: entry.size_bytes.map(|n| n as i64),
+        verified: entry.verified,
+        entry_json,
+        metadata_json,
+        created_at: entry.created_at,
+        updated_at: entry.updated_at,
+    })
+}
+
+async fn load_registry_with_migration(
+    vault: &Path,
+    db: &Database,
+) -> ModelResult<(ModelRegistry, bool)> {
+    let repo = db.repositories().models();
+    let count = repo.count().await.map_err(ModelError::from)?;
+    let mut dirty = false;
+
+    let mut registry = if count > 0 {
+        let rows = repo.list().await.map_err(ModelError::from)?;
+        let mut entries = Vec::with_capacity(rows.len());
+        for row in rows {
+            let entry: ModelEntry = serde_json::from_str(&row.entry_json).map_err(|e| {
+                ModelError::invalid(format!("corrupt model entry {}: {e}", row.id))
+            })?;
+            entries.push(entry);
+        }
+        ModelRegistry::from_entries(entries)
+    } else {
+        ModelRegistry::new()
+    };
+
+    if registry.is_empty() {
+        let json_path = ModelRegistry::registry_path(vault);
+        if json_path.exists() {
+            let file_registry = ModelRegistry::load_from_vault(vault)?;
+            if !file_registry.is_empty() {
+                let upserts = file_registry
+                    .list()
+                    .into_iter()
+                    .map(|entry| model_entry_to_upsert(entry))
+                    .collect::<ModelResult<Vec<_>>>()?;
+                repo.replace_all(upserts)
+                    .await
+                    .map_err(ModelError::from)?;
+                info!(
+                    count = file_registry.len(),
+                    "migrated model registry.json into SQLite"
+                );
+                registry = file_registry;
+                dirty = true;
+            }
+            let migrated = ModelRegistry::migrated_registry_path(vault);
+            std::fs::rename(&json_path, &migrated).map_err(ModelError::Io)?;
+            info!(
+                from = %json_path.display(),
+                to = %migrated.display(),
+                "renamed registry.json after SQLite migration"
+            );
+        }
+    }
+
+    if ModelRegistry::migrate_storage_layout(vault, &mut registry)? {
+        dirty = true;
+    }
+
+    Ok((registry, dirty))
 }
 
 fn walk_vault_files(vault: &Path, mut matches: impl FnMut(&Path) -> bool) -> Vec<PathBuf> {
@@ -828,7 +958,7 @@ mod tests {
         tokio::fs::write(&model_path, b"gguf-content").await.unwrap();
 
         let mut mgr = LocalModelManager::new(&vault).unwrap();
-        let entry = mgr.import_local("tiny", &model_path).unwrap();
+        let entry = mgr.import_local("tiny", &model_path).await.unwrap();
 
         let result = mgr.verify_model(&entry.id).await.unwrap();
         assert!(result.valid);

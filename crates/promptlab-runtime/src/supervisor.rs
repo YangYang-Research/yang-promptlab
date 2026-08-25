@@ -82,7 +82,7 @@ impl RuntimeSupervisor {
         }
         let backend = resolve_backend(self.config.backend, Some(&profile));
         self.adapter
-            .set_backend(gfx_from_manifest(backend), Some(&profile));
+            .set_backend(gfx_from_backend(backend), Some(&profile));
     }
 
     pub fn set_n_gpu_layers(&mut self, n_gpu_layers: u32) {
@@ -243,12 +243,12 @@ impl Drop for RuntimeSupervisor {
     }
 }
 
-fn gfx_from_manifest(backend: crate::manifest::RuntimeBackend) -> GfxBackend {
+fn gfx_from_backend(backend: crate::local_runtime_adapter::RuntimeBackend) -> GfxBackend {
     match backend {
-        crate::manifest::RuntimeBackend::Cuda => GfxBackend::Cuda,
-        crate::manifest::RuntimeBackend::Metal => GfxBackend::Metal,
-        crate::manifest::RuntimeBackend::Vulkan => GfxBackend::Vulkan,
-        crate::manifest::RuntimeBackend::Cpu => GfxBackend::Cpu,
+        crate::local_runtime_adapter::RuntimeBackend::Cuda => GfxBackend::Cuda,
+        crate::local_runtime_adapter::RuntimeBackend::Metal => GfxBackend::Metal,
+        crate::local_runtime_adapter::RuntimeBackend::Vulkan => GfxBackend::Vulkan,
+        crate::local_runtime_adapter::RuntimeBackend::Cpu => GfxBackend::Cpu,
     }
 }
 

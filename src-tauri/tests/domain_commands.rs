@@ -23,7 +23,7 @@ async fn make_state(dir: &Path) -> AppState {
     let db = open_database(&dir.join("promptlab.db")).await.expect("open db");
     let guard = init_logging(LogOptions::bootstrap("domain-it")).unwrap();
     let (manager, provider, harness_factory, plugin_manager) =
-        promptlab_desktop_lib::model_registry::open_test_model_stack(dir).expect("model stack");
+        promptlab_desktop_lib::model_registry::open_test_model_stack(dir, &db).await.expect("model stack");
     AppState::new(
         db,
         dir.to_path_buf(),

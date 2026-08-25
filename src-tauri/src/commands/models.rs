@@ -896,6 +896,7 @@ pub async fn models_save_third_party(
             resolve_third_party_base_url(&provider, request.base_url.clone(), Some(model)),
             request.region.clone().filter(|value| !value.trim().is_empty()),
         )
+        .await
         .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
 
     if let Some(old_id) = existing_id {
@@ -930,6 +931,7 @@ pub async fn models_save_third_party(
 
         manager
             .update_model_metadata(&entry.id, metadata)
+            .await
             .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
 
         let is_new_model = existing_id.is_none();
@@ -946,13 +948,16 @@ pub async fn models_save_third_party(
             apply_model_connectivity_metadata(&mut metadata, true, latency_ms, &checked_at);
             manager
                 .update_model_metadata(&entry.id, metadata)
+                .await
                 .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
             manager
                 .set_model_verified(&entry.id, true)
+                .await
                 .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
         } else if is_new_model || renamed || credential_input_changed {
             manager
                 .set_model_verified(&entry.id, false)
+                .await
                 .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
         }
     } else {
@@ -1078,9 +1083,11 @@ async fn persist_third_party_model_connectivity(
         apply_model_connectivity_metadata(&mut metadata, ok, latency_ms, &checked_at);
         manager
             .update_model_metadata(model_id, metadata)
+            .await
             .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
         manager
             .set_model_verified(model_id, ok)
+            .await
             .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     }
 

@@ -14,11 +14,16 @@ pub use health_score::compute_health_score;
 pub use models::*;
 pub use pool::Database;
 pub use repositories::{
-    AgentLongTermMemoryRepository, AgentShortTermMemoryRepository, AttackCatalogRepository,
-    AttackResultRepository, AuthProfileRepository, AuthRecordingRepository, AuthSessionRepository,
-    EndpointRepository, FindingRepository, JudgeRoleWeightsRepository, ModelRepository,
+    AgentLongTermMemoryRepository, AgentShortTermMemoryRepository, AppSettingsRepository,
+    AttackCatalogRepository, AttackResultRepository, AuthProfileRepository,
+    AuthRecordingRepository, AuthSessionRepository, EndpointRepository, FindingRepository,
+    HardwareProfileRepository, JudgeRoleWeightsRepository, ModelRepository,
     MutatorSettingsRepository, PayloadRepository, PluginRepository, ProjectRepository,
     ReportRepository, Repositories, RuntimeTrafficRepository, ScanRepository, TargetRepository,
+};
+
+pub use repositories::sqlite::{
+    SETTING_AI_RUNTIME_CONFIG, SETTING_ENVIRONMENT, SETTING_TOKEN_USAGE,
 };
 
 #[cfg(test)]
@@ -130,8 +135,11 @@ mod integration_tests {
                 name: "local-eval".into(),
                 file_path: "/models/eval.gguf".into(),
                 format: None,
+                provider: None,
                 checksum_sha256: None,
                 size_bytes: None,
+                verified: None,
+                entry_json: None,
                 metadata_json: None,
             })
             .await

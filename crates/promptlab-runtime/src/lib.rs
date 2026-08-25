@@ -11,7 +11,6 @@ pub mod launcher;
 pub mod local_runtime_adapter;
 pub mod logs;
 pub mod manager;
-pub mod manifest;
 pub mod monitor;
 pub mod paths;
 pub mod provider;
@@ -30,10 +29,10 @@ pub use inference_adapter::ModelProviderRuntime;
 pub use error::{RuntimeError, RuntimeResult};
 pub use local_runtime_adapter::{
     GfxBackend, InferRequest, InferResponse, LocalRuntimeAdapter, LocalRuntimeCapabilities,
+    RuntimeBackend,
 };
 pub use logs::RuntimeLogEntry;
 pub use manager::{RuntimeManager, RuntimeStatusSnapshot};
-pub use manifest::{RuntimeBackend, RuntimeManifest};
 pub use monitor::RuntimeHealthReport;
 pub use paths::{models_dir, runtime_dir};
 pub use provider::{ModelProvider, ModelProviderHealth};

@@ -4,6 +4,7 @@ use std::path::Path;
 
 use promptlab_core::PromptLabResult;
 use promptlab_runtime::RuntimeManager;
+use promptlab_storage::Database;
 use tauri::AppHandle;
 use tracing::{info, warn};
 
@@ -13,8 +14,9 @@ use crate::state::AppState;
 pub async fn bootstrap_runtime_manager(
     _app: &AppHandle,
     data_dir: &Path,
+    db: &Database,
 ) -> PromptLabResult<(RuntimeManager, bool)> {
-    let mut manager = RuntimeManager::new(data_dir);
+    let mut manager = RuntimeManager::new(data_dir, Some(db.clone()));
 
     match manager.bootstrap().await {
         Ok(()) => {

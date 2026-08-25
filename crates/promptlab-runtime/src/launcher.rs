@@ -1,11 +1,8 @@
-//! Start/stop/restart the embedded libllama runtime.
+//! Start/stop/restart the embedded runtime stub.
 
 use std::path::Path;
 
-use time::OffsetDateTime;
-
 use crate::error::{RuntimeError, RuntimeResult};
-use crate::manifest::RuntimeManifest;
 use crate::state::{transition, RuntimeLifecycleState};
 use crate::supervisor::RuntimeSupervisor;
 
@@ -14,7 +11,6 @@ pub struct RuntimeLauncher;
 impl RuntimeLauncher {
     pub async fn start(
         supervisor: &mut RuntimeSupervisor,
-        manifest: &mut RuntimeManifest,
         lifecycle: RuntimeLifecycleState,
     ) -> RuntimeResult<RuntimeLifecycleState> {
         if !supervisor.runtime_available() {
@@ -23,7 +19,6 @@ impl RuntimeLauncher {
 
         let state = transition(lifecycle, RuntimeLifecycleState::Starting);
         supervisor.ensure_running().await?;
-        manifest.last_started = Some(OffsetDateTime::now_utc());
         Ok(transition(state, RuntimeLifecycleState::Running))
     }
 
@@ -38,11 +33,10 @@ impl RuntimeLauncher {
 
     pub async fn restart(
         supervisor: &mut RuntimeSupervisor,
-        manifest: &mut RuntimeManifest,
         lifecycle: RuntimeLifecycleState,
     ) -> RuntimeResult<RuntimeLifecycleState> {
         let _ = Self::stop(supervisor, lifecycle).await?;
-        Self::start(supervisor, manifest, RuntimeLifecycleState::Stopped).await
+        Self::start(supervisor, RuntimeLifecycleState::Stopped).await
     }
 
     pub async fn load_model_for_inference(
