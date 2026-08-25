@@ -10,9 +10,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "setup:playwright": "npm install --prefix crates/promptlab-auth/playwright && npx --prefix crates/promptlab-auth/playwright playwright install chromium",
-    "bundle:playwright": "bash scripts/bundle-playwright-auth.sh"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",

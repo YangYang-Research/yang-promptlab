@@ -6,7 +6,7 @@ The desktop app does **not** crawl. Operators configure **one AI endpoint** as a
 
 ```
 Pick template or import cURL
-  → Auth (API key / JWT / basic / Playwright session)
+  → Auth (API key / JWT / basic)
   → Verify
       1. Connect probe  (`Hello`) — harness only, no AI Runtime
       2. Capability probe (inventory prompt) — harness
@@ -49,7 +49,7 @@ Default capabilities come from the provider (streaming, tools, conversation, att
 
 Failures persist on the profile (`verification` not verified) with a console row (method, URL, masked headers, status, latency, preview). Success sets `is_verified()` — required before `planner_generate_from_profile`.
 
-Auth for probes: sanitized `descriptor_json` hydrated from keychain, or wizard inline headers. Playwright login is leftover (disabled in wizard) — [AUTH.md](AUTH.md).
+Auth for probes: sanitized `descriptor_json` hydrated from keychain, or wizard inline headers — [AUTH.md](AUTH.md).
 
 ---
 

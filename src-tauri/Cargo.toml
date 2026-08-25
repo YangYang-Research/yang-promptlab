@@ -25,7 +25,7 @@ promptlab-report = { workspace = true }
 promptlab-endpoint-metadata = { workspace = true }
 promptlab-attack = { workspace = true }
 promptlab-auth = { workspace = true }
-promptlab-harness = { workspace = true, features = ["playwright"] }
+promptlab-harness = { workspace = true }
 promptlab-runtime = { workspace = true }
 promptlab-inference = { workspace = true }
 promptlab-judge = { workspace = true }

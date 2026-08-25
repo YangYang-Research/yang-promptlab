@@ -19,7 +19,6 @@ pub mod embedded_runtime;
 pub mod plugin_interceptor;
 pub mod plugin_service;
 pub mod plugin_transport;
-pub mod playwright_runtime;
 pub mod runtime_watch;
 pub mod session_auth;
 pub mod scan_console_log;
@@ -105,9 +104,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
 
             let vault_dir = environment.auth_sessions_dir();
             let auth_engine_config =
-                playwright_runtime::resolve_auth_engine_config(app.handle())
-                    .map_err(crate::error::CommandError::from)?
-                    .with_vault_dir(vault_dir.clone());
+                promptlab_auth::AuthEngineConfig::default().with_vault_dir(vault_dir.clone());
 
             tauri::async_runtime::block_on(async {
                 let store = promptlab_auth::SessionStore::new(database.clone(), vault_dir.clone())
@@ -284,11 +281,6 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::wizard_scan::scan_wizard_create,
             commands::wizard_scan::scan_wizard_save,
             commands::wizard_scan::scan_wizard_load,
-            commands::auth::auth_record_session_start,
-            commands::auth::auth_record_session_finish,
-            commands::auth::auth_record_session_cancel,
-            commands::auth::auth_session_validate,
-            commands::auth::auth_session_status,
             commands::models::models_list,
             commands::models::models_registry_info,
             commands::models::models_registry_diagnostics,
@@ -369,7 +361,6 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::attack_catalog::attack_catalog_reset,
             commands::attack_catalog::attack_catalog_generate_prompt,
         ])
-        .manage(AsyncMutex::new(commands::auth::AuthRecordingState::new()))
         .build(tauri::generate_context!())?;
 
     Ok(app)

@@ -7,7 +7,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm run build && npm run bundle:playwright",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -34,7 +34,6 @@
       "minimumSystemVersion": "11.0"
     },
     "resources": {
-      "resources/playwright/": "playwright/",
       "../runtime/": "runtime/",
       "../resources/models.json": "resources/models.json"
     },

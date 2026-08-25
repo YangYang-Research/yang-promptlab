@@ -67,7 +67,7 @@ New IPC: add the Rust command, then the TypeScript wrapper in `src/shared/ipc`. 
 - Small, reviewable diffs. Match existing style.
 - Update living docs when behavior changes (`docs/*.md`, `SCREAMING_SNAKE.md` except `README.md`).
 - Do not commit secrets, `.env`, or anything under `~/.promptlab/`.
-- Do not revive leftover product surfaces: `/plugins`, `promptlab-plugin-host`, crawl-era `promptlab-discovery` / fingerprint / endpoints. Playwright login is leftover (wizard radios disabled) — see [docs/AUTH.md](docs/AUTH.md).
+- Do not revive leftover product surfaces: `/plugins`, `promptlab-plugin-host`, crawl-era `promptlab-discovery` / fingerprint / endpoints, or browser Playwright login/SSO — see [docs/AUTH.md](docs/AUTH.md).
 - Attack catalog and harness probes are for **authorized assessment** only. Do not add payloads aimed at unauthenticated third-party abuse.
 
 ## Tests

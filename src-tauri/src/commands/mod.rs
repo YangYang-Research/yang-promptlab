@@ -11,7 +11,6 @@ pub mod agent_memory;
 pub mod agenttrace;
 pub mod attack;
 pub mod attack_catalog;
-pub mod auth;
 pub mod domain;
 pub mod environment;
 pub mod generator;
