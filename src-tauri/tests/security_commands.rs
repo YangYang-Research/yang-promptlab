@@ -15,7 +15,7 @@ use promptlab_storage::{
 async fn make_state(dir: &Path) -> AppState {
     let db = open_database(&dir.join("promptlab.db")).await.expect("open db");
     let guard = init_logging(LogOptions::bootstrap("security-it")).unwrap();
-    let (manager, provider, meta, harness_factory, plugin_manager) =
+    let (manager, provider, harness_factory, plugin_manager) =
         promptlab_desktop_lib::model_registry::open_test_model_stack(dir).expect("model stack");
     AppState::new(
         db,
@@ -27,7 +27,6 @@ async fn make_state(dir: &Path) -> AppState {
         promptlab_runtime::RuntimeManager::new(dir, None),
         manager,
         provider,
-        meta,
     )
 }
 

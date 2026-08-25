@@ -79,13 +79,19 @@ impl ModelProvider for EmbeddedModelProvider {
             });
         }
 
-        let healthy = manager.runtime().health().await.unwrap_or(false);
+        // Prefer remote/Ollama entries; embedded GGUF is no longer supported.
+        let has_remote_or_ollama = manager.list_models().iter().any(|entry| {
+            matches!(
+                entry.provider,
+                promptlab_models::ModelProvider::Remote | promptlab_models::ModelProvider::Ollama
+            )
+        });
         Ok(ModelProviderHealth {
-            healthy,
-            message: if healthy {
-                "vault inference runtime is healthy".into()
+            healthy: has_remote_or_ollama,
+            message: if has_remote_or_ollama {
+                "vault has remote or Ollama models configured".into()
             } else {
-                "vault inference runtime is unavailable".into()
+                "no remote/Ollama models configured — embedded GGUF runtime removed".into()
             },
         })
     }

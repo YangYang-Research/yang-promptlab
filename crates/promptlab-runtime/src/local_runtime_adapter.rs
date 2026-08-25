@@ -1,10 +1,9 @@
-//! Embedded libllama runtime — in-process GGUF inference (no subprocess, no HTTP).
+//! Local runtime adapter stub — embedded libllama / GGUF has been removed.
+//! API shapes are retained so desktop and inference host still compile.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use promptlab_models::runtime::{InferenceRuntime, LlamaInProcessRuntime, LlamaModelConfig};
-use promptlab_models::types::{InferenceRequest, RuntimeState};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::info;
@@ -14,7 +13,10 @@ use crate::hardware::RuntimeHardwareProfile;
 use crate::manifest::RuntimeBackend;
 use crate::runtime::gguf::{detect_quantization, GgufQuantization};
 
-/// User-selectable GPU/CPU backend for embedded libllama.
+const UNAVAILABLE: &str =
+    "embedded GGUF / llama.cpp runtime has been removed — configure a remote AI provider or Ollama over HTTP";
+
+/// User-selectable GPU/CPU backend (retained for config compatibility).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GfxBackend {
@@ -68,7 +70,6 @@ impl Default for LocalRuntimeCapabilities {
     }
 }
 
-/// Inference request for embedded libllama.
 #[derive(Debug, Clone)]
 pub struct InferRequest {
     pub prompt: String,
@@ -76,7 +77,6 @@ pub struct InferRequest {
     pub temperature: f32,
 }
 
-/// Inference response from embedded libllama.
 #[derive(Debug, Clone)]
 pub struct InferResponse {
     pub text: String,
@@ -85,11 +85,10 @@ pub struct InferResponse {
     pub quantization: Option<GgufQuantization>,
 }
 
-/// Owns all native llama resources — no other module may call libllama directly.
+/// Stub adapter — always reports local runtime unavailable.
 pub struct LocalRuntimeAdapter {
     backend: GfxBackend,
-    config: LlamaModelConfig,
-    runtime: Mutex<LlamaInProcessRuntime>,
+    n_gpu_layers: u32,
     model_path: Mutex<Option<PathBuf>>,
     initialized: AtomicBool,
     model_loaded: AtomicBool,
@@ -97,11 +96,10 @@ pub struct LocalRuntimeAdapter {
 }
 
 impl LocalRuntimeAdapter {
-    pub fn new(config: LlamaModelConfig, backend: GfxBackend) -> Self {
+    pub fn new(_n_gpu_layers: u32, backend: GfxBackend) -> Self {
         Self {
             backend,
-            config: config.clone(),
-            runtime: Mutex::new(LlamaInProcessRuntime::new(config)),
+            n_gpu_layers: _n_gpu_layers,
             model_path: Mutex::new(None),
             initialized: AtomicBool::new(false),
             model_loaded: AtomicBool::new(false),
@@ -113,13 +111,12 @@ impl LocalRuntimeAdapter {
         self.backend
     }
 
-    pub fn config(&self) -> &LlamaModelConfig {
-        &self.config
+    pub fn n_gpu_layers(&self) -> u32 {
+        self.n_gpu_layers
     }
 
-    /// Embedded libllama is always available when compiled in.
     pub fn runtime_available(&self) -> bool {
-        true
+        false
     }
 
     pub fn is_initialized(&self) -> bool {
@@ -127,104 +124,48 @@ impl LocalRuntimeAdapter {
     }
 
     pub fn is_loaded(&self) -> bool {
-        self.model_loaded.load(Ordering::SeqCst)
+        false
     }
 
     pub async fn is_loaded_async(&self) -> bool {
-        if !self.model_loaded.load(Ordering::SeqCst) {
-            return false;
-        }
-        let rt = self.runtime.lock().await;
-        rt.state() == RuntimeState::Ready
+        false
     }
 
     pub async fn initialize(&self) -> RuntimeResult<()> {
         if self.initialized.swap(true, Ordering::SeqCst) {
             return Ok(());
         }
-        info!(backend = %self.backend.as_str(), "embedded libllama runtime initialized");
+        info!("local runtime stub initialized (embedded libllama unavailable)");
         Ok(())
     }
 
     pub fn set_backend(&mut self, backend: GfxBackend, profile: Option<&RuntimeHardwareProfile>) {
         self.backend = backend;
-        self.config.n_gpu_layers = n_gpu_layers_for_backend(resolve_backend(backend, profile), profile);
-        let rt = LlamaInProcessRuntime::new(self.config.clone());
-        self.runtime = Mutex::new(rt);
+        self.n_gpu_layers = n_gpu_layers_for_backend(resolve_backend(backend, profile), profile);
         self.initialized.store(false, Ordering::SeqCst);
         self.model_loaded.store(false, Ordering::SeqCst);
     }
 
     pub fn set_n_gpu_layers(&mut self, n_gpu_layers: u32) {
-        self.config.n_gpu_layers = n_gpu_layers;
+        self.n_gpu_layers = n_gpu_layers;
     }
 
-    pub async fn load_model(&self, model_path: &Path) -> RuntimeResult<()> {
-        if self.is_loaded() {
-            if let Some(loaded) = self.loaded_model_path().await {
-                if crate::paths::same_paths(&loaded, model_path) {
-                    return Ok(());
-                }
-            }
-        }
-
-        self.initialize().await?;
-        let quant = detect_quantization(model_path);
-        let mut caps = LocalRuntimeCapabilities::default();
-        caps.max_context = self.config.ctx_size;
-        *self.capabilities.lock().await = caps;
-
-        let mut rt = self.runtime.lock().await;
-        rt.load_model(model_path)
-            .await
-            .map_err(RuntimeError::from)?;
-        *self.model_path.lock().await = Some(model_path.to_path_buf());
-        self.model_loaded.store(true, Ordering::SeqCst);
-        info!(
-            model = %model_path.display(),
-            quant = quant.as_str(),
-            "GGUF model loaded via embedded libllama"
-        );
-        Ok(())
+    pub async fn load_model(&self, _model_path: &Path) -> RuntimeResult<()> {
+        Err(RuntimeError::BackendUnavailable(UNAVAILABLE.into()))
     }
 
     pub async fn unload(&self) -> RuntimeResult<()> {
-        let mut rt = self.runtime.lock().await;
-        rt.unload().await.map_err(RuntimeError::from)?;
         *self.model_path.lock().await = None;
         self.model_loaded.store(false, Ordering::SeqCst);
         Ok(())
     }
 
-    pub async fn infer(&self, request: InferRequest) -> RuntimeResult<InferResponse> {
-        let rt = self.runtime.lock().await;
-        if rt.state() != RuntimeState::Ready {
-            return Err(RuntimeError::ModelNotLoaded);
-        }
-        let model_path = self.model_path.lock().await.clone();
-        let quant = model_path.as_deref().map(detect_quantization);
-
-        let response = rt
-            .complete(InferenceRequest {
-                system: None,
-                prompt: request.prompt,
-                max_tokens: request.max_tokens,
-                temperature: request.temperature,
-            })
-            .await
-            .map_err(RuntimeError::from)?;
-
-        Ok(InferResponse {
-            text: response.text,
-            tokens_predicted: response.tokens_predicted,
-            duration_ms: response.duration_ms,
-            quantization: quant,
-        })
+    pub async fn infer(&self, _request: InferRequest) -> RuntimeResult<InferResponse> {
+        Err(RuntimeError::BackendUnavailable(UNAVAILABLE.into()))
     }
 
     pub async fn health(&self) -> RuntimeResult<bool> {
-        let rt = self.runtime.lock().await;
-        rt.health().await.map_err(RuntimeError::from)
+        Ok(false)
     }
 
     pub async fn loaded_model_path(&self) -> Option<PathBuf> {
@@ -287,9 +228,17 @@ pub fn n_gpu_layers_for_backend(
     }
 }
 
-pub fn default_model_config(profile: Option<&RuntimeHardwareProfile>) -> LlamaModelConfig {
+pub fn default_n_gpu_layers(profile: Option<&RuntimeHardwareProfile>) -> u32 {
     let backend = resolve_backend(GfxBackend::Auto, profile);
-    let mut config = LlamaModelConfig::default();
-    config.n_gpu_layers = n_gpu_layers_for_backend(backend, profile);
-    config
+    n_gpu_layers_for_backend(backend, profile)
+}
+
+/// Retained helper for callers that previously built a LlamaModelConfig.
+pub fn default_model_config(profile: Option<&RuntimeHardwareProfile>) -> u32 {
+    default_n_gpu_layers(profile)
+}
+
+#[allow(dead_code)]
+fn _quant_hint(path: &Path) -> GgufQuantization {
+    detect_quantization(path)
 }

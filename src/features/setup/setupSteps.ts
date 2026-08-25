@@ -1,8 +1,4 @@
-export type SetupStepId =
-  | "runtime-mode"
-  | "add-model"
-  | "load-model"
-  | "first-project-scan";
+export type SetupStepId = "add-model" | "load-model" | "first-project-scan";
 
 export type SetupStep = {
   id: SetupStepId;
@@ -34,21 +30,15 @@ const STEP_META: Array<{
   to: string;
 }> = [
   {
-    id: "runtime-mode",
-    title: "Choose AI Runtime Mode",
-    description: "Pick Local or Third-party API in AI Runtime.",
-    to: "/runtime",
-  },
-  {
     id: "add-model",
-    title: "Register a model",
-    description: "Add a local or third-party model for AI Runtime.",
+    title: "Register a remote model",
+    description: "Add an OpenAI-compatible or cloud provider model for AI Runtime.",
     to: "/models",
   },
   {
     id: "load-model",
     title: "Choose a model for AI Runtime",
-    description: "Pick which registered model AI Runtime should use.",
+    description: "Pick which registered remote model AI Runtime should use.",
     to: "/runtime",
   },
   {
@@ -60,14 +50,13 @@ const STEP_META: Array<{
 ];
 
 export function deriveSetupSteps(input: SetupProgressInput): SetupStep[] {
+  const hasRemoteModel = input.configuredThirdPartyCount > 0 || input.localModelCount > 0;
+  const modelSelected =
+    Boolean(input.selectedModelId) && input.configuredThirdPartyCount > 0;
+
   const rawDone = [
-    input.initialized && input.mode !== "not_configured",
-    input.localModelCount > 0 || input.configuredThirdPartyCount > 0,
-    input.mode === "local"
-      ? Boolean(input.selectedModelId) && input.modelLoaded
-      : input.mode === "third_party"
-        ? Boolean(input.selectedModelId) && input.configuredThirdPartyCount > 0
-        : false,
+    hasRemoteModel,
+    modelSelected,
     input.projectCount > 0 && input.scanCount > 0,
   ];
 

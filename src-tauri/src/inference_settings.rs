@@ -50,13 +50,17 @@ pub fn parse_route(raw: &str) -> Option<InferenceMode> {
 }
 
 pub fn is_third_party_model(entry: &ModelEntry) -> bool {
-    entry.provider == ModelProvider::Remote
+    matches!(
+        entry.provider,
+        ModelProvider::Remote | ModelProvider::Ollama
+    )
 }
 
 pub fn is_local_model(entry: &ModelEntry) -> bool {
+    // Legacy GGUF/HuggingFace vault entries — no longer usable for inference.
     matches!(
         entry.provider,
-        ModelProvider::Gguf | ModelProvider::HuggingFace | ModelProvider::Ollama
+        ModelProvider::Gguf | ModelProvider::HuggingFace
     )
 }
 
@@ -158,8 +162,11 @@ pub fn reconcile_config(
     mut config: AiRuntimeConfiguration,
     models: &[ModelEntry],
 ) -> AiRuntimeConfiguration {
-    if !config.initialized {
-        return config;
+    // Product is remote-only — always normalize away local / unset modes.
+    config.mode = InferenceMode::ThirdParty;
+    config.initialized = true;
+    if config.runtime == "local" || config.runtime.is_empty() {
+        config.runtime = "cloud".into();
     }
 
     let third_party = sort_third_party_models(
@@ -167,41 +174,33 @@ pub fn reconcile_config(
         config.selected_model_id.as_deref(),
         third_party_connectivity(&config),
     );
-    let local = sort_local_models(models.iter().filter(|e| is_local_model(e)).collect());
 
     let previous_selected = config.selected_model_id.clone();
-
-    let pool = match config.mode {
-        InferenceMode::ThirdParty => &third_party,
-        InferenceMode::Local | InferenceMode::Deterministic => &local,
-    };
 
     let selected_valid = config
         .selected_model_id
         .as_ref()
-        .and_then(|id| pool.iter().find(|m| &m.id == id));
+        .and_then(|id| third_party.iter().find(|m| &m.id == id));
 
     if selected_valid.is_none() {
         config.selected_model_id = None;
     }
 
-    if config.mode == InferenceMode::ThirdParty {
-        let previous_third_party = previous_selected.as_deref().and_then(|id| {
-            third_party
-                .iter()
-                .find(|model| model.id == id)
-                .map(|model| model.id.as_str())
-        });
-        let selected_third_party = config.selected_model_id.as_deref().and_then(|id| {
-            third_party
-                .iter()
-                .find(|model| model.id == id)
-                .map(|model| model.id.as_str())
-        });
-        if let (Some(previous), Some(selected)) = (previous_third_party, selected_third_party) {
-            if previous != selected {
-                config.health = Default::default();
-            }
+    let previous_third_party = previous_selected.as_deref().and_then(|id| {
+        third_party
+            .iter()
+            .find(|model| model.id == id)
+            .map(|model| model.id.as_str())
+    });
+    let selected_third_party = config.selected_model_id.as_deref().and_then(|id| {
+        third_party
+            .iter()
+            .find(|model| model.id == id)
+            .map(|model| model.id.as_str())
+    });
+    if let (Some(previous), Some(selected)) = (previous_third_party, selected_third_party) {
+        if previous != selected {
+            config.health = Default::default();
         }
     }
 
@@ -290,22 +289,15 @@ pub fn config_to_dto_with_connectivity_test(
     let third_party_available = third_party.iter().any(|m| m.configured);
     let local_available = local.iter().any(|m| m.configured);
 
-    let message = if !config.initialized {
-        "Choose Third-party Providers or Local Runtime to configure AI features".into()
-    } else {
-        match config.mode {
-            InferenceMode::ThirdParty if third_party_available => {
-                "Using third-party cloud API for AI features".into()
-            }
-            InferenceMode::ThirdParty => {
-                "Third-party route selected — add a cloud model in Models".into()
-            }
-            InferenceMode::Local if local_available => {
-                "Using local llama.cpp runtime for AI features".into()
-            }
-            InferenceMode::Local | InferenceMode::Deterministic => {
-                "Local route selected — install a GGUF model or repair AI Runtime".into()
-            }
+    let message = match config.mode {
+        InferenceMode::ThirdParty if third_party_available => {
+            "Using remote HTTP provider for AI features".into()
+        }
+        InferenceMode::ThirdParty => {
+            "Add a remote provider model in Models, then select it here".into()
+        }
+        InferenceMode::Local | InferenceMode::Deterministic => {
+            "Local llama.cpp runtime has been removed — using remote providers only".into()
         }
     };
 

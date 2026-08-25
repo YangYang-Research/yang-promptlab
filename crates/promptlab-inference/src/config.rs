@@ -113,19 +113,19 @@ pub struct AiRuntimeConfiguration {
 impl Default for AiRuntimeConfiguration {
     fn default() -> Self {
         Self {
-            mode: InferenceMode::Local,
-            provider: InferenceProvider::LlamaCpp,
-            runtime: "llama.cpp".into(),
+            mode: InferenceMode::ThirdParty,
+            provider: InferenceProvider::OpenAi,
+            runtime: "cloud".into(),
             model: String::new(),
             selected_model_id: None,
-            status: "not_configured".into(),
+            status: "ready".into(),
             health: RuntimeHealth::default(),
             temperature: 0.1,
             max_tokens: 512,
             timeout_secs: 120,
             streaming: false,
             context_length: None,
-            initialized: false,
+            initialized: true,
         }
     }
 }

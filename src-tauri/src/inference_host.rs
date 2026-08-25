@@ -13,7 +13,7 @@ use promptlab_inference::{
     PromptRegistry, RemoteAdapterSettings,
 };
 use promptlab_judge::{build_judge_engine_with_client, JudgeEngine, JudgeMode, JudgeProviderConfig};
-use promptlab_models::{BuiltinCatalog, LocalModelManager, ModelEntry, ModelProvider};
+use promptlab_models::{LocalModelManager, ModelEntry, ModelProvider};
 use promptlab_planner::PlannerLlm;
 use promptlab_generator::GeneratorLlm;
 use promptlab_runtime::{RuntimeManager, SharedModelProvider};
@@ -55,12 +55,8 @@ pub fn current_assistant_cancel() -> CancelFlag {
         .unwrap_or_default()
 }
 
-pub fn open_model_manager(
-    data_dir: &Path,
-    catalog: BuiltinCatalog,
-) -> CommandResult<LocalModelManager> {
+pub fn open_model_manager(data_dir: &Path) -> CommandResult<LocalModelManager> {
     LocalModelManager::new(models_vault_path(data_dir))
-        .map(|mgr| mgr.with_catalog(catalog))
         .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 
@@ -1103,14 +1099,14 @@ fn configure_scratch_for_entry(
             config.runtime = "cloud".into();
         }
         ModelProvider::Ollama => {
-            config.mode = InferenceMode::Local;
+            config.mode = InferenceMode::ThirdParty;
             config.provider = InferenceProvider::Ollama;
             config.runtime = "ollama".into();
         }
         _ => {
-            config.mode = InferenceMode::Local;
-            config.provider = InferenceProvider::LlamaCpp;
-            config.runtime = "llama.cpp".into();
+            return Err(CommandError::invalid_input(
+                "embedded GGUF / llama.cpp runtime has been removed — use a remote provider or Ollama over HTTP",
+            ));
         }
     }
     Ok(())

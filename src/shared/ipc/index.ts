@@ -75,16 +75,12 @@ export {
 } from "./findingRecommendations";
 export {
   listModels,
-  browseModels,
-  installModel,
   removeModel,
   verifyModel,
   testModelInference,
   testModelEmbeddings,
   getModelsVaultPath,
   type ModelEntryDto,
-  type ModelCatalogEntryDto,
-  type ModelInstallRequest,
   type ModelInferenceTestResult,
   type ModelCapabilitiesDto,
 } from "./models";

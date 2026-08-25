@@ -9,12 +9,6 @@ rust-version.workspace = true
 
 [features]
 default = []
-# Enable the in-process llama.cpp runtime so the LLM evaluator runs real models.
-llama = ["promptlab-models/llama"]
-
-[[example]]
-name = "judge_with_local_model"
-required-features = ["llama"]
 
 [dependencies]
 promptlab-core = { workspace = true }

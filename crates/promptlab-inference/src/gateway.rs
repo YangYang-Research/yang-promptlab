@@ -14,7 +14,7 @@ use crate::error::{InferenceError, InferenceResult};
 use crate::manager::InferenceRuntimeManager;
 use crate::prompts::PromptComposer;
 use crate::provider::{
-    descriptor_from_remote, AdapterHarness, LlamaCppAdapter, ProviderAdapter, RemoteAdapterSettings,
+    descriptor_from_remote, AdapterHarness, ProviderAdapter, RemoteAdapterSettings,
 };
 use crate::types::{
     ChatRequest, ChatResponse, CompleteRequest, CompletionOutcome, ConnectivityTestResult,
@@ -431,34 +431,9 @@ impl<'a> GatewaySession<'a> {
                         cancel,
                     ));
                 }
-                self.inner
-                    .manager
-                    .prepare_local_runtime(self.inner.model_entry, self.inner.runtime_manager)
-                    .await?;
-                let provider_runtime = promptlab_runtime::ModelProviderRuntime::new(
-                    self.inner.model_provider.clone(),
-                    self.inner.model_entry.id.clone(),
-                );
-                factory.register(Arc::new(LlamaCppAdapter::new(
-                    config.provider,
-                    self.inner.model_entry.display_model_name(),
-                    Arc::new(tokio::sync::Mutex::new(provider_runtime)),
-                )))?;
-                Ok(InferenceClient::from_harness(
-                    factory,
-                    TargetDescriptor {
-                        url: "local://llama".into(),
-                        surface: TargetSurface::LlamaCpp,
-                        ..TargetDescriptor::default()
-                    },
-                    HarnessPurpose::assistant(),
-                    config.provider.as_str(),
-                    self.inner.model_entry.display_model_name(),
-                    crate::capabilities::ModelCapabilities::from_local_chat(),
-                    config.max_tokens,
-                    config.temperature,
-                    config.timeout_secs.saturating_mul(1000).max(1_000),
-                    cancel,
+                Err(InferenceError::NotReady(
+                    "embedded GGUF / llama.cpp runtime has been removed — use a remote provider or Ollama over HTTP"
+                        .into(),
                 ))
             }
         }

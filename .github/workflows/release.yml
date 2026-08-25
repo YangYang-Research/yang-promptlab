@@ -41,8 +41,8 @@ jobs:
             macos_deployment_target: ""
     runs-on: ${{ matrix.platform }}
     env:
-      # llama-cpp/ggml need std::filesystem (macOS ≥10.15). Tauri's default
-      # min version is lower and breaks cmake on Apple Silicon CI.
+      # Keep macOS deployment target aligned with Tauri / Apple Silicon CI.
+      # (Previously raised for llama-cpp/ggml; embedded llama.cpp is removed.)
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_deployment_target }}
     steps:
       - name: Checkout

@@ -44,7 +44,7 @@ async fn database_is_accessible_via_app_state() {
     let dir = tempfile::tempdir().unwrap();
     let db = open_database(&dir.path().join("promptlab.db")).await.unwrap();
     let guard = init_logging(LogOptions::bootstrap("promptlab-it")).unwrap();
-    let (manager, provider, meta, harness_factory, plugin_manager) =
+    let (manager, provider, harness_factory, plugin_manager) =
         promptlab_desktop_lib::model_registry::open_test_model_stack(dir.path()).expect("model stack");
     let state = AppState::new(
         db,
@@ -56,7 +56,6 @@ async fn database_is_accessible_via_app_state() {
         promptlab_runtime::RuntimeManager::new(dir.path(), None),
         manager,
         provider,
-        meta,
     );
 
     let before = state.repositories().projects().list().await.unwrap().len();

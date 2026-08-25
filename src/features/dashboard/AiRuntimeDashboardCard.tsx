@@ -18,10 +18,11 @@ type AiRuntimeDashboardCardProps = {
 export function AiRuntimeDashboardCard({ configuration, loading }: AiRuntimeDashboardCardProps) {
   const navigate = useNavigate();
 
-  const mode = configuration?.mode ?? "not_configured";
+  const selectedModelId = configuration?.settings.selectedModelId ?? null;
+  const needsSetup = !selectedModelId;
   const yazgLive = isYazgAgentLive(configuration);
   const statusDotVariant =
-    mode === "not_configured" || loading
+    needsSetup || loading
       ? null
       : connectivityStatusVariant(configuration?.connectivity) ??
         connectivityStatusVariant(configuration?.statusLabel);
@@ -46,7 +47,7 @@ export function AiRuntimeDashboardCard({ configuration, loading }: AiRuntimeDash
 
         {loading ? (
           <span className="stat-card__value stat-card__value--sm">Loading…</span>
-        ) : mode === "not_configured" ? (
+        ) : needsSetup ? (
           <span className="stat-card__setup-row">
             <IconWarning className="stat-card__setup-icon" />
             <span className="stat-card__value stat-card__value--setup">Setup Required</span>
@@ -55,21 +56,15 @@ export function AiRuntimeDashboardCard({ configuration, loading }: AiRuntimeDash
         ) : (
           <div className="runtime-dashboard-card__body">
             <div className="runtime-dashboard-card__row">
-              <span className="runtime-dashboard-card__key">Mode</span>
+              <span className="runtime-dashboard-card__key">Provider</span>
               <span className="runtime-dashboard-card__val">
-                {mode === "third_party"
-                  ? "Third-party"
-                  : mode === "local"
-                    ? "Local Runtime"
-                    : "—"}
+                {configuration?.provider ?? "—"}
               </span>
             </div>
             <div className="runtime-dashboard-card__row">
-              <span className="runtime-dashboard-card__key">Provider</span>
+              <span className="runtime-dashboard-card__key">Model</span>
               <span className="runtime-dashboard-card__val">
-                {mode === "local"
-                  ? (configuration?.runtimeName ?? "Local")
-                  : (configuration?.provider ?? "—")}
+                {configuration?.modelName ?? configuration?.settings.selectedModelName ?? "—"}
               </span>
             </div>
             <div className="runtime-dashboard-card__row">

@@ -33,27 +33,31 @@ function baseConfig(
 }
 
 describe("isYazgAgentLive", () => {
-  it("is false when not configured", () => {
+  it("is false when missing config or model", () => {
     expect(isYazgAgentLive(null)).toBe(false);
-    expect(isYazgAgentLive(baseConfig({ mode: "not_configured" }))).toBe(false);
+    expect(
+      isYazgAgentLive(
+        baseConfig({
+          modelName: null,
+          settings: {
+            ...baseConfig().settings,
+            selectedModelId: null,
+            selectedModelName: null,
+          },
+        }),
+      ),
+    ).toBe(false);
   });
 
-  it("is true for third-party with model and live connectivity", () => {
+  it("is true for remote with model and live connectivity", () => {
     expect(isYazgAgentLive(baseConfig())).toBe(true);
   });
 
-  it("is false for local without loaded model", () => {
+  it("is false for legacy local mode", () => {
     expect(
       isYazgAgentLive(
         baseConfig({
           mode: "local",
-          runtimeStatus: {
-            modelLoaded: false,
-            requiresAttention: false,
-            message: "",
-            loadedModelPath: null,
-            runtimeVersion: null,
-          } as RuntimeConfigurationDto["runtimeStatus"],
         }),
       ),
     ).toBe(false);

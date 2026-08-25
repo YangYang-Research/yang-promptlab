@@ -2,16 +2,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use promptlab_models::{ModelEntry, ModelProvider, ModelSource};
-use promptlab_runtime::{ModelProviderRuntime, RuntimeManager, SharedModelProvider};
-use tokio::sync::Mutex;
+use promptlab_runtime::{RuntimeManager, SharedModelProvider};
 
 use crate::capabilities::ModelCapabilities;
 use crate::config::{AiRuntimeConfiguration, InferenceMode, InferenceProvider, load_config, save_config};
 use crate::error::{InferenceError, InferenceResult};
-use crate::provider::{
-    LlamaCppAdapter, ProviderAdapter, RemoteAdapterSettings, RemoteProviderAdapter,
-};
-use crate::runtime::{LocalRuntimeAdapterBridge, RuntimeAdapter};
+use crate::provider::{ProviderAdapter, RemoteAdapterSettings, RemoteProviderAdapter};
 use crate::types::HealthStatus;
 
 /// Central AI runtime orchestrator — config, lifecycle coordination, provider selection.
@@ -38,6 +34,20 @@ impl InferenceRuntimeManager {
 
     pub async fn load(&mut self) -> InferenceResult<()> {
         self.config = load_config(&self.data_dir).await?;
+        // Migrate persisted llama.cpp / Local GGUF configs to not_configured third-party.
+        if self.config.provider == InferenceProvider::LlamaCpp
+            || (self.config.mode == InferenceMode::Local
+                && self.config.provider != InferenceProvider::Ollama)
+        {
+            self.config.mode = InferenceMode::ThirdParty;
+            self.config.provider = InferenceProvider::OpenAi;
+            self.config.runtime = "cloud".into();
+            self.config.status = "not_configured".into();
+            self.config.initialized = false;
+            self.config.model.clear();
+            self.config.selected_model_id = None;
+            let _ = self.save().await;
+        }
         Ok(())
     }
 
@@ -68,14 +78,16 @@ impl InferenceRuntimeManager {
                 self.config.runtime = "cloud".into();
             }
             ModelProvider::Ollama => {
-                self.config.mode = InferenceMode::Local;
+                // Ollama is HTTP remote (OpenAI-compatible), not in-process GGUF.
+                self.config.mode = InferenceMode::ThirdParty;
                 self.config.provider = InferenceProvider::Ollama;
                 self.config.runtime = "ollama".into();
             }
             _ => {
-                self.config.mode = InferenceMode::Local;
-                self.config.provider = InferenceProvider::LlamaCpp;
-                self.config.runtime = "llama.cpp".into();
+                return Err(InferenceError::Config(
+                    "embedded GGUF / llama.cpp runtime has been removed — use a remote provider or Ollama over HTTP"
+                        .into(),
+                ));
             }
         }
         self.config.initialized = true;
@@ -83,25 +95,24 @@ impl InferenceRuntimeManager {
         self.save().await
     }
 
+    /// Local GGUF prepare path removed — always errors unless caller uses Ollama/ThirdParty.
     pub async fn prepare_local_runtime(
         &self,
-        entry: &ModelEntry,
-        runtime_manager: &mut RuntimeManager,
+        _entry: &ModelEntry,
+        _runtime_manager: &mut RuntimeManager,
     ) -> InferenceResult<()> {
-        let mut adapter = LocalRuntimeAdapterBridge::new(runtime_manager.supervisor_mut());
-        adapter.ensure_running().await?;
-        if entry.file_path.exists() && self.config.provider == InferenceProvider::LlamaCpp {
-            adapter.ensure_model_loaded(&entry.file_path).await?;
-        }
-        Ok(())
+        Err(InferenceError::NotReady(
+            "embedded GGUF / llama.cpp runtime has been removed — use a remote provider or Ollama over HTTP"
+                .into(),
+        ))
     }
 
     pub async fn build_provider_adapter(
         &self,
         entry: &ModelEntry,
         remote: Option<RemoteAdapterSettings>,
-        model_provider: SharedModelProvider,
-        runtime_manager: &mut RuntimeManager,
+        _model_provider: SharedModelProvider,
+        _runtime_manager: &mut RuntimeManager,
     ) -> InferenceResult<Arc<dyn ProviderAdapter>> {
         match self.config.mode {
             InferenceMode::Deterministic => Err(InferenceError::NotReady(
@@ -114,15 +125,26 @@ impl InferenceRuntimeManager {
                 Ok(Arc::new(RemoteProviderAdapter::new(settings)))
             }
             InferenceMode::Local => {
-                self.prepare_local_runtime(entry, runtime_manager).await?;
-                let model_id = entry.id.clone();
-                let provider_runtime =
-                    ModelProviderRuntime::new(model_provider, model_id);
-                Ok(Arc::new(LlamaCppAdapter::new(
-                    self.config.provider,
-                    entry.display_model_name(),
-                    Arc::new(Mutex::new(provider_runtime)),
-                )))
+                // Legacy Local mode: only Ollama-over-HTTP is supported.
+                if self.config.provider == InferenceProvider::Ollama {
+                    let settings = remote.unwrap_or_else(|| RemoteAdapterSettings {
+                        provider: InferenceProvider::Ollama,
+                        model: entry.display_model_name(),
+                        base_url: match &entry.source {
+                            ModelSource::Ollama { base_url, .. } => Some(base_url.clone()),
+                            _ => Some("http://127.0.0.1:11434".into()),
+                        },
+                        api_key: String::new(),
+                        aws_secret_access_key: None,
+                        aws_region: None,
+                        aws_session_token: None,
+                    });
+                    return Ok(Arc::new(RemoteProviderAdapter::new(settings)));
+                }
+                Err(InferenceError::NotReady(
+                    "embedded GGUF / llama.cpp runtime has been removed — use a remote provider or Ollama over HTTP"
+                        .into(),
+                ))
             }
         }
     }

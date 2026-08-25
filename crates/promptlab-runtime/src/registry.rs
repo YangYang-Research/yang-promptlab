@@ -35,18 +35,15 @@ pub struct RegistryUpdateResult {
     pub remote_available: bool,
 }
 
+/// Legacy builtin model registry — no longer loads `models.json` (Remote-only).
 pub struct BuiltinModelRegistry {
     entries: Vec<RegistryEntry>,
 }
 
 impl BuiltinModelRegistry {
-    pub fn load_builtin(app_root: impl AsRef<Path>) -> RuntimeResult<Self> {
-        let bundled = app_root.as_ref().join("resources/models.json");
-        if bundled.exists() {
-            return Self::load_from_path(&bundled);
-        }
+    pub fn load_builtin(_app_root: impl AsRef<Path>) -> RuntimeResult<Self> {
         Ok(Self {
-            entries: default_entries(),
+            entries: Vec::new(),
         })
     }
 
@@ -125,18 +122,4 @@ async fn merge_remote(entries: &mut Vec<RegistryEntry>, url: &str) -> RuntimeRes
     }
 
     Ok(entries.len())
-}
-
-fn default_entries() -> Vec<RegistryEntry> {
-    vec![RegistryEntry {
-        id: "qwen3-8b-judge".into(),
-        name: "Qwen3 8B Security Judge".into(),
-        purpose: "judge".into(),
-        recommended: true,
-        provider: "huggingface".into(),
-        repo: Some("Qwen/Qwen3-8B-GGUF".into()),
-        file: Some("qwen3-8b-q4_k_m.gguf".into()),
-        ollama_tag: None,
-        sha256: None,
-    }]
 }

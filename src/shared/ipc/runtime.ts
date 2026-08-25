@@ -84,7 +84,7 @@ export type RuntimeLogEntry = {
   message: string;
 };
 
-export type AiInferenceRoute = "third_party" | "local";
+export type AiInferenceRoute = "third_party";
 
 export type AiInferenceModelOptionDto = {
   id: string;
@@ -147,27 +147,8 @@ export function getRuntimeStatus(): Promise<RuntimeStatusDto> {
   return invokeCommand<RuntimeStatusDto>("runtime_status");
 }
 
-export function reinitializeRuntimeEngine(): Promise<RuntimeStatusDto> {
-  return invokeCommand<RuntimeStatusDto>("runtime_repair");
-}
-
-/** @deprecated Use {@link reinitializeRuntimeEngine} — embedded libllama has no separate install step. */
-export function installRuntime(): Promise<RuntimeStatusDto> {
-  return reinitializeRuntimeEngine();
-}
-
-/** @deprecated Use {@link reinitializeRuntimeEngine}. */
-export function repairRuntime(): Promise<RuntimeStatusDto> {
-  return reinitializeRuntimeEngine();
-}
-
 export function resetRuntimeConfig(): Promise<RuntimeStatusDto> {
   return invokeCommand<RuntimeStatusDto>("runtime_delete");
-}
-
-/** @deprecated Use {@link resetRuntimeConfig}. */
-export function deleteRuntime(): Promise<RuntimeStatusDto> {
-  return resetRuntimeConfig();
 }
 
 export function startRuntime(): Promise<RuntimeStatusDto> {
@@ -176,16 +157,6 @@ export function startRuntime(): Promise<RuntimeStatusDto> {
 
 export function stopRuntime(): Promise<RuntimeStatusDto> {
   return invokeCommand<RuntimeStatusDto>("runtime_stop");
-}
-
-export function loadRuntimeModel(modelId: string): Promise<RuntimeConfigurationDto> {
-  return invokeCommand<RuntimeConfigurationDto>("runtime_load_model", {
-    request: { modelId },
-  });
-}
-
-export function unloadRuntimeModel(): Promise<RuntimeConfigurationDto> {
-  return invokeCommand<RuntimeConfigurationDto>("runtime_unload_model");
 }
 
 export function restartRuntime(): Promise<RuntimeStatusDto> {
@@ -245,20 +216,8 @@ export function resetRuntimeTokenUsage(): Promise<TokenUsageSnapshot> {
   return invokeCommand<TokenUsageSnapshot>("runtime_token_usage_reset");
 }
 
-export function runRuntimeBenchmark(): Promise<RuntimeBenchmarkResult> {
-  return invokeCommand<RuntimeBenchmarkResult>("runtime_benchmark");
-}
-
 export function getRuntimeLogs(limit = 100): Promise<RuntimeLogEntry[]> {
   return invokeCommand<RuntimeLogEntry[]>("runtime_logs", { limit });
-}
-
-export function refreshRuntimeHardware(): Promise<RuntimeHardwareDto> {
-  return invokeCommand<RuntimeHardwareDto>("hardware_refresh");
-}
-
-export function getRuntimeHardware(): Promise<RuntimeHardwareDto | null> {
-  return invokeCommand<RuntimeHardwareDto | null>("runtime_hardware");
 }
 
 export type RuntimeConnectivityResult = {

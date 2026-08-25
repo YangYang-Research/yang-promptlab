@@ -1,7 +1,7 @@
-# Embedded libllama runtime
+# Runtime notes
 
-Local inference uses **in-process libllama** via `llama-cpp-2` (Rust FFI).
+PromptLab AI Runtime is **remote-only**. Inference goes to third-party HTTP providers
+(OpenAI, Anthropic, Gemini, Azure, Bedrock, OpenRouter, custom OpenAI-compatible including
+Ollama over HTTP). Embedded llama.cpp / in-process GGUF has been removed.
 
-There is no `llama-server` subprocess and no localhost HTTP API.
-
-GGUF models are loaded directly from the model vault at `{data_dir}/models/`.
+See [docs/RUNTIME.md](../docs/RUNTIME.md).

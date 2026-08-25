@@ -1,67 +1,34 @@
 # Runtime and models
 
-**Last verified:** 2026-08-22
+**Last verified:** 2026-08-25
 
-Local inference is **in-process libllama** (`llama-cpp-2` FFI). No `llama-server`, no localhost HTTP for GGUF.
+AI Runtime is **remote-only**. PromptLab talks to third-party HTTP providers (OpenAI, Anthropic, Gemini, Azure, Bedrock, OpenRouter, custom OpenAI-compatible including Ollama over HTTP). There is **no** embedded llama.cpp / in-process GGUF runtime.
 
-Product completions still go through the [harness](ARCHITECTURE.md#harness-ai-io). `promptlab-inference` picks **local GGUF** vs **third-party API** (`InferenceMode`) and records traffic / token usage (`runtime_traffic_*`, `runtime_token_usage`). Settings → Usage; AI Runtime page selects the route. Third-party keys: `models_save_third_party` + keychain (`ThirdPartyCredentialFields`). `models_test_embeddings` probes embedding endpoints.
+Product completions go through the [harness](ARCHITECTURE.md#harness-ai-io). `promptlab-inference` routes to remote providers (`InferenceMode::ThirdParty`) and records traffic / token usage (`runtime_traffic_*`, `runtime_token_usage`). Settings → Usage; AI Runtime page selects the active remote model. Third-party keys: `models_save_third_party` + keychain (`ThirdPartyCredentialFields`).
 
 ```
 Feature (judge | planner | generator | yazg | report | verify)
   → GatewaySession → AiInferenceGateway
-      → local:  RuntimeManager → LocalRuntimeAdapter → LlamaInProcessRuntime → GGUF
-      → remote: harness provider (OpenAI / Anthropic / Gemini / Bedrock / …)
+      → remote: harness provider (OpenAI / Anthropic / Gemini / Bedrock / Ollama HTTP / …)
 ```
-
-FFI is confined to a worker thread; adapter access is a `tokio::sync::Mutex`. Missing GPU is non-fatal.
 
 | Store | Path |
 |-------|------|
 | AI route | `~/.promptlab/config/ai_runtime_config.json` |
-| Vault | `~/.promptlab/models/` |
-| Hardware | `~/.promptlab/runtime/hardware.json` |
-| Manifest | `~/.promptlab/runtime/manifest.json` |
+| Vault | `~/.promptlab/models/` (remote registry metadata) |
 
-`GfxBackend`: Auto | CUDA | Metal | Vulkan | CPU.
-
-Startup (`lib.rs`): load inference config → `RuntimeManager::bootstrap()` (no model) → resume last GGUF if route is local → persist traffic/usage.
+Startup (`lib.rs`): load inference config → optional connectivity check → persist traffic/usage. No GGUF preload.
 
 | Crate | Role |
 |-------|------|
 | `promptlab-inference` | Gateway, route, tokens, traffic |
-| `promptlab-runtime` | libllama lifecycle, hardware |
-| `promptlab-models` | Vault, catalog, downloads |
+| `promptlab-runtime` | Remote-oriented host stubs / SharedModelProvider |
+| `promptlab-models` | Vault registry, third-party entries |
 | `promptlab-harness` | Provider adapters |
 
-UI: `/runtime`, `/models`. Judge weights: SQLite `judge_role_weights`. Also [runtime/README.md](../runtime/README.md).
+UI: `/runtime`, `/models` (third-party panel only). No built-in GGUF `models.json` catalog. Judge weights: SQLite `judge_role_weights`.
 
----
-
-## GGUF vault (`promptlab-models`)
-
-Catalog SSOT: [`resources/models.json`](../resources/models.json). GGUF-first — no Ollama tags.
-
-```
-{vault}/models/{uuid}/model.gguf
-{vault}/models/{uuid}/model.download.json
-```
-
-```json
-{
-  "id": "qwen3-8b-judge",
-  "name": "Qwen3 8B Security Judge",
-  "purpose": "judge",
-  "engine": "llama.cpp",
-  "format": "gguf",
-  "download_url": "https://huggingface.co/.../model.q4_k_m.gguf"
-}
-```
-
-Startup: bundled JSON → optional `PROMPTLAB_MODEL_REGISTRY_URL` merge → `validate_registry()` (`engine=llama.cpp`, HTTPS URL, unique `id`). Invalid entries are dropped from browse.
-
-Downloads: HTTP `Range` resume + SHA256 stream. UI polls `models_download_status`. Import GGUF/ZIP via Tauri dialog.
-
-IPC (see [ARCHITECTURE.md](ARCHITECTURE.md#ipc)): `models_browse`, `models_download_*`, `models_import_*`, `models_list/remove/verify/test_inference/test_embeddings`, `models_save_third_party`, `runtime_*` (including `install` / `repair` / `benchmark` / `traffic_stats` / `token_usage`).
+IPC: `models_list/remove/verify/test_*`, `models_save_third_party`, `runtime_status`, `runtime_set_inference_route` (third_party only), `runtime_test_*`, `runtime_traffic_*`, `runtime_token_usage`, judge weights.
 
 ```bash
 cargo test -p promptlab-models

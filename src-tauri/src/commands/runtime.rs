@@ -19,7 +19,6 @@ use crate::inference_settings::{
 use crate::inference_host::{connectivity_to_judge, open_gateway_session};
 use crate::commands::models::test_third_party_model_connection;
 use crate::error::{CommandError, CommandResult};
-use crate::events::emit_runtime_install_progress;
 use crate::runtime_watch;
 use crate::state::AppState;
 
@@ -145,30 +144,26 @@ pub async fn runtime_status(state: State<'_, AppState>) -> CommandResult<Runtime
 
 #[tauri::command]
 pub async fn runtime_install(
-    app: AppHandle,
-    state: State<'_, AppState>,
+    _app: AppHandle,
+    _state: State<'_, AppState>,
 ) -> CommandResult<RuntimeStatusDto> {
-    runtime_repair_inner(app, state.inner()).await
+    Err(CommandError::invalid_input(
+        "embedded llama.cpp runtime install has been removed — configure a remote AI provider",
+    ))
 }
 
 #[tauri::command]
 pub async fn runtime_repair(
-    app: AppHandle,
-    state: State<'_, AppState>,
+    _app: AppHandle,
+    _state: State<'_, AppState>,
 ) -> CommandResult<RuntimeStatusDto> {
-    runtime_repair_inner(app, state.inner()).await
+    Err(CommandError::invalid_input(
+        "embedded llama.cpp runtime repair has been removed — configure a remote AI provider",
+    ))
 }
 
-async fn runtime_repair_inner(app: AppHandle, state: &AppState) -> CommandResult<RuntimeStatusDto> {
-    let app_handle = app.clone();
-    let mut manager = state.runtime_manager().lock().await;
-    manager
-        .repair(|step, message, phase| {
-            emit_runtime_install_progress(&app_handle, step, message, phase);
-        })
-        .await
-        .map_err(|err| CommandError::from(promptlab_core::PromptLabError::internal(err.to_string())))?;
-    Ok(status_dto_for_manager(&manager).await)
+async fn runtime_repair_inner(_app: AppHandle, state: &AppState) -> CommandResult<RuntimeStatusDto> {
+    runtime_status_op(state).await
 }
 
 #[tauri::command]
@@ -214,87 +209,22 @@ pub struct RuntimeLoadModelRequest {
 
 #[tauri::command]
 pub async fn runtime_load_model(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    request: RuntimeLoadModelRequest,
+    _app: AppHandle,
+    _state: State<'_, AppState>,
+    _request: RuntimeLoadModelRequest,
 ) -> CommandResult<RuntimeConfigurationDto> {
-    let (file_path, model_id) = {
-        let manager = state.model_manager().lock().await;
-        let entry = manager
-            .get_model(&request.model_id)
-            .ok_or_else(|| {
-                CommandError::invalid_input(format!("model not found: {}", request.model_id))
-            })?;
-        if entry.provider == ModelProvider::Remote {
-            return Err(CommandError::invalid_input(
-                "only local GGUF models can be loaded into the runtime",
-            ));
-        }
-        if !entry.file_path.exists() {
-            return Err(CommandError::invalid_input(format!(
-                "model file missing: {}",
-                entry.file_path.display()
-            )));
-        }
-        (entry.file_path.clone(), entry.id.clone())
-    };
-
-    {
-        let mut inference = state.inference_manager().lock().await;
-        let manager = state.model_manager().lock().await;
-        let entry = manager
-            .get_model(&model_id)
-            .ok_or_else(|| CommandError::invalid_input(format!("model not found: {model_id}")))?;
-        inference
-            .update_from_model(entry, None)
-            .await
-            .map_err(|e| CommandError::from(promptlab_core::PromptLabError::internal(e.to_string())))?;
-    }
-
-    {
-        let mut manager = state.runtime_manager().lock().await;
-        if !manager.supervisor().binary_available() {
-            return Err(map_runtime_err(promptlab_runtime::RuntimeError::Unavailable));
-        }
-        let lifecycle = manager.lifecycle_state();
-        if !matches!(
-            lifecycle,
-            RuntimeLifecycleState::Running
-                | RuntimeLifecycleState::Starting
-                | RuntimeLifecycleState::Busy
-        ) {
-            return Err(CommandError::invalid_input(
-                "Start Runtime before loading a model",
-            ));
-        }
-        if !manager.is_same_model_loaded_at(&file_path).await {
-            load_model_with_loading_cache(
-                state.inner(),
-                &mut manager,
-                &file_path,
-                &model_id,
-            )
-                .await
-                .map_err(map_runtime_err)?;
-        } else {
-            let _ = manager.run_health_check().await;
-        }
-    }
-
-    runtime_watch::spawn_runtime_watch(app);
-    runtime_configuration_for_state(state.inner()).await
+    Err(CommandError::invalid_input(
+        "embedded GGUF load has been removed — configure a remote AI provider or Ollama over HTTP",
+    ))
 }
 
 #[tauri::command]
 pub async fn runtime_unload_model(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> CommandResult<RuntimeConfigurationDto> {
-    let mut manager = state.runtime_manager().lock().await;
-    manager
-        .unload_loaded_model()
-        .await
-        .map_err(map_runtime_err)?;
-    runtime_configuration_for_state(state.inner()).await
+    Err(CommandError::invalid_input(
+        "embedded GGUF unload has been removed — no in-process model is loaded",
+    ))
 }
 
 #[tauri::command]
@@ -347,12 +277,10 @@ pub async fn runtime_token_usage_reset(
 }
 
 #[tauri::command]
-pub async fn runtime_benchmark(state: State<'_, AppState>) -> CommandResult<RuntimeBenchmarkResult> {
-    let mut manager = state.runtime_manager().lock().await;
-    manager
-        .run_benchmark()
-        .await
-        .map_err(map_runtime_err)
+pub async fn runtime_benchmark(_state: State<'_, AppState>) -> CommandResult<RuntimeBenchmarkResult> {
+    Err(CommandError::invalid_input(
+        "local runtime benchmark has been removed — embedded llama.cpp is unavailable",
+    ))
 }
 
 #[tauri::command]
@@ -435,7 +363,7 @@ pub(crate) async fn startup_connectivity_check(state: &AppState) {
         inference.config().clone()
     };
 
-    if !config.initialized {
+    if config.selected_model_id.is_none() {
         return;
     }
 
@@ -607,94 +535,29 @@ async fn assemble_runtime_configuration(
     runtime_manager: &promptlab_runtime::RuntimeManager,
 ) -> RuntimeConfigurationDto {
     let runtime_status = status_dto_for_manager(runtime_manager).await;
-    let last_health = runtime_manager.last_health().cloned();
 
     let selected_model = config.selected_model_id.as_ref().and_then(|id| {
         models.iter().find(|m| &m.id == id)
     });
 
-    let (mode, status_label, provider, model_name, runtime_name, runtime_version, connectivity, last_health_check) =
-        if !config.initialized {
-            (
-                "not_configured".to_string(),
-                "Setup Required".to_string(),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-        } else if config.mode == InferenceMode::ThirdParty {
-            (
-                "third_party".to_string(),
-                third_party_status_label(
-                    config,
-                    inference.third_party_available,
-                    selected_model,
-                ),
-                selected_model.map(|m| m.display_provider()),
-                inference.selected_model_name.clone(),
-                None,
-                None,
-                if config.health.message.is_empty() {
-                    None
-                } else {
-                    Some(config.health.message.clone())
-                },
-                config.health.checked_at.clone(),
-            )
-        } else {
-            let lifecycle = runtime_status.lifecycle_state.as_str();
-            let manifest_installed = runtime_manager
-                .manifest()
-                .is_some_and(|m| m.installed);
-            (
-                "local".to_string(),
-                local_status_label(
-                    lifecycle,
-                    runtime_status.binary_available,
-                    manifest_installed,
-                    runtime_status.model_loaded,
-                ),
-                None,
-                if runtime_status.model_loaded {
-                    runtime_status.loaded_model_path.as_ref().map(|p| {
-                        std::path::Path::new(p)
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or(p)
-                            .to_string()
-                    })
-                } else {
-                    None
-                },
-                local_runtime_display_name(runtime_status.backend.as_deref()),
-                runtime_status.runtime_version.clone(),
-                Some(local_inference_connectivity_label(
-                    lifecycle,
-                    runtime_status.model_loaded,
-                    last_health.as_ref(),
-                )),
-                last_health.as_ref().and_then(|h| {
-                    if h.message.is_empty() {
-                        None
-                    } else {
-                        Some(h.message.clone())
-                    }
-                }),
-            )
-        };
-
+    // Remote-only product — DTO mode is always third_party.
     RuntimeConfigurationDto {
-        mode,
-        status_label,
-        provider,
-        model_name,
-        runtime_name,
-        runtime_version,
-        connectivity,
-        last_health_check,
+        mode: "third_party".to_string(),
+        status_label: third_party_status_label(
+            config,
+            inference.third_party_available,
+            selected_model,
+        ),
+        provider: selected_model.map(|m| m.display_provider()),
+        model_name: inference.selected_model_name.clone(),
+        runtime_name: None,
+        runtime_version: None,
+        connectivity: if config.health.message.is_empty() {
+            None
+        } else {
+            Some(config.health.message.clone())
+        },
+        last_health_check: config.health.checked_at.clone(),
         model_load_in_progress: false,
         model_test_in_progress: false,
         settings: inference.clone(),
@@ -715,7 +578,7 @@ fn fallback_runtime_status_when_busy() -> RuntimeStatusDto {
         base_url: "embedded".into(),
         model_loaded: false,
         loaded_model_path: None,
-        message: "Loading GGUF model via embedded libllama — large models may take several minutes on CPU".into(),
+        message: "Busy".into(),
         requires_attention: false,
         last_error: None,
         recommended_runtime: None,
@@ -730,65 +593,28 @@ async fn assemble_runtime_configuration_busy_fallback(
     let selected_model = config.selected_model_id.as_ref().and_then(|id| {
         models.iter().find(|m| &m.id == id)
     });
-    let runtime_status = fallback_runtime_status_when_busy();
-
-    let (mode, status_label, provider, model_name, runtime_name, runtime_version, connectivity, last_health_check) =
-        if !config.initialized {
-            (
-                "not_configured".to_string(),
-                "Setup Required".to_string(),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-        } else if config.mode == InferenceMode::ThirdParty {
-            (
-                "third_party".to_string(),
-                third_party_status_label(
-                    config,
-                    inference.third_party_available,
-                    selected_model,
-                ),
-                selected_model.map(|m| m.display_provider()),
-                inference.selected_model_name.clone(),
-                None,
-                None,
-                if config.health.message.is_empty() {
-                    None
-                } else {
-                    Some(config.health.message.clone())
-                },
-                config.health.checked_at.clone(),
-            )
-        } else {
-            (
-                "local".to_string(),
-                "Loading model".into(),
-                None,
-                inference.selected_model_name.clone(),
-                local_runtime_display_name(runtime_status.backend.as_deref()),
-                None,
-                Some("Offline — load a model".into()),
-                None,
-            )
-        };
 
     RuntimeConfigurationDto {
-        mode,
-        status_label,
-        provider,
-        model_name,
-        runtime_name,
-        runtime_version,
-        connectivity,
-        last_health_check,
+        mode: "third_party".to_string(),
+        status_label: third_party_status_label(
+            config,
+            inference.third_party_available,
+            selected_model,
+        ),
+        provider: selected_model.map(|m| m.display_provider()),
+        model_name: inference.selected_model_name.clone(),
+        runtime_name: None,
+        runtime_version: None,
+        connectivity: if config.health.message.is_empty() {
+            None
+        } else {
+            Some(config.health.message.clone())
+        },
+        last_health_check: config.health.checked_at.clone(),
         model_load_in_progress: false,
         model_test_in_progress: false,
         settings: inference.clone(),
-        runtime_status,
+        runtime_status: fallback_runtime_status_when_busy(),
     }
 }
 
@@ -820,14 +646,10 @@ fn apply_model_loading_overlay(dto: &mut RuntimeConfigurationDto, loading_model_
     dto.runtime_status.lifecycle_state = "starting".into();
     dto.runtime_status.model_loaded = false;
     dto.runtime_status.loaded_model_path = None;
-    dto.runtime_status.message =
-        "Loading GGUF model via embedded libllama — large models may take several minutes on CPU".into();
+    dto.runtime_status.message = "Verifying remote model connectivity…".into();
     dto.runtime_name = runtime_name;
     dto.runtime_version = runtime_version;
     dto.runtime_status.recommended_runtime = recommended_runtime;
-    if dto.mode == "not_configured" {
-        dto.mode = "local".into();
-    }
     dto.settings.selected_model_id = Some(model_id.to_string());
 }
 
@@ -837,9 +659,6 @@ fn apply_model_testing_overlay(dto: &mut RuntimeConfigurationDto, testing_model_
     };
     dto.model_test_in_progress = true;
     dto.status_label = "Verifying model".into();
-    if dto.mode == "not_configured" {
-        dto.mode = "local".into();
-    }
     dto.settings.selected_model_id = Some(model_id.to_string());
 }
 
@@ -989,23 +808,10 @@ pub async fn runtime_set_inference_route(
         CommandError::invalid_input(format!("unknown inference route: {}", request.route))
     })?;
 
-    if state.runtime_model_loading_id().lock().await.is_some() {
+    if route != InferenceMode::ThirdParty {
         return Err(CommandError::invalid_input(
-            "cannot change inference route while a local model is loading",
+            "only remote / third-party inference is supported — embedded llama.cpp has been removed",
         ));
-    }
-
-    if route == InferenceMode::ThirdParty {
-        let mut runtime_mgr = state.runtime_manager().lock().await;
-        let snap = runtime_mgr.status_snapshot();
-        if snap.lifecycle_state == RuntimeLifecycleState::Starting.as_str() && !snap.model_loaded {
-            return Err(CommandError::invalid_input(
-                "cannot switch to third-party while a local model is loading",
-            ));
-        }
-        if runtime_mgr.is_runtime_active() {
-            let _ = runtime_mgr.stop_runtime().await;
-        }
     }
 
     let models: Vec<ModelEntry> = {
@@ -1013,45 +819,35 @@ pub async fn runtime_set_inference_route(
         manager.list_models().into_iter().cloned().collect()
     };
 
-    let run_connectivity_test = route == InferenceMode::ThirdParty
-        && request
-            .selected_model_id
-            .as_ref()
-            .is_some_and(|value| !value.trim().is_empty());
+    let run_connectivity_test = request
+        .selected_model_id
+        .as_ref()
+        .is_some_and(|value| !value.trim().is_empty());
 
     let mut inference = state.inference_manager().lock().await;
     let mut config = inference.config().clone();
-    config.mode = route;
+    config.mode = InferenceMode::ThirdParty;
     config.initialized = true;
 
     if let Some(id) = request
         .selected_model_id
         .filter(|value| !value.trim().is_empty())
     {
-        let valid = models.iter().any(|model| match route {
-            InferenceMode::ThirdParty => is_third_party_model(model) && model.id == id,
-            InferenceMode::Local => is_local_model(model) && model.id == id,
-            InferenceMode::Deterministic => false,
-        });
+        let valid = models
+            .iter()
+            .any(|model| is_third_party_model(model) && model.id == id);
         if valid {
             config.selected_model_id = Some(id);
         }
     } else {
-        let selection_matches_route = config
-            .selected_model_id
-            .as_ref()
-            .is_some_and(|id| {
-                models.iter().any(|model| match route {
-                    InferenceMode::ThirdParty => is_third_party_model(model) && model.id == *id,
-                    InferenceMode::Local => is_local_model(model) && model.id == *id,
-                    InferenceMode::Deterministic => false,
-                })
-            });
+        let selection_matches_route = config.selected_model_id.as_ref().is_some_and(|id| {
+            models
+                .iter()
+                .any(|model| is_third_party_model(model) && model.id == *id)
+        });
         if !selection_matches_route {
             config.selected_model_id = None;
-            if route == InferenceMode::ThirdParty {
-                config.health = Default::default();
-            }
+            config.health = Default::default();
         }
     }
 

@@ -46,8 +46,8 @@ yang-promptlab/
 ├── crates/                     # engines (table below)
 ├── packages/plugin-sdk-{python,js}/  # leftover
 ├── plugins/                    # leftover samples
-├── resources/models.json       # GGUF catalog
-├── runtime/                    # libllama notes
+├── resources/                  # optional bundled assets
+├── runtime/                    # legacy notes
 └── tests/{frontend,integration}/
 ```
 
@@ -77,8 +77,8 @@ cargo test -p promptlab-core
 | `promptlab-storage` | SQLite + repositories |
 | `promptlab-harness` | Normalized AI I/O |
 | `promptlab-inference` | Gateway, token usage, traffic |
-| `promptlab-runtime` | Embedded libllama |
-| `promptlab-models` | GGUF vault, catalog, downloads |
+| `promptlab-runtime` | Remote-oriented runtime host |
+| `promptlab-models` | Model vault / third-party registry |
 | `promptlab-target-profile` | Wizard target SSOT + verify |
 | `promptlab-planner` | Attack-plan types |
 | `promptlab-payload` / `promptlab-generator` | Catalog + plan → probes |

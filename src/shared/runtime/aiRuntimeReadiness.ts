@@ -11,54 +11,37 @@ export async function checkAiRuntimeReadiness(): Promise<AiRuntimeReadiness> {
     const configuration = await getRuntimeConfiguration();
     const settings = configuration.settings;
 
-    if (!settings.initialized || configuration.mode === "not_configured") {
-      return {
-        ready: false,
-        configuration,
-        message:
-          "AI Runtime is not configured. Choose a third-party API model or load a local model before creating a project.",
-      };
-    }
-
     if (!settings.selectedModelId) {
       return {
         ready: false,
         configuration,
-        message: "Select an AI model in AI Runtime before creating a project.",
+        message: "Select a remote AI model in AI Runtime before creating a project.",
       };
     }
 
-    if (configuration.mode === "third_party") {
-      const selected = settings.thirdPartyModels.find(
-        (model) => model.id === settings.selectedModelId,
-      );
-      if (selected && !selected.configured) {
-        return {
-          ready: false,
-          configuration,
-          message:
-            "The selected third-party model is missing API credentials. Configure it in AI Runtime first.",
-        };
-      }
+    if (
+      configuration.mode === "local" ||
+      configuration.mode === "not_configured"
+    ) {
+      // Legacy configs should already be migrated; treat as not ready until remote.
+      return {
+        ready: false,
+        configuration,
+        message:
+          "AI Runtime is remote-only. Add a remote provider model in Models, then select it in AI Runtime.",
+      };
     }
 
-    if (configuration.mode === "local") {
-      if (!configuration.runtimeStatus.modelLoaded) {
-        return {
-          ready: false,
-          configuration,
-          message: "Load a local model in AI Runtime before creating a project.",
-        };
-      }
-      if (configuration.runtimeStatus.requiresAttention) {
-        return {
-          ready: false,
-          configuration,
-          message:
-            configuration.runtimeStatus.message ||
-            "Local AI Runtime needs attention. Open AI Runtime and resolve the issue first.",
-        };
-      }
+    const selected = settings.thirdPartyModels.find(
+      (model) => model.id === settings.selectedModelId,
+    );
+    if (selected && !selected.configured) {
+      return {
+        ready: false,
+        configuration,
+        message:
+          "The selected remote model is missing API credentials. Configure it in Models first.",
+      };
     }
 
     return {

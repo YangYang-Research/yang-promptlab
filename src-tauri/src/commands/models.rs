@@ -805,41 +805,27 @@ pub async fn models_registry_info(state: State<'_, AppState>) -> CommandResult<M
     models_registry_info_op(state.inner())
 }
 
-pub fn models_registry_info_op(state: &AppState) -> CommandResult<ModelRegistryInfoDto> {
-    let meta = state.model_catalog_meta();
-    let validation = &meta.validation;
+pub fn models_registry_info_op(_state: &AppState) -> CommandResult<ModelRegistryInfoDto> {
     Ok(ModelRegistryInfoDto {
-        entry_count: meta.entry_count,
-        remote_merged: meta.remote_merged,
-        remote_url: meta.remote_url.clone(),
-        source_path: meta
-            .source_path
-            .as_ref()
-            .map(|p| p.to_string_lossy().into_owned()),
-        total_models: validation.total,
-        valid_models: validation.valid,
-        invalid_models: validation.invalid,
+        entry_count: 0,
+        remote_merged: false,
+        remote_url: None,
+        source_path: None,
+        total_models: 0,
+        valid_models: 0,
+        invalid_models: 0,
     })
 }
 
-pub fn models_registry_diagnostics_op(state: &AppState) -> CommandResult<ModelRegistryDiagnosticsDto> {
-    let validation = &state.model_catalog_meta().validation;
+pub fn models_registry_diagnostics_op(_state: &AppState) -> CommandResult<ModelRegistryDiagnosticsDto> {
     Ok(ModelRegistryDiagnosticsDto {
-        total_models: validation.total,
-        valid_models: validation.valid,
-        invalid_models: validation.invalid,
-        valid_ids: validation.valid_ids.clone(),
-        invalid_ids: validation.invalid_ids.clone(),
-        issues: validation
-            .issues
-            .iter()
-            .map(|issue| RegistryValidationIssueDto {
-                id: issue.id.clone(),
-                field: issue.field.clone(),
-                message: issue.message.clone(),
-            })
-            .collect(),
-        healthy: validation.is_healthy(),
+        total_models: 0,
+        valid_models: 0,
+        invalid_models: 0,
+        valid_ids: Vec::new(),
+        invalid_ids: Vec::new(),
+        issues: Vec::new(),
+        healthy: true,
     })
 }
 
@@ -866,16 +852,12 @@ pub async fn models_browse_op(state: &AppState) -> CommandResult<Vec<ModelCatalo
 
 #[tauri::command]
 pub async fn models_install(
-    state: State<'_, AppState>,
-    request: ModelInstallRequest,
+    _state: State<'_, AppState>,
+    _request: ModelInstallRequest,
 ) -> CommandResult<ModelEntryDto> {
-    let mut manager = state.model_manager().lock().await;
-    let entry = manager
-        .install_catalog(&request.catalog_id, None)
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    let vault = manager.vault_path().to_path_buf();
-    Ok(entry_to_dto(&entry, &vault))
+    Err(CommandError::invalid_input(
+        "GGUF catalog install has been removed — add a remote third-party provider instead",
+    ))
 }
 
 #[tauri::command]
@@ -1121,113 +1103,85 @@ async fn persist_third_party_model_connectivity(
 
 #[tauri::command]
 pub async fn models_import_gguf(
-    state: State<'_, AppState>,
-    request: ModelImportRequest,
+    _state: State<'_, AppState>,
+    _request: ModelImportRequest,
 ) -> CommandResult<ModelEntryDto> {
-    let mut manager = state.model_manager().lock().await;
-    let entry = manager
-        .import_local(&request.name, &request.path)
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    let vault = manager.vault_path().to_path_buf();
-    Ok(entry_to_dto(&entry, &vault))
+    Err(CommandError::invalid_input(
+        "GGUF import has been removed — add a remote third-party provider instead",
+    ))
 }
 
 #[tauri::command]
 pub async fn models_import_zip(
-    state: State<'_, AppState>,
-    request: ModelImportRequest,
+    _state: State<'_, AppState>,
+    _request: ModelImportRequest,
 ) -> CommandResult<ModelEntryDto> {
-    let mut manager = state.model_manager().lock().await;
-    let entry = manager
-        .import_zip_package(&request.name, &request.path)
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    let vault = manager.vault_path().to_path_buf();
-    Ok(entry_to_dto(&entry, &vault))
+    Err(CommandError::invalid_input(
+        "GGUF zip import has been removed — add a remote third-party provider instead",
+    ))
 }
 
 #[tauri::command]
 pub async fn models_download_start(
-    state: State<'_, AppState>,
-    request: ModelDownloadRequest,
+    _state: State<'_, AppState>,
+    _request: ModelDownloadRequest,
 ) -> CommandResult<ModelDownloadProgressDto> {
-    let mut manager = state.model_manager().lock().await;
-    let progress = manager
-        .start_catalog_download(&request.catalog_id)
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    Ok(progress_to_dto(&progress))
+    Err(CommandError::invalid_input(
+        "GGUF download has been removed — add a remote third-party provider instead",
+    ))
 }
 
 #[tauri::command]
 pub async fn models_download_status(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> CommandResult<ModelDownloadStatusDto> {
-    download_status_snapshot(state.inner(), true).await
-}
-
-#[tauri::command]
-pub async fn models_download_pause(
-    state: State<'_, AppState>,
-) -> CommandResult<ModelDownloadProgressDto> {
-    let manager = state.model_manager().lock().await;
-    let progress = manager
-        .pause_download()
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    Ok(progress_to_dto(&progress))
-}
-
-#[tauri::command]
-pub async fn models_download_resume(
-    state: State<'_, AppState>,
-) -> CommandResult<ModelDownloadProgressDto> {
-    let manager = state.model_manager().lock().await;
-    let progress = manager
-        .resume_download()
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    Ok(progress_to_dto(&progress))
-}
-
-#[tauri::command]
-pub async fn models_download_retry_verify(
-    state: State<'_, AppState>,
-    request: ModelDownloadRequest,
-) -> CommandResult<ModelDownloadStatusDto> {
-    let progress = {
-        let mut manager = state.model_manager().lock().await;
-        manager
-            .begin_catalog_verify(&request.catalog_id)
-            .await
-            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?
-    };
-    spawn_download_finalize(state.inner());
     Ok(ModelDownloadStatusDto {
-        active: true,
-        progress: Some(progress_to_dto_enriched(&progress).await),
+        active: false,
+        progress: None,
         installed: None,
     })
 }
 
 #[tauri::command]
-pub async fn models_download_cancel_verify(
-    state: State<'_, AppState>,
+pub async fn models_download_pause(
+    _state: State<'_, AppState>,
 ) -> CommandResult<ModelDownloadProgressDto> {
-    let mut manager = state.model_manager().lock().await;
-    let progress = manager
-        .cancel_catalog_verify()
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    Ok(progress_to_dto_enriched(&progress).await)
+    Err(CommandError::invalid_input(
+        "GGUF download has been removed",
+    ))
 }
 
 #[tauri::command]
-pub async fn models_download_cancel(state: State<'_, AppState>) -> CommandResult<()> {
-    let manager = state.model_manager().lock().await;
-    manager
-        .cancel_download()
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
+pub async fn models_download_resume(
+    _state: State<'_, AppState>,
+) -> CommandResult<ModelDownloadProgressDto> {
+    Err(CommandError::invalid_input(
+        "GGUF download has been removed",
+    ))
+}
+
+#[tauri::command]
+pub async fn models_download_retry_verify(
+    _state: State<'_, AppState>,
+    _request: ModelDownloadRequest,
+) -> CommandResult<ModelDownloadStatusDto> {
+    Err(CommandError::invalid_input(
+        "GGUF download verify has been removed",
+    ))
+}
+
+#[tauri::command]
+pub async fn models_download_cancel_verify(
+    _state: State<'_, AppState>,
+) -> CommandResult<ModelDownloadProgressDto> {
+    Err(CommandError::invalid_input(
+        "GGUF download verify has been removed",
+    ))
+}
+
+#[tauri::command]
+pub async fn models_download_cancel(_state: State<'_, AppState>) -> CommandResult<()> {
+    Ok(())
 }
 
 #[tauri::command]

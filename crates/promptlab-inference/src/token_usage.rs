@@ -3,7 +3,7 @@
 //! Hot-path recording stays in-memory and queues dirty state for JSON persistence.
 //! Call sites set [`CURRENT_AGENT`] via [`with_agent`] before completions so
 //! leaf adapters ([`crate::provider::RemoteProviderAdapter`] /
-//! [`crate::provider::LlamaCppAdapter`]) attribute tokens correctly.
+//! [`crate::provider::RemoteProviderAdapter`]) attribute tokens correctly.
 
 use std::collections::BTreeMap;
 use std::future::Future;

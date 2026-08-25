@@ -1,4 +1,4 @@
-//! Embedded local AI runtime — in-process libllama inference.
+//! Remote-oriented AI runtime host — model provider, lifecycle, and stubs for legacy local APIs.
 
 pub mod benchmark;
 pub mod config;

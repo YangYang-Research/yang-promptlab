@@ -72,41 +72,14 @@ async fn mock_inference_runtime() {
 }
 
 #[tokio::test]
-#[ignore = "network: mistral catalog background download smoke test"]
-async fn mistral_catalog_download_smoke() {
-    use promptlab_models::builtin_catalog::BuiltinCatalog;
-    use std::path::Path;
-
-    let catalog_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/models.json");
-    let catalog = BuiltinCatalog::load_from_path(&catalog_path).unwrap();
+async fn catalog_install_rejected_without_builtin_registry() {
     let dir = tempfile::tempdir().unwrap();
-    let mut mgr = LocalModelManager::new(dir.path().join("vault"))
-        .unwrap()
-        .with_catalog(catalog);
-
-    let progress = mgr
-        .start_catalog_download("mistral-7b-q4")
+    let mut mgr = LocalModelManager::new(dir.path().join("vault")).unwrap();
+    let err = mgr
+        .install_catalog("any-id", None)
         .await
-        .expect("start download");
-
-    assert_eq!(progress.status, DownloadStatus::Downloading);
-
-    for _ in 0..120 {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        if let Some(status) = mgr.download_status().await {
-            if status.status == DownloadStatus::Failed {
-                panic!("download failed: {:?}", status.error);
-            }
-            if status.status == DownloadStatus::Completed {
-                return;
-            }
-            if status.downloaded_bytes > 5_000_000 {
-                let _ = mgr.cancel_download().await;
-                return;
-            }
-        }
-    }
-    let _ = mgr.cancel_download().await;
+        .expect_err("builtin catalog removed");
+    assert!(err.to_string().contains("removed"));
 }
 
 #[tokio::test]

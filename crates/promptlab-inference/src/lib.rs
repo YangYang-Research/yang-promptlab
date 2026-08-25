@@ -29,7 +29,7 @@ pub use gateway::{
 };
 pub use manager::InferenceRuntimeManager;
 pub use prompts::{PromptBuilder, PromptComposer, PromptContext, PromptId, PromptRegistry, PromptTemplate};
-pub use provider::{LlamaCppAdapter, ProviderAdapter, RemoteAdapterSettings, RemoteProviderAdapter};
+pub use provider::{ProviderAdapter, RemoteAdapterSettings, RemoteProviderAdapter};
 pub use runtime::{LocalRuntimeAdapterBridge, RuntimeAdapter};
 pub use token_usage::{
     AgentTokenUsage, AgentTokenUsageRow, TokenUsageSnapshot, estimate_tokens,

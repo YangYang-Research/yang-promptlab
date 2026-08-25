@@ -86,12 +86,10 @@ pub trait ProviderAdapter: Send + Sync {
 
 pub mod bedrock_sigv4;
 mod adapter_harness;
-mod llama_cpp;
 mod remote;
 mod route;
 
 pub use adapter_harness::AdapterHarness;
-pub use llama_cpp::LlamaCppAdapter;
 pub use remote::RemoteProviderAdapter;
 pub use route::descriptor_from_remote;
 

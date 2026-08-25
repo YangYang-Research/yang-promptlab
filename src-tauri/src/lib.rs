@@ -126,7 +126,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 Ok::<(), crate::error::CommandError>(())
             })?;
 
-            let (mut model_manager, model_catalog_meta) = tauri::async_runtime::block_on(
+            let mut model_manager = tauri::async_runtime::block_on(
                 model_registry::open_model_manager_with_registry(app.handle(), &root),
             )
             .map_err(crate::error::CommandError::from)?;
@@ -177,7 +177,6 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 runtime_manager,
                 model_manager_arc,
                 model_provider,
-                model_catalog_meta,
                 agent_trace,
             ));
 
@@ -196,6 +195,18 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 {
                     let mut inference = state.inference_manager().lock().await;
                     let _ = inference.load().await;
+                    let models: Vec<_> = {
+                        let manager = state.model_manager().lock().await;
+                        manager.list_models().into_iter().cloned().collect()
+                    };
+                    let before = inference.config().clone();
+                    let after = crate::inference_settings::reconcile_config(before.clone(), &models);
+                    if after != before {
+                        *inference.config_mut() = after;
+                        if let Err(err) = inference.save().await {
+                            tracing::warn!(error = %err, "failed to persist remote-only runtime config migration");
+                        }
+                    }
                 }
                 embedded_runtime::resume_local_runtime_on_startup(&app_handle, state.inner()).await;
                 commands::runtime::startup_connectivity_check(state.inner()).await;
@@ -285,20 +296,10 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::models::models_registry_info,
             commands::models::models_registry_diagnostics,
             commands::models::models_browse,
-            commands::models::models_install,
-            commands::models::models_import_gguf,
             commands::models::models_save_third_party,
             commands::models::models_third_party_edit_form,
             commands::models::models_test_third_party,
             commands::models::models_test_connection,
-            commands::models::models_import_zip,
-            commands::models::models_download_start,
-            commands::models::models_download_status,
-            commands::models::models_download_pause,
-            commands::models::models_download_resume,
-            commands::models::models_download_cancel,
-            commands::models::models_download_retry_verify,
-            commands::models::models_download_cancel_verify,
             commands::models::models_remove,
             commands::models::models_verify,
             commands::models::models_test_inference,
@@ -323,22 +324,15 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::project_summary::project_summary_generate,
             commands::planner::attack_planner_adjust,
             commands::runtime::runtime_status,
-            commands::runtime::runtime_install,
-            commands::runtime::runtime_repair,
             commands::runtime::runtime_start,
             commands::runtime::runtime_stop,
             commands::runtime::runtime_delete,
-            commands::runtime::runtime_load_model,
-            commands::runtime::runtime_unload_model,
             commands::runtime::runtime_restart,
             commands::runtime::runtime_health,
             commands::runtime::runtime_traffic_stats,
             commands::runtime::runtime_token_usage,
             commands::runtime::runtime_token_usage_reset,
-            commands::runtime::runtime_benchmark,
             commands::runtime::runtime_logs,
-            commands::runtime::runtime_hardware,
-            commands::runtime::hardware_refresh,
             commands::runtime::runtime_configuration,
             commands::runtime::runtime_inference_settings,
             commands::runtime::runtime_set_inference_route,

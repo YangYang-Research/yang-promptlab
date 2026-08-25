@@ -294,7 +294,7 @@ export function SettingsPage() {
                 description="Judge, planner, and payload generation share one runtime configuration."
               >
                 <p className="text-muted text-sm">
-                  Configure local llama.cpp or a third-party API model on the AI Runtime page.
+                  Configure a remote AI provider (OpenAI, Anthropic, Gemini, Azure, Bedrock, OpenRouter, Ollama HTTP, or custom) on the AI Runtime page.
                 </p>
                 <div className="settings-section__actions">
                   <Link className="button button--secondary" to="/runtime">
