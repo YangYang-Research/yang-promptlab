@@ -509,7 +509,7 @@ fn registry_verified_status(entry: &ModelEntry) -> bool {
     entry.verified
 }
 
-pub(crate) fn entry_to_dto(entry: &ModelEntry, vault: &std::path::Path) -> ModelEntryDto {
+pub(crate) fn entry_to_dto(entry: &ModelEntry, _vault: &std::path::Path) -> ModelEntryDto {
     let size_gb = entry
         .size_bytes
         .map(|b| (b as f64) / (1024.0 * 1024.0 * 1024.0))
@@ -524,7 +524,7 @@ pub(crate) fn entry_to_dto(entry: &ModelEntry, vault: &std::path::Path) -> Model
         size_bytes: entry.size_bytes,
         size_gb,
         verified,
-        path: promptlab_models::ModelRegistry::display_uri(vault, &entry.file_path),
+        path: entry.file_path.to_string_lossy().into_owned(),
         sha256: entry.checksum_sha256.clone(),
         capabilities: ModelCapabilitiesDto {
             chat: entry.capabilities.chat,

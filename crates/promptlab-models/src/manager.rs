@@ -110,15 +110,9 @@ impl LocalModelManager {
         Ok(entry)
     }
 
-    /// Remove a model from the registry and delete vault files.
+    /// Remove a model from the registry.
     pub async fn remove_model(&mut self, model_id: &str) -> ModelResult<ModelEntry> {
         let entry = self.registry.remove(model_id)?;
-        let model_dir = ModelRegistry::model_dir(&self.vault_path, model_id);
-        if model_dir.exists() {
-            tokio::fs::remove_dir_all(&model_dir)
-                .await
-                .map_err(ModelError::Io)?;
-        }
         self.persist().await?;
         info!(id = %model_id, "removed model");
         Ok(entry)
@@ -380,10 +374,6 @@ async fn load_registry_with_migration(
                 "renamed registry.json after SQLite migration"
             );
         }
-    }
-
-    if ModelRegistry::migrate_storage_layout(vault, &mut registry)? {
-        dirty = true;
     }
 
     Ok((registry, dirty))

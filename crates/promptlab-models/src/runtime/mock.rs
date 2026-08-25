@@ -72,7 +72,7 @@ mod tests {
     #[tokio::test]
     async fn mock_complete() {
         let mut runtime = MockInferenceRuntime::new("ok");
-        runtime.load_model(Path::new("/fake/model.gguf")).await.unwrap();
+        runtime.load_model(Path::new("/fake/model")).await.unwrap();
         let resp = runtime
             .complete(InferenceRequest {
                 system: None,

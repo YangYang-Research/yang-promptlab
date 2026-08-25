@@ -1,11 +1,10 @@
+//! Model discovery stubs — local GGUF vault scanning removed (remote-only).
+
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use tokio::fs;
-use tracing::debug;
 
-use crate::error::{RuntimeError, RuntimeResult};
-use crate::runtime::gguf::detect_quantization;
+use crate::error::RuntimeResult;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,85 +15,12 @@ pub struct DiscoveredModel {
     pub digest: Option<String>,
 }
 
-/// Scan the model vault directory for `.gguf` files.
-pub async fn discover_models_in_dir(models_dir: &Path) -> RuntimeResult<Vec<DiscoveredModel>> {
-    if !models_dir.is_dir() {
-        return Ok(Vec::new());
-    }
-
-    let mut discovered = Vec::new();
-    let mut stack = vec![models_dir.to_path_buf()];
-
-    while let Some(current) = stack.pop() {
-        let mut entries = fs::read_dir(&current)
-            .await
-            .map_err(|err| RuntimeError::NativeRuntimeError(err.to_string()))?;
-
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|err| RuntimeError::NativeRuntimeError(err.to_string()))?
-        {
-            let path = entry.path();
-            let file_type = entry
-                .file_type()
-                .await
-                .map_err(|err| RuntimeError::NativeRuntimeError(err.to_string()))?;
-
-            if file_type.is_dir() {
-                stack.push(path);
-                continue;
-            }
-
-            if path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.eq_ignore_ascii_case("gguf"))
-                != Some(true)
-            {
-                continue;
-            }
-
-            let metadata = entry
-                .metadata()
-                .await
-                .map_err(|err| RuntimeError::NativeRuntimeError(err.to_string()))?;
-
-            let name = path
-                .strip_prefix(models_dir)
-                .ok()
-                .and_then(|p| p.to_str())
-                .unwrap_or_else(|| {
-                    path.file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("model.gguf")
-                })
-                .to_string();
-
-            let quant = detect_quantization(&path);
-            let digest = Some(format!("gguf:{}", quant.as_str()));
-
-            debug!(path = %path.display(), quant = quant.as_str(), "discovered gguf model");
-
-            discovered.push(DiscoveredModel {
-                name,
-                size_bytes: metadata.len(),
-                modified_at: None,
-                digest,
-            });
-        }
-    }
-
-    discovered.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(discovered)
+/// Local GGUF vault discovery removed — always empty.
+pub async fn discover_models_in_dir(_models_dir: &Path) -> RuntimeResult<Vec<DiscoveredModel>> {
+    Ok(Vec::new())
 }
 
-/// Embedded runtime health — vault has models when idle.
-pub async fn check_health(_base_url: Option<&str>, models_dir: Option<&Path>) -> RuntimeResult<bool> {
-    if let Some(dir) = models_dir {
-        let models = discover_models_in_dir(dir).await?;
-        return Ok(!models.is_empty());
-    }
+pub async fn check_health(_base_url: Option<&str>, _models_dir: Option<&Path>) -> RuntimeResult<bool> {
     Ok(false)
 }
 
@@ -107,7 +33,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn empty_dir_returns_no_models() {
+    async fn discovery_always_empty() {
         let dir = tempfile::tempdir().unwrap();
         let models = discover_models_in_dir(dir.path()).await.unwrap();
         assert!(models.is_empty());

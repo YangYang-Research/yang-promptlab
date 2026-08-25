@@ -10,10 +10,9 @@ use tracing::info;
 
 use crate::error::{RuntimeError, RuntimeResult};
 use crate::hardware::RuntimeHardwareProfile;
-use crate::runtime::gguf::{detect_quantization, GgufQuantization};
 
 const UNAVAILABLE: &str =
-    "embedded GGUF / llama.cpp runtime has been removed — configure a remote AI provider or Ollama over HTTP";
+    "local embedded runtime has been removed — configure a remote AI provider or Ollama over HTTP";
 
 /// Resolved runtime compute backend (legacy local-runtime field).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -102,7 +101,6 @@ pub struct InferResponse {
     pub text: String,
     pub tokens_predicted: u32,
     pub duration_ms: u64,
-    pub quantization: Option<GgufQuantization>,
 }
 
 /// Stub adapter — always reports local runtime unavailable.
@@ -253,12 +251,7 @@ pub fn default_n_gpu_layers(profile: Option<&RuntimeHardwareProfile>) -> u32 {
     n_gpu_layers_for_backend(backend, profile)
 }
 
-/// Retained helper for callers that previously built a LlamaModelConfig.
+/// Retained helper for callers that previously built a local model config.
 pub fn default_model_config(profile: Option<&RuntimeHardwareProfile>) -> u32 {
     default_n_gpu_layers(profile)
-}
-
-#[allow(dead_code)]
-fn _quant_hint(path: &Path) -> GgufQuantization {
-    detect_quantization(path)
 }

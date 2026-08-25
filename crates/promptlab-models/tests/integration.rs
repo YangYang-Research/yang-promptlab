@@ -15,7 +15,7 @@ fn hardware_detection_includes_os_and_cpu() {
 async fn mock_inference_runtime() {
     let mut runtime = MockInferenceRuntime::new("generated");
     runtime
-        .load_model(std::path::Path::new("/tmp/fake.gguf"))
+        .load_model(Path::new("/tmp/fake-model"))
         .await
         .unwrap();
     let resp = runtime

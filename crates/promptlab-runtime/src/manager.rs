@@ -393,19 +393,16 @@ impl RuntimeManager {
                 }
             }
             RuntimeLifecycleState::Installed => {
-                "Embedded libllama runtime ready — idle until a model is loaded".into()
+                "Runtime host ready — configure a remote model".into()
             }
             RuntimeLifecycleState::NotInstalled => "AI runtime not configured".into(),
-            RuntimeLifecycleState::Starting => {
-                "Loading GGUF model via embedded libllama — large models may take several minutes on CPU"
-                    .into()
-            }
+            RuntimeLifecycleState::Starting => "Starting AI runtime…".into(),
             RuntimeLifecycleState::Stopping => "Stopping AI runtime…".into(),
             RuntimeLifecycleState::Stopped => "AI runtime stopped".into(),
-            RuntimeLifecycleState::Busy => "AI runtime busy (benchmark)".into(),
-            RuntimeLifecycleState::Failed => "AI runtime failed — reinitialize the engine".into(),
+            RuntimeLifecycleState::Busy => "AI runtime busy".into(),
+            RuntimeLifecycleState::Failed => "AI runtime failed — check configuration".into(),
             RuntimeLifecycleState::Downloading | RuntimeLifecycleState::Installing => {
-                "Initializing embedded libllama…".into()
+                "Initializing runtime host…".into()
             }
             RuntimeLifecycleState::Updating => "Updating runtime configuration…".into(),
         }

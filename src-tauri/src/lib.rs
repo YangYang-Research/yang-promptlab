@@ -126,7 +126,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 Ok::<(), crate::error::CommandError>(())
             })?;
 
-            let mut model_manager = tauri::async_runtime::block_on(
+            let model_manager = tauri::async_runtime::block_on(
                 model_registry::open_model_manager_with_registry(app.handle(), &root, &database),
             )
             .map_err(crate::error::CommandError::from)?;

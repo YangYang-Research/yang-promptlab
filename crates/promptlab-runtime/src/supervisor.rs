@@ -153,14 +153,8 @@ impl RuntimeSupervisor {
 
         let vault_models = discover_models_in_dir(&self.config.models_dir).await?;
         self.state = RuntimeProcessState::Running;
-        if vault_models.is_empty() {
-            info!("embedded libllama runtime ready (idle; no GGUF in vault)");
-        } else {
-            info!(
-                gguf_count = vault_models.len(),
-                "embedded libllama runtime ready (idle; activate models via Models module)"
-            );
-        }
+        let _ = vault_models;
+        info!("runtime host ready (remote-only; no local model vault)");
         Ok(())
     }
 
