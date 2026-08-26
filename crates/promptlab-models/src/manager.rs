@@ -283,42 +283,25 @@ fn model_entry_to_upsert(entry: &ModelEntry) -> ModelResult<UpsertModelEntry> {
     })
 }
 
-fn is_legacy_provider_or_format(provider: &str, format: &str) -> bool {
-    let provider = provider.trim().to_ascii_lowercase();
-    let format = format.trim().to_ascii_lowercase();
-    matches!(provider.as_str(), "gguf" | "huggingface") || format == "gguf"
-}
-
 async fn load_registry_with_migration(
     vault: &Path,
     db: &Database,
 ) -> ModelResult<(ModelRegistry, bool)> {
     let repo = db.repositories().models();
-    let purged = repo
-        .purge_legacy_local_models()
-        .await
-        .map_err(ModelError::from)?;
-    if purged > 0 {
-        info!(count = purged, "purged legacy gguf/huggingface model rows");
-    }
-
     let count = repo.count().await.map_err(ModelError::from)?;
-    let mut dirty = purged > 0;
+    let mut dirty = false;
 
     let mut registry = if count > 0 {
         let rows = repo.list().await.map_err(ModelError::from)?;
         let mut entries = Vec::with_capacity(rows.len());
         for row in rows {
-            if is_legacy_provider_or_format(&row.provider, &row.format) {
-                continue;
-            }
             match serde_json::from_str::<ModelEntry>(&row.entry_json) {
                 Ok(entry) => entries.push(entry),
                 Err(err) => {
                     tracing::warn!(
                         id = %row.id,
                         error = %err,
-                        "skipping unreadable model row after legacy purge"
+                        "skipping unreadable model row"
                     );
                 }
             }

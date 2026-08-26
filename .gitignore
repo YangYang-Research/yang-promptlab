@@ -14,7 +14,7 @@ src-tauri/gen/
 *.log
 logs/
 
-# Local model vault (downloaded GGUF files)
+# Local scratch data (repo-root only)
 /data/
 
 # Generated reports (repo-root output only; not src/features/reports/)

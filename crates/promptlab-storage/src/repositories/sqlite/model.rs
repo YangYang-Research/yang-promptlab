@@ -195,20 +195,6 @@ impl ModelRepository for SqliteModelRepository {
         tx.commit().await.map_storage()?;
         Ok(())
     }
-
-    async fn purge_legacy_local_models(&self) -> PromptLabResult<u64> {
-        let result = sqlx::query(
-            r#"
-            DELETE FROM models
-            WHERE lower(provider) IN ('gguf', 'huggingface')
-               OR lower(format) = 'gguf'
-            "#,
-        )
-        .execute(&self.pool)
-        .await
-        .map_storage()?;
-        Ok(result.rows_affected())
-    }
 }
 
 #[cfg(test)]
