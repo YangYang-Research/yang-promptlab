@@ -123,28 +123,53 @@ export function NewScanChooserModal({
     >
       {view === "choose" ? (
         <div className="new-scan-chooser">
-          <p className="text-muted new-scan-chooser__lead">
-            Configure a scan manually or import a previously exported scan config.
-          </p>
-          <div className="new-scan-chooser__options" role="group" aria-label="New scan options">
-            <button type="button" className="new-scan-chooser__option" onClick={goManual}>
-              <span className="new-scan-chooser__option-title">Manual Setup</span>
-              <span className="new-scan-chooser__option-desc">
-                Walk through the scan wizard and configure endpoint, auth, and attack plan.
-              </span>
-            </button>
-            <button type="button" className="new-scan-chooser__option" onClick={goImportView}>
-              <span className="new-scan-chooser__option-title">Import Scan</span>
-              <span className="new-scan-chooser__option-desc">
-                Load a scan-config JSON exported from a completed scan.
-              </span>
-            </button>
-          </div>
-          <div className="project-form__actions">
-            <Button type="button" variant="ghost" onClick={handleClose}>
-              Cancel
-            </Button>
-          </div>
+          {noProjects ? (
+            <>
+              <p className="text-muted new-scan-chooser__lead">
+                Create a project first, then start a scan with manual setup or import.
+              </p>
+              <div className="project-form__actions">
+                <Button type="button" variant="ghost" onClick={handleClose}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={() => {
+                    onClose();
+                    navigate("/projects", { state: { openNewProject: true } });
+                  }}
+                >
+                  Create project
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-muted new-scan-chooser__lead">
+                Configure a scan manually or import a previously exported scan config.
+              </p>
+              <div className="new-scan-chooser__options" role="group" aria-label="New scan options">
+                <button type="button" className="new-scan-chooser__option" onClick={goManual}>
+                  <span className="new-scan-chooser__option-title">Manual Setup</span>
+                  <span className="new-scan-chooser__option-desc">
+                    Walk through the scan wizard and configure endpoint, auth, and attack plan.
+                  </span>
+                </button>
+                <button type="button" className="new-scan-chooser__option" onClick={goImportView}>
+                  <span className="new-scan-chooser__option-title">Import Scan</span>
+                  <span className="new-scan-chooser__option-desc">
+                    Load a scan-config JSON exported from a completed scan.
+                  </span>
+                </button>
+              </div>
+              <div className="project-form__actions">
+                <Button type="button" variant="ghost" onClick={handleClose}>
+                  Cancel
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       ) : (
         <form className="project-form" onSubmit={handleImportSubmit}>
