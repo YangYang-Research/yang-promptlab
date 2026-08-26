@@ -43,11 +43,6 @@ impl ModelCapabilities {
             caps.supports_vision = true;
             caps.supports_images = true;
         }
-        if provider == "ollama" {
-            caps.supports_streaming = false;
-            caps.supports_tool_calling = false;
-            caps.supports_function_calling = false;
-        }
         caps
     }
 }

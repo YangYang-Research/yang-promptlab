@@ -87,13 +87,13 @@ Details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/YAZG.md`](docs/Y
 
 ## AI Runtime
 
-Yazg, planning, and judging use the model you register in Models / Settings (remote HTTP providers, including Ollama over HTTP). Not the scan target — that is a Target Profile in the wizard.
+Yazg, planning, and judging use the model you register in Models / Settings (remote HTTP providers, including custom OpenAI-compatible endpoints). Not the scan target — that is a Target Profile in the wizard.
 
 ### Providers
 
 | Model | Provider |
 |-------|----------|
-| Remote | OpenAI, Anthropic, Google, Azure, AWS Bedrock, NVIDIA, OpenRouter, Ollama (HTTP), Custom (`/v1`) |
+| Remote | OpenAI, Anthropic, Google, Azure, AWS Bedrock, NVIDIA, OpenRouter, Custom (`/v1`) |
 |-------|----------|
 
 ---

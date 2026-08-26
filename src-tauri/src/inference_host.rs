@@ -9,7 +9,7 @@ use promptlab_auth::SecretStore;
 use promptlab_core::PromptLabError;
 use promptlab_inference::{
     CompleteRequest, ConnectivityTestResult, GatewaySession,
-    InferenceMode, InferenceProvider, InferenceRuntimeManager, InferenceSession,
+    InferenceMode, InferenceRuntimeManager, InferenceSession,
     PromptRegistry, RemoteAdapterSettings,
 };
 use promptlab_judge::{build_judge_engine_with_client, JudgeEngine, JudgeMode, JudgeProviderConfig};
@@ -1101,16 +1101,6 @@ fn configure_scratch_for_entry(
             })?;
             config.provider = remote.provider;
             config.runtime = "cloud".into();
-        }
-        ModelProvider::Ollama => {
-            config.mode = InferenceMode::ThirdParty;
-            config.provider = InferenceProvider::Ollama;
-            config.runtime = "ollama".into();
-        }
-        _ => {
-            return Err(CommandError::invalid_input(
-                "use a remote provider or Ollama over HTTP",
-            ));
         }
     }
     Ok(())

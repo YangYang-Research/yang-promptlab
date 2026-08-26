@@ -1,4 +1,4 @@
-//! Open the model manager (remote registry + Ollama HTTP).
+//! Open the model manager (remote registry).
 
 use std::path::Path;
 

@@ -1,4 +1,4 @@
-//! Model registry IPC integration tests (remote + Ollama HTTP).
+//! Model registry IPC integration tests (remote providers).
 
 use std::path::Path;
 

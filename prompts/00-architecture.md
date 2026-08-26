@@ -30,7 +30,7 @@ Browser Automation:
 - Playwright
 
 AI Runtime (product inference):
-- Remote HTTP providers (OpenAI-compatible, Anthropic, Gemini, Azure, Bedrock, OpenRouter, Ollama over HTTP)
+- Remote HTTP providers (OpenAI-compatible, Anthropic, Gemini, Azure, Bedrock, OpenRouter, custom)
 
 Requirements:
 

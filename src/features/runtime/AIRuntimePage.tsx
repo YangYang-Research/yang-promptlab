@@ -270,7 +270,7 @@ export function AIRuntimePage() {
               ) : (
                 <EmptyState
                   title="No remote models yet"
-                  description="Register OpenAI, Anthropic, Gemini, Azure, Bedrock, OpenRouter, Ollama HTTP, or a custom endpoint from Models."
+                  description="Register OpenAI, Anthropic, Gemini, Azure, Bedrock, OpenRouter, or a custom OpenAI-compatible endpoint from Models."
                 />
               )}
             </Card>

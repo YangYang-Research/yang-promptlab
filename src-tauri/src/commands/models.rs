@@ -1,4 +1,4 @@
-//! Model registry commands — remote providers, Ollama HTTP, verify, inference test.
+//! Model registry commands — remote providers, verify, inference test.
 
 use std::time::Duration;
 
@@ -840,16 +840,12 @@ pub async fn models_verify(
         .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 
-fn map_model_err(err: promptlab_models::ModelError) -> CommandError {
-    CommandError::from(PromptLabError::internal(err.to_string()))
-}
-
 #[tauri::command]
 pub async fn models_test_inference(
     state: State<'_, AppState>,
     model_id: String,
 ) -> CommandResult<ModelInferenceTestResult> {
-    let entry = {
+    let _entry = {
         let manager = state.model_manager().lock().await;
         manager
             .get_model(&model_id)
@@ -857,94 +853,20 @@ pub async fn models_test_inference(
             .clone()
     };
 
-    if entry.provider == ModelProvider::Remote {
-        return Err(CommandError::invalid_input(
-            "use Test Connection for third-party cloud models",
-        ));
-    }
-
-    if entry.provider != ModelProvider::Ollama {
-        return Err(CommandError::invalid_input(
-            "use a remote provider or Ollama over HTTP",
-        ));
-    }
-
-    let use_chat = entry.capabilities.chat;
-
-    if let Some(testing) = state.runtime_model_testing_id().lock().await.clone() {
-        return Err(CommandError::invalid_input(if testing == model_id {
-            "model verify already in progress".into()
-        } else {
-            format!("another model verify is in progress ({testing})")
-        }));
-    }
-
-    crate::commands::runtime::set_runtime_model_testing(state.inner(), Some(model_id.clone())).await;
-    let test_result = with_model_operation_timeout(async {
-        let manager = state.model_manager().lock().await;
-        let started = std::time::Instant::now();
-        promptlab_inference::record_sent();
-        let sample = if use_chat {
-            manager
-                .test_chat(&model_id)
-                .await
-                .map_err(map_model_err)?
-        } else {
-            manager
-                .test_inference(&model_id)
-                .await
-                .map_err(map_model_err)?
-        };
-        promptlab_inference::record_received();
-        let ok = !sample.trim().is_empty();
-
-        Ok(ModelInferenceTestResult {
-            ok,
-            mode: if use_chat {
-                "chat".into()
-            } else {
-                "completion".into()
-            },
-            sample,
-            message: if ok {
-                format!(
-                    "Inference smoke test succeeded ({} ms)",
-                    started.elapsed().as_millis()
-                )
-            } else {
-                "Inference smoke test returned an empty response".into()
-            },
-        })
-    })
-    .await;
-
-    crate::commands::runtime::set_runtime_model_testing(state.inner(), None).await;
-    test_result
+    Err(CommandError::invalid_input(
+        "use Test Connection for third-party cloud models",
+    ))
 }
 
 #[tauri::command]
 pub async fn models_test_embeddings(
-    state: State<'_, AppState>,
-    model_id: String,
-    input: Option<String>,
+    _state: State<'_, AppState>,
+    _model_id: String,
+    _input: Option<String>,
 ) -> CommandResult<ModelInferenceTestResult> {
-    let manager = state.model_manager().lock().await;
-    let engine = manager
-        .inference_engine(&model_id)
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    let response = engine
-        .embeddings(promptlab_models::EmbeddingRequest {
-            input: input.unwrap_or_else(|| "PromptLab embedding test".into()),
-        })
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    Ok(ModelInferenceTestResult {
-        ok: !response.vector.is_empty(),
-        mode: "embeddings".into(),
-        sample: format!("{} dimensions", response.dimensions),
-        message: "Embedding inference succeeded".into(),
-    })
+    Err(CommandError::invalid_input(
+        "use a remote third-party provider",
+    ))
 }
 
 #[tauri::command]

@@ -225,7 +225,7 @@ fn extract_json_object(text: &str) -> String {
     text.trim().to_string()
 }
 
-/// LLM evaluator backed by an [`InferenceRuntime`] (gateway / Ollama HTTP).
+/// LLM evaluator backed by an [`InferenceRuntime`] (gateway / vault ModelProvider).
 pub struct LlmEvaluator {
     id: String,
     role: ModelRole,

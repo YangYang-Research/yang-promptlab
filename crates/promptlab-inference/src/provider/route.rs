@@ -43,10 +43,6 @@ pub fn descriptor_from_remote(settings: &RemoteAdapterSettings) -> TargetDescrip
                 settings.model.trim()
             );
         }
-        InferenceProvider::Ollama => {
-            descriptor.surface = TargetSurface::Ollama;
-            descriptor.url = join_url(&base, "/v1/chat/completions");
-        }
         InferenceProvider::Deterministic => {
             descriptor.surface = TargetSurface::OpenAiCompatible;
             descriptor.url = if base.is_empty() {
@@ -107,7 +103,6 @@ fn default_base(settings: &RemoteAdapterSettings) -> String {
                 .unwrap_or("us-east-1");
             format!("https://bedrock-runtime.{region}.amazonaws.com")
         }
-        InferenceProvider::Ollama => "http://127.0.0.1:11434".into(),
         InferenceProvider::Deterministic => String::new(),
     }
 }

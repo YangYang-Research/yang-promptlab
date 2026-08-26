@@ -1,6 +1,6 @@
 //! PromptLab model registry and vault helpers.
 //!
-//! Remote/third-party provider registry and Ollama-over-HTTP smoke tests.
+//! Remote/third-party provider registry.
 
 pub mod error;
 pub mod hardware;
@@ -14,9 +14,7 @@ pub use error::{ModelError, ModelResult};
 pub use hardware::detect_hardware;
 pub use manager::LocalModelManager;
 pub use registry::{remote_entry_id, ModelRegistry};
-pub use runtime::{
-    InferenceRuntime, LocalInferenceEngine, MockInferenceRuntime, OllamaConfig, OllamaRuntime,
-};
+pub use runtime::{InferenceRuntime, LocalInferenceEngine, MockInferenceRuntime};
 pub use types::*;
 pub use verify::VerificationEngine;
 

@@ -34,17 +34,17 @@ impl InferenceRuntimeManager {
 
     pub async fn load(&mut self) -> InferenceResult<()> {
         self.config = load_config(&self.data_dir).await?;
-        if self.config.runtime == "local" || self.config.runtime == "embedded" {
-            if self.config.provider == InferenceProvider::Ollama {
-                self.config.runtime = "ollama".into();
-            } else {
-                self.config.provider = InferenceProvider::OpenAi;
-                self.config.runtime = "cloud".into();
-                self.config.status = "not_configured".into();
-                self.config.initialized = false;
-                self.config.model.clear();
-                self.config.selected_model_id = None;
-            }
+        // Migrate legacy local/embedded/ollama runtime labels to remote cloud route.
+        if matches!(
+            self.config.runtime.as_str(),
+            "local" | "embedded" | "ollama"
+        ) {
+            self.config.provider = InferenceProvider::OpenAi;
+            self.config.runtime = "cloud".into();
+            self.config.status = "not_configured".into();
+            self.config.initialized = false;
+            self.config.model.clear();
+            self.config.selected_model_id = None;
             let _ = self.save().await;
         }
         Ok(())
@@ -76,11 +76,6 @@ impl InferenceRuntimeManager {
                 self.config.provider = remote.provider;
                 self.config.runtime = "cloud".into();
             }
-            ModelProvider::Ollama => {
-                self.config.mode = InferenceMode::ThirdParty;
-                self.config.provider = InferenceProvider::Ollama;
-                self.config.runtime = "ollama".into();
-            }
         }
         self.config.initialized = true;
         self.config.status = "configured".into();
@@ -89,7 +84,7 @@ impl InferenceRuntimeManager {
 
     pub async fn build_provider_adapter(
         &self,
-        entry: &ModelEntry,
+        _entry: &ModelEntry,
         remote: Option<RemoteAdapterSettings>,
         _model_provider: SharedModelProvider,
         _runtime_manager: &mut RuntimeManager,
@@ -99,21 +94,6 @@ impl InferenceRuntimeManager {
                 "deterministic mode has no LLM provider".into(),
             )),
             InferenceMode::ThirdParty => {
-                if self.config.provider == InferenceProvider::Ollama {
-                    let settings = remote.unwrap_or_else(|| RemoteAdapterSettings {
-                        provider: InferenceProvider::Ollama,
-                        model: entry.display_model_name(),
-                        base_url: match &entry.source {
-                            ModelSource::Ollama { base_url, .. } => Some(base_url.clone()),
-                            _ => Some("http://127.0.0.1:11434".into()),
-                        },
-                        api_key: String::new(),
-                        aws_secret_access_key: None,
-                        aws_region: None,
-                        aws_session_token: None,
-                    });
-                    return Ok(Arc::new(RemoteProviderAdapter::new(settings)));
-                }
                 let settings = remote.ok_or_else(|| {
                     InferenceError::Config("missing remote credentials".into())
                 })?;
@@ -168,15 +148,6 @@ impl InferenceRuntimeManager {
                 aws_secret_access_key: aws_secret,
                 aws_region: region.clone(),
                 aws_session_token: aws_session,
-            }),
-            ModelSource::Ollama { model, base_url } => Ok(RemoteAdapterSettings {
-                provider: InferenceProvider::Ollama,
-                model: model.clone(),
-                base_url: Some(base_url.clone()),
-                api_key,
-                aws_secret_access_key: None,
-                aws_region: None,
-                aws_session_token: None,
             }),
         }
     }

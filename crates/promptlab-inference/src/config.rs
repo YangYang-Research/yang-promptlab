@@ -34,6 +34,8 @@ impl InferenceMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InferenceProvider {
+    /// OpenAI API or any OpenAI-compatible endpoint (incl. custom / local servers).
+    #[serde(alias = "ollama")]
     OpenAi,
     Anthropic,
     Gemini,
@@ -41,7 +43,6 @@ pub enum InferenceProvider {
     Nvidia,
     Azure,
     Bedrock,
-    Ollama,
     Deterministic,
 }
 
@@ -55,7 +56,6 @@ impl InferenceProvider {
             Self::Nvidia => "nvidia",
             Self::Azure => "azure",
             Self::Bedrock => "bedrock",
-            Self::Ollama => "ollama",
             Self::Deterministic => "deterministic",
         }
     }
@@ -68,8 +68,8 @@ impl InferenceProvider {
             "nvidia" => Self::Nvidia,
             "azure" => Self::Azure,
             "bedrock" | "aws_bedrock" => Self::Bedrock,
-            "ollama" => Self::Ollama,
             "deterministic" => Self::Deterministic,
+            // openai, custom, ollama (legacy), and unknown → OpenAI-compatible
             _ => Self::OpenAi,
         }
     }

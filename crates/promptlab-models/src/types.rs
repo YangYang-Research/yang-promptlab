@@ -22,14 +22,12 @@ impl ModelFormat {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelProvider {
-    Ollama,
     Remote,
 }
 
 impl ModelProvider {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Ollama => "ollama",
             Self::Remote => "remote",
         }
     }
@@ -54,14 +52,6 @@ impl Default for ModelCapabilities {
 }
 
 impl ModelCapabilities {
-    pub fn ollama() -> Self {
-        Self {
-            chat: true,
-            completion: true,
-            embeddings: true,
-        }
-    }
-
     /// Default capabilities for remote / third-party HTTP providers.
     pub fn remote() -> Self {
         Self::default()
@@ -72,10 +62,6 @@ impl ModelCapabilities {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ModelSource {
-    Ollama {
-        model: String,
-        base_url: String,
-    },
     Remote {
         provider: String,
         model: String,
@@ -124,7 +110,6 @@ impl ModelEntry {
                 .and_then(|value| value.as_str())
                 .or_else(|| match &self.source {
                     ModelSource::Remote { provider, .. } => Some(provider.as_str()),
-                    _ => None,
                 })
                 .unwrap_or("remote");
 
@@ -135,17 +120,13 @@ impl ModelEntry {
             return label;
         }
 
-        match self.provider {
-            ModelProvider::Ollama => "Ollama".into(),
-            ModelProvider::Remote => "Remote".into(),
-        }
+        "Remote".into()
     }
 
-    /// Model identifier for display (remote API model id, or Ollama display name).
+    /// Model identifier for display (remote API model id).
     pub fn display_model_name(&self) -> String {
         match &self.source {
             ModelSource::Remote { model, .. } => model.clone(),
-            _ => self.name.clone(),
         }
     }
 }
@@ -186,9 +167,9 @@ fn remote_provider_display_name(provider: &str) -> String {
 /// Vault storage summary for desktop UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultStats {
-    /// Active registered models (remote + Ollama HTTP).
+    /// Active registered models (remote / third-party).
     pub registered_count: usize,
-    /// Ollama HTTP entries only.
+    /// Legacy local-install counter (always 0 — product AI is remote-only).
     pub installed_local_count: usize,
     pub installed_bytes: u64,
     pub vault_path: PathBuf,

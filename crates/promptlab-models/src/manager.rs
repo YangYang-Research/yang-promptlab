@@ -7,11 +7,7 @@ use tracing::info;
 use crate::error::{ModelError, ModelResult};
 use crate::hardware::detect_hardware;
 use crate::registry::ModelRegistry;
-use crate::runtime::LocalInferenceEngine;
-use crate::types::{
-    ChatMessage, ChatRequest, HardwareProfile, InferenceRequest, ModelEntry, ModelProvider,
-    VerificationResult,
-};
+use crate::types::{HardwareProfile, ModelEntry, ModelProvider, VerificationResult};
 use crate::verify::VerificationEngine;
 
 /// Top-level model manager orchestrating registry, verification, and remote providers.
@@ -113,7 +109,7 @@ impl LocalModelManager {
         Ok(entry)
     }
 
-    /// Verify a registered model (remote always valid; Ollama health for Ollama refs).
+    /// Verify a registered model (remote always valid).
     pub async fn verify_model(&mut self, model_id: &str) -> ModelResult<VerificationResult> {
         let entry = self
             .registry
@@ -129,26 +125,6 @@ impl LocalModelManager {
                 size_bytes: 0,
                 valid: true,
             }),
-            ModelProvider::Ollama => {
-                let engine = LocalInferenceEngine::from_entry(entry.clone()).await?;
-                let ok = engine.health().await.unwrap_or(false);
-                if ok {
-                    self.registry
-                        .update_verification(model_id, "ollama-ok".into(), true)?;
-                    self.persist().await?;
-                }
-                Ok(VerificationResult {
-                    file_path: entry.file_path,
-                    expected_sha256: None,
-                    actual_sha256: if ok {
-                        "ollama-ok".into()
-                    } else {
-                        "ollama-unreachable".into()
-                    },
-                    size_bytes: 0,
-                    valid: ok,
-                })
-            }
         }
     }
 
@@ -161,61 +137,35 @@ impl LocalModelManager {
         VerificationEngine::verify_file(path, expected_sha256).await
     }
 
-    /// Build a unified inference engine for a registered model (Ollama HTTP only).
-    pub async fn inference_engine(&self, model_id: &str) -> ModelResult<LocalInferenceEngine> {
-        let entry = self
-            .registry
-            .get(model_id)
-            .ok_or_else(|| ModelError::not_found(model_id))?
-            .clone();
-        LocalInferenceEngine::from_entry(entry).await
+    /// Local inference is unsupported — use the remote third-party gateway.
+    pub async fn inference_engine(
+        &self,
+        _model_id: &str,
+    ) -> ModelResult<crate::runtime::LocalInferenceEngine> {
+        Err(ModelError::runtime("use a remote third-party provider"))
     }
 
-    /// Run a completion smoke test on a registered model.
-    pub async fn test_inference(&self, model_id: &str) -> ModelResult<String> {
-        let engine = self.inference_engine(model_id).await?;
-        let response = engine
-            .complete(InferenceRequest {
-                system: None,
-                prompt: "Reply with exactly: PromptLab OK".into(),
-                max_tokens: 16,
-                temperature: 0.0,
-            })
-            .await?;
-        Ok(response.text)
+    /// Local completion smoke tests are unsupported.
+    pub async fn test_inference(&self, _model_id: &str) -> ModelResult<String> {
+        Err(ModelError::runtime("use a remote third-party provider"))
     }
 
-    /// Run a chat smoke test on a registered model.
-    pub async fn test_chat(&self, model_id: &str) -> ModelResult<String> {
-        let engine = self.inference_engine(model_id).await?;
-        let response = engine
-            .chat(ChatRequest {
-                messages: vec![ChatMessage {
-                    role: "user".into(),
-                    content: "Reply with exactly: PromptLab OK".into(),
-                }],
-                max_tokens: 16,
-                temperature: 0.0,
-            })
-            .await?;
-        Ok(response.message.content)
+    /// Local chat smoke tests are unsupported.
+    pub async fn test_chat(&self, _model_id: &str) -> ModelResult<String> {
+        Err(ModelError::runtime("use a remote third-party provider"))
     }
 
     pub fn list_models(&self) -> Vec<&ModelEntry> {
         self.registry.list()
     }
 
-    /// Aggregate vault sizes for desktop UI cards (remote + Ollama only).
+    /// Aggregate vault sizes for desktop UI cards (remote only).
     pub fn vault_stats(&self) -> ModelResult<crate::types::VaultStats> {
         let models = self.list_models();
-        let ollama_count = models
-            .iter()
-            .filter(|entry| entry.provider == ModelProvider::Ollama)
-            .count();
         let installed_bytes = models.iter().filter_map(|entry| entry.size_bytes).sum();
         Ok(crate::types::VaultStats {
             registered_count: models.len(),
-            installed_local_count: ollama_count,
+            installed_local_count: 0,
             installed_bytes,
             vault_path: self.vault_path.clone(),
         })

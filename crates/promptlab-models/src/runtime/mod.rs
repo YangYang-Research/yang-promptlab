@@ -1,5 +1,4 @@
 mod inference_engine;
-mod ollama;
 mod mock;
 
 use async_trait::async_trait;
@@ -7,13 +6,12 @@ use async_trait::async_trait;
 pub use inference_engine::{
     infer_capabilities, infer_provider, infer_version, LocalInferenceEngine,
 };
-pub use ollama::{OllamaConfig, OllamaRuntime};
 pub use mock::MockInferenceRuntime;
 
 use crate::error::ModelResult;
 use crate::types::{InferenceRequest, InferenceResponse, RuntimeState};
 
-/// Inference runtime contract (Ollama HTTP / mocks / gateway bridges).
+/// Inference runtime contract (mocks / gateway bridges).
 #[async_trait]
 pub trait InferenceRuntime: Send + Sync {
     fn state(&self) -> RuntimeState;

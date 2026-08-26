@@ -164,11 +164,6 @@ impl AppState {
         &self.event_ring
     }
 
-    pub async fn ollama_base_url(&self) -> String {
-        let _ = self.runtime_manager.lock().await;
-        "embedded".into()
-    }
-
     pub fn auth_engine_config(&self) -> &AuthEngineConfig {
         &self.auth_engine_config
     }

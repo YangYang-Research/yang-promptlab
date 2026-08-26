@@ -2,14 +2,14 @@
 
 **Last verified:** 2026-08-26
 
-AI Runtime is **remote-only**. PromptLab talks to third-party HTTP providers (OpenAI, Anthropic, Gemini, Azure, Bedrock, OpenRouter, custom OpenAI-compatible including Ollama over HTTP). There is no embedded local weight runtime.
+AI Runtime is **remote-only**. PromptLab talks to third-party HTTP providers (OpenAI, Anthropic, Gemini, Azure, Bedrock, OpenRouter, custom OpenAI-compatible). There is no embedded local weight runtime.
 
 Product completions go through the [harness](ARCHITECTURE.md#harness-ai-io). `promptlab-inference` routes to remote providers (`InferenceMode::ThirdParty`) and records traffic / token usage (`runtime_traffic_*`, `runtime_token_usage`). Settings → Usage; AI Runtime page selects the active remote model. Third-party keys: `models_save_third_party` + keychain (`ThirdPartyCredentialFields`).
 
 ```
 Feature (judge | planner | generator | yazg | report | verify)
   → GatewaySession → AiInferenceGateway
-      → remote: harness provider (OpenAI / Anthropic / Gemini / Bedrock / Ollama HTTP / …)
+      → remote: harness provider (OpenAI / Anthropic / Gemini / Bedrock / custom OpenAI-compatible / …)
 ```
 
 | Store | Path |
@@ -23,7 +23,7 @@ Startup (`lib.rs`): load inference config → optional connectivity check → pe
 |-------|------|
 | `promptlab-inference` | Gateway, route, tokens, traffic |
 | `promptlab-runtime` | Remote host / SharedModelProvider |
-| `promptlab-models` | Registry, third-party + Ollama entries |
+| `promptlab-models` | Registry, third-party entries |
 | `promptlab-harness` | Provider adapters (+ scan-target surfaces) |
 
 UI: `/runtime`, `/models` (third-party panel only). Judge weights: SQLite `judge_role_weights`.

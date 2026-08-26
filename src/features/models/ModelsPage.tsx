@@ -28,11 +28,7 @@ type ModelsPageLocationState = {
 };
 
 function isThirdPartyModel(model: ModelEntryDto): boolean {
-  return (
-    model.format === "api" ||
-    model.id.startsWith("remote-") ||
-    model.provider.toLowerCase() === "ollama"
-  );
+  return model.format === "api" || model.id.startsWith("remote-");
 }
 
 function formatTokens(value: number): string {

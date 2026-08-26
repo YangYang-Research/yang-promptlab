@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use time::OffsetDateTime;
-use uuid::Uuid;
 
 use crate::error::{ModelError, ModelResult};
 use crate::runtime::{infer_capabilities, infer_version};
@@ -105,45 +104,6 @@ impl ModelRegistry {
 
     pub fn get_mut(&mut self, id: &str) -> Option<&mut ModelEntry> {
         self.entries.get_mut(id)
-    }
-
-    pub fn register_ollama(
-        &mut self,
-        _vault: &Path,
-        name: impl Into<String>,
-        model: impl Into<String>,
-        base_url: impl Into<String>,
-    ) -> ModelResult<ModelEntry> {
-        let name = name.into();
-        let model = model.into();
-        let base_url = base_url.into();
-        let id = Uuid::new_v4().to_string();
-        let source = ModelSource::Ollama {
-            model: model.clone(),
-            base_url: base_url.clone(),
-        };
-
-        let now = OffsetDateTime::now_utc();
-        let provider = ModelProvider::Ollama;
-        let entry = ModelEntry {
-            id: id.clone(),
-            name,
-            format: ModelFormat::Api,
-            provider,
-            version: infer_version(&source),
-            capabilities: infer_capabilities(provider),
-            source,
-            file_path: PathBuf::from(format!("ollama://{model}")),
-            size_bytes: None,
-            checksum_sha256: None,
-            verified: false,
-            created_at: now,
-            updated_at: now,
-            metadata: serde_json::json!({ "runtime": "ollama", "baseUrl": base_url }),
-        };
-
-        self.entries.insert(id, entry.clone());
-        Ok(entry)
     }
 
     pub fn register_entry(&mut self, entry: ModelEntry) -> ModelResult<()> {
@@ -320,13 +280,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn register_ollama_uses_virtual_path() {
-        let mut registry = ModelRegistry::new();
-        let entry = registry
-            .register_ollama(Path::new("/unused"), "llama", "llama3.2", "http://127.0.0.1:11434")
-            .unwrap();
-        assert_eq!(entry.provider, ModelProvider::Ollama);
-        assert_eq!(entry.file_path, PathBuf::from("ollama://llama3.2"));
-    }
 }

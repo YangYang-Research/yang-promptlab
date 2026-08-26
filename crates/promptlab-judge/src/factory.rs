@@ -5,9 +5,7 @@ use promptlab_models::runtime::InferenceRuntime;
 use promptlab_runtime::ModelProviderRuntime;
 use tokio::sync::Mutex;
 
-use crate::config::{
-    JudgeConnectivityResult, JudgeProviderConfig, LocalProvider,
-};
+use crate::config::{JudgeConnectivityResult, JudgeProviderConfig};
 use crate::engine::JudgeEngine;
 use crate::error::{JudgeError, JudgeResult};
 use promptlab_inference::{CompleteRequest, InferenceClient};
@@ -196,9 +194,7 @@ async fn build_local_backend(
     }
 
     let provider_runtime = ModelProviderRuntime::new(ctx.model_provider.clone(), model_id.clone());
-    let label = match config.local.provider {
-        LocalProvider::Ollama => "runtime/ollama",
-    };
+    let label = "runtime/vault";
 
     Ok(Arc::new(LocalLlmBackend::new(
         label,

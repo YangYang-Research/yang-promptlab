@@ -6,12 +6,12 @@ PromptLab is an offline-first Tauri 2 desktop app for authorized AI security tes
 
 | Principle | Implementation |
 |-----------|----------------|
-| Offline-capable | SQLite + remote HTTP AI providers (incl. local Ollama over HTTP) |
+| Offline-capable | SQLite + remote HTTP AI providers (incl. custom OpenAI-compatible) |
 | Local data sovereignty | All state under `~/.promptlab/` (`PROMPTLAB_ROOT`) |
 | Extensibility | Harness providers |
 | Auditability | Scan console, AgentTrace SQLite, structured logs |
 
-Platforms: **Windows**, **macOS**, **Linux**. Product AI is **remote-only** (no embedded llama.cpp). Ollama is supported as an OpenAI-compatible HTTP endpoint.
+Platforms: **Windows**, **macOS**, **Linux**. Product AI is **remote-only** (no embedded llama.cpp). Local servers such as Ollama are added as a custom OpenAI-compatible endpoint (`baseUrl` + model id).
 
 ---
 

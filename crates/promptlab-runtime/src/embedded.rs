@@ -42,18 +42,18 @@ impl ModelProvider for EmbeddedModelProvider {
             });
         }
 
-        let has_remote_or_ollama = manager.list_models().iter().any(|entry| {
+        let has_remote = manager.list_models().iter().any(|entry| {
             matches!(
                 entry.provider,
-                promptlab_models::ModelProvider::Remote | promptlab_models::ModelProvider::Ollama
+                promptlab_models::ModelProvider::Remote
             )
         });
         Ok(ModelProviderHealth {
-            healthy: has_remote_or_ollama,
-            message: if has_remote_or_ollama {
-                "vault has remote or Ollama models configured".into()
+            healthy: has_remote,
+            message: if has_remote {
+                "vault has remote models configured".into()
             } else {
-                "no remote/Ollama models configured".into()
+                "no remote models configured".into()
             },
         })
     }

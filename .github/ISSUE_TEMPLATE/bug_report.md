@@ -22,7 +22,7 @@ What you expected to happen.
 - OS: (macOS / Windows / Linux + version)
 - Install: (Release installer / `npm run tauri dev` / other)
 - Status indicator: Connected / Mock mode / other
-- AI Runtime: remote provider + model (OpenAI / Anthropic / Ollama HTTP / …)
+- AI Runtime: remote provider + model (OpenAI / Anthropic / custom OpenAI-compatible / …)
 
 **Logs / screenshots**
 Paste relevant console, Settings → Diagnostics, or scan console output. Mask secrets and API keys.

@@ -48,10 +48,7 @@ pub fn parse_route(raw: &str) -> Option<InferenceMode> {
 }
 
 pub fn is_third_party_model(entry: &ModelEntry) -> bool {
-    matches!(
-        entry.provider,
-        ModelProvider::Remote | ModelProvider::Ollama
-    )
+    matches!(entry.provider, ModelProvider::Remote)
 }
 
 pub fn is_configured_third_party(entry: &ModelEntry) -> bool {

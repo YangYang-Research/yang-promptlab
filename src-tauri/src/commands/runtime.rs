@@ -707,7 +707,7 @@ fn map_runtime_err(err: promptlab_runtime::RuntimeError) -> CommandError {
         promptlab_runtime::RuntimeError::Unavailable
         | promptlab_runtime::RuntimeError::BackendUnavailable(_) => {
             CommandError::invalid_input(
-                "configure a remote AI provider or Ollama over HTTP",
+                "configure a remote AI provider",
             )
         }
         other => CommandError::from(promptlab_core::PromptLabError::internal(other.to_string())),

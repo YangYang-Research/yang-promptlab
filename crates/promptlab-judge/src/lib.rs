@@ -18,8 +18,8 @@ pub mod scoring;
 pub mod types;
 
 pub use config::{
-    JudgeConnectivityResult, JudgeProviderConfig, LocalProvider, LocalProviderSettings,
-    RemoteProvider, RemoteProviderSettings,
+    JudgeConnectivityResult, JudgeProviderConfig, LocalProviderSettings, RemoteProvider,
+    RemoteProviderSettings,
 };
 pub use consensus::ConsensusEngine;
 pub use engine::JudgeEngine;
