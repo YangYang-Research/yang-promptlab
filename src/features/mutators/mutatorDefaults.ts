@@ -21,6 +21,7 @@ import {
 export const DEFAULT_CATEGORY_MUTATORS: Record<AttackCategoryId, AttackMutatorId[]> = {
   prompt_injection: [
     "delimiter_injection",
+    "language_pivot",
     "role_swap",
     "markdown_code_fence",
     "base64_wrap",
@@ -30,6 +31,7 @@ export const DEFAULT_CATEGORY_MUTATORS: Record<AttackCategoryId, AttackMutatorId
   ],
   jailbreak: [
     "role_swap",
+    "language_pivot",
     "unicode_homoglyph",
     "base64_wrap",
     "html_wrap",
@@ -41,6 +43,7 @@ export const DEFAULT_CATEGORY_MUTATORS: Record<AttackCategoryId, AttackMutatorId
   ],
   system_prompt_extraction: [
     "repeat_amplify",
+    "language_pivot",
     "delimiter_injection",
     "role_swap",
     "markdown_code_fence",
@@ -72,6 +75,7 @@ export const DEFAULT_CATEGORY_MUTATORS: Record<AttackCategoryId, AttackMutatorId
   ],
   memory_poisoning: [
     "repeat_amplify",
+    "language_pivot",
     "role_swap",
     "delimiter_injection",
     "markdown_code_fence",
@@ -86,6 +90,7 @@ export const DEFAULT_CATEGORY_MUTATORS: Record<AttackCategoryId, AttackMutatorId
   ],
   agent_goal_hijacking: [
     "role_swap",
+    "language_pivot",
     "delimiter_injection",
     "markdown_code_fence",
     "repeat_amplify",

@@ -35,6 +35,7 @@ impl Attack for SystemPromptExtractionAttack {
             category: self.category(),
             mutators: vec![
                 MutatorKind::RepeatAmplify,
+                MutatorKind::LanguagePivot,
                 MutatorKind::DelimiterInjection,
                 MutatorKind::RoleSwap,
                 MutatorKind::MarkdownCodeFence,

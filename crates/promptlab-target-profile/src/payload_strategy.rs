@@ -24,6 +24,7 @@ pub fn all_attack_mutator_ids() -> Vec<String> {
         "token_split",
         "markdown_code_fence",
         "zero_width_dense",
+        "language_pivot",
     ]
     .into_iter()
     .map(str::to_string)

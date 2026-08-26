@@ -35,6 +35,7 @@ impl Attack for JailbreakAttack {
             category: self.category(),
             mutators: vec![
                 MutatorKind::RoleSwap,
+                MutatorKind::LanguagePivot,
                 MutatorKind::UnicodeHomoglyph,
                 MutatorKind::Base64Wrap,
                 MutatorKind::HtmlWrap,

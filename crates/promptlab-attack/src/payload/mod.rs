@@ -19,6 +19,7 @@ pub enum MutatorKind {
     TokenSplit,
     MarkdownCodeFence,
     ZeroWidthDense,
+    LanguagePivot,
 }
 
 impl MutatorKind {
@@ -39,6 +40,7 @@ impl MutatorKind {
             Self::TokenSplit,
             Self::MarkdownCodeFence,
             Self::ZeroWidthDense,
+            Self::LanguagePivot,
         ]
     }
 
@@ -59,6 +61,7 @@ impl MutatorKind {
             Self::TokenSplit => "token_split",
             Self::MarkdownCodeFence => "markdown_code_fence",
             Self::ZeroWidthDense => "zero_width_dense",
+            Self::LanguagePivot => "language_pivot",
         }
     }
 
@@ -79,6 +82,9 @@ impl MutatorKind {
             "token_split" | "split" => Some(Self::TokenSplit),
             "markdown_code_fence" | "markdown" | "code_fence" => Some(Self::MarkdownCodeFence),
             "zero_width_dense" | "zero_width" | "zwsp" => Some(Self::ZeroWidthDense),
+            "language_pivot" | "language" | "translate" | "multilingual" => {
+                Some(Self::LanguagePivot)
+            }
             _ => None,
         }
     }
