@@ -302,3 +302,39 @@ async fn factory_exhausted_rate_limit_stays_observation_for_attack() {
     let response = factory.execute(&descriptor, request).await.unwrap();
     assert_eq!(response.status_code, Some(429));
 }
+
+#[tokio::test]
+async fn factory_model_gone_is_error_for_assistant() {
+    use promptlab_harness::{AttackRequest, ChatMessage, HarnessError, HarnessPurpose};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(410).set_body_string(
+                r#"{"type":"about:blank","title":"Gone","status":410,"detail":"The model 'meta/llama-3.1-8b-instruct' has reached its end of life on 2026-08-26T09:00:00Z and is no longer available."}"#,
+            ),
+        )
+        .mount(&server)
+        .await;
+
+    let factory = HarnessFactory::new().unwrap();
+    let mut request = AttackRequest::from_chat(
+        format!("{}/v1/chat/completions", server.uri()),
+        vec![ChatMessage::text("user", "ping")],
+    );
+    request.purpose = HarnessPurpose::assistant();
+    let descriptor = TargetDescriptor {
+        url: request.url.clone(),
+        surface: TargetSurface::OpenAiCompatible,
+        ..Default::default()
+    };
+    let err = factory.execute(&descriptor, request).await.unwrap_err();
+    match err {
+        HarnessError::Http { status, message } => {
+            assert_eq!(status, 410);
+            assert!(message.contains("end of life"), "{message}");
+        }
+        other => panic!("expected Http, got {other:?}"),
+    }
+}

@@ -142,6 +142,9 @@ fn truncate_for_prompt(text: &str, max: usize) -> String {
 
 fn parse_llm_verification(raw: &str) -> Result<LlmEndpointVerification, VerificationError> {
     let json = extract_json_object(raw)?;
+    if let Some(detail) = promptlab_harness::provider_error_detail(&json) {
+        return Err(VerificationError::LlmValidationFailed(detail));
+    }
     if let Ok(value) = serde_json::from_str::<LlmEndpointVerification>(&json) {
         return Ok(value);
     }
@@ -313,5 +316,15 @@ mod tests {
         let raw = r#"{"isAiEndpoint": true, "confidence": 0.8}"#;
         let parsed = parse_llm_verification(raw).expect("parse");
         assert!(parsed.is_ai_endpoint);
+    }
+
+    #[test]
+    fn parse_llm_verification_rejects_provider_gone_payload() {
+        let raw = r#"{"type":"about:blank","title":"Gone","status":410,"detail":"The model 'meta/llama-3.1-8b-instruct' has reached its end of life on 2026-08-26T09:00:00Z and is no longer available."}"#;
+        let err = parse_llm_verification(raw).expect_err("provider error");
+        assert!(
+            err.to_string().contains("end of life"),
+            "{err}"
+        );
     }
 }

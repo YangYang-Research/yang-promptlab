@@ -24,8 +24,9 @@ pub use cancel::CancelFlag;
 pub use error::{HarnessError, HarnessResult};
 pub use factory::HarnessFactory;
 pub use models::{
-    AttackRequest, AuthMaterial, ChatMessage, ChatTool, HarnessKind, HarnessPurpose, HarnessRequest,
-    HttpMethod, NormalizedResponse, NormalizedToolCall, StreamChunk, TargetDescriptor, TargetSurface,
+    provider_error_detail, AttackRequest, AuthMaterial, ChatMessage, ChatTool, HarnessKind,
+    HarnessPurpose, HarnessRequest, HttpMethod, NormalizedResponse, NormalizedToolCall, StreamChunk,
+    TargetDescriptor, TargetSurface,
 };
 pub use pipeline::{HarnessInterceptor, InterceptAction};
 pub use registry::HarnessRegistry;

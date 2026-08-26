@@ -263,7 +263,12 @@ fn inference_error_from_response(
             response.status_code.unwrap_or(0)
         ))),
         Some("empty") => Some(HarnessError::Empty),
-        Some("auth") => Some(HarnessError::auth(response.content.clone())),
+        Some("auth") => Some(HarnessError::auth(
+            crate::provider_error_detail(&response.raw_response)
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or_else(|| response.content.clone()),
+        )),
+        Some("http") => Some(http_status_error(response)),
         _ => match response.status_code {
             Some(429) => Some(HarnessError::RateLimited {
                 retry_after_ms: retry_after_ms(response),
@@ -276,9 +281,27 @@ fn inference_error_from_response(
                 "http {}",
                 response.status_code.unwrap_or(0)
             ))),
+            Some(status) if status >= 400 => Some(http_status_error(response)),
             _ => None,
         },
     }
+}
+
+fn http_status_error(response: &crate::models::NormalizedResponse) -> HarnessError {
+    let status = response.status_code.unwrap_or(0);
+    let message = crate::provider_error_detail(&response.raw_response)
+        .or_else(|| {
+            let trimmed = response.content.trim();
+            if trimmed.is_empty() {
+                None
+            } else if trimmed.len() > 400 {
+                Some(format!("{}…", &trimmed[..400]))
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .unwrap_or_else(|| format!("http {status}"));
+    HarnessError::Http { status, message }
 }
 
 fn retry_after_ms(response: &crate::models::NormalizedResponse) -> Option<u64> {
@@ -390,5 +413,22 @@ mod tests {
         assert!(matches!(err, HarnessError::RateLimited { .. }));
         assert!(!HarnessPurpose::attack().fails_on_retryable_http());
         assert!(HarnessPurpose::assistant().fails_on_retryable_http());
+    }
+
+    #[test]
+    fn gone_410_is_http_error_with_provider_detail() {
+        let response = crate::models::NormalizedResponse::from_http(
+            410,
+            r#"{"type":"about:blank","title":"Gone","status":410,"detail":"The model 'meta/llama-3.1-8b-instruct' has reached its end of life on 2026-08-26T09:00:00Z and is no longer available."}"#.into(),
+            "openai",
+        );
+        let err = inference_error_from_response(&response).expect("410 maps to error");
+        match err {
+            HarnessError::Http { status, message } => {
+                assert_eq!(status, 410);
+                assert!(message.contains("end of life"), "{message}");
+            }
+            other => panic!("expected Http, got {other:?}"),
+        }
     }
 }
