@@ -57,7 +57,7 @@ import type {
 import type { LocalModel, ModelStatus } from "@/shared/types";
 import { loadThemePreference } from "@/shared/theme/theme";
 
-function mapLocalModels(entries: ModelEntryDto[]): LocalModel[] {
+function mapRegisteredModels(entries: ModelEntryDto[]): LocalModel[] {
   return entries.map((entry) => ({
     id: entry.id,
     name: entry.name,
@@ -208,7 +208,7 @@ async function loadAll(): Promise<LoadedData> {
     scans,
     findings,
     reports,
-    models: mapLocalModels(modelEntries),
+    models: mapRegisteredModels(modelEntries),
     attackRuns: deriveAttackRuns(scans, targets, liveStatusMap),
     activity: deriveActivity(findings, scans, targets, projects, reports, localActivity),
   };

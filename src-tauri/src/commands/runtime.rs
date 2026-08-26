@@ -31,10 +31,7 @@ pub struct RuntimeStatusDto {
     pub install_path: Option<String>,
     pub installed: bool,
     pub verified: bool,
-    pub binary_available: bool,
     pub base_url: String,
-    pub model_loaded: bool,
-    pub loaded_model_path: Option<String>,
     pub message: String,
     pub requires_attention: bool,
     pub last_error: Option<String>,
@@ -107,10 +104,7 @@ fn snapshot_to_dto(snap: RuntimeStatusSnapshot, recommended_runtime: Option<Stri
         install_path: snap.install_path,
         installed: snap.installed,
         verified: snap.verified,
-        binary_available: snap.binary_available,
         base_url: snap.base_url,
-        model_loaded: snap.model_loaded,
-        loaded_model_path: snap.loaded_model_path,
         message: snap.message,
         requires_attention: snap.requires_attention,
         last_error: snap.last_error,
@@ -331,22 +325,6 @@ pub(crate) async fn startup_connectivity_check(state: &AppState) {
                 tracing::warn!(error = %err, "failed to refresh runtime cache after startup check");
             }
         }
-        InferenceMode::Local => {
-            let mut runtime = state.runtime_manager().lock().await;
-            match runtime.run_health_check().await {
-                Ok(report) => {
-                    tracing::info!(
-                        reachable = report.endpoint_reachable,
-                        model_loaded = report.model_loaded,
-                        "startup local runtime health check completed"
-                    );
-                    prime_runtime_configuration_cache(state, &runtime).await;
-                }
-                Err(err) => {
-                    tracing::warn!(error = %err, "startup local runtime health check failed");
-                }
-            }
-        }
         InferenceMode::Deterministic => {}
     }
 }
@@ -451,10 +429,7 @@ fn fallback_runtime_status_when_busy() -> RuntimeStatusDto {
         install_path: None,
         installed: true,
         verified: false,
-        binary_available: false,
         base_url: "remote".into(),
-        model_loaded: false,
-        loaded_model_path: None,
         message: "Busy".into(),
         requires_attention: false,
         last_error: None,
@@ -517,8 +492,6 @@ fn apply_model_loading_overlay(dto: &mut RuntimeConfigurationDto, loading_model_
     dto.model_load_in_progress = true;
     dto.status_label = "Loading model".into();
     dto.runtime_status.lifecycle_state = "starting".into();
-    dto.runtime_status.model_loaded = false;
-    dto.runtime_status.loaded_model_path = None;
     dto.runtime_status.message = "Verifying remote model connectivity…".into();
     dto.runtime_name = runtime_name;
     dto.runtime_version = runtime_version;
@@ -613,7 +586,7 @@ pub async fn runtime_set_inference_route(
 
     if route != InferenceMode::ThirdParty {
         return Err(CommandError::invalid_input(
-            "only remote / third-party inference is supported — embedded llama.cpp has been removed",
+            "only remote / third-party inference is supported — local embedded runtime has been removed",
         ));
     }
 

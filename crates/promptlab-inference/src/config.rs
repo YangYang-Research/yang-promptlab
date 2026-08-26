@@ -4,12 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{InferenceError, InferenceResult};
 
-/// Inference route: third-party cloud API or local embedded runtime.
+/// Inference route: third-party HTTP API or rule-based deterministic mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InferenceMode {
+    /// Accepts legacy persisted `"local"` configs via serde alias.
+    #[serde(alias = "local")]
     ThirdParty,
-    Local,
     /// Rule-based evaluation only — no LLM.
     Deterministic,
 }
@@ -18,15 +19,15 @@ impl InferenceMode {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ThirdParty => "third_party",
-            Self::Local => "local",
             Self::Deterministic => "deterministic",
         }
     }
 
     pub fn parse(raw: &str) -> Option<Self> {
         match raw.trim().to_ascii_lowercase().as_str() {
-            "third_party" | "third-party" | "cloud" | "remote" => Some(Self::ThirdParty),
-            "local" | "llama" | "embedded" => Some(Self::Local),
+            "third_party" | "third-party" | "cloud" | "remote" | "local" | "llama" | "embedded" => {
+                Some(Self::ThirdParty)
+            }
             "deterministic" | "rules" => Some(Self::Deterministic),
             _ => None,
         }
@@ -44,7 +45,7 @@ pub enum InferenceProvider {
     Nvidia,
     Azure,
     Bedrock,
-    LlamaCpp,
+    #[serde(alias = "llama_cpp", alias = "llama.cpp", alias = "llama")]
     Ollama,
     Deterministic,
 }
@@ -59,7 +60,6 @@ impl InferenceProvider {
             Self::Nvidia => "nvidia",
             Self::Azure => "azure",
             Self::Bedrock => "bedrock",
-            Self::LlamaCpp => "llama_cpp",
             Self::Ollama => "ollama",
             Self::Deterministic => "deterministic",
         }
@@ -74,7 +74,6 @@ impl InferenceProvider {
             "azure" => Self::Azure,
             "bedrock" | "aws_bedrock" => Self::Bedrock,
             "ollama" => Self::Ollama,
-            "llama_cpp" | "llama.cpp" | "llama" => Self::LlamaCpp,
             "deterministic" => Self::Deterministic,
             _ => Self::OpenAi,
         }

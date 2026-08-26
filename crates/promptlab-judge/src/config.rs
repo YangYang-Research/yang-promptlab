@@ -1,7 +1,5 @@
 //! Judge provider configuration and hybrid mode settings.
 
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
 
 use crate::types::JudgeMode;
@@ -9,7 +7,6 @@ use crate::types::JudgeMode;
 #[serde(rename_all = "snake_case")]
 pub enum LocalProvider {
     Ollama,
-    LlamaCpp,
 }
 
 impl Default for LocalProvider {
@@ -37,7 +34,7 @@ impl Default for RemoteProvider {
     }
 }
 
-/// Local model settings (Ollama, llama.cpp / GGUF).
+/// Local HTTP model settings (Ollama).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalProviderSettings {
     pub provider: LocalProvider,
@@ -45,15 +42,9 @@ pub struct LocalProviderSettings {
     pub base_url: String,
     #[serde(default = "default_local_model")]
     pub model: String,
-    #[serde(default)]
-    pub model_path: Option<PathBuf>,
-    /// Registered vault model id — resolved to path/tag at judge engine build time.
+    /// Registered vault model id — resolved at judge engine build time.
     #[serde(default)]
     pub vault_model_id: Option<String>,
-    #[serde(default = "default_llama_binary")]
-    pub llama_binary: String,
-    #[serde(default = "default_llama_port")]
-    pub llama_port: u16,
 }
 
 fn default_ollama_url() -> String {
@@ -64,24 +55,13 @@ fn default_local_model() -> String {
     "llama3".into()
 }
 
-fn default_llama_binary() -> String {
-    "llama-server".into()
-}
-
-fn default_llama_port() -> u16 {
-    8081
-}
-
 impl Default for LocalProviderSettings {
     fn default() -> Self {
         Self {
             provider: LocalProvider::Ollama,
             base_url: default_ollama_url(),
             model: default_local_model(),
-            model_path: None,
             vault_model_id: None,
-            llama_binary: default_llama_binary(),
-            llama_port: default_llama_port(),
         }
     }
 }

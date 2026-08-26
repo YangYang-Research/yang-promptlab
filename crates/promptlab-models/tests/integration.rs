@@ -13,11 +13,7 @@ fn hardware_detection_includes_os_and_cpu() {
 
 #[tokio::test]
 async fn mock_inference_runtime() {
-    let mut runtime = MockInferenceRuntime::new("generated");
-    runtime
-        .load_model(Path::new("/tmp/fake-model"))
-        .await
-        .unwrap();
+    let runtime = MockInferenceRuntime::new("generated");
     let resp = runtime
         .complete(InferenceRequest {
             system: None,

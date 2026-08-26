@@ -7,7 +7,7 @@ use crate::types::{
     InferenceResponse, ModelEntry, ModelProvider, ModelSource,
 };
 
-/// Unified local inference engine — Ollama HTTP only (no in-process GGUF).
+/// Unified inference engine — Ollama HTTP only.
 pub struct LocalInferenceEngine {
     entry: ModelEntry,
     ollama: Option<OllamaRuntime>,
@@ -35,9 +35,6 @@ impl LocalInferenceEngine {
             }
             ModelProvider::Remote => Err(ModelError::invalid(
                 "remote cloud models use the third-party provider API, not local inference",
-            )),
-            ModelProvider::HuggingFace | ModelProvider::Gguf => Err(ModelError::invalid(
-                "embedded GGUF / llama.cpp runtime has been removed — use a remote provider or Ollama over HTTP",
             )),
         }
     }
@@ -81,33 +78,21 @@ impl LocalInferenceEngine {
 pub fn infer_provider(source: &ModelSource) -> ModelProvider {
     match source {
         ModelSource::Ollama { .. } => ModelProvider::Ollama,
-        ModelSource::HuggingFace { .. } => ModelProvider::HuggingFace,
-        ModelSource::Local { .. } => ModelProvider::Gguf,
         ModelSource::Remote { .. } => ModelProvider::Remote,
     }
 }
 
 pub fn infer_version(source: &ModelSource) -> String {
     match source {
-        ModelSource::HuggingFace { revision, filename, .. } => revision
-            .clone()
-            .unwrap_or_else(|| filename.clone()),
         ModelSource::Ollama { model, .. } => model.clone(),
         ModelSource::Remote { model, .. } => model.clone(),
-        ModelSource::Local { path } => path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("local")
-            .into(),
     }
 }
 
 pub fn infer_capabilities(provider: ModelProvider) -> crate::types::ModelCapabilities {
     match provider {
         ModelProvider::Ollama => crate::types::ModelCapabilities::ollama(),
-        ModelProvider::HuggingFace | ModelProvider::Gguf | ModelProvider::Remote => {
-            crate::types::ModelCapabilities::gguf()
-        }
+        ModelProvider::Remote => crate::types::ModelCapabilities::remote(),
     }
 }
 

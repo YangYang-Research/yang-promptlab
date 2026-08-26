@@ -1,4 +1,4 @@
-//! Local model vault commands — browse, install, remove, verify, inference test.
+//! Model registry commands — remote providers, Ollama HTTP, verify, inference test.
 
 use std::time::Duration;
 
@@ -865,7 +865,7 @@ pub async fn models_test_inference(
 
     if entry.provider != ModelProvider::Ollama {
         return Err(CommandError::invalid_input(
-            "embedded GGUF / llama.cpp runtime has been removed — use a remote provider or Ollama over HTTP",
+            "local embedded runtime removed — use a remote provider or Ollama over HTTP",
         ));
     }
 

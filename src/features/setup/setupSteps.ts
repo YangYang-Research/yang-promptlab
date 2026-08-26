@@ -13,7 +13,7 @@ export type SetupStep = {
 };
 
 export type SetupProgressInput = {
-  mode: "not_configured" | "third_party" | "local";
+  mode: "not_configured" | "third_party";
   initialized: boolean;
   registeredModelCount: number;
   configuredThirdPartyCount: number;

@@ -1109,7 +1109,7 @@ fn configure_scratch_for_entry(
         }
         _ => {
             return Err(CommandError::invalid_input(
-                "embedded GGUF / llama.cpp runtime has been removed — use a remote provider or Ollama over HTTP",
+                "local embedded runtime removed — use a remote provider or Ollama over HTTP",
             ));
         }
     }

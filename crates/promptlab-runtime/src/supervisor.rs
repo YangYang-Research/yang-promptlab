@@ -26,7 +26,7 @@ impl RuntimeProcessState {
     }
 }
 
-/// Thin runtime host — remote providers only; no embedded GGUF / llama.cpp.
+/// Thin runtime host — remote providers / Ollama HTTP only.
 pub struct RuntimeSupervisor {
     config: RuntimeConfig,
     state: RuntimeProcessState,
@@ -54,16 +54,6 @@ impl RuntimeSupervisor {
         self.state
     }
 
-    /// Embedded local runtime is gone — always false.
-    pub fn runtime_available(&self) -> bool {
-        false
-    }
-
-    /// Legacy alias — local binary never available.
-    pub fn binary_available(&self) -> bool {
-        false
-    }
-
     pub fn set_hardware_profile(&mut self, profile: RuntimeHardwareProfile) {
         self.hardware = Some(profile);
     }
@@ -89,17 +79,11 @@ impl RuntimeSupervisor {
             .await
             .map_err(|err| RuntimeError::NativeRuntimeError(err.to_string()))?;
         self.state = RuntimeProcessState::Running;
-        info!("runtime host ready (remote-only; no local GGUF)");
+        info!("runtime host ready (remote providers / Ollama HTTP)");
         Ok(())
     }
 
-    pub async fn ensure_model_loaded(&mut self, _model_path: &Path) -> RuntimeResult<()> {
-        Err(RuntimeError::BackendUnavailable(
-            "local embedded runtime removed — use a remote provider or Ollama over HTTP".into(),
-        ))
-    }
-
-    /// Host ready when Running (not model-loaded).
+    /// Host ready when Running.
     pub async fn check_health(&mut self) -> RuntimeResult<bool> {
         Ok(self.state == RuntimeProcessState::Running)
     }
@@ -125,10 +109,12 @@ mod tests {
         assert_eq!(RuntimeProcessState::Stopped.as_str(), "stopped");
     }
 
-    #[test]
-    fn embedded_runtime_not_available() {
-        let supervisor = RuntimeSupervisor::new("/tmp/promptlab", "/tmp/data");
-        assert!(!supervisor.runtime_available());
-        assert!(!supervisor.binary_available());
+    #[tokio::test]
+    async fn ensure_running_marks_host_ready() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut supervisor = RuntimeSupervisor::new("/tmp/promptlab", dir.path());
+        supervisor.ensure_running().await.unwrap();
+        assert_eq!(supervisor.state(), RuntimeProcessState::Running);
+        assert!(supervisor.check_health().await.unwrap());
     }
 }

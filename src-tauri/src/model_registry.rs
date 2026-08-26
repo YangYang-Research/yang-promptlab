@@ -1,4 +1,4 @@
-//! Open the local model manager (Remote-only; no built-in GGUF catalog).
+//! Open the model manager (remote registry + Ollama HTTP).
 
 use std::path::Path;
 

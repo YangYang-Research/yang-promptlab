@@ -3,27 +3,18 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-/// Supported on-disk model format.
+/// Supported model format (HTTP / API references only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelFormat {
-    Gguf,
     Api,
 }
 
 impl ModelFormat {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Gguf => "gguf",
             Self::Api => "api",
         }
-    }
-
-    pub fn from_path(path: &std::path::Path) -> Option<Self> {
-        path.extension()
-            .and_then(|e| e.to_str())
-            .map(str::to_lowercase)
-            .and_then(|ext| if ext == "gguf" { Some(Self::Gguf) } else { None })
     }
 }
 
@@ -32,8 +23,6 @@ impl ModelFormat {
 #[serde(rename_all = "snake_case")]
 pub enum ModelProvider {
     Ollama,
-    HuggingFace,
-    Gguf,
     Remote,
 }
 
@@ -41,8 +30,6 @@ impl ModelProvider {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Ollama => "ollama",
-            Self::HuggingFace => "huggingface",
-            Self::Gguf => "gguf",
             Self::Remote => "remote",
         }
     }
@@ -75,12 +62,9 @@ impl ModelCapabilities {
         }
     }
 
-    pub fn gguf() -> Self {
-        Self {
-            chat: true,
-            completion: true,
-            embeddings: false,
-        }
+    /// Default capabilities for remote / third-party HTTP providers.
+    pub fn remote() -> Self {
+        Self::default()
     }
 }
 
@@ -88,12 +72,6 @@ impl ModelCapabilities {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ModelSource {
-    Local { path: PathBuf },
-    HuggingFace {
-        repo: String,
-        filename: String,
-        revision: Option<String>,
-    },
     Ollama {
         model: String,
         base_url: String,
@@ -153,19 +131,17 @@ impl ModelEntry {
             return remote_provider_display_name(raw);
         }
 
-        if let Some(label) = local_publisher_display_name(&self.name) {
+        if let Some(label) = publisher_display_name(&self.name) {
             return label;
         }
 
         match self.provider {
-            ModelProvider::HuggingFace => "Hugging Face".into(),
             ModelProvider::Ollama => "Ollama".into(),
-            ModelProvider::Gguf => "Local".into(),
             ModelProvider::Remote => "Remote".into(),
         }
     }
 
-    /// Model identifier for display (remote API model id, or local display name).
+    /// Model identifier for display (remote API model id, or Ollama display name).
     pub fn display_model_name(&self) -> String {
         match &self.source {
             ModelSource::Remote { model, .. } => model.clone(),
@@ -174,7 +150,7 @@ impl ModelEntry {
     }
 }
 
-fn local_publisher_display_name(name: &str) -> Option<String> {
+fn publisher_display_name(name: &str) -> Option<String> {
     let lower = name.to_ascii_lowercase();
     if lower.contains("qwen") {
         Some("Qwen Team".into())
@@ -207,38 +183,12 @@ fn remote_provider_display_name(provider: &str) -> String {
     }
 }
 
-/// Curated or discovered model available for installation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelCatalogEntry {
-    pub id: String,
-    pub name: String,
-    pub provider: ModelProvider,
-    /// Human-readable model publisher (e.g. Meta, Qwen Team).
-    pub provider_label: String,
-    pub version: String,
-    pub description: String,
-    pub purpose: String,
-    pub recommended: bool,
-    pub size_bytes: Option<u64>,
-    pub quant: Option<String>,
-    pub capabilities: ModelCapabilities,
-    pub repo: Option<String>,
-    pub filename: Option<String>,
-    #[serde(default)]
-    pub engine: String,
-    #[serde(default)]
-    pub format: String,
-    pub download_url: Option<String>,
-    pub sha256: Option<String>,
-    pub size_label: Option<String>,
-}
-
 /// Vault storage summary for desktop UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultStats {
-    /// All registered models (public, import, third-party).
+    /// Active registered models (remote + Ollama HTTP).
     pub registered_count: usize,
-    /// Non-remote entries remaining in the vault (legacy local / Ollama refs).
+    /// Ollama HTTP entries only.
     pub installed_local_count: usize,
     pub installed_bytes: u64,
     pub vault_path: PathBuf,
@@ -254,7 +204,7 @@ pub struct VerificationResult {
     pub valid: bool,
 }
 
-/// GPU compute backend hint for llama.cpp.
+/// GPU compute backend hint for hardware detection / tuning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GpuBackend {
@@ -285,20 +235,12 @@ pub struct HardwareProfile {
 }
 
 impl HardwareProfile {
-    pub fn recommended_gpu_layers(&self) -> u32 {
-        if self.gpus.is_empty() {
-            0
-        } else {
-            35
-        }
-    }
-
     pub fn primary_gpu(&self) -> Option<&GpuDevice> {
         self.gpus.first()
     }
 }
 
-/// llama.cpp inference request.
+/// Generic completion inference request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferenceRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -318,7 +260,7 @@ impl InferenceRequest {
     }
 }
 
-/// llama.cpp inference response.
+/// Generic completion inference response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferenceResponse {
     pub text: String,

@@ -9,8 +9,8 @@ use crate::hardware::detect_hardware;
 use crate::registry::ModelRegistry;
 use crate::runtime::LocalInferenceEngine;
 use crate::types::{
-    ChatMessage, ChatRequest, HardwareProfile, InferenceRequest, ModelEntry,
-    ModelProvider, VerificationResult,
+    ChatMessage, ChatRequest, HardwareProfile, InferenceRequest, ModelEntry, ModelProvider,
+    VerificationResult,
 };
 use crate::verify::VerificationEngine;
 
@@ -113,7 +113,7 @@ impl LocalModelManager {
         Ok(entry)
     }
 
-    /// Verify a registered model (SHA256 for legacy local files, Ollama health for Ollama refs).
+    /// Verify a registered model (remote always valid; Ollama health for Ollama refs).
     pub async fn verify_model(&mut self, model_id: &str) -> ModelResult<VerificationResult> {
         let entry = self
             .registry
@@ -121,46 +121,35 @@ impl LocalModelManager {
             .ok_or_else(|| ModelError::not_found(model_id))?
             .clone();
 
-        if entry.provider == ModelProvider::Remote {
-            return Ok(VerificationResult {
+        match entry.provider {
+            ModelProvider::Remote => Ok(VerificationResult {
                 file_path: entry.file_path,
                 expected_sha256: None,
                 actual_sha256: "remote-api".into(),
                 size_bytes: 0,
                 valid: true,
-            });
-        }
-
-        if entry.provider == ModelProvider::Ollama {
-            let engine = LocalInferenceEngine::from_entry(entry.clone()).await?;
-            let ok = engine.health().await.unwrap_or(false);
-            if ok {
-                self.registry.update_verification(model_id, "ollama-ok".into(), true)?;
-                self.persist().await?;
+            }),
+            ModelProvider::Ollama => {
+                let engine = LocalInferenceEngine::from_entry(entry.clone()).await?;
+                let ok = engine.health().await.unwrap_or(false);
+                if ok {
+                    self.registry
+                        .update_verification(model_id, "ollama-ok".into(), true)?;
+                    self.persist().await?;
+                }
+                Ok(VerificationResult {
+                    file_path: entry.file_path,
+                    expected_sha256: None,
+                    actual_sha256: if ok {
+                        "ollama-ok".into()
+                    } else {
+                        "ollama-unreachable".into()
+                    },
+                    size_bytes: 0,
+                    valid: ok,
+                })
             }
-            return Ok(VerificationResult {
-                file_path: entry.file_path,
-                expected_sha256: None,
-                actual_sha256: if ok {
-                    "ollama-ok".into()
-                } else {
-                    "ollama-unreachable".into()
-                },
-                size_bytes: 0,
-                valid: ok,
-            });
         }
-
-        let expected = entry.checksum_sha256.as_deref();
-        let result = self.verify_file(&entry.file_path, expected).await?;
-
-        if result.valid {
-            self.registry
-                .update_verification(model_id, result.actual_sha256.clone(), true)?;
-            self.persist().await?;
-        }
-
-        Ok(result)
     }
 
     /// Verify an arbitrary file on disk.
@@ -212,46 +201,21 @@ impl LocalModelManager {
         Ok(response.message.content)
     }
 
-    /// Embedded GGUF load is no longer supported.
-    pub async fn load(&mut self, _model_id: &str) -> ModelResult<()> {
-        Err(ModelError::invalid(
-            "embedded GGUF / llama.cpp runtime has been removed — use a remote provider or Ollama over HTTP",
-        ))
-    }
-
-    /// No-op: there is no in-process model to unload.
-    pub async fn unload(&mut self) -> ModelResult<()> {
-        Ok(())
-    }
-
-    /// In-process completion is no longer supported.
-    pub async fn complete(
-        &self,
-        _request: InferenceRequest,
-    ) -> ModelResult<crate::types::InferenceResponse> {
-        Err(ModelError::invalid(
-            "embedded GGUF / llama.cpp runtime has been removed — use a remote provider or Ollama over HTTP",
-        ))
-    }
-
     pub fn list_models(&self) -> Vec<&ModelEntry> {
         self.registry.list()
     }
 
-    /// Aggregate installed model sizes for desktop UI cards.
+    /// Aggregate vault sizes for desktop UI cards (remote + Ollama only).
     pub fn vault_stats(&self) -> ModelResult<crate::types::VaultStats> {
         let models = self.list_models();
-        let local_models: Vec<_> = models
+        let ollama_count = models
             .iter()
-            .filter(|entry| entry.provider != ModelProvider::Remote)
-            .collect();
-        let installed_bytes = local_models
-            .iter()
-            .filter_map(|entry| entry.size_bytes)
-            .sum();
+            .filter(|entry| entry.provider == ModelProvider::Ollama)
+            .count();
+        let installed_bytes = models.iter().filter_map(|entry| entry.size_bytes).sum();
         Ok(crate::types::VaultStats {
             registered_count: models.len(),
-            installed_local_count: local_models.len(),
+            installed_local_count: ollama_count,
             installed_bytes,
             vault_path: self.vault_path.clone(),
         })
@@ -319,22 +283,45 @@ fn model_entry_to_upsert(entry: &ModelEntry) -> ModelResult<UpsertModelEntry> {
     })
 }
 
+fn is_legacy_provider_or_format(provider: &str, format: &str) -> bool {
+    let provider = provider.trim().to_ascii_lowercase();
+    let format = format.trim().to_ascii_lowercase();
+    matches!(provider.as_str(), "gguf" | "huggingface") || format == "gguf"
+}
+
 async fn load_registry_with_migration(
     vault: &Path,
     db: &Database,
 ) -> ModelResult<(ModelRegistry, bool)> {
     let repo = db.repositories().models();
+    let purged = repo
+        .purge_legacy_local_models()
+        .await
+        .map_err(ModelError::from)?;
+    if purged > 0 {
+        info!(count = purged, "purged legacy gguf/huggingface model rows");
+    }
+
     let count = repo.count().await.map_err(ModelError::from)?;
-    let mut dirty = false;
+    let mut dirty = purged > 0;
 
     let mut registry = if count > 0 {
         let rows = repo.list().await.map_err(ModelError::from)?;
         let mut entries = Vec::with_capacity(rows.len());
         for row in rows {
-            let entry: ModelEntry = serde_json::from_str(&row.entry_json).map_err(|e| {
-                ModelError::invalid(format!("corrupt model entry {}: {e}", row.id))
-            })?;
-            entries.push(entry);
+            if is_legacy_provider_or_format(&row.provider, &row.format) {
+                continue;
+            }
+            match serde_json::from_str::<ModelEntry>(&row.entry_json) {
+                Ok(entry) => entries.push(entry),
+                Err(err) => {
+                    tracing::warn!(
+                        id = %row.id,
+                        error = %err,
+                        "skipping unreadable model row after legacy purge"
+                    );
+                }
+            }
         }
         ModelRegistry::from_entries(entries)
     } else {

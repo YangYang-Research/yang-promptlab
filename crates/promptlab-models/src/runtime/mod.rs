@@ -13,12 +13,10 @@ pub use mock::MockInferenceRuntime;
 use crate::error::ModelResult;
 use crate::types::{InferenceRequest, InferenceResponse, RuntimeState};
 
-/// Local inference runtime contract (Ollama HTTP / mocks).
+/// Inference runtime contract (Ollama HTTP / mocks / gateway bridges).
 #[async_trait]
 pub trait InferenceRuntime: Send + Sync {
     fn state(&self) -> RuntimeState;
-    async fn load_model(&mut self, model_path: &std::path::Path) -> ModelResult<()>;
-    async fn unload(&mut self) -> ModelResult<()>;
     async fn complete(&self, request: InferenceRequest) -> ModelResult<InferenceResponse>;
     async fn health(&self) -> ModelResult<bool>;
 }

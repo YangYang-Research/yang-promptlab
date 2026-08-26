@@ -97,6 +97,8 @@ pub trait ModelRepository: Send + Sync {
         &self,
         entries: Vec<crate::models::UpsertModelEntry>,
     ) -> PromptLabResult<()>;
+    /// Delete legacy GGUF / HuggingFace product rows before typed deserialize.
+    async fn purge_legacy_local_models(&self) -> PromptLabResult<u64>;
 }
 
 #[async_trait]

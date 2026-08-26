@@ -1,8 +1,7 @@
 //! PromptLab model registry and vault helpers.
 //!
 //! Remote/third-party provider registry and Ollama-over-HTTP smoke tests.
-//! Embedded llama.cpp / in-process GGUF and HuggingFace GGUF downloads are removed.
-//! The built-in GGUF `models.json` catalog has been removed — Remote-only.
+//! Local embedded inference is removed — Remote + Ollama HTTP only.
 
 pub mod error;
 pub mod hardware;

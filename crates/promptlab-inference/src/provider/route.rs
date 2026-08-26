@@ -47,8 +47,7 @@ pub fn descriptor_from_remote(settings: &RemoteAdapterSettings) -> TargetDescrip
             descriptor.surface = TargetSurface::Ollama;
             descriptor.url = join_url(&base, "/v1/chat/completions");
         }
-        InferenceProvider::LlamaCpp | InferenceProvider::Deterministic => {
-            // LlamaCpp in-process path removed; treat as OpenAI-compatible if base_url set.
+        InferenceProvider::Deterministic => {
             descriptor.surface = TargetSurface::OpenAiCompatible;
             descriptor.url = if base.is_empty() {
                 String::new()
@@ -109,7 +108,6 @@ fn default_base(settings: &RemoteAdapterSettings) -> String {
             format!("https://bedrock-runtime.{region}.amazonaws.com")
         }
         InferenceProvider::Ollama => "http://127.0.0.1:11434".into(),
-        InferenceProvider::LlamaCpp => String::new(),
         InferenceProvider::Deterministic => String::new(),
     }
 }

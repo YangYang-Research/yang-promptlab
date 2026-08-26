@@ -32,6 +32,5 @@ async fn runtime_status_reports_unavailable_without_binary() {
 
     let status = runtime_status_op(&state).await.expect("runtime status");
     assert_eq!(status.lifecycle_state, "not_installed");
-    assert!(!status.binary_available);
     assert!(status.message.to_lowercase().contains("runtime"));
 }

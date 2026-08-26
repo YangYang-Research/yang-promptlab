@@ -53,10 +53,10 @@ export function AIRuntimePage() {
     );
   }, []);
 
-  // Persist remote-only defaults for leftover local configs.
+  // Persist remote-only defaults for leftover unset configs.
   useEffect(() => {
     if (!backendConnected || configLoading || !configuration) return;
-    if (configuration.mode === "local" || configuration.mode === "not_configured") {
+    if (configuration.mode === "not_configured") {
       void setRoute("third_party").catch(() => undefined);
     }
   }, [backendConnected, configLoading, configuration, setRoute]);

@@ -94,17 +94,6 @@ impl InferenceRuntime for ClientRuntime {
         promptlab_models::types::RuntimeState::Ready
     }
 
-    async fn load_model(
-        &mut self,
-        _model_path: &std::path::Path,
-    ) -> promptlab_models::error::ModelResult<()> {
-        Ok(())
-    }
-
-    async fn unload(&mut self) -> promptlab_models::error::ModelResult<()> {
-        Ok(())
-    }
-
     async fn complete(
         &self,
         request: promptlab_models::types::InferenceRequest,
@@ -155,17 +144,6 @@ struct BackendRuntime {
 impl InferenceRuntime for BackendRuntime {
     fn state(&self) -> promptlab_models::types::RuntimeState {
         promptlab_models::types::RuntimeState::Ready
-    }
-
-    async fn load_model(
-        &mut self,
-        _model_path: &std::path::Path,
-    ) -> promptlab_models::error::ModelResult<()> {
-        Ok(())
-    }
-
-    async fn unload(&mut self) -> promptlab_models::error::ModelResult<()> {
-        Ok(())
     }
 
     async fn complete(
@@ -220,7 +198,6 @@ async fn build_local_backend(
     let provider_runtime = ModelProviderRuntime::new(ctx.model_provider.clone(), model_id.clone());
     let label = match config.local.provider {
         LocalProvider::Ollama => "runtime/ollama",
-        LocalProvider::LlamaCpp => "runtime/llama_cpp",
     };
 
     Ok(Arc::new(LocalLlmBackend::new(

@@ -195,6 +195,20 @@ impl ModelRepository for SqliteModelRepository {
         tx.commit().await.map_storage()?;
         Ok(())
     }
+
+    async fn purge_legacy_local_models(&self) -> PromptLabResult<u64> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM models
+            WHERE lower(provider) IN ('gguf', 'huggingface')
+               OR lower(format) = 'gguf'
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_storage()?;
+        Ok(result.rows_affected())
+    }
 }
 
 #[cfg(test)]
@@ -211,21 +225,21 @@ mod tests {
 
         let model = repo
             .create(CreateModel {
-                name: "llama-3-8b".into(),
-                file_path: "/vault/models/llama.gguf".into(),
-                format: Some("gguf".into()),
-                provider: Some("gguf".into()),
+                name: "gpt-4o-mini".into(),
+                file_path: "remote://openai/gpt-4o-mini".into(),
+                format: Some("api".into()),
+                provider: Some("remote".into()),
                 checksum_sha256: Some("abc123".into()),
-                size_bytes: Some(4_000_000_000),
+                size_bytes: Some(0),
                 verified: Some(false),
                 entry_json: Some(r#"{"id":"x"}"#.into()),
-                metadata_json: Some(serde_json::json!({"quant": "Q4_K_M"})),
+                metadata_json: Some(serde_json::json!({"remoteProvider": "openai"})),
             })
             .await
             .unwrap();
 
-        assert_eq!(model.format, "gguf");
-        assert_eq!(model.provider, "gguf");
+        assert_eq!(model.format, "api");
+        assert_eq!(model.provider, "remote");
         assert!(!model.verified);
         assert_eq!(repo.count().await.unwrap(), 1);
         repo.delete(&model.id).await.unwrap();

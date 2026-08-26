@@ -132,10 +132,10 @@ mod integration_tests {
         repos
             .models()
             .create(CreateModel {
-                name: "local-eval".into(),
-                file_path: "/models/eval.gguf".into(),
-                format: None,
-                provider: None,
+                name: "remote-eval".into(),
+                file_path: "remote://openai/gpt".into(),
+                format: Some("api".into()),
+                provider: Some("remote".into()),
                 checksum_sha256: None,
                 size_bytes: None,
                 verified: None,

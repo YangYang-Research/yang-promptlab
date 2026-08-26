@@ -2,8 +2,7 @@
 //!
 //! Every completion — attack delivery, wizard verify, discovery, Assistant, Judge,
 //! planner, generator, and reports — goes through [`HarnessFactory::execute`].
-//! Providers register by id; callers set [`HarnessPurpose`]. Local GGUF process
-//! lifecycle stays in `promptlab-runtime`; harness only calls the runtime.
+//! Providers register by id; callers set [`HarnessPurpose`].
 //!
 //! Attack path still ends at [`NormalizedResponse`] for the Judge Engine.
 

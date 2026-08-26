@@ -24,14 +24,6 @@ impl ModelCapabilities {
         }
     }
 
-    pub fn from_local_chat() -> Self {
-        Self {
-            supports_chat: true,
-            supports_json: true,
-            ..Self::default()
-        }
-    }
-
     pub fn from_remote(provider: &str) -> Self {
         let mut caps = Self {
             supports_chat: true,
@@ -50,6 +42,11 @@ impl ModelCapabilities {
         if provider == "gemini" {
             caps.supports_vision = true;
             caps.supports_images = true;
+        }
+        if provider == "ollama" {
+            caps.supports_streaming = false;
+            caps.supports_tool_calling = false;
+            caps.supports_function_calling = false;
         }
         caps
     }

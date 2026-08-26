@@ -398,44 +398,6 @@ impl<'a> GatewaySession<'a> {
                     cancel,
                 ))
             }
-            InferenceMode::Local => {
-                if config.provider == crate::config::InferenceProvider::Ollama {
-                    let mut descriptor = TargetDescriptor {
-                        url: "http://127.0.0.1:11434/v1/chat/completions".into(),
-                        surface: TargetSurface::Ollama,
-                        ..TargetDescriptor::default()
-                    };
-                    if let Some(base) = self
-                        .inner
-                        .remote_settings
-                        .as_ref()
-                        .and_then(|s| s.base_url.clone())
-                    {
-                        if !base.trim().is_empty() {
-                            descriptor.url = format!(
-                                "{}/v1/chat/completions",
-                                base.trim().trim_end_matches('/')
-                            );
-                        }
-                    }
-                    return Ok(InferenceClient::from_harness(
-                        factory,
-                        descriptor,
-                        HarnessPurpose::assistant(),
-                        config.provider.as_str(),
-                        self.inner.model_entry.display_model_name(),
-                        crate::capabilities::ModelCapabilities::from_local_chat(),
-                        config.max_tokens,
-                        config.temperature,
-                        config.timeout_secs.saturating_mul(1000).max(1_000),
-                        cancel,
-                    ));
-                }
-                Err(InferenceError::NotReady(
-                    "embedded GGUF / llama.cpp runtime has been removed — use a remote provider or Ollama over HTTP"
-                        .into(),
-                ))
-            }
         }
     }
 

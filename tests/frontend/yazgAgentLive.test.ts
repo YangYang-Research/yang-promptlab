@@ -34,10 +34,7 @@ function baseConfig(
       installPath: null,
       installed: true,
       verified: true,
-      binaryAvailable: false,
       baseUrl: "",
-      modelLoaded: false,
-      loadedModelPath: null,
       message: "",
       requiresAttention: false,
       lastError: null,
@@ -72,7 +69,7 @@ describe("isYazgAgentLive", () => {
     expect(isYazgAgentLive(baseConfig())).toBe(true);
   });
 
-  it("is false for leftover local mode", () => {
-    expect(isYazgAgentLive(baseConfig({ mode: "local" }))).toBe(false);
+  it("is false for not_configured mode", () => {
+    expect(isYazgAgentLive(baseConfig({ mode: "not_configured" }))).toBe(false);
   });
 });

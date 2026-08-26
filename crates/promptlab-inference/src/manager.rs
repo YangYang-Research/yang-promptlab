@@ -34,18 +34,18 @@ impl InferenceRuntimeManager {
 
     pub async fn load(&mut self) -> InferenceResult<()> {
         self.config = load_config(&self.data_dir).await?;
-        // Migrate persisted llama.cpp / Local GGUF configs to not_configured third-party.
-        if self.config.provider == InferenceProvider::LlamaCpp
-            || (self.config.mode == InferenceMode::Local
-                && self.config.provider != InferenceProvider::Ollama)
-        {
-            self.config.mode = InferenceMode::ThirdParty;
-            self.config.provider = InferenceProvider::OpenAi;
-            self.config.runtime = "cloud".into();
-            self.config.status = "not_configured".into();
-            self.config.initialized = false;
-            self.config.model.clear();
-            self.config.selected_model_id = None;
+        // Normalize leftover local runtime labels after `"local"` → ThirdParty deserialize.
+        if self.config.runtime == "local" || self.config.runtime == "embedded" {
+            if self.config.provider == InferenceProvider::Ollama {
+                self.config.runtime = "ollama".into();
+            } else {
+                self.config.provider = InferenceProvider::OpenAi;
+                self.config.runtime = "cloud".into();
+                self.config.status = "not_configured".into();
+                self.config.initialized = false;
+                self.config.model.clear();
+                self.config.selected_model_id = None;
+            }
             let _ = self.save().await;
         }
         Ok(())
@@ -78,33 +78,14 @@ impl InferenceRuntimeManager {
                 self.config.runtime = "cloud".into();
             }
             ModelProvider::Ollama => {
-                // Ollama is HTTP remote (OpenAI-compatible), not in-process GGUF.
                 self.config.mode = InferenceMode::ThirdParty;
                 self.config.provider = InferenceProvider::Ollama;
                 self.config.runtime = "ollama".into();
-            }
-            _ => {
-                return Err(InferenceError::Config(
-                    "embedded GGUF / llama.cpp runtime has been removed — use a remote provider or Ollama over HTTP"
-                        .into(),
-                ));
             }
         }
         self.config.initialized = true;
         self.config.status = "configured".into();
         self.save().await
-    }
-
-    /// Local GGUF prepare path removed — always errors unless caller uses Ollama/ThirdParty.
-    pub async fn prepare_local_runtime(
-        &self,
-        _entry: &ModelEntry,
-        _runtime_manager: &mut RuntimeManager,
-    ) -> InferenceResult<()> {
-        Err(InferenceError::NotReady(
-            "embedded GGUF / llama.cpp runtime has been removed — use a remote provider or Ollama over HTTP"
-                .into(),
-        ))
     }
 
     pub async fn build_provider_adapter(
@@ -119,13 +100,6 @@ impl InferenceRuntimeManager {
                 "deterministic mode has no LLM provider".into(),
             )),
             InferenceMode::ThirdParty => {
-                let settings = remote.ok_or_else(|| {
-                    InferenceError::Config("missing remote credentials".into())
-                })?;
-                Ok(Arc::new(RemoteProviderAdapter::new(settings)))
-            }
-            InferenceMode::Local => {
-                // Legacy Local mode: only Ollama-over-HTTP is supported.
                 if self.config.provider == InferenceProvider::Ollama {
                     let settings = remote.unwrap_or_else(|| RemoteAdapterSettings {
                         provider: InferenceProvider::Ollama,
@@ -141,10 +115,10 @@ impl InferenceRuntimeManager {
                     });
                     return Ok(Arc::new(RemoteProviderAdapter::new(settings)));
                 }
-                Err(InferenceError::NotReady(
-                    "embedded GGUF / llama.cpp runtime has been removed — use a remote provider or Ollama over HTTP"
-                        .into(),
-                ))
+                let settings = remote.ok_or_else(|| {
+                    InferenceError::Config("missing remote credentials".into())
+                })?;
+                Ok(Arc::new(RemoteProviderAdapter::new(settings)))
             }
         }
     }
@@ -181,26 +155,31 @@ impl InferenceRuntimeManager {
         aws_secret: Option<String>,
         aws_session: Option<String>,
     ) -> InferenceResult<RemoteAdapterSettings> {
-        let ModelSource::Remote {
-            provider,
-            model,
-            base_url,
-            region,
-        } = &entry.source
-        else {
-            return Err(InferenceError::Config(
-                "model is not a third-party remote entry".into(),
-            ));
-        };
-        Ok(RemoteAdapterSettings {
-            provider: InferenceProvider::parse(provider),
-            model: model.clone(),
-            base_url: base_url.clone(),
-            api_key,
-            aws_secret_access_key: aws_secret,
-            aws_region: region.clone(),
-            aws_session_token: aws_session,
-        })
+        match &entry.source {
+            ModelSource::Remote {
+                provider,
+                model,
+                base_url,
+                region,
+            } => Ok(RemoteAdapterSettings {
+                provider: InferenceProvider::parse(provider),
+                model: model.clone(),
+                base_url: base_url.clone(),
+                api_key,
+                aws_secret_access_key: aws_secret,
+                aws_region: region.clone(),
+                aws_session_token: aws_session,
+            }),
+            ModelSource::Ollama { model, base_url } => Ok(RemoteAdapterSettings {
+                provider: InferenceProvider::Ollama,
+                model: model.clone(),
+                base_url: Some(base_url.clone()),
+                api_key,
+                aws_secret_access_key: None,
+                aws_region: None,
+                aws_session_token: None,
+            }),
+        }
     }
 }
 

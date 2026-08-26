@@ -17,7 +17,7 @@ We aim to acknowledge reports promptly and coordinate a fix before public disclo
 ### In scope (product)
 
 - PromptLab desktop app (`src/`, `src-tauri/`, `crates/`)
-- Local data under `~/.promptlab/` (SQLite, logs, AgentTrace, GGUF vault paths)
+- Local data under `~/.promptlab/` (SQLite, logs, AgentTrace, model registry)
 - Secret handling (OS keychain, credential refs, `allow_insecure_tls` / proxy misuse that leaks secrets)
 - Tauri IPC / command surface that can escalate beyond the operator’s intent on the same machine
 - Supply-chain issues in **direct** dependencies with a clear exploit path into PromptLab

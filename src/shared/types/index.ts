@@ -120,7 +120,7 @@ export type Report = {
   exported?: boolean;
 };
 
-export type LocalModel = {
+export type RegisteredModel = {
   id: string;
   name: string;
   provider: string;
@@ -130,6 +130,9 @@ export type LocalModel = {
   path: string | null;
   sha256: string | null;
 };
+
+/** @deprecated Use RegisteredModel */
+export type LocalModel = RegisteredModel;
 
 export type ActivityItem = {
   id: string;

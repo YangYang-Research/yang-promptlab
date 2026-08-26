@@ -1,4 +1,4 @@
-//! Model registry IPC integration tests (Remote-only; no built-in GGUF catalog).
+//! Model registry IPC integration tests (remote + Ollama HTTP).
 
 use std::path::Path;
 

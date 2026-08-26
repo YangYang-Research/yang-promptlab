@@ -39,7 +39,7 @@ pub struct AiInferenceSettingsDto {
 pub fn mode_to_route(mode: InferenceMode) -> &'static str {
     match mode {
         InferenceMode::ThirdParty => "third_party",
-        InferenceMode::Local | InferenceMode::Deterministic => "local",
+        InferenceMode::Deterministic => "deterministic",
     }
 }
 
@@ -245,8 +245,8 @@ pub fn config_to_dto_with_connectivity_test(
         InferenceMode::ThirdParty => {
             "Add a remote provider model in Models, then select it here".into()
         }
-        InferenceMode::Local | InferenceMode::Deterministic => {
-            "Local llama.cpp runtime has been removed — using remote providers only".into()
+        InferenceMode::Deterministic => {
+            "Deterministic mode has no LLM provider — select a remote model".into()
         }
     };
 

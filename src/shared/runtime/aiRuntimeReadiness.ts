@@ -19,11 +19,7 @@ export async function checkAiRuntimeReadiness(): Promise<AiRuntimeReadiness> {
       };
     }
 
-    if (
-      configuration.mode === "local" ||
-      configuration.mode === "not_configured"
-    ) {
-      // Legacy configs should already be migrated; treat as not ready until remote.
+    if (configuration.mode === "not_configured") {
       return {
         ready: false,
         configuration,

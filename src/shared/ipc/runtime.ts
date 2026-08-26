@@ -21,10 +21,7 @@ export type RuntimeStatusDto = {
   installPath: string | null;
   installed: boolean;
   verified: boolean;
-  binaryAvailable: boolean;
   baseUrl: string;
-  modelLoaded: boolean;
-  loadedModelPath: string | null;
   message: string;
   requiresAttention: boolean;
   lastError: string | null;
@@ -55,7 +52,6 @@ export type RuntimeHealthReport = {
   latencyMs: number;
   memoryBytes: number | null;
   gpuMemoryBytes: number | null;
-  modelLoaded: boolean;
   message: string;
 };
 
@@ -94,7 +90,7 @@ export type RuntimeInferenceRouteRequest = {
 };
 
 export type RuntimeConfigurationDto = {
-  mode: "not_configured" | "third_party" | "local";
+  mode: "not_configured" | "third_party";
   statusLabel: string;
   provider: string | null;
   modelName: string | null;

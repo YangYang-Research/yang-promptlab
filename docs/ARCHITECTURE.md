@@ -6,12 +6,12 @@ PromptLab is an offline-first Tauri 2 desktop app for authorized AI security tes
 
 | Principle | Implementation |
 |-----------|----------------|
-| Offline-first | SQLite + local GGUF via in-process libllama |
+| Offline-capable | SQLite + remote HTTP AI providers (incl. local Ollama over HTTP) |
 | Local data sovereignty | All state under `~/.promptlab/` (`PROMPTLAB_ROOT`) |
 | Extensibility | Harness providers |
 | Auditability | Scan console, AgentTrace SQLite, structured logs |
 
-Platforms: **Windows**, **macOS**, **Linux**. There is **no** `llama-server` and **no** embedded Ollama.
+Platforms: **Windows**, **macOS**, **Linux**. Product AI is **remote-only** (no embedded llama.cpp). Ollama is supported as an OpenAI-compatible HTTP endpoint.
 
 ---
 
@@ -22,7 +22,7 @@ React UI (HashRouter)  src/features/* → src/shared/ipc
         │ invoke / listen
 promptlab-desktop (src-tauri)  commands/* → AppState → crates
         │
-   storage (SQLite)   harness (AI I/O)   inference (gateway)   runtime (libllama)
+   storage (SQLite)   harness (AI I/O)   inference (gateway)   runtime (remote host)
 ```
 
 Browser-only `npm run dev` has **no IPC** — empty workspace, not mock fixtures.
@@ -98,7 +98,7 @@ cargo test -p promptlab-core
 ```
 config/          environment.json, ai_runtime_config.json, plugins_state.json
 workspaces/      promptlab.db, reports/, AuthSessions/*.storage.enc
-models/          GGUF vault
+models/          legacy path (registry is SQLite; no local weight vault)
 runtime/         (legacy local-runtime dir; hardware profile is in SQLite)
 logs/  plugins/  cache/  temp/  backups/
 agenttrace/agenttrace.db
@@ -110,7 +110,7 @@ Not Tauri `app_data_dir`. Secrets: OS keychain `com.promptlab.app` — see [AUTH
 
 WAL, `PRAGMA foreign_keys = ON`. Schema: `crates/promptlab-storage/migrations/001_initial_schema.sql`.
 
-GGUF files are **not** SQLite rows. AgentTrace is a separate DB.
+Model registry rows live in SQLite (`models`). AgentTrace is a separate DB.
 
 | Table | Notes |
 |-------|-------|
@@ -125,7 +125,7 @@ GGUF files are **not** SQLite rows. AgentTrace is a separate DB.
 | `runtime_traffic_*` / `judge_role_weights` / `mutator_settings` | |
 | `agent_short_term_memory` / `agent_long_term_memory` | |
 
-IDs are UUID `TEXT`; timestamps RFC 3339 UTC. Access: `Database::connect` → `db.repositories()`. `ModelRepository` exists in the crate but **001 has no `models` table**.
+IDs are UUID `TEXT`; timestamps RFC 3339 UTC. Access: `Database::connect` → `db.repositories()`. Model registry: `models` table via `ModelRepository`.
 
 ---
 

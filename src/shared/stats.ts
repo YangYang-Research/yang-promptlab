@@ -1,7 +1,7 @@
 import type {
   DashboardStats,
   Finding,
-  LocalModel,
+  RegisteredModel,
   Project,
   ScanRun,
   Severity,
@@ -52,7 +52,7 @@ export function computeDashboardStats(
   targets: Target[],
   findings: Finding[],
   scans: ScanRun[],
-  models: LocalModel[],
+  models: RegisteredModel[],
 ): DashboardStats {
   return {
     projects: projects.length,

@@ -2,17 +2,15 @@ use async_trait::async_trait;
 use promptlab_models::runtime::InferenceRuntime;
 use promptlab_models::types::{InferenceRequest, InferenceResponse, RuntimeState};
 
-/// Mock llama.cpp runtime returning fixed JSON for judge tests.
+/// Mock inference runtime returning fixed JSON for judge tests.
 pub struct JsonMockRuntime {
     response_json: String,
-    ready: bool,
 }
 
 impl JsonMockRuntime {
     pub fn new(json: impl Into<String>) -> Self {
         Self {
             response_json: json.into(),
-            ready: false,
         }
     }
 
@@ -32,30 +30,13 @@ impl JsonMockRuntime {
 #[async_trait]
 impl InferenceRuntime for JsonMockRuntime {
     fn state(&self) -> RuntimeState {
-        if self.ready {
-            RuntimeState::Ready
-        } else {
-            RuntimeState::Unloaded
-        }
-    }
-
-    async fn load_model(&mut self, _model_path: &std::path::Path) -> promptlab_models::ModelResult<()> {
-        self.ready = true;
-        Ok(())
-    }
-
-    async fn unload(&mut self) -> promptlab_models::ModelResult<()> {
-        self.ready = false;
-        Ok(())
+        RuntimeState::Ready
     }
 
     async fn complete(
         &self,
         _request: InferenceRequest,
     ) -> promptlab_models::ModelResult<InferenceResponse> {
-        if !self.ready {
-            // Auto-ready for tests without explicit load
-        }
         Ok(InferenceResponse {
             text: self.response_json.clone(),
             tokens_predicted: 32,

@@ -56,7 +56,7 @@ UI never talks to the target or the LLM directly. All I/O goes Tauri IPC → Rus
 | Harness provider | `crates/promptlab-harness/src/providers/`, register in the harness crate. [docs/RUNTIME.md](docs/RUNTIME.md) |
 | Yazg / sub-agents / tools | `crates/promptlab-agent`, [docs/YAZG.md](docs/YAZG.md) |
 | Scan execute / judge | `crates/promptlab-attack`, `crates/promptlab-judge`, [docs/ATTACK.md](docs/ATTACK.md) |
-| Local GGUF / remote route | `crates/promptlab-runtime`, `crates/promptlab-inference` |
+| AI Runtime / model registry | `crates/promptlab-runtime`, `crates/promptlab-inference`, `crates/promptlab-models` |
 | SQLite schema | `crates/promptlab-storage` (migrations) |
 | Errors, proxy, `~/.promptlab` paths | `crates/promptlab-core` |
 

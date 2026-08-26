@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -43,10 +42,6 @@ impl OllamaRuntime {
             client,
             state: Arc::new(AtomicU32::new(RuntimeState::Ready as u32)),
         }
-    }
-
-    fn set_state(&self, state: RuntimeState) {
-        self.state.store(state as u32, Ordering::SeqCst);
     }
 
     pub fn config(&self) -> &OllamaConfig {
@@ -220,16 +215,6 @@ impl InferenceRuntime for OllamaRuntime {
             2 => RuntimeState::Ready,
             _ => RuntimeState::Error,
         }
-    }
-
-    async fn load_model(&mut self, _model_path: &Path) -> ModelResult<()> {
-        self.set_state(RuntimeState::Ready);
-        Ok(())
-    }
-
-    async fn unload(&mut self) -> ModelResult<()> {
-        self.set_state(RuntimeState::Unloaded);
-        Ok(())
     }
 
     async fn complete(&self, request: InferenceRequest) -> ModelResult<InferenceResponse> {

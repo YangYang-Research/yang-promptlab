@@ -11,7 +11,7 @@ export const YAZG_AGENT_OFFLINE_MESSAGE =
 export function isYazgAgentLive(
   configuration: RuntimeConfigurationDto | null | undefined,
 ): boolean {
-  if (!configuration || configuration.mode === "local") {
+  if (!configuration || configuration.mode === "not_configured") {
     return false;
   }
 

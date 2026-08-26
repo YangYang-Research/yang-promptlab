@@ -10,6 +10,32 @@ use crate::types::{ModelEntry, ModelFormat, ModelProvider, ModelSource};
 
 const REGISTRY_VERSION: u32 = 1;
 
+fn is_legacy_provider_or_format(provider: &str, format: &str) -> bool {
+    let provider = provider.trim().to_ascii_lowercase();
+    let format = format.trim().to_ascii_lowercase();
+    matches!(provider.as_str(), "gguf" | "huggingface") || format == "gguf"
+}
+
+fn entry_json_is_legacy(raw: &serde_json::Value) -> bool {
+    let provider = raw
+        .get("provider")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let format = raw
+        .get("format")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let source_type = raw
+        .pointer("/source/type")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    is_legacy_provider_or_format(provider, format)
+        || matches!(
+            source_type.to_ascii_lowercase().as_str(),
+            "local" | "hugging_face" | "huggingface"
+        )
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct RegistrySnapshot {
     version: u32,
@@ -53,11 +79,26 @@ impl ModelRegistry {
             tracing::warn!(path = %path.display(), "model registry file is empty — starting fresh");
             return Ok(Self::new());
         }
-        let snapshot: RegistrySnapshot =
+        let snapshot: serde_json::Value =
             serde_json::from_str(&raw).map_err(|e| ModelError::invalid(e.to_string()))?;
+        let entries = snapshot
+            .get("entries")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
         let mut registry = Self::new();
-        for entry in snapshot.entries {
-            registry.entries.insert(entry.id.clone(), entry);
+        for raw_entry in entries {
+            if entry_json_is_legacy(&raw_entry) {
+                continue;
+            }
+            match serde_json::from_value::<ModelEntry>(raw_entry) {
+                Ok(entry) => {
+                    registry.entries.insert(entry.id.clone(), entry);
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "skipping unreadable model registry entry");
+                }
+            }
         }
         Ok(registry)
     }

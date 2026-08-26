@@ -21,7 +21,6 @@ pub struct RuntimeHealthReport {
     pub latency_ms: u64,
     pub memory_bytes: Option<u64>,
     pub gpu_memory_bytes: Option<u64>,
-    pub model_loaded: bool,
     pub message: String,
 }
 
@@ -35,10 +34,7 @@ pub struct RuntimeStatusSnapshot {
     pub install_path: Option<String>,
     pub installed: bool,
     pub verified: bool,
-    pub binary_available: bool,
     pub base_url: String,
-    pub model_loaded: bool,
-    pub loaded_model_path: Option<String>,
     pub message: String,
     pub requires_attention: bool,
     pub last_error: Option<String>,
@@ -126,7 +122,7 @@ impl RuntimeManager {
         }
 
         self.lifecycle = RuntimeLifecycleState::Installed;
-        self.log("info", "runtime host ready (remote providers; no local GGUF)")
+        self.log("info", "runtime host ready (remote providers / Ollama HTTP)")
             .await;
         Ok(())
     }
@@ -207,41 +203,6 @@ impl RuntimeManager {
         }
     }
 
-    pub fn on_model_load_started(&mut self) {
-        self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Starting);
-    }
-
-    pub fn on_model_load_finished(&mut self, ok: bool) {
-        self.lifecycle = if ok {
-            transition(self.lifecycle, RuntimeLifecycleState::Running)
-        } else {
-            transition(self.lifecycle, RuntimeLifecycleState::Failed)
-        };
-    }
-
-    pub async fn load_model_at_path(
-        &mut self,
-        _model_path: &std::path::Path,
-    ) -> RuntimeResult<()> {
-        Err(RuntimeError::BackendUnavailable(
-            "local embedded runtime removed — use a remote provider or Ollama over HTTP".into(),
-        ))
-    }
-
-    pub async fn is_same_model_loaded_at(&self, _model_path: &std::path::Path) -> bool {
-        false
-    }
-
-    pub async fn is_model_loaded_at(&mut self, _model_path: &std::path::Path) -> bool {
-        false
-    }
-
-    pub async fn unload_loaded_model(&mut self) -> RuntimeResult<()> {
-        Err(RuntimeError::BackendUnavailable(
-            "local embedded runtime removed — no in-process model is loaded".into(),
-        ))
-    }
-
     pub async fn stop_runtime(&mut self) -> RuntimeResult<()> {
         self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Stopping);
         self.supervisor.stop().await?;
@@ -316,7 +277,6 @@ impl RuntimeManager {
             latency_ms,
             memory_bytes: None,
             gpu_memory_bytes: None,
-            model_loaded: false,
             message,
         };
         self.last_health = Some(report.clone());
@@ -337,10 +297,7 @@ impl RuntimeManager {
             install_path: None,
             installed,
             verified: installed,
-            binary_available: false,
             base_url: "remote".into(),
-            model_loaded: false,
-            loaded_model_path: None,
             message: self.status_message(),
             requires_attention: self.requires_attention(),
             last_error: self.last_error.clone(),
