@@ -176,7 +176,7 @@ export function ThirdPartyModelsPanel({
     setError(null);
     setTesting(true);
     try {
-      const result = await testThirdPartyModelConnectivity(form);
+      const result = await testThirdPartyModelConnectivity(form, editingModelId);
       const toast = connectivityToast(result);
       notify(toast.message, toast.type);
       if (result.ok) {

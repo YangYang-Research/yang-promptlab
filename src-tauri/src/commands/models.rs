@@ -232,6 +232,13 @@ fn looks_like_openrouter_model(model: &str) -> bool {
     model.contains('/') && !model.contains(' ')
 }
 
+fn third_party_requires_api_key(provider: &str) -> bool {
+    matches!(
+        provider.trim().to_ascii_lowercase().as_str(),
+        "nvidia" | "openai" | "anthropic" | "gemini" | "openrouter" | "azure" | "bedrock"
+    )
+}
+
 fn normalize_third_party_provider(
     provider: &str,
     base_url: Option<&str>,
@@ -384,6 +391,12 @@ async fn run_third_party_connectivity_test(
         &secrets,
     )?;
     apply_credential_fields(&mut request, &credentials);
+
+    if third_party_requires_api_key(&request.provider) && credentials.api_key.trim().is_empty() {
+        return Err(CommandError::invalid_input(
+            "API key is required — re-enter it on the form, or save the model first so PromptLab can reuse the stored key",
+        ));
+    }
 
     let entry = staging_remote_entry(&request, metadata.as_ref())?;
     let remote = InferenceRuntimeManager::remote_settings_from_entry(
@@ -695,19 +708,33 @@ pub async fn models_test_third_party(
     let provider = request.provider.trim().to_string();
     let model = request.model.trim().to_string();
     with_model_operation_timeout(async {
-        let model_id = remote_entry_id(&provider, &model);
-        let metadata = {
+        let normalized_provider = normalize_third_party_provider(
+            request.provider.trim(),
+            request.base_url.as_deref(),
+            Some(request.model.trim()),
+        );
+        let new_id = remote_entry_id(&normalized_provider, request.model.trim());
+        let existing_id = request
+            .existing_model_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let (metadata, persist_existing) = {
             let manager = state.model_manager().lock().await;
-            manager
-                .get_model(&model_id)
-                .map(|entry| entry.metadata.clone())
+            let metadata = existing_id
+                .as_deref()
+                .and_then(|id| manager.get_model(id).map(|entry| entry.metadata.clone()))
+                .or_else(|| manager.get_model(&new_id).map(|entry| entry.metadata.clone()));
+            let persist_existing = manager.get_model(&new_id).is_some();
+            (metadata, persist_existing)
         };
         let result =
-            run_third_party_connectivity_test(state.inner(), request, metadata.clone()).await?;
-        if metadata.is_some() {
+            run_third_party_connectivity_test(state.inner(), request, metadata).await?;
+        if persist_existing {
             persist_third_party_model_connectivity(
                 state.inner(),
-                &model_id,
+                &new_id,
                 result.ok,
                 result.latency_ms,
             )

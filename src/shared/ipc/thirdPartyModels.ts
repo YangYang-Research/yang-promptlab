@@ -262,10 +262,11 @@ export function thirdPartyConnectionTestFingerprint(form: ThirdPartyModelForm): 
 
 export function testThirdPartyModelConnectivity(
   form: ThirdPartyModelForm,
+  existingModelId?: string | null,
 ): Promise<ThirdPartyModelConnectivityResult> {
   return withModelOperationTimeout(
     invokeCommand<ThirdPartyModelConnectivityResult>("models_test_third_party", {
-      request: thirdPartyModelToSaveRequest(form),
+      request: thirdPartyModelToSaveRequest(form, existingModelId),
     }),
     "Connection test",
   );
