@@ -1,11 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Instant;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::error::{PluginError, PluginResult};
 use crate::manifest::PluginManifest;

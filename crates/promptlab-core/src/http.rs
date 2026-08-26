@@ -49,7 +49,7 @@ impl HttpClientOptions {
 
 /// Apply proxy (or force direct) onto a [`ClientBuilder`].
 pub fn apply_proxy_settings(
-    mut builder: ClientBuilder,
+    builder: ClientBuilder,
     settings: &ProxySettings,
 ) -> PromptLabResult<ClientBuilder> {
     if !settings.enabled {

@@ -478,10 +478,6 @@ async fn runtime_model_testing_id(state: &AppState) -> Option<String> {
     state.runtime_model_testing_id().lock().await.clone()
 }
 
-pub(crate) async fn set_runtime_model_testing(state: &AppState, model_id: Option<String>) {
-    *state.runtime_model_testing_id().lock().await = model_id;
-}
-
 fn apply_model_loading_overlay(dto: &mut RuntimeConfigurationDto, loading_model_id: Option<&str>) {
     let Some(model_id) = loading_model_id else {
         return;
@@ -506,24 +502,6 @@ fn apply_model_testing_overlay(dto: &mut RuntimeConfigurationDto, testing_model_
     dto.model_test_in_progress = true;
     dto.status_label = "Verifying model".into();
     dto.settings.selected_model_id = Some(model_id.to_string());
-}
-
-/// Refresh the configuration cache while the runtime manager lock is already held.
-pub(crate) async fn prime_runtime_configuration_cache(
-    state: &AppState,
-    runtime_manager: &promptlab_runtime::RuntimeManager,
-) {
-    let models: Vec<ModelEntry> = {
-        let manager = state.model_manager().lock().await;
-        manager.list_models().into_iter().cloned().collect()
-    };
-    let config = {
-        let inference = state.inference_manager().lock().await;
-        inference.config().clone()
-    };
-    let inference_dto = config_to_dto(&config, &models);
-    let dto = assemble_runtime_configuration(&models, &config, &inference_dto, runtime_manager).await;
-    store_runtime_configuration_cache(state, &dto).await;
 }
 
 async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<RuntimeConfigurationDto> {

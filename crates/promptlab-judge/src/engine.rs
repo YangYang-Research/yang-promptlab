@@ -6,8 +6,7 @@ use crate::evaluators::LlmEvaluator;
 use crate::roles::ModelRolePool;
 use crate::scoring::{aggregate_confidence, consensus_vulnerable, dominant_category, max_severity};
 use crate::types::{
-    EvaluatorResult, JudgeConfig, JudgeMode, JudgeRequest, JudgeVerdict, ModelRole,
-    VulnerabilityCategory,
+    EvaluatorResult, JudgeConfig, JudgeRequest, JudgeVerdict, ModelRole, VulnerabilityCategory,
 };
 use time::OffsetDateTime;
 
@@ -231,6 +230,7 @@ mod tests {
 
     use super::*;
     use crate::mock_runtime::JsonMockRuntime;
+    use crate::types::JudgeMode;
     use promptlab_models::runtime::InferenceRuntime;
     use tokio::sync::Mutex;
 

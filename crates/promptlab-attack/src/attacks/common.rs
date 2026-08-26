@@ -1,8 +1,6 @@
 use regex::Regex;
 use serde_json::Value;
 
-use crate::types::AttackResponse;
-
 /// Extract assistant-visible text from common LLM JSON response shapes.
 pub fn extract_response_text(body: &str) -> String {
     if let Ok(value) = serde_json::from_str::<Value>(body) {
@@ -45,16 +43,6 @@ pub fn matching_indicators(text: &str, patterns: &[(&str, &str)]) -> Vec<String>
         .collect()
 }
 
-pub fn json_field_contains(body: &str, pointer: &str, needle: &str) -> bool {
-    let Ok(value) = serde_json::from_str::<Value>(body) else {
-        return false;
-    };
-    value
-        .pointer(pointer)
-        .and_then(|v| v.as_str())
-        .is_some_and(|s| s.to_lowercase().contains(&needle.to_lowercase()))
-}
-
 pub fn json_pointer_exists(body: &str, pointer: &str) -> bool {
     let Ok(value) = serde_json::from_str::<Value>(body) else {
         return false;
@@ -62,15 +50,6 @@ pub fn json_pointer_exists(body: &str, pointer: &str) -> bool {
     value
         .pointer(pointer)
         .is_some_and(|v| !v.is_null())
-}
-
-pub fn response_snippet(response: &AttackResponse, max_len: usize) -> String {
-    let text = extract_response_text(&response.body);
-    if text.len() <= max_len {
-        text
-    } else {
-        format!("{}…", &text[..max_len])
-    }
 }
 
 #[cfg(test)]

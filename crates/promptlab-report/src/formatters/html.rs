@@ -8,7 +8,7 @@ use crate::evidence::{
 };
 use crate::formatters::ReportFormatter;
 use crate::types::{
-    GeneratedReport, ReportFormat, ReportFinding, ReportInput, ReportKind, Severity,
+    GeneratedReport, ReportFormat, ReportFinding, ReportInput, ReportKind,
 };
 
 pub struct HtmlFormatter;
@@ -630,7 +630,7 @@ fn format_generated_at(at: time::OffsetDateTime) -> String {
         .unwrap_or_else(|_| at.to_offset(time::UtcOffset::UTC));
     local
         .format(
-            &time::format_description::parse(
+            &time::format_description::parse_borrowed::<2>(
                 "[year]-[month]-[day] [hour]:[minute]:[second] [offset_hour sign:mandatory]:[offset_minute]",
             )
             .expect("valid time format"),

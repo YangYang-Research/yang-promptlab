@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use time::OffsetDateTime;
 
 use crate::error::{ModelError, ModelResult};
-use crate::runtime::{infer_capabilities, infer_version};
+use crate::runtime::infer_capabilities;
 use crate::types::{ModelEntry, ModelFormat, ModelProvider, ModelSource};
 
 const REGISTRY_VERSION: u32 = 1;

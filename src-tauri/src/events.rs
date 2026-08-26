@@ -188,7 +188,7 @@ impl ScanProgressEmitter {
         self.emit(ScanProgressLevel::Error, message);
     }
 
-    pub fn detailed(&self, level: ScanProgressLevel, event: ScanProgressEvent) {
+    pub fn detailed(&self, _level: ScanProgressLevel, event: ScanProgressEvent) {
         emit_scan_progress(&self.app, event);
     }
 

@@ -180,9 +180,6 @@ fn third_party_edit_dto_from_entry(entry: &ModelEntry) -> Result<ThirdPartyModel
             )
             .is_some(),
         }),
-        _ => Err(CommandError::invalid_input(
-            "edit form only applies to third-party models",
-        )),
     }
 }
 
@@ -208,9 +205,6 @@ fn third_party_request_from_entry(
             mark_verified: false,
             test_latency_ms: None,
         }),
-        _ => Err(CommandError::invalid_input(
-            "connection test only applies to third-party models",
-        )),
     }
 }
 
@@ -767,7 +761,10 @@ pub(crate) async fn test_third_party_model_connection(
         let request = third_party_request_from_entry(entry)?;
         (request, metadata)
     };
-    let result = run_third_party_connectivity_test(state, request, Some(metadata)).await?;
+    *state.runtime_model_testing_id().lock().await = Some(model_id.to_string());
+    let result = run_third_party_connectivity_test(state, request, Some(metadata)).await;
+    *state.runtime_model_testing_id().lock().await = None;
+    let result = result?;
     persist_third_party_model_connectivity(state, model_id, result.ok, result.latency_ms).await?;
     Ok(result)
 }

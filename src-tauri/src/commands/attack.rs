@@ -736,7 +736,7 @@ struct CategoryJudgeEnv<'a> {
 
 async fn judge_single_attempt(
     env: &CategoryJudgeEnv<'_>,
-    seq: usize,
+    _seq: usize,
     attempt: PayloadAttempt,
     accum: &mut CategoryJudgeAccum,
 ) -> CommandResult<()> {
