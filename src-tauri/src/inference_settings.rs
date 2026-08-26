@@ -113,7 +113,6 @@ pub fn reconcile_config(
     mut config: AiRuntimeConfiguration,
     models: &[ModelEntry],
 ) -> AiRuntimeConfiguration {
-    // Product is remote-only — always normalize away local / unset modes.
     config.mode = InferenceMode::ThirdParty;
     config.initialized = true;
     if config.runtime == "local" || config.runtime.is_empty() {

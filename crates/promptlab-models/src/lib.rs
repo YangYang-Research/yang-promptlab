@@ -1,7 +1,6 @@
 //! PromptLab model registry and vault helpers.
 //!
 //! Remote/third-party provider registry and Ollama-over-HTTP smoke tests.
-//! Local embedded inference is removed — Remote + Ollama HTTP only.
 
 pub mod error;
 pub mod hardware;

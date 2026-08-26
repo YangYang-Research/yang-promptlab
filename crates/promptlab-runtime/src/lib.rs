@@ -1,4 +1,4 @@
-//! Remote-oriented AI runtime host — model provider, lifecycle, and remote-only stubs.
+//! AI runtime host — model provider and lifecycle.
 
 pub mod config;
 pub mod embedded;

@@ -115,14 +115,13 @@ impl RuntimeManager {
             self.supervisor.set_hardware_profile(profile);
         }
 
-        // Drop leftover local-runtime install marker if present.
         let legacy_manifest = self.data_dir.join("runtime").join("manifest.json");
         if legacy_manifest.is_file() {
             let _ = tokio::fs::remove_file(&legacy_manifest).await;
         }
 
         self.lifecycle = RuntimeLifecycleState::Installed;
-        self.log("info", "runtime host ready (remote providers / Ollama HTTP)")
+        self.log("info", "runtime host ready")
             .await;
         Ok(())
     }
@@ -263,7 +262,7 @@ impl RuntimeManager {
         let runtime_alive = self.supervisor.is_process_alive_async().await;
 
         let message = if healthy {
-            "runtime host ready (remote-only)".into()
+            "runtime host ready".into()
         } else if runtime_alive {
             "runtime host starting".into()
         } else {
@@ -311,7 +310,7 @@ impl RuntimeManager {
     fn status_message(&self) -> String {
         match self.lifecycle {
             RuntimeLifecycleState::Running => {
-                "Runtime host ready — use a remote provider or Ollama over HTTP".into()
+                "Runtime host ready".into()
             }
             RuntimeLifecycleState::Installed => {
                 "Runtime host ready — configure a remote model".into()

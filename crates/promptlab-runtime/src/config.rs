@@ -5,7 +5,7 @@ use crate::paths::models_dir;
 /// Configuration for the remote-oriented runtime host.
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
-    /// Directory for model vault files (legacy path retained for layout).
+    /// Directory under the app data root for model-related files.
     pub models_dir: PathBuf,
 }
 

@@ -204,7 +204,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                     if after != before {
                         *inference.config_mut() = after;
                         if let Err(err) = inference.save().await {
-                            tracing::warn!(error = %err, "failed to persist remote-only runtime config migration");
+                            tracing::warn!(error = %err, "failed to persist runtime config migration");
                         }
                     }
                 }

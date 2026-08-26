@@ -5,10 +5,8 @@ use crate::models::{AttackRequest, HttpMethod, NormalizedResponse};
 use crate::providers::HttpHarness;
 use crate::traits::Harness;
 
-/// OpenAI-compatible chat completions for llama.cpp / Ollama **attack targets**.
-///
-/// Covers llama-server and Ollama `/v1` endpoints discovered during recon — not
-/// product-side embedded inference.
+/// OpenAI-compatible chat completions for llama.cpp / Ollama attack targets
+/// (llama-server and Ollama `/v1` endpoints).
 #[derive(Clone)]
 pub struct LlamaHarness {
     inner: HttpHarness,

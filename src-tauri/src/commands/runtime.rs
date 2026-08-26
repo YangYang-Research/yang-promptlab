@@ -586,7 +586,7 @@ pub async fn runtime_set_inference_route(
 
     if route != InferenceMode::ThirdParty {
         return Err(CommandError::invalid_input(
-            "only remote / third-party inference is supported — local embedded runtime has been removed",
+            "only remote / third-party inference is supported",
         ));
     }
 
@@ -707,7 +707,7 @@ fn map_runtime_err(err: promptlab_runtime::RuntimeError) -> CommandError {
         promptlab_runtime::RuntimeError::Unavailable
         | promptlab_runtime::RuntimeError::BackendUnavailable(_) => {
             CommandError::invalid_input(
-                "local embedded runtime removed — configure a remote AI provider or Ollama over HTTP",
+                "configure a remote AI provider or Ollama over HTTP",
             )
         }
         other => CommandError::from(promptlab_core::PromptLabError::internal(other.to_string())),

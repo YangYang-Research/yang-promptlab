@@ -34,7 +34,6 @@ impl InferenceRuntimeManager {
 
     pub async fn load(&mut self) -> InferenceResult<()> {
         self.config = load_config(&self.data_dir).await?;
-        // Normalize leftover local runtime labels after `"local"` → ThirdParty deserialize.
         if self.config.runtime == "local" || self.config.runtime == "embedded" {
             if self.config.provider == InferenceProvider::Ollama {
                 self.config.runtime = "ollama".into();

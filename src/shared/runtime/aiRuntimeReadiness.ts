@@ -24,7 +24,7 @@ export async function checkAiRuntimeReadiness(): Promise<AiRuntimeReadiness> {
         ready: false,
         configuration,
         message:
-          "AI Runtime is remote-only. Add a remote provider model in Models, then select it in AI Runtime.",
+          "Add a remote provider model in Models, then select it in AI Runtime.",
       };
     }
 

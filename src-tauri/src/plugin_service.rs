@@ -1,4 +1,4 @@
-//! Plugin manager bootstrap (leftover — no longer seeds or creates a plugins dir).
+//! Plugin manager bootstrap.
 
 use std::path::{Path, PathBuf};
 

@@ -53,7 +53,7 @@ export function AIRuntimePage() {
     );
   }, []);
 
-  // Persist remote-only defaults for leftover unset configs.
+  // Default unset configs to third-party route.
   useEffect(() => {
     if (!backendConnected || configLoading || !configuration) return;
     if (configuration.mode === "not_configured") {

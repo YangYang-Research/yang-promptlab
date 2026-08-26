@@ -26,7 +26,7 @@ impl RuntimeProcessState {
     }
 }
 
-/// Thin runtime host — remote providers / Ollama HTTP only.
+/// Runtime host for model provider lifecycle.
 pub struct RuntimeSupervisor {
     config: RuntimeConfig,
     state: RuntimeProcessState,
@@ -79,7 +79,7 @@ impl RuntimeSupervisor {
             .await
             .map_err(|err| RuntimeError::NativeRuntimeError(err.to_string()))?;
         self.state = RuntimeProcessState::Running;
-        info!("runtime host ready (remote providers / Ollama HTTP)");
+        info!("runtime host ready");
         Ok(())
     }
 

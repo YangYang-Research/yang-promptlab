@@ -8,7 +8,6 @@ use crate::error::{InferenceError, InferenceResult};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InferenceMode {
-    /// Accepts legacy persisted `"local"` configs via serde alias.
     #[serde(alias = "local")]
     ThirdParty,
     /// Rule-based evaluation only — no LLM.

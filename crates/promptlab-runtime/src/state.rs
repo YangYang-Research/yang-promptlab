@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Full lifecycle states for the embedded inference runtime.
+/// Runtime lifecycle states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeLifecycleState {

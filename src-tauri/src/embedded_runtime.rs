@@ -20,7 +20,7 @@ pub async fn bootstrap_runtime_manager(
         Ok(()) => {
             info!(
                 state = manager.lifecycle_state().as_str(),
-                "AI runtime configuration loaded (remote-only)"
+                "AI runtime configuration loaded"
             );
             Ok((manager, false))
         }
