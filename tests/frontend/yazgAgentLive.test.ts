@@ -15,21 +15,36 @@ function baseConfig(
     statusLabel: "Live",
     connectivity: "Connected",
     lastHealthCheck: null,
+    modelLoadInProgress: false,
+    modelTestInProgress: false,
     settings: {
+      route: "third_party",
       initialized: true,
       selectedModelId: "model-1",
       selectedModelName: "gpt-4o-mini",
+      thirdPartyAvailable: true,
       thirdPartyModels: [],
+      message: "",
     },
     runtimeStatus: {
-      modelLoaded: false,
-      requiresAttention: false,
-      message: "",
-      loadedModelPath: null,
+      lifecycleState: "running",
       runtimeVersion: null,
+      backend: "remote",
+      platform: null,
+      installPath: null,
+      installed: true,
+      verified: true,
+      binaryAvailable: false,
+      baseUrl: "",
+      modelLoaded: false,
+      loadedModelPath: null,
+      message: "",
+      requiresAttention: false,
+      lastError: null,
+      recommendedRuntime: null,
     },
     ...overrides,
-  } as RuntimeConfigurationDto;
+  };
 }
 
 describe("isYazgAgentLive", () => {
@@ -40,26 +55,24 @@ describe("isYazgAgentLive", () => {
         baseConfig({
           modelName: null,
           settings: {
-            ...baseConfig().settings,
+            route: "third_party",
+            initialized: true,
             selectedModelId: null,
             selectedModelName: null,
+            thirdPartyAvailable: false,
+            thirdPartyModels: [],
+            message: "",
           },
         }),
       ),
     ).toBe(false);
   });
 
-  it("is true for remote with model and live connectivity", () => {
+  it("is true when third-party connectivity is live", () => {
     expect(isYazgAgentLive(baseConfig())).toBe(true);
   });
 
-  it("is false for legacy local mode", () => {
-    expect(
-      isYazgAgentLive(
-        baseConfig({
-          mode: "local",
-        }),
-      ),
-    ).toBe(false);
+  it("is false for leftover local mode", () => {
+    expect(isYazgAgentLive(baseConfig({ mode: "local" }))).toBe(false);
   });
 });

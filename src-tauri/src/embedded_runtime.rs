@@ -8,8 +8,6 @@ use promptlab_storage::Database;
 use tauri::AppHandle;
 use tracing::{info, warn};
 
-use crate::state::AppState;
-
 /// Load runtime configuration from disk at app startup. Does not install or start.
 pub async fn bootstrap_runtime_manager(
     _app: &AppHandle,
@@ -45,9 +43,4 @@ pub async fn detect_hardware_on_startup(manager: &mut RuntimeManager) {
         }
         Err(err) => warn!(error = %err, "hardware profile load on startup failed"),
     }
-}
-
-/// No-op: embedded GGUF / llama.cpp auto-resume has been removed.
-pub async fn resume_local_runtime_on_startup(_app: &AppHandle, _state: &AppState) {
-    info!("local GGUF runtime auto-resume skipped (embedded llama.cpp removed)");
 }

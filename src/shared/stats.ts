@@ -62,8 +62,8 @@ export function computeDashboardStats(
     openFindings: findings.filter((f) => f.status === "open" || f.status === "confirmed").length,
     criticalFindings: findings.filter((f) => f.severity === "critical").length,
     runningScans: scans.filter((s) => s.status === "running").length,
-    installedModels: models.filter((m) => m.status === "installed").length,
-    downloadingModels: models.filter((m) => m.status === "downloading").length,
+    installedModels: models.filter((m) => m.status === "installed" || m.status === "available").length,
+    downloadingModels: 0,
   };
 }
 

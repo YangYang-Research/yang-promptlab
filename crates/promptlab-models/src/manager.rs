@@ -9,7 +9,7 @@ use crate::hardware::detect_hardware;
 use crate::registry::ModelRegistry;
 use crate::runtime::LocalInferenceEngine;
 use crate::types::{
-    ChatMessage, ChatRequest, HardwareProfile, InferenceRequest, ModelCatalogEntry, ModelEntry,
+    ChatMessage, ChatRequest, HardwareProfile, InferenceRequest, ModelEntry,
     ModelProvider, VerificationResult,
 };
 use crate::verify::VerificationEngine;
@@ -90,11 +90,6 @@ impl LocalModelManager {
             .await
             .map_err(ModelError::from)?;
         Ok(())
-    }
-
-    /// Built-in GGUF catalog removed — always empty (Remote-only).
-    pub fn browse_catalog(&self) -> &[ModelCatalogEntry] {
-        &[]
     }
 
     /// Register or update a third-party cloud model in the vault registry.

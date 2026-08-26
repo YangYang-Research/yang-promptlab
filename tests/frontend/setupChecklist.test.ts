@@ -7,10 +7,9 @@ describe("deriveSetupSteps", () => {
     const steps = deriveSetupSteps({
       mode: "third_party",
       initialized: true,
-      localModelCount: 0,
+      registeredModelCount: 0,
       configuredThirdPartyCount: 0,
       selectedModelId: null,
-      modelLoaded: false,
       projectCount: 0,
       scanCount: 0,
     });
@@ -25,10 +24,9 @@ describe("deriveSetupSteps", () => {
     const steps = deriveSetupSteps({
       mode: "third_party",
       initialized: true,
-      localModelCount: 0,
+      registeredModelCount: 0,
       configuredThirdPartyCount: 1,
       selectedModelId: "m1",
-      modelLoaded: false,
       projectCount: 1,
       scanCount: 1,
     });
@@ -41,10 +39,9 @@ describe("deriveSetupSteps", () => {
     const afterAdd = deriveSetupSteps({
       mode: "third_party",
       initialized: true,
-      localModelCount: 0,
+      registeredModelCount: 0,
       configuredThirdPartyCount: 1,
       selectedModelId: null,
-      modelLoaded: false,
       projectCount: 0,
       scanCount: 0,
     });
@@ -56,10 +53,9 @@ describe("deriveSetupSteps", () => {
     const steps = deriveSetupSteps({
       mode: "third_party",
       initialized: true,
-      localModelCount: 0,
+      registeredModelCount: 0,
       configuredThirdPartyCount: 1,
       selectedModelId: "m1",
-      modelLoaded: false,
       projectCount: 1,
       scanCount: 0,
     });
@@ -71,10 +67,9 @@ describe("deriveSetupSteps", () => {
     const steps = deriveSetupSteps({
       mode: "third_party",
       initialized: true,
-      localModelCount: 0,
+      registeredModelCount: 0,
       configuredThirdPartyCount: 1,
       selectedModelId: "gpt",
-      modelLoaded: false,
       projectCount: 1,
       scanCount: 1,
     });

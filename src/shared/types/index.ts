@@ -126,8 +126,7 @@ export type LocalModel = {
   provider: string;
   sizeGb: number;
   status: ModelStatus;
-  downloadProgress: number;
-  quant: string;
+  format: string;
   path: string | null;
   sha256: string | null;
 };

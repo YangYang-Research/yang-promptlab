@@ -17,10 +17,9 @@ function emptyProgress(): SetupProgressInput {
   return {
     mode: "not_configured",
     initialized: false,
-    localModelCount: 0,
+    registeredModelCount: 0,
     configuredThirdPartyCount: 0,
     selectedModelId: null,
-    modelLoaded: false,
     projectCount: 0,
     scanCount: 0,
   };
@@ -43,7 +42,6 @@ export function useSetupChecklist(): {
         ...prev,
         mode: "not_configured",
         initialized: false,
-        modelLoaded: false,
       }));
       return;
     }
@@ -53,11 +51,10 @@ export function useSetupChecklist(): {
       setRuntime({
         mode: configuration.mode,
         initialized: settings.initialized,
-        localModelCount: Math.max(settings.localModels.length, models.length),
+        registeredModelCount: Math.max(settings.thirdPartyModels.length, models.length),
         configuredThirdPartyCount: settings.thirdPartyModels.filter((m) => m.configured)
           .length,
         selectedModelId: settings.selectedModelId,
-        modelLoaded: configuration.runtimeStatus.modelLoaded,
         projectCount: projects.length,
         scanCount: scans.length,
       });
@@ -66,7 +63,7 @@ export function useSetupChecklist(): {
         ...prev,
         projectCount: projects.length,
         scanCount: scans.length,
-        localModelCount: Math.max(prev.localModelCount, models.length),
+        registeredModelCount: Math.max(prev.registeredModelCount, models.length),
       }));
     }
   }, [backendConnected, models.length, projects.length, scans.length]);
@@ -97,7 +94,7 @@ export function useSetupChecklist(): {
         ...runtime,
         projectCount: projects.length,
         scanCount: scans.length,
-        localModelCount: Math.max(runtime.localModelCount, models.length),
+        registeredModelCount: Math.max(runtime.registeredModelCount, models.length),
       }),
     [runtime, projects.length, scans.length, models.length],
   );

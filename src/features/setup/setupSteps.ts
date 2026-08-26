@@ -15,10 +15,9 @@ export type SetupStep = {
 export type SetupProgressInput = {
   mode: "not_configured" | "third_party" | "local";
   initialized: boolean;
-  localModelCount: number;
+  registeredModelCount: number;
   configuredThirdPartyCount: number;
   selectedModelId: string | null;
-  modelLoaded: boolean;
   projectCount: number;
   scanCount: number;
 };
@@ -50,7 +49,8 @@ const STEP_META: Array<{
 ];
 
 export function deriveSetupSteps(input: SetupProgressInput): SetupStep[] {
-  const hasRemoteModel = input.configuredThirdPartyCount > 0 || input.localModelCount > 0;
+  const hasRemoteModel =
+    input.configuredThirdPartyCount > 0 || input.registeredModelCount > 0;
   const modelSelected =
     Boolean(input.selectedModelId) && input.configuredThirdPartyCount > 0;
 

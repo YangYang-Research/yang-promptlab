@@ -19,7 +19,6 @@ pub mod embedded_runtime;
 pub mod plugin_interceptor;
 pub mod plugin_service;
 pub mod plugin_transport;
-pub mod runtime_watch;
 pub mod session_auth;
 pub mod scan_console_log;
 pub mod scan_playbook;
@@ -209,7 +208,6 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                embedded_runtime::resume_local_runtime_on_startup(&app_handle, state.inner()).await;
                 commands::runtime::startup_connectivity_check(state.inner()).await;
             });
 
@@ -299,7 +297,6 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::models::models_list,
             commands::models::models_registry_info,
             commands::models::models_registry_diagnostics,
-            commands::models::models_browse,
             commands::models::models_save_third_party,
             commands::models::models_third_party_edit_form,
             commands::models::models_test_third_party,

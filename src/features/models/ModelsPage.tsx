@@ -179,13 +179,6 @@ export function ModelsPage() {
 
   async function handleTest(model: ModelEntryDto) {
     setError(null);
-    if (!isThirdPartyModel(model)) {
-      notify(
-        "Local GGUF models are no longer supported — configure a remote provider instead",
-        "error",
-      );
-      return;
-    }
     setModelBusy(model.id, true);
     try {
       const result = await testModelConnection(model.id);
@@ -274,9 +267,6 @@ export function ModelsPage() {
         <ModelRegistrySection
           models={remoteModels}
           isModelBusy={isModelBusy}
-          runtimeModelLoading={false}
-          runtimeModelTesting={false}
-          runtimeTestingModelId={null}
           onTest={(model) => void handleTest(model)}
           onEdit={(model) => void handleEdit(model)}
           onRemove={(modelId) => void handleRemove(modelId)}

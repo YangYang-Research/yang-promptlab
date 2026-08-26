@@ -5,11 +5,8 @@ use std::time::Duration;
 use promptlab_auth::SecretStore;
 use promptlab_core::{PromptLabError, LogCategory};
 use promptlab_models::{
-    ModelCatalogEntry, ModelEntry, ModelFormat, ModelProvider, ModelSource, VerificationResult,
-    remote_entry_id,
+    ModelEntry, ModelFormat, ModelProvider, ModelSource, VerificationResult, remote_entry_id,
 };
-use promptlab_inference::prompts::PromptRegistry;
-use promptlab_runtime::{InferRequest, RuntimeError};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tauri::State;
@@ -66,27 +63,6 @@ pub struct ModelCapabilitiesDto {
     pub chat: bool,
     pub completion: bool,
     pub embeddings: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelCatalogEntryDto {
-    pub id: String,
-    pub name: String,
-    pub provider: String,
-    pub version: String,
-    pub description: String,
-    pub purpose: String,
-    pub recommended: bool,
-    pub size_bytes: Option<u64>,
-    pub size_gb: Option<f64>,
-    pub quant: Option<String>,
-    pub capabilities: ModelCapabilitiesDto,
-    pub engine: String,
-    pub format: String,
-    pub download_url: Option<String>,
-    pub sha256: Option<String>,
-    pub size_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -539,37 +515,6 @@ pub(crate) fn entry_to_dto(entry: &ModelEntry, _vault: &std::path::Path) -> Mode
     }
 }
 
-fn catalog_to_dto(entry: &ModelCatalogEntry) -> ModelCatalogEntryDto {
-    ModelCatalogEntryDto {
-        id: entry.id.clone(),
-        name: entry.name.clone(),
-        provider: if entry.provider_label.trim().is_empty() {
-            entry.provider.as_str().into()
-        } else {
-            entry.provider_label.clone()
-        },
-        version: entry.version.clone(),
-        description: entry.description.clone(),
-        purpose: entry.purpose.clone(),
-        recommended: entry.recommended,
-        size_bytes: entry.size_bytes,
-        size_gb: entry
-            .size_bytes
-            .map(|b| (b as f64) / (1024.0 * 1024.0 * 1024.0)),
-        quant: entry.quant.clone(),
-        capabilities: ModelCapabilitiesDto {
-            chat: entry.capabilities.chat,
-            completion: entry.capabilities.completion,
-            embeddings: entry.capabilities.embeddings,
-        },
-        engine: entry.engine.clone(),
-        format: entry.format.clone(),
-        download_url: entry.download_url.clone(),
-        sha256: entry.sha256.clone(),
-        size_label: entry.size_label.clone(),
-    }
-}
-
 #[tauri::command]
 pub async fn models_list(state: State<'_, AppState>) -> CommandResult<Vec<ModelEntryDto>> {
     models_list_op(state.inner()).await
@@ -619,20 +564,6 @@ pub async fn models_registry_diagnostics(
     state: State<'_, AppState>,
 ) -> CommandResult<ModelRegistryDiagnosticsDto> {
     models_registry_diagnostics_op(state.inner())
-}
-
-#[tauri::command]
-pub async fn models_browse(state: State<'_, AppState>) -> CommandResult<Vec<ModelCatalogEntryDto>> {
-    models_browse_op(state.inner()).await
-}
-
-pub async fn models_browse_op(state: &AppState) -> CommandResult<Vec<ModelCatalogEntryDto>> {
-    let manager = state.model_manager().lock().await;
-    Ok(manager
-        .browse_catalog()
-        .iter()
-        .map(catalog_to_dto)
-        .collect())
 }
 
 #[tauri::command]
@@ -909,24 +840,8 @@ pub async fn models_verify(
         .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 
-fn runtime_unavailable_error() -> CommandError {
-    CommandError::invalid_input(
-        "embedded libllama engine is unavailable — reinitialize the engine from AI Runtime",
-    )
-}
-
-fn map_runtime_err(err: RuntimeError) -> CommandError {
-    match err {
-        RuntimeError::Unavailable => runtime_unavailable_error(),
-        other => CommandError::from(PromptLabError::internal(other.to_string())),
-    }
-}
-
-fn map_runtime_test_error(err: RuntimeError, _supervisor: &promptlab_runtime::RuntimeSupervisor) -> CommandError {
-    match err {
-        RuntimeError::Unavailable => runtime_unavailable_error(),
-        other => CommandError::from(PromptLabError::internal(other.to_string())),
-    }
+fn map_model_err(err: promptlab_models::ModelError) -> CommandError {
+    CommandError::from(PromptLabError::internal(err.to_string()))
 }
 
 #[tauri::command]
@@ -936,26 +851,24 @@ pub async fn models_test_inference(
 ) -> CommandResult<ModelInferenceTestResult> {
     let entry = {
         let manager = state.model_manager().lock().await;
-        let entry = manager
+        manager
             .get_model(&model_id)
-            .ok_or_else(|| CommandError::invalid_input(format!("model not found: {model_id}")))?;
-
-        if entry.provider == ModelProvider::Remote {
-            return Err(CommandError::invalid_input(
-                "use Test Connection for third-party cloud models",
-            ));
-        }
-
-        if !entry.file_path.exists() {
-            return Err(CommandError::invalid_input(format!(
-                "model file missing: {}",
-                entry.file_path.display()
-            )));
-        }
-        entry.clone()
+            .ok_or_else(|| CommandError::invalid_input(format!("model not found: {model_id}")))?
+            .clone()
     };
 
-    let file_path = entry.file_path.clone();
+    if entry.provider == ModelProvider::Remote {
+        return Err(CommandError::invalid_input(
+            "use Test Connection for third-party cloud models",
+        ));
+    }
+
+    if entry.provider != ModelProvider::Ollama {
+        return Err(CommandError::invalid_input(
+            "embedded GGUF / llama.cpp runtime has been removed — use a remote provider or Ollama over HTTP",
+        ));
+    }
+
     let use_chat = entry.capabilities.chat;
 
     if let Some(testing) = state.runtime_model_testing_id().lock().await.clone() {
@@ -968,66 +881,21 @@ pub async fn models_test_inference(
 
     crate::commands::runtime::set_runtime_model_testing(state.inner(), Some(model_id.clone())).await;
     let test_result = with_model_operation_timeout(async {
-        let need_load = {
-            let runtime_mgr = state.runtime_manager().lock().await;
-            !runtime_mgr.is_same_model_loaded_at(&file_path).await
-        };
-
-        if need_load {
-            if state
-                .runtime_model_loading_id()
-                .lock()
-                .await
-                .as_deref()
-                == Some(model_id.as_str())
-            {
-                crate::commands::runtime::wait_for_runtime_model_load(
-                    state.inner(),
-                    &model_id,
-                    &file_path,
-                )
-                .await
-                .map_err(map_runtime_err)?;
-            } else {
-                let mut runtime_mgr = state.runtime_manager().lock().await;
-                if !runtime_mgr.supervisor().runtime_available() {
-                    return Err(runtime_unavailable_error());
-                }
-                crate::commands::runtime::load_model_with_loading_cache(
-                    state.inner(),
-                    &mut runtime_mgr,
-                    &file_path,
-                    &model_id,
-                )
-                .await
-                .map_err(|err| map_runtime_test_error(err, runtime_mgr.supervisor()))?;
-                runtime_mgr.sync_lifecycle_from_supervisor();
-            }
-        }
-
-        let runtime_mgr = state.runtime_manager().lock().await;
-        if !runtime_mgr.supervisor().runtime_available() {
-            return Err(runtime_unavailable_error());
-        }
-
-        let prompt = format!(
-            "{}\n\n{}",
-            PromptRegistry::health_check_system(),
-            PromptRegistry::health_check_user()
-        );
+        let manager = state.model_manager().lock().await;
         let started = std::time::Instant::now();
         promptlab_inference::record_sent();
-        let response = runtime_mgr
-            .supervisor()
-            .infer(InferRequest {
-                prompt,
-                max_tokens: 32,
-                temperature: 0.0,
-            })
-            .await
-            .map_err(|err| map_runtime_test_error(err, runtime_mgr.supervisor()))?;
+        let sample = if use_chat {
+            manager
+                .test_chat(&model_id)
+                .await
+                .map_err(map_model_err)?
+        } else {
+            manager
+                .test_inference(&model_id)
+                .await
+                .map_err(map_model_err)?
+        };
         promptlab_inference::record_received();
-        let sample = response.text;
         let ok = !sample.trim().is_empty();
 
         Ok(ModelInferenceTestResult {

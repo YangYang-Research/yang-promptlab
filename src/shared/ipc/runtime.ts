@@ -31,14 +31,6 @@ export type RuntimeStatusDto = {
   recommendedRuntime: string | null;
 };
 
-export type RuntimeInstallProgressEvent = {
-  step: string;
-  message: string;
-  phase: number;
-};
-
-export const RUNTIME_INSTALL_PROGRESS_EVENT = "runtime-install-progress";
-
 export type RuntimeHardwareDto = {
   os: string;
   arch: string;
@@ -67,17 +59,6 @@ export type RuntimeHealthReport = {
   message: string;
 };
 
-export type RuntimeBenchmarkResult = {
-  ok: boolean;
-  latencyMs: number;
-  tokensPerSec: number;
-  tokensPredicted: number;
-  memoryBytes: number | null;
-  gpuMemoryBytes: number | null;
-  message: string;
-  measuredAt: string;
-};
-
 export type RuntimeLogEntry = {
   timestamp: string;
   level: string;
@@ -101,9 +82,7 @@ export type AiInferenceSettingsDto = {
   selectedModelId: string | null;
   selectedModelName: string | null;
   thirdPartyAvailable: boolean;
-  localAvailable: boolean;
   thirdPartyModels: AiInferenceModelOptionDto[];
-  localModels: AiInferenceModelOptionDto[];
   message: string;
   connectivityTestOk?: boolean | null;
   connectivityTestDetail?: string | null;
@@ -143,28 +122,8 @@ export function setRuntimeInferenceRoute(
   return invokeCommand<AiInferenceSettingsDto>("runtime_set_inference_route", { request });
 }
 
-export function getRuntimeStatus(): Promise<RuntimeStatusDto> {
-  return invokeCommand<RuntimeStatusDto>("runtime_status");
-}
-
 export function resetRuntimeConfig(): Promise<RuntimeStatusDto> {
   return invokeCommand<RuntimeStatusDto>("runtime_delete");
-}
-
-export function startRuntime(): Promise<RuntimeStatusDto> {
-  return invokeCommand<RuntimeStatusDto>("runtime_start");
-}
-
-export function stopRuntime(): Promise<RuntimeStatusDto> {
-  return invokeCommand<RuntimeStatusDto>("runtime_stop");
-}
-
-export function restartRuntime(): Promise<RuntimeStatusDto> {
-  return invokeCommand<RuntimeStatusDto>("runtime_restart");
-}
-
-export function getRuntimeHealth(): Promise<RuntimeHealthReport> {
-  return invokeCommand<RuntimeHealthReport>("runtime_health");
 }
 
 export type RuntimeTrafficBucket = {
@@ -214,10 +173,6 @@ export function getRuntimeTokenUsage(): Promise<TokenUsageSnapshot> {
 
 export function resetRuntimeTokenUsage(): Promise<TokenUsageSnapshot> {
   return invokeCommand<TokenUsageSnapshot>("runtime_token_usage_reset");
-}
-
-export function getRuntimeLogs(limit = 100): Promise<RuntimeLogEntry[]> {
-  return invokeCommand<RuntimeLogEntry[]>("runtime_logs", { limit });
 }
 
 export type RuntimeConnectivityResult = {

@@ -79,7 +79,6 @@ export {
   verifyModel,
   testModelInference,
   testModelEmbeddings,
-  getModelsVaultPath,
   type ModelEntryDto,
   type ModelInferenceTestResult,
   type ModelCapabilitiesDto,

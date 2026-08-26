@@ -1,13 +1,13 @@
-//! Embedded AI runtime IPC — lifecycle, health, benchmark, logs, hardware.
+//! Embedded AI runtime IPC — lifecycle, health, logs, hardware.
 
 use promptlab_models::ModelEntry;
 use promptlab_runtime::{
-    hardware::HardwareDetector, RuntimeBenchmarkResult, RuntimeHardwareProfile,
-    RuntimeHealthReport, RuntimeLogEntry, RuntimeStatusSnapshot,
+    hardware::HardwareDetector, RuntimeHardwareProfile, RuntimeHealthReport, RuntimeLogEntry,
+    RuntimeStatusSnapshot,
 };
 use serde::Deserialize;
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::State;
 use time::OffsetDateTime;
 
 use promptlab_inference::config::{AiRuntimeConfiguration, InferenceMode};
@@ -19,7 +19,6 @@ use crate::inference_settings::{
 use crate::inference_host::{connectivity_to_judge, open_gateway_session};
 use crate::commands::models::test_third_party_model_connection;
 use crate::error::{CommandError, CommandResult};
-use crate::runtime_watch;
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize)]
@@ -136,28 +135,7 @@ pub async fn runtime_status(state: State<'_, AppState>) -> CommandResult<Runtime
 }
 
 #[tauri::command]
-pub async fn runtime_install(
-    _app: AppHandle,
-    _state: State<'_, AppState>,
-) -> CommandResult<RuntimeStatusDto> {
-    Err(CommandError::invalid_input(
-        "embedded llama.cpp runtime install has been removed — configure a remote AI provider",
-    ))
-}
-
-#[tauri::command]
-pub async fn runtime_repair(
-    _app: AppHandle,
-    _state: State<'_, AppState>,
-) -> CommandResult<RuntimeStatusDto> {
-    Err(CommandError::invalid_input(
-        "embedded llama.cpp runtime repair has been removed — configure a remote AI provider",
-    ))
-}
-
-#[tauri::command]
 pub async fn runtime_start(
-    app: AppHandle,
     state: State<'_, AppState>,
 ) -> CommandResult<RuntimeStatusDto> {
     let mut manager = state.runtime_manager().lock().await;
@@ -166,7 +144,6 @@ pub async fn runtime_start(
         .await
         .map_err(map_runtime_err)?;
     let _ = manager.run_health_check().await;
-    runtime_watch::spawn_runtime_watch(app);
     Ok(status_dto_for_manager(&manager).await)
 }
 
@@ -188,32 +165,6 @@ pub async fn runtime_delete(state: State<'_, AppState>) -> CommandResult<Runtime
         .await
         .map_err(map_runtime_err)?;
     Ok(status_dto_for_manager(&manager).await)
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeLoadModelRequest {
-    pub model_id: String,
-}
-
-#[tauri::command]
-pub async fn runtime_load_model(
-    _app: AppHandle,
-    _state: State<'_, AppState>,
-    _request: RuntimeLoadModelRequest,
-) -> CommandResult<RuntimeConfigurationDto> {
-    Err(CommandError::invalid_input(
-        "embedded GGUF load has been removed — configure a remote AI provider or Ollama over HTTP",
-    ))
-}
-
-#[tauri::command]
-pub async fn runtime_unload_model(
-    _state: State<'_, AppState>,
-) -> CommandResult<RuntimeConfigurationDto> {
-    Err(CommandError::invalid_input(
-        "embedded GGUF unload has been removed — no in-process model is loaded",
-    ))
 }
 
 #[tauri::command]
@@ -264,13 +215,6 @@ pub async fn runtime_token_usage_reset(
     crate::token_usage_persist::reset_usage(state.database())
         .await
         .map_err(CommandError::invalid_input)
-}
-
-#[tauri::command]
-pub async fn runtime_benchmark(_state: State<'_, AppState>) -> CommandResult<RuntimeBenchmarkResult> {
-    Err(CommandError::invalid_input(
-        "local runtime benchmark has been removed — embedded llama.cpp is unavailable",
-    ))
 }
 
 #[tauri::command]
@@ -507,8 +451,8 @@ fn fallback_runtime_status_when_busy() -> RuntimeStatusDto {
         install_path: None,
         installed: true,
         verified: false,
-        binary_available: true,
-        base_url: "embedded".into(),
+        binary_available: false,
+        base_url: "remote".into(),
         model_loaded: false,
         loaded_model_path: None,
         message: "Busy".into(),
@@ -553,10 +497,6 @@ async fn assemble_runtime_configuration_busy_fallback(
 
 async fn runtime_model_loading_id(state: &AppState) -> Option<String> {
     state.runtime_model_loading_id().lock().await.clone()
-}
-
-pub(crate) async fn set_runtime_model_loading(state: &AppState, model_id: Option<String>) {
-    *state.runtime_model_loading_id().lock().await = model_id;
 }
 
 async fn runtime_model_testing_id(state: &AppState) -> Option<String> {
@@ -611,73 +551,6 @@ pub(crate) async fn prime_runtime_configuration_cache(
     let inference_dto = config_to_dto(&config, &models);
     let dto = assemble_runtime_configuration(&models, &config, &inference_dto, runtime_manager).await;
     store_runtime_configuration_cache(state, &dto).await;
-}
-
-/// Wait until an in-flight model load for `model_id` completes.
-pub(crate) async fn wait_for_runtime_model_load(
-    state: &AppState,
-    model_id: &str,
-    file_path: &std::path::Path,
-) -> Result<(), promptlab_runtime::RuntimeError> {
-    const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
-    let started = std::time::Instant::now();
-
-    loop {
-        let loading = state.runtime_model_loading_id().lock().await.clone();
-        if loading.as_deref() != Some(model_id) {
-            let manager = state.runtime_manager().lock().await;
-            if manager.is_same_model_loaded_at(file_path).await {
-                return Ok(());
-            }
-            if loading.is_some() {
-                return Err(promptlab_runtime::RuntimeError::NativeRuntimeError(
-                    "another model is loading into the runtime".into(),
-                ));
-            }
-            return Err(promptlab_runtime::RuntimeError::NativeRuntimeError(
-                "model load did not complete".into(),
-            ));
-        }
-        if started.elapsed() >= MAX_WAIT {
-            return Err(promptlab_runtime::RuntimeError::NativeRuntimeError(
-                "timed out waiting for model load".into(),
-            ));
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    }
-}
-
-/// Shared model-load path for manual IPC and startup auto-resume.
-pub(crate) async fn load_model_with_loading_cache(
-    state: &AppState,
-    manager: &mut promptlab_runtime::RuntimeManager,
-    file_path: &std::path::Path,
-    model_id: &str,
-) -> Result<(), promptlab_runtime::RuntimeError> {
-    if manager.is_same_model_loaded_at(file_path).await {
-        prime_runtime_configuration_cache(state, manager).await;
-        return Ok(());
-    }
-
-    set_runtime_model_loading(state, Some(model_id.to_string())).await;
-
-    let result = async {
-        if !manager.is_same_model_loaded_at(file_path).await {
-            manager.on_model_load_started();
-            prime_runtime_configuration_cache(state, manager).await;
-            manager.load_model_at_path(file_path).await
-        } else {
-            Ok(())
-        }
-    }
-    .await;
-
-    if result.is_ok() {
-        let _ = manager.run_health_check().await;
-    }
-    set_runtime_model_loading(state, None).await;
-    prime_runtime_configuration_cache(state, manager).await;
-    result
 }
 
 async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<RuntimeConfigurationDto> {
@@ -858,9 +731,10 @@ pub async fn runtime_test_inference(
 
 fn map_runtime_err(err: promptlab_runtime::RuntimeError) -> CommandError {
     match err {
-        promptlab_runtime::RuntimeError::Unavailable => {
+        promptlab_runtime::RuntimeError::Unavailable
+        | promptlab_runtime::RuntimeError::BackendUnavailable(_) => {
             CommandError::invalid_input(
-                "Embedded libllama engine is unavailable — reinitialize the engine from AI Runtime",
+                "local embedded runtime removed — configure a remote AI provider or Ollama over HTTP",
             )
         }
         other => CommandError::from(promptlab_core::PromptLabError::internal(other.to_string())),

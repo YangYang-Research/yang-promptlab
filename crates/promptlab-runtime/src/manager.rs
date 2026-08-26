@@ -1,20 +1,29 @@
-//! Central orchestrator for the embedded AI inference runtime.
+//! Central orchestrator for the remote-oriented AI runtime host.
 
 use std::path::PathBuf;
 
 use promptlab_storage::Database;
 use serde::{Deserialize, Serialize};
 
-use crate::benchmark::{RuntimeBenchmark, RuntimeBenchmarkResult};
 use crate::config::RuntimeConfig;
 use crate::error::{RuntimeError, RuntimeResult};
 use crate::hardware::{HardwareDetector, RuntimeHardwareProfile};
-use crate::launcher::RuntimeLauncher;
-use crate::local_runtime_adapter::{resolve_backend, GfxBackend};
 use crate::logs::{RuntimeLogEntry, RuntimeLogs};
-use crate::monitor::{RuntimeHealthReport, RuntimeMonitor};
 use crate::state::{transition, RuntimeLifecycleState};
-use crate::supervisor::RuntimeSupervisor;
+use crate::supervisor::{RuntimeProcessState, RuntimeSupervisor};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeHealthReport {
+    pub lifecycle_state: String,
+    pub process_alive: bool,
+    pub endpoint_reachable: bool,
+    pub latency_ms: u64,
+    pub memory_bytes: Option<u64>,
+    pub gpu_memory_bytes: Option<u64>,
+    pub model_loaded: bool,
+    pub message: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,7 +52,6 @@ pub struct RuntimeManager {
     supervisor: RuntimeSupervisor,
     logs: RuntimeLogs,
     last_health: Option<RuntimeHealthReport>,
-    last_benchmark: Option<RuntimeBenchmarkResult>,
     last_error: Option<String>,
 }
 
@@ -59,7 +67,6 @@ impl RuntimeManager {
             supervisor: RuntimeSupervisor::with_config(config),
             logs: RuntimeLogs::new(500),
             last_health: None,
-            last_benchmark: None,
             last_error: None,
         }
     }
@@ -102,12 +109,9 @@ impl RuntimeManager {
         self.last_health.as_ref()
     }
 
-    pub fn last_benchmark(&self) -> Option<&RuntimeBenchmarkResult> {
-        self.last_benchmark.as_ref()
-    }
-
     pub async fn bootstrap(&mut self) -> RuntimeResult<()> {
-        self.log("info", "loading remote-oriented runtime configuration").await;
+        self.log("info", "loading remote-oriented runtime configuration")
+            .await;
         self.last_error = None;
         self.hardware = self.hardware_detector().load().await?;
 
@@ -121,9 +125,9 @@ impl RuntimeManager {
             let _ = tokio::fs::remove_file(&legacy_manifest).await;
         }
 
-        self.supervisor.local_runtime().initialize().await?;
         self.lifecycle = RuntimeLifecycleState::Installed;
-        self.log("info", "runtime host ready (remote providers; no local GGUF)").await;
+        self.log("info", "runtime host ready (remote providers; no local GGUF)")
+            .await;
         Ok(())
     }
 
@@ -135,7 +139,9 @@ impl RuntimeManager {
         if let Err(err) = self.repair_steps(&mut progress).await {
             self.record_failure(err).await;
             return Err(RuntimeError::NativeRuntimeError(
-                self.last_error.clone().unwrap_or_else(|| "repair failed".into()),
+                self.last_error
+                    .clone()
+                    .unwrap_or_else(|| "repair failed".into()),
             ));
         }
         Ok(())
@@ -152,8 +158,6 @@ impl RuntimeManager {
         self.supervisor.set_hardware_profile(profile);
 
         progress("runtime", "Initializing runtime host…", 60);
-        self.supervisor.local_runtime().initialize().await?;
-
         self.lifecycle = RuntimeLifecycleState::Installed;
         self.last_error = None;
         progress("complete", "Runtime host ready", 100);
@@ -163,7 +167,7 @@ impl RuntimeManager {
 
     pub fn recommended_runtime_label(&self) -> Option<String> {
         if self.hardware.is_some() {
-            Some("libllama".into())
+            Some("remote".into())
         } else {
             None
         }
@@ -183,12 +187,8 @@ impl RuntimeManager {
     }
 
     pub async fn start_runtime(&mut self) -> RuntimeResult<()> {
-        if !self.supervisor.runtime_available() {
-            self.lifecycle = RuntimeLifecycleState::Failed;
-            self.last_error = Some("embedded libllama runtime unavailable".into());
-            return Err(RuntimeError::Unavailable);
-        }
-        self.lifecycle = RuntimeLauncher::start(&mut self.supervisor, self.lifecycle).await?;
+        self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Starting);
+        self.supervisor.ensure_running().await?;
         self.sync_lifecycle_from_supervisor();
         self.log(
             "info",
@@ -199,14 +199,10 @@ impl RuntimeManager {
     }
 
     pub fn sync_lifecycle_from_supervisor(&mut self) {
-        use crate::supervisor::RuntimeProcessState;
-
-        if self.supervisor.local_runtime().is_loaded()
-            || self.supervisor.state() == RuntimeProcessState::Running
-        {
+        if self.supervisor.state() == RuntimeProcessState::Running {
             self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Running);
         } else if matches!(self.lifecycle, RuntimeLifecycleState::Stopped) {
-        } else if self.supervisor.runtime_available() {
+        } else {
             self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Installed);
         }
     }
@@ -225,51 +221,31 @@ impl RuntimeManager {
 
     pub async fn load_model_at_path(
         &mut self,
-        model_path: &std::path::Path,
+        _model_path: &std::path::Path,
     ) -> RuntimeResult<()> {
-        if self.is_model_loaded_at(model_path).await {
-            self.sync_lifecycle_from_supervisor();
-            return Ok(());
-        }
-        if !matches!(self.lifecycle, RuntimeLifecycleState::Starting) {
-            self.on_model_load_started();
-        }
-        let result = self.supervisor.ensure_model_loaded(model_path).await;
-        self.on_model_load_finished(result.is_ok());
-        if result.is_ok() {
-            self.sync_lifecycle_from_supervisor();
-        }
-        result
+        Err(RuntimeError::BackendUnavailable(
+            "local embedded runtime removed — use a remote provider or Ollama over HTTP".into(),
+        ))
     }
 
-    pub async fn is_same_model_loaded_at(&self, model_path: &std::path::Path) -> bool {
-        let adapter = self.supervisor.local_runtime();
-        let Some(loaded) = adapter.loaded_model_path().await else {
-            return false;
-        };
-        if !crate::paths::same_paths(&loaded, model_path) {
-            return false;
-        }
-        adapter.is_loaded_async().await
+    pub async fn is_same_model_loaded_at(&self, _model_path: &std::path::Path) -> bool {
+        false
     }
 
-    pub async fn is_model_loaded_at(&mut self, model_path: &std::path::Path) -> bool {
-        if !self.is_same_model_loaded_at(model_path).await {
-            return false;
-        }
-        self.supervisor.check_health().await.unwrap_or(false)
+    pub async fn is_model_loaded_at(&mut self, _model_path: &std::path::Path) -> bool {
+        false
     }
 
     pub async fn unload_loaded_model(&mut self) -> RuntimeResult<()> {
-        if self.supervisor.local_runtime().is_loaded() {
-            self.supervisor.stop().await?;
-        }
-        self.lifecycle = RuntimeLifecycleState::Installed;
-        Ok(())
+        Err(RuntimeError::BackendUnavailable(
+            "local embedded runtime removed — no in-process model is loaded".into(),
+        ))
     }
 
     pub async fn stop_runtime(&mut self) -> RuntimeResult<()> {
-        self.lifecycle = RuntimeLauncher::stop(&mut self.supervisor, self.lifecycle).await?;
+        self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Stopping);
+        self.supervisor.stop().await?;
+        self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Stopped);
         self.log("info", "runtime stopped").await;
         Ok(())
     }
@@ -295,7 +271,6 @@ impl RuntimeManager {
         }
 
         self.last_health = None;
-        self.last_benchmark = None;
         self.last_error = None;
         self.lifecycle = RuntimeLifecycleState::NotInstalled;
         self.log("info", "runtime configuration cleared").await;
@@ -321,30 +296,31 @@ impl RuntimeManager {
     }
 
     pub async fn run_health_check(&mut self) -> RuntimeResult<RuntimeHealthReport> {
-        let report = RuntimeMonitor::check(
-            &mut self.supervisor,
-            self.lifecycle.as_str(),
-        )
-        .await?;
+        let started = std::time::Instant::now();
+        let healthy = self.supervisor.check_health().await.unwrap_or(false);
+        let latency_ms = started.elapsed().as_millis() as u64;
+        let runtime_alive = self.supervisor.is_process_alive_async().await;
+
+        let message = if healthy {
+            "runtime host ready (remote-only)".into()
+        } else if runtime_alive {
+            "runtime host starting".into()
+        } else {
+            "runtime host stopped".into()
+        };
+
+        let report = RuntimeHealthReport {
+            lifecycle_state: self.lifecycle.as_str().to_string(),
+            process_alive: runtime_alive,
+            endpoint_reachable: healthy,
+            latency_ms,
+            memory_bytes: None,
+            gpu_memory_bytes: None,
+            model_loaded: false,
+            message,
+        };
         self.last_health = Some(report.clone());
         Ok(report)
-    }
-
-    pub async fn run_benchmark(&mut self) -> RuntimeResult<RuntimeBenchmarkResult> {
-        self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Busy);
-        let result = RuntimeBenchmark::run(&self.supervisor).await;
-        self.lifecycle = transition(self.lifecycle, RuntimeLifecycleState::Running);
-        let result = result?;
-        self.last_benchmark = Some(result.clone());
-        self.log(
-            "info",
-            format!(
-                "benchmark: {:.1} tok/s, {} ms",
-                result.tokens_per_sec, result.latency_ms
-            ),
-        )
-        .await;
-        Ok(result)
     }
 
     pub async fn logs(&self, limit: usize) -> Vec<RuntimeLogEntry> {
@@ -353,18 +329,17 @@ impl RuntimeManager {
 
     pub fn status_snapshot(&self) -> RuntimeStatusSnapshot {
         let installed = !matches!(self.lifecycle, RuntimeLifecycleState::NotInstalled);
-        let backend = resolve_backend(GfxBackend::Auto, self.hardware.as_ref());
         RuntimeStatusSnapshot {
             lifecycle_state: self.lifecycle.as_str().to_string(),
             runtime_version: None,
-            backend: Some(backend.as_str().to_string()),
+            backend: Some("remote".into()),
             platform: Some(std::env::consts::OS.to_string()),
             install_path: None,
             installed,
             verified: installed,
-            binary_available: self.supervisor.runtime_available(),
-            base_url: "embedded".into(),
-            model_loaded: self.supervisor.local_runtime().is_loaded(),
+            binary_available: false,
+            base_url: "remote".into(),
+            model_loaded: false,
             loaded_model_path: None,
             message: self.status_message(),
             requires_attention: self.requires_attention(),
@@ -373,24 +348,13 @@ impl RuntimeManager {
     }
 
     pub async fn status_snapshot_async(&self) -> RuntimeStatusSnapshot {
-        let mut snap = self.status_snapshot();
-        let adapter = self.supervisor.local_runtime();
-        snap.loaded_model_path = adapter
-            .loaded_model_path()
-            .await
-            .map(|p| p.display().to_string());
-        snap.model_loaded = adapter.is_loaded_async().await;
-        snap
+        self.status_snapshot()
     }
 
     fn status_message(&self) -> String {
         match self.lifecycle {
             RuntimeLifecycleState::Running => {
-                if self.supervisor.local_runtime().is_loaded() {
-                    "AI runtime is running".into()
-                } else {
-                    "AI runtime ready — load a model to start inference".into()
-                }
+                "Runtime host ready — use a remote provider or Ollama over HTTP".into()
             }
             RuntimeLifecycleState::Installed => {
                 "Runtime host ready — configure a remote model".into()

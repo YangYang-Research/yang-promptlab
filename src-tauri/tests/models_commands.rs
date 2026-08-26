@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use promptlab_core::{init_logging, LogOptions};
-use promptlab_desktop_lib::commands::models::{models_browse_op, models_registry_info_op};
+use promptlab_desktop_lib::commands::models::models_registry_info_op;
 use promptlab_desktop_lib::db::open_database;
 use promptlab_desktop_lib::state::AppState;
 
@@ -26,7 +26,7 @@ async fn make_state(dir: &Path) -> AppState {
 }
 
 #[tokio::test]
-async fn browse_returns_empty_without_builtin_catalog() {
+async fn registry_info_empty_without_builtin_catalog() {
     let dir = tempfile::tempdir().unwrap();
     let state = make_state(dir.path()).await;
 
@@ -34,7 +34,4 @@ async fn browse_returns_empty_without_builtin_catalog() {
     assert_eq!(info.entry_count, 0);
     assert_eq!(info.valid_models, 0);
     assert_eq!(info.invalid_models, 0);
-
-    let catalog = models_browse_op(&state).await.expect("browse");
-    assert!(catalog.is_empty());
 }

@@ -28,9 +28,7 @@ pub struct AiInferenceSettingsDto {
     pub selected_model_id: Option<String>,
     pub selected_model_name: Option<String>,
     pub third_party_available: bool,
-    pub local_available: bool,
     pub third_party_models: Vec<AiInferenceModelOptionDto>,
-    pub local_models: Vec<AiInferenceModelOptionDto>,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connectivity_test_ok: Option<bool>,
@@ -56,20 +54,8 @@ pub fn is_third_party_model(entry: &ModelEntry) -> bool {
     )
 }
 
-pub fn is_local_model(entry: &ModelEntry) -> bool {
-    // Legacy GGUF/HuggingFace vault entries — no longer usable for inference.
-    matches!(
-        entry.provider,
-        ModelProvider::Gguf | ModelProvider::HuggingFace
-    )
-}
-
 pub fn is_configured_third_party(entry: &ModelEntry) -> bool {
     is_third_party_model(entry) && has_third_party_credentials_metadata(&entry.metadata)
-}
-
-pub fn is_configured_local(entry: &ModelEntry) -> bool {
-    is_local_model(entry) && (entry.verified || entry.file_path.is_file())
 }
 
 fn third_party_connectivity(config: &AiRuntimeConfiguration) -> Option<&str> {
@@ -77,21 +63,6 @@ fn third_party_connectivity(config: &AiRuntimeConfiguration) -> Option<&str> {
         Some(config.health.message.as_str())
     } else {
         None
-    }
-}
-
-fn local_model_option(entry: &ModelEntry, configured: bool) -> AiInferenceModelOptionDto {
-    AiInferenceModelOptionDto {
-        id: entry.id.clone(),
-        name: entry.display_model_name(),
-        provider: entry.display_provider(),
-        verified: entry.verified,
-        configured,
-        status_label: if configured {
-            "Ready".into()
-        } else {
-            "Needs setup".into()
-        },
     }
 }
 
@@ -120,18 +91,6 @@ fn third_party_model_option(
         configured,
         status_label,
     }
-}
-
-fn sort_local_models(mut entries: Vec<&ModelEntry>) -> Vec<AiInferenceModelOptionDto> {
-    entries.sort_by(|a, b| {
-        b.verified
-            .cmp(&a.verified)
-            .then_with(|| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()))
-    });
-    entries
-        .into_iter()
-        .map(|entry| local_model_option(entry, is_configured_local(entry)))
-        .collect()
 }
 
 fn sort_third_party_models(
@@ -271,7 +230,6 @@ pub fn config_to_dto_with_connectivity_test(
         config.selected_model_id.as_deref(),
         third_party_connectivity(config),
     );
-    let local = sort_local_models(models.iter().filter(|e| is_local_model(e)).collect());
 
     let selected_model_name = config
         .selected_model_id
@@ -279,7 +237,6 @@ pub fn config_to_dto_with_connectivity_test(
         .and_then(|id| models.iter().find(|m| &m.id == id).map(|m| m.display_model_name()));
 
     let third_party_available = third_party.iter().any(|m| m.configured);
-    let local_available = local.iter().any(|m| m.configured);
 
     let message = match config.mode {
         InferenceMode::ThirdParty if third_party_available => {
@@ -299,9 +256,7 @@ pub fn config_to_dto_with_connectivity_test(
         selected_model_id: config.selected_model_id.clone(),
         selected_model_name,
         third_party_available,
-        local_available,
         third_party_models: third_party,
-        local_models: local,
         message,
         connectivity_test_ok: connectivity_test.as_ref().map(|(ok, _)| *ok),
         connectivity_test_detail: connectivity_test.map(|(_, detail)| detail),

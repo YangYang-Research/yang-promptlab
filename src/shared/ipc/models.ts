@@ -22,14 +22,6 @@ export type ModelEntryDto = {
   status: string;
 };
 
-export type ModelVaultStatsDto = {
-  vaultPath: string;
-  registeredCount: number;
-  installedLocalCount: number;
-  installedBytes: number;
-  installedGb: number;
-};
-
 export type ModelInferenceTestResult = {
   ok: boolean;
   mode: string;
@@ -109,12 +101,4 @@ export function testModelEmbeddings(
     modelId,
     input: input ?? null,
   });
-}
-
-export function getModelsVaultPath(): Promise<string> {
-  return invokeCommand<string>("models_vault_path");
-}
-
-export function getModelsVaultStats(): Promise<ModelVaultStatsDto> {
-  return invokeCommand<ModelVaultStatsDto>("models_vault_stats");
 }

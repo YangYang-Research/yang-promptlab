@@ -64,8 +64,7 @@ function mapLocalModels(entries: ModelEntryDto[]): LocalModel[] {
     provider: entry.provider,
     sizeGb: entry.sizeGb,
     status: (entry.status as ModelStatus) || "available",
-    downloadProgress: entry.status === "downloading" ? 50 : entry.status === "installed" ? 100 : 0,
-    quant: entry.format,
+    format: entry.format,
     path: entry.path || null,
     sha256: entry.sha256,
   }));
