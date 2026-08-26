@@ -8,7 +8,6 @@ use crate::error::{InferenceError, InferenceResult};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InferenceMode {
-    #[serde(alias = "local")]
     ThirdParty,
     /// Rule-based evaluation only — no LLM.
     Deterministic,
@@ -24,9 +23,7 @@ impl InferenceMode {
 
     pub fn parse(raw: &str) -> Option<Self> {
         match raw.trim().to_ascii_lowercase().as_str() {
-            "third_party" | "third-party" | "cloud" | "remote" | "local" | "llama" | "embedded" => {
-                Some(Self::ThirdParty)
-            }
+            "third_party" | "third-party" | "cloud" | "remote" => Some(Self::ThirdParty),
             "deterministic" | "rules" => Some(Self::Deterministic),
             _ => None,
         }
@@ -44,7 +41,6 @@ pub enum InferenceProvider {
     Nvidia,
     Azure,
     Bedrock,
-    #[serde(alias = "llama_cpp", alias = "llama.cpp", alias = "llama")]
     Ollama,
     Deterministic,
 }

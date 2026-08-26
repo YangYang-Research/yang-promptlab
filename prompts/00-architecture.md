@@ -32,8 +32,6 @@ Browser Automation:
 AI Runtime (product inference):
 - Remote HTTP providers (OpenAI-compatible, Anthropic, Gemini, Azure, Bedrock, OpenRouter, Ollama over HTTP)
 
-Note: llama.cpp / Ollama may still appear as **scan targets** (harness TargetSurface), not as the product's embedded AI runtime.
-
 Requirements:
 
 - Windows
