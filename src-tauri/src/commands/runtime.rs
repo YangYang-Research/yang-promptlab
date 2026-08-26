@@ -516,7 +516,29 @@ async fn runtime_configuration_for_state(state: &AppState) -> CommandResult<Runt
         apply_model_testing_overlay(&mut response, testing_model_id.as_deref());
         return Ok(response);
     } else {
-        Vec::new()
+        // Registry is locked (inference in flight) and there is no cache yet.
+        // Never reconcile an empty snapshot — that clears selected_model_id and
+        // persists it, which looks like registered models vanishing.
+        let config = match state.inference_manager().try_lock() {
+            Ok(inference) => inference.config().clone(),
+            Err(_) => {
+                let mut response = assemble_runtime_configuration_busy_fallback(
+                    &[],
+                    &AiRuntimeConfiguration::default(),
+                    &config_to_dto(&AiRuntimeConfiguration::default(), &[]),
+                )
+                .await;
+                apply_model_loading_overlay(&mut response, loading_model_id.as_deref());
+                apply_model_testing_overlay(&mut response, testing_model_id.as_deref());
+                return Ok(response);
+            }
+        };
+        let inference = config_to_dto(&config, &[]);
+        let mut response =
+            assemble_runtime_configuration_busy_fallback(&[], &config, &inference).await;
+        apply_model_loading_overlay(&mut response, loading_model_id.as_deref());
+        apply_model_testing_overlay(&mut response, testing_model_id.as_deref());
+        return Ok(response);
     };
 
     let (config, _) = reconcile_inference_config(state, &models).await?;

@@ -129,7 +129,7 @@ pub fn reconcile_config(
         .as_ref()
         .and_then(|id| third_party.iter().find(|m| &m.id == id));
 
-    if selected_valid.is_none() {
+    if selected_valid.is_none() && !third_party.is_empty() {
         config.selected_model_id = None;
     }
 
@@ -256,5 +256,44 @@ pub fn config_to_dto_with_connectivity_test(
         message,
         connectivity_test_ok: connectivity_test.as_ref().map(|(ok, _)| *ok),
         connectivity_test_detail: connectivity_test.map(|(_, detail)| detail),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use promptlab_models::ModelRegistry;
+
+    fn remote_entry(provider: &str, model: &str) -> ModelEntry {
+        ModelRegistry::new().register_remote(provider, model, None, None)
+    }
+
+    #[test]
+    fn reconcile_keeps_selection_when_model_list_is_empty() {
+        let mut config = AiRuntimeConfiguration::default();
+        config.selected_model_id = Some("remote-nvidia-nemotron".into());
+        let out = reconcile_config(config, &[]);
+        assert_eq!(
+            out.selected_model_id.as_deref(),
+            Some("remote-nvidia-nemotron")
+        );
+    }
+
+    #[test]
+    fn reconcile_clears_selection_when_selected_model_is_gone() {
+        let other = remote_entry("nvidia", "other");
+        let mut config = AiRuntimeConfiguration::default();
+        config.selected_model_id = Some("remote-nvidia-missing".into());
+        let out = reconcile_config(config, std::slice::from_ref(&other));
+        assert_eq!(out.selected_model_id, None);
+    }
+
+    #[test]
+    fn reconcile_keeps_selection_when_selected_model_is_present() {
+        let entry = remote_entry("nvidia", "foo");
+        let mut config = AiRuntimeConfiguration::default();
+        config.selected_model_id = Some(entry.id.clone());
+        let out = reconcile_config(config, std::slice::from_ref(&entry));
+        assert_eq!(out.selected_model_id.as_deref(), Some(entry.id.as_str()));
     }
 }

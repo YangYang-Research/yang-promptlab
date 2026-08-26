@@ -24,7 +24,7 @@ use tokio::sync::Mutex as TokioMutex;
 
 use crate::agent_memory::SqliteAgentMemoryStore;
 use crate::error::{CommandError, CommandResult};
-use crate::inference_host::{gateway_complete_as, is_inference_ready, YazgHostLlms};
+use crate::inference_host::{detached_complete_as, is_inference_ready, YazgHostLlms};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -1132,15 +1132,11 @@ pub async fn yazg_generate_chat_title_op(
         prompt.push_str(&format!("\nAssistant reply:\n{clipped}\n"));
     }
 
-    let inference = state.inference_manager().lock().await;
-    let manager = state.model_manager().lock().await;
-    let mut runtime_mgr = state.runtime_manager().lock().await;
-    match gateway_complete_as(
+    match detached_complete_as(
         state.data_dir(),
-        &inference,
-        &manager,
+        state.inference_manager(),
+        state.model_manager(),
         state.model_provider().clone(),
-        &mut runtime_mgr,
         "yazg",
         None,
         &prompt,
