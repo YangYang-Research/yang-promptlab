@@ -4,12 +4,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{InferenceError, InferenceResult};
 
-/// Inference route: third-party cloud API or local embedded runtime.
+/// Inference route: third-party HTTP API or rule-based deterministic mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InferenceMode {
     ThirdParty,
-    Local,
     /// Rule-based evaluation only — no LLM.
     Deterministic,
 }
@@ -18,7 +17,6 @@ impl InferenceMode {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ThirdParty => "third_party",
-            Self::Local => "local",
             Self::Deterministic => "deterministic",
         }
     }
@@ -26,7 +24,6 @@ impl InferenceMode {
     pub fn parse(raw: &str) -> Option<Self> {
         match raw.trim().to_ascii_lowercase().as_str() {
             "third_party" | "third-party" | "cloud" | "remote" => Some(Self::ThirdParty),
-            "local" | "llama" | "embedded" => Some(Self::Local),
             "deterministic" | "rules" => Some(Self::Deterministic),
             _ => None,
         }
@@ -37,6 +34,8 @@ impl InferenceMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InferenceProvider {
+    /// OpenAI API or any OpenAI-compatible endpoint (incl. custom / local servers).
+    #[serde(alias = "ollama")]
     OpenAi,
     Anthropic,
     Gemini,
@@ -44,8 +43,6 @@ pub enum InferenceProvider {
     Nvidia,
     Azure,
     Bedrock,
-    LlamaCpp,
-    Ollama,
     Deterministic,
 }
 
@@ -59,8 +56,6 @@ impl InferenceProvider {
             Self::Nvidia => "nvidia",
             Self::Azure => "azure",
             Self::Bedrock => "bedrock",
-            Self::LlamaCpp => "llama_cpp",
-            Self::Ollama => "ollama",
             Self::Deterministic => "deterministic",
         }
     }
@@ -73,9 +68,8 @@ impl InferenceProvider {
             "nvidia" => Self::Nvidia,
             "azure" => Self::Azure,
             "bedrock" | "aws_bedrock" => Self::Bedrock,
-            "ollama" => Self::Ollama,
-            "llama_cpp" | "llama.cpp" | "llama" => Self::LlamaCpp,
             "deterministic" => Self::Deterministic,
+            // openai, custom, ollama (legacy), and unknown → OpenAI-compatible
             _ => Self::OpenAi,
         }
     }
@@ -113,19 +107,19 @@ pub struct AiRuntimeConfiguration {
 impl Default for AiRuntimeConfiguration {
     fn default() -> Self {
         Self {
-            mode: InferenceMode::Local,
-            provider: InferenceProvider::LlamaCpp,
-            runtime: "llama.cpp".into(),
+            mode: InferenceMode::ThirdParty,
+            provider: InferenceProvider::OpenAi,
+            runtime: "cloud".into(),
             model: String::new(),
             selected_model_id: None,
-            status: "not_configured".into(),
+            status: "ready".into(),
             health: RuntimeHealth::default(),
             temperature: 0.1,
             max_tokens: 512,
             timeout_secs: 120,
             streaming: false,
             context_length: None,
-            initialized: false,
+            initialized: true,
         }
     }
 }

@@ -11,16 +11,6 @@ function baseForm(overrides: Partial<TargetFormState> = {}): TargetFormState {
   return {
     url: "https://api.example.com",
     authKind: "none",
-    loginUrl: "",
-    loginUsername: "",
-    loginPassword: "",
-    usernameSelector: "#email",
-    passwordSelector: "#password",
-    submitSelector: "button[type=submit]",
-    browserSessionId: null,
-    browserSessionReady: false,
-    ssoLoginUrl: "",
-    ssoSuccessUrlPattern: "",
     basicUsername: "",
     basicPassword: "",
     apiKeyHeaderName: "Authorization",
@@ -38,35 +28,6 @@ describe("buildTargetDescriptor", () => {
     expect(buildTargetDescriptor(baseForm())).toEqual({
       url: "https://api.example.com",
       auth: { kind: "none", engine: "none", method: "none" },
-    });
-  });
-
-  it("persists username/password playwright config", () => {
-    expect(
-      buildTargetDescriptor(
-        baseForm({
-          authKind: "username_password",
-          loginUsername: "alice",
-          loginPassword: "secret",
-          browserSessionId: "session-1",
-          browserSessionReady: true,
-        }),
-      ),
-    ).toEqual({
-      url: "https://api.example.com",
-      auth: {
-        kind: "username_password",
-        engine: "playwright",
-        method: "username_password",
-        config: {
-          type: "username_password",
-          login_url: "https://api.example.com",
-          username: "alice",
-          password: "secret",
-          recording_mode: "interactive",
-        },
-        session_id: "session-1",
-      },
     });
   });
 
@@ -136,43 +97,12 @@ describe("buildTargetDescriptor", () => {
       },
     });
   });
-
-  it("persists sso playwright config", () => {
-    expect(
-      buildTargetDescriptor(
-        baseForm({
-          authKind: "sso",
-          browserSessionId: "session-2",
-          browserSessionReady: true,
-        }),
-      ),
-    ).toEqual({
-      url: "https://api.example.com",
-      auth: {
-        kind: "sso",
-        engine: "playwright",
-        method: "oauth",
-        config: {
-          type: "oauth",
-          login_url: "https://api.example.com",
-          recording_mode: "interactive",
-          provider: null,
-        },
-        session_id: "session-2",
-      },
-    });
-  });
 });
 
 describe("migrateTargetForm", () => {
-  it("resets disabled username/password and sso to none", () => {
-    expect(migrateTargetForm({ authKind: "username_password" }).authKind).toBe("none");
-    expect(migrateTargetForm({ authKind: "sso", browserSessionReady: true }).authKind).toBe(
-      "none",
-    );
-    expect(migrateTargetForm({ authKind: "sso", browserSessionReady: true }).browserSessionReady).toBe(
-      false,
-    );
+  it("resets removed username/password and sso to none", () => {
+    expect(migrateTargetForm({ authKind: "username_password" as never }).authKind).toBe("none");
+    expect(migrateTargetForm({ authKind: "sso" as never }).authKind).toBe("none");
   });
 
   it("keeps selectable auth kinds", () => {
@@ -186,27 +116,6 @@ describe("validateTargetStep", () => {
   it("requires a valid https url", () => {
     expect(validateTargetStep(baseForm({ url: "" }))).toMatch(/required/i);
     expect(validateTargetStep(baseForm({ url: "not-a-url" }))).toMatch(/valid URL/i);
-  });
-
-  it("requires username/password playwright fields", () => {
-    expect(
-      validateTargetStep(baseForm({ authKind: "username_password", loginUsername: "" })),
-    ).toMatch(/Username/);
-  });
-
-  it("requires recorded browser session for playwright auth", () => {
-    expect(
-      validateTargetStep(
-        baseForm({
-          authKind: "username_password",
-          loginUsername: "alice",
-          loginPassword: "secret",
-        }),
-      ),
-    ).toMatch(/Record a browser login session/);
-    expect(validateTargetStep(baseForm({ authKind: "sso" }))).toMatch(
-      /Complete browser authentication/,
-    );
   });
 
   it("requires basic auth fields", () => {

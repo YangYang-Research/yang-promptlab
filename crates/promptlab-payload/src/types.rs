@@ -79,6 +79,7 @@ pub enum MutationKind {
     Base64Wrap,
     HexWrap,
     HtmlWrap,
+    LanguagePivot,
 }
 
 impl MutationKind {
@@ -93,6 +94,7 @@ impl MutationKind {
 
     pub fn all() -> &'static [MutationKind] {
         &[
+            Self::LanguagePivot,
             Self::UnicodeObfuscation,
             Self::Base64Encode,
             Self::HexEncode,

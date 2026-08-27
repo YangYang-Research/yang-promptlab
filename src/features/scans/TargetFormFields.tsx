@@ -3,7 +3,6 @@ import {
   type TargetAuthKind,
   type TargetFormState,
 } from "./targetDescriptor";
-import { PlaywrightRecordPanel } from "./PlaywrightRecordPanel";
 
 type TargetFormFieldsProps = {
   form: TargetFormState;
@@ -18,19 +17,13 @@ type TargetFormFieldsProps = {
 
 const AUTH_BUTTON_CLASS: Record<TargetAuthKind, string> = {
   none: "wizard-auth-btn--none",
-  username_password: "wizard-auth-btn--username",
-  sso: "wizard-auth-btn--sso",
   basic: "wizard-auth-btn--basic",
   api_key: "wizard-auth-btn--api-key",
   jwt: "wizard-auth-btn--jwt",
 };
 
 function selectAuthKind(onChange: TargetFormFieldsProps["onChange"], kind: TargetAuthKind) {
-  onChange({
-    authKind: kind,
-    browserSessionReady: false,
-    browserSessionId: null,
-  });
+  onChange({ authKind: kind });
 }
 
 export function TargetFormFields({
@@ -51,13 +44,7 @@ export function TargetFormFields({
             type="url"
             placeholder="https://api.example.com/v1/chat"
             value={form.url}
-            onChange={(e) =>
-              onChange({
-                url: e.target.value,
-                browserSessionReady: false,
-                browserSessionId: null,
-              })
-            }
+            onChange={(e) => onChange({ url: e.target.value })}
             autoComplete="url"
             autoFocus={autoFocusUrl}
           />
@@ -69,28 +56,21 @@ export function TargetFormFields({
         <div className="wizard-auth-buttons">
           {AUTH_METHOD_OPTIONS.map((option) => {
             const isActive = form.authKind === option.value;
-            const isDisabled = Boolean(option.disabled);
             return (
               <button
                 key={option.value}
                 type="button"
                 role="radio"
                 aria-checked={isActive}
-                aria-disabled={isDisabled}
-                disabled={isDisabled}
-                title={isDisabled ? option.hint : undefined}
+                title={option.hint}
                 className={[
                   "wizard-auth-btn",
                   isActive ? AUTH_BUTTON_CLASS[option.value] : "",
                   isActive ? "wizard-auth-btn--selected" : "",
-                  isDisabled ? "wizard-auth-btn--disabled" : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
-                onClick={() => {
-                  if (isDisabled) return;
-                  selectAuthKind(onChange, option.value);
-                }}
+                onClick={() => selectAuthKind(onChange, option.value)}
               >
                 {option.label}
               </button>
@@ -101,57 +81,6 @@ export function TargetFormFields({
 
       {form.authKind !== "none" && (
         <div className="wizard-auth-panel">
-          {form.authKind === "username_password" && (
-            <div className="wizard-auth-fields">
-              <label className="field">
-                <span className="field__label">Username</span>
-                <input
-                  className="input"
-                  value={form.loginUsername}
-                  onChange={(e) =>
-                    onChange({
-                      loginUsername: e.target.value,
-                      browserSessionReady: false,
-                      browserSessionId: null,
-                    })
-                  }
-                  autoComplete="username"
-                />
-              </label>
-              <label className="field">
-                <span className="field__label">Password</span>
-                <input
-                  className="input"
-                  type="password"
-                  value={form.loginPassword}
-                  onChange={(e) =>
-                    onChange({
-                      loginPassword: e.target.value,
-                      browserSessionReady: false,
-                      browserSessionId: null,
-                    })
-                  }
-                  autoComplete="current-password"
-                />
-              </label>
-              <PlaywrightRecordPanel
-                form={form}
-                authKind="username_password"
-                onChange={onChange}
-                startLabel="Record login session"
-              />
-            </div>
-          )}
-
-          {form.authKind === "sso" && (
-            <PlaywrightRecordPanel
-              form={form}
-              authKind="sso"
-              onChange={onChange}
-              startLabel="Launch browser authentication"
-            />
-          )}
-
           {form.authKind === "basic" && (
             <div className="wizard-auth-fields">
               <label className="field">

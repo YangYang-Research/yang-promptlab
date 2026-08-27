@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::capabilities::default_capabilities_for_provider;
 use crate::prompt::PROMPT_PLACEHOLDER;
-use crate::types::{HttpMethod, TargetCapabilities, TargetProfile, TargetProvider};
+use crate::types::{HttpMethod, TargetProfile, TargetProvider};
 
 fn profile(
     provider: TargetProvider,

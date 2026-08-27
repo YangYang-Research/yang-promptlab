@@ -472,10 +472,11 @@ function CopyPayloadButton({ payload }: { payload: string | null }) {
   const [copied, setCopied] = useState(false);
   const text = payload?.trim();
   if (!text) return null;
+  const copyText = text;
 
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(copyText);
       setCopied(true);
       notify("Payload copied", "success");
       window.setTimeout(() => setCopied(false), 1600);
@@ -502,10 +503,11 @@ function CopyCurlButton({ evidence }: { evidence: ParsedFindingEvidence }) {
   const curl = buildFindingCurl(evidence);
 
   if (!curl) return null;
+  const copyCurl = curl;
 
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(curl);
+      await navigator.clipboard.writeText(copyCurl);
       setCopied(true);
       notify("cURL copied", "success");
       window.setTimeout(() => setCopied(false), 1600);

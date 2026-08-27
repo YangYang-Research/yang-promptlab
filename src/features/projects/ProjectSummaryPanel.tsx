@@ -302,17 +302,20 @@ export function ProjectSummaryPanel({
                       {showRetry ? (
                         <div className="scan-rec__actions project-summary__retry-actions">
                           {retryActions.map((action) => (
-                            <Button
+                            <span
                               key={action.scan_id}
-                              variant="primary"
-                              size="sm"
                               title={action.description || undefined}
-                              onClick={() =>
-                                handleRetryScan(action.scan_id, action.target_id)
-                              }
                             >
-                              {retryButtonLabel(action)}
-                            </Button>
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() =>
+                                  handleRetryScan(action.scan_id, action.target_id)
+                                }
+                              >
+                                {retryButtonLabel(action)}
+                              </Button>
+                            </span>
                           ))}
                         </div>
                       ) : null}

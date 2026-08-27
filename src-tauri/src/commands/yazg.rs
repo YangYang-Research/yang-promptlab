@@ -12,8 +12,8 @@ use promptlab_agent::{
     MAX_REPORT_PREVIEW_CHARS, clamp_findings_limit, is_mutating_tool,
 };
 use promptlab_storage::{
-    CreateProject, FindingRepository, ProjectRepository, ReportRepository, ScanRepository,
-    TargetRepository,
+    CreateProject, FindingRepository, JsonDocumentRepository, ProjectRepository, ReportRepository,
+    ScanRepository, TargetRepository,
 };
 use promptlab_target_profile::TargetProfile;
 use async_trait::async_trait;
@@ -24,7 +24,7 @@ use tokio::sync::Mutex as TokioMutex;
 
 use crate::agent_memory::SqliteAgentMemoryStore;
 use crate::error::{CommandError, CommandResult};
-use crate::inference_host::{gateway_complete_as, is_inference_ready, YazgHostLlms};
+use crate::inference_host::{detached_complete_as, is_inference_ready, YazgHostLlms};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -1132,15 +1132,11 @@ pub async fn yazg_generate_chat_title_op(
         prompt.push_str(&format!("\nAssistant reply:\n{clipped}\n"));
     }
 
-    let inference = state.inference_manager().lock().await;
-    let manager = state.model_manager().lock().await;
-    let mut runtime_mgr = state.runtime_manager().lock().await;
-    match gateway_complete_as(
+    match detached_complete_as(
         state.data_dir(),
-        &inference,
-        &manager,
+        state.inference_manager(),
+        state.model_manager(),
         state.model_provider().clone(),
-        &mut runtime_mgr,
         "yazg",
         None,
         &prompt,
@@ -1432,4 +1428,44 @@ pub async fn yazg_resolve_hilt(
     request: YazgResolveHiltRequest,
 ) -> CommandResult<YazgChatResponse> {
     yazg_resolve_hilt_op(state.inner(), request).await
+}
+
+// ─── Chat thread persistence (replaces WebView localStorage) ─────────────────
+
+#[tauri::command]
+pub async fn yazg_chat_threads_get(
+    state: State<'_, AppState>,
+) -> CommandResult<Option<Value>> {
+    let record = state
+        .repositories()
+        .yazg_chat_threads()
+        .get()
+        .await
+        .map_err(CommandError::from)?;
+    match record {
+        Some(row) if !row.data_json.trim().is_empty() => {
+            let value: Value = serde_json::from_str(&row.data_json).map_err(|err| {
+                CommandError::from(promptlab_core::PromptLabError::internal(err.to_string()))
+            })?;
+            Ok(Some(value))
+        }
+        _ => Ok(None),
+    }
+}
+
+#[tauri::command]
+pub async fn yazg_chat_threads_save(
+    state: State<'_, AppState>,
+    store: Value,
+) -> CommandResult<()> {
+    let raw = serde_json::to_string(&store).map_err(|err| {
+        CommandError::from(promptlab_core::PromptLabError::internal(err.to_string()))
+    })?;
+    state
+        .repositories()
+        .yazg_chat_threads()
+        .upsert(&raw)
+        .await
+        .map_err(CommandError::from)?;
+    Ok(())
 }

@@ -1,14 +1,13 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use promptlab_models::runtime::InferenceRuntime;
-use promptlab_models::{InferenceRequest, LocalModelManager};
+use promptlab_models::LocalModelManager;
 use tokio::sync::Mutex;
 
 use crate::error::RuntimeResult;
 use crate::provider::{ModelProvider, ModelProviderHealth};
 
-/// Bridges the embedded runtime supervisor to `promptlab-models` vault operations.
+/// Bridges the model registry to the runtime [`ModelProvider`] contract.
 pub struct EmbeddedModelProvider {
     manager: Arc<Mutex<LocalModelManager>>,
 }
@@ -21,46 +20,10 @@ impl EmbeddedModelProvider {
 
 #[async_trait]
 impl ModelProvider for EmbeddedModelProvider {
-    async fn list_models(&self) -> RuntimeResult<Vec<String>> {
-        let manager = self.manager.lock().await;
-        Ok(manager
-            .list_models()
-            .into_iter()
-            .map(|entry| entry.id.clone())
-            .collect())
-    }
-
-    async fn install_model(&self, model_id: &str) -> RuntimeResult<()> {
-        let mut manager = self.manager.lock().await;
-        manager.install_catalog(model_id, None).await?;
-        Ok(())
-    }
-
-    async fn remove_model(&self, model_id: &str) -> RuntimeResult<()> {
-        let mut manager = self.manager.lock().await;
-        manager.remove_model(model_id).await?;
-        Ok(())
-    }
-
-    async fn run_inference(&self, model_id: &str, prompt: &str) -> RuntimeResult<String> {
-        let response = self
-            .complete_for_model(
-                model_id,
-                &InferenceRequest {
-                    system: None,
-                    prompt: prompt.to_string(),
-                    max_tokens: 512,
-                    temperature: 0.1,
-                },
-            )
-            .await?;
-        Ok(response.text)
-    }
-
     async fn complete_for_model(
         &self,
         model_id: &str,
-        request: &InferenceRequest,
+        request: &promptlab_models::InferenceRequest,
     ) -> RuntimeResult<promptlab_models::types::InferenceResponse> {
         let manager = self.manager.lock().await;
         let engine = manager.inference_engine(model_id).await?;
@@ -75,17 +38,22 @@ impl ModelProvider for EmbeddedModelProvider {
         if manager.list_models().is_empty() {
             return Ok(ModelProviderHealth {
                 healthy: false,
-                message: "no models installed in vault".into(),
+                message: "no models registered".into(),
             });
         }
 
-        let healthy = manager.runtime().health().await.unwrap_or(false);
+        let has_remote = manager.list_models().iter().any(|entry| {
+            matches!(
+                entry.provider,
+                promptlab_models::ModelProvider::Remote
+            )
+        });
         Ok(ModelProviderHealth {
-            healthy,
-            message: if healthy {
-                "vault inference runtime is healthy".into()
+            healthy: has_remote,
+            message: if has_remote {
+                "vault has remote models configured".into()
             } else {
-                "vault inference runtime is unavailable".into()
+                "no remote models configured".into()
             },
         })
     }

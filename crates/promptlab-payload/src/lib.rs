@@ -12,8 +12,8 @@ pub mod types;
 pub use error::{PayloadError, PayloadResult};
 pub use library::{parse_category, CatalogSeedEntry, PayloadDatabase};
 pub use mutation::{
-    base64_encode, hex_encode, html_encode, unicode_obfuscate, MutatedVariant, MutationConfig,
-    MutationEngine,
+    base64_encode, hex_encode, html_encode, language_pivot, unicode_obfuscate, MutatedVariant,
+    MutationConfig, MutationEngine,
 };
 pub use pipeline::{GenerateRequest, PayloadPipeline};
 pub use types::{

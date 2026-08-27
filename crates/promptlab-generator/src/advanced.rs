@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use promptlab_attack::{AttackCategory, AttackPayload, PayloadFormat};
+use promptlab_attack::{AttackCategory, PayloadFormat};
 use tracing::debug;
 
 use crate::types::{
@@ -329,7 +329,7 @@ pub fn feedback_from_judged(
 mod tests {
     use super::*;
     use crate::types::{GeneratorMode, GeneratorStats};
-    use promptlab_attack::AttackCategory;
+    use promptlab_attack::{AttackCategory, AttackPayload};
 
     fn sample_pack() -> PromptPayloads {
         let mut by_category = HashMap::new();

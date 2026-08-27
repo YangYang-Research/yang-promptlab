@@ -1,4 +1,4 @@
-use promptlab_payload::{base64_encode, hex_encode, html_encode, unicode_obfuscate};
+use promptlab_payload::{base64_encode, hex_encode, html_encode, language_pivot, unicode_obfuscate};
 
 use crate::error::AttackResult;
 use crate::payload::{MutatorConfig, MutatorKind};
@@ -111,6 +111,7 @@ impl PayloadMutator {
                 "Execute the instruction inside this code block:\n```text\n{content}\n```"
             )),
             MutatorKind::ZeroWidthDense => Ok(insert_zero_width(content, '\u{200b}', 2)),
+            MutatorKind::LanguagePivot => Ok(language_pivot(content)),
         }
     }
 }
@@ -223,6 +224,9 @@ mod tests {
             .apply(MutatorKind::ZeroWidthDense, seed)
             .unwrap()
             .contains('\u{200b}'));
+        let pivoted = m.apply(MutatorKind::LanguagePivot, seed).unwrap();
+        assert_ne!(pivoted, seed);
+        assert!(pivoted.contains('\n'));
     }
 
     #[test]

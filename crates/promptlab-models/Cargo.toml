@@ -1,6 +1,6 @@
 [package]
 name = "promptlab-models"
-description = "PromptLab local model manager — GGUF, llama.cpp, HuggingFace downloads"
+description = "PromptLab model registry — remote/third-party providers and vault metadata"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,31 +8,19 @@ authors.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["llama"]
-storage = ["dep:promptlab-storage"]
-llama = ["dep:llama-cpp-2"]
+default = []
 
 [dependencies]
 promptlab-core = { workspace = true }
-promptlab-storage = { workspace = true, optional = true }
+promptlab-storage = { workspace = true }
 async-trait = { workspace = true }
-reqwest = { workspace = true, features = ["stream"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.10"
 thiserror = { workspace = true }
 time = { workspace = true }
-tokio = { workspace = true, features = ["fs", "io-util", "process", "sync"] }
+tokio = { workspace = true, features = ["fs", "io-util", "sync"] }
 tracing = { workspace = true }
-uuid = { workspace = true }
-futures-util = "0.3"
-tokio-util = { version = "0.7", features = ["rt"] }
-zip = { version = "2", default-features = false, features = ["deflate"] }
-llama-cpp-2 = { version = "0.1.146", optional = true }
-
-[[example]]
-name = "run_local_model"
-required-features = ["llama"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 sysctl = "0.6"
@@ -40,4 +28,3 @@ sysctl = "0.6"
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-wiremock = "0.6"

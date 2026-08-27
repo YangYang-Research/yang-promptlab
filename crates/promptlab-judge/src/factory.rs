@@ -5,9 +5,7 @@ use promptlab_models::runtime::InferenceRuntime;
 use promptlab_runtime::ModelProviderRuntime;
 use tokio::sync::Mutex;
 
-use crate::config::{
-    JudgeConnectivityResult, JudgeProviderConfig, LocalProvider,
-};
+use crate::config::{JudgeConnectivityResult, JudgeProviderConfig};
 use crate::engine::JudgeEngine;
 use crate::error::{JudgeError, JudgeResult};
 use promptlab_inference::{CompleteRequest, InferenceClient};
@@ -94,17 +92,6 @@ impl InferenceRuntime for ClientRuntime {
         promptlab_models::types::RuntimeState::Ready
     }
 
-    async fn load_model(
-        &mut self,
-        _model_path: &std::path::Path,
-    ) -> promptlab_models::error::ModelResult<()> {
-        Ok(())
-    }
-
-    async fn unload(&mut self) -> promptlab_models::error::ModelResult<()> {
-        Ok(())
-    }
-
     async fn complete(
         &self,
         request: promptlab_models::types::InferenceRequest,
@@ -157,17 +144,6 @@ impl InferenceRuntime for BackendRuntime {
         promptlab_models::types::RuntimeState::Ready
     }
 
-    async fn load_model(
-        &mut self,
-        _model_path: &std::path::Path,
-    ) -> promptlab_models::error::ModelResult<()> {
-        Ok(())
-    }
-
-    async fn unload(&mut self) -> promptlab_models::error::ModelResult<()> {
-        Ok(())
-    }
-
     async fn complete(
         &self,
         request: promptlab_models::types::InferenceRequest,
@@ -218,10 +194,7 @@ async fn build_local_backend(
     }
 
     let provider_runtime = ModelProviderRuntime::new(ctx.model_provider.clone(), model_id.clone());
-    let label = match config.local.provider {
-        LocalProvider::Ollama => "runtime/ollama",
-        LocalProvider::LlamaCpp => "runtime/llama_cpp",
-    };
+    let label = "runtime/vault";
 
     Ok(Arc::new(LocalLlmBackend::new(
         label,

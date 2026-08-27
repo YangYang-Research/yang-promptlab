@@ -126,10 +126,13 @@ pub struct Report {
 pub struct ModelRecord {
     pub id: String,
     pub name: String,
-    pub file_path: String,
+    pub provider: String,
     pub format: String,
+    pub file_path: String,
     pub checksum_sha256: Option<String>,
     pub size_bytes: Option<i64>,
+    pub verified: bool,
+    pub entry_json: String,
     pub metadata_json: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
@@ -332,8 +335,11 @@ pub struct CreateModel {
     pub name: String,
     pub file_path: String,
     pub format: Option<String>,
+    pub provider: Option<String>,
     pub checksum_sha256: Option<String>,
     pub size_bytes: Option<i64>,
+    pub verified: Option<bool>,
+    pub entry_json: Option<String>,
     pub metadata_json: Option<serde_json::Value>,
 }
 
@@ -342,9 +348,29 @@ pub struct UpdateModel {
     pub name: Option<String>,
     pub file_path: Option<String>,
     pub format: Option<String>,
+    pub provider: Option<String>,
     pub checksum_sha256: Option<String>,
     pub size_bytes: Option<i64>,
+    pub verified: Option<bool>,
+    pub entry_json: Option<String>,
     pub metadata_json: Option<serde_json::Value>,
+}
+
+/// Full model-registry upsert (denormalized columns + canonical `entry_json`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpsertModelEntry {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    pub format: String,
+    pub file_path: String,
+    pub checksum_sha256: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub verified: bool,
+    pub entry_json: String,
+    pub metadata_json: Option<String>,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -454,6 +480,36 @@ pub struct MutatorSettings {
 pub struct UpdateMutatorSettings {
     pub enabled_mutators: Vec<String>,
     pub category_mutators: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+/// Singleton host hardware profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct HardwareProfileRow {
+    pub id: String,
+    pub profile_json: String,
+    pub updated_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HardwareProfileRecord {
+    pub id: String,
+    pub profile_json: String,
+    pub updated_at: OffsetDateTime,
+}
+
+/// Generic app setting row (`environment`, `ai_runtime_config`, …).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct AppSettingRow {
+    pub key: String,
+    pub value_json: String,
+    pub updated_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppSettingRecord {
+    pub key: String,
+    pub value_json: String,
+    pub updated_at: OffsetDateTime,
 }
 
 /// Session-scoped agent working memory (short-term).

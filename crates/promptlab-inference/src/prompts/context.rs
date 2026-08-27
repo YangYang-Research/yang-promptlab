@@ -1,6 +1,3 @@
-use super::template::PromptId;
-use crate::prompts::PromptRegistry;
-
 #[derive(Debug, Clone, Default)]
 pub struct PromptContext {
     pub vars: Vec<(String, String)>,

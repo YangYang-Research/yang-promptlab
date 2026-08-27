@@ -52,7 +52,7 @@ export type Target = {
   fingerprint: string | null;
   tags: string[];
   authType: string;
-  authKind: "none" | "username_password" | "sso" | "basic" | "api_key" | "jwt";
+  authKind: "none" | "basic" | "api_key" | "jwt";
 };
 
 export type AttackRun = {
@@ -120,17 +120,19 @@ export type Report = {
   exported?: boolean;
 };
 
-export type LocalModel = {
+export type RegisteredModel = {
   id: string;
   name: string;
   provider: string;
   sizeGb: number;
   status: ModelStatus;
-  downloadProgress: number;
-  quant: string;
+  format: string;
   path: string | null;
   sha256: string | null;
 };
+
+/** @deprecated Use RegisteredModel */
+export type LocalModel = RegisteredModel;
 
 export type ActivityItem = {
   id: string;

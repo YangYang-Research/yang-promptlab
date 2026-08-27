@@ -14,7 +14,7 @@ use crate::error::{InferenceError, InferenceResult};
 use crate::manager::InferenceRuntimeManager;
 use crate::prompts::PromptComposer;
 use crate::provider::{
-    descriptor_from_remote, AdapterHarness, LlamaCppAdapter, ProviderAdapter, RemoteAdapterSettings,
+    descriptor_from_remote, AdapterHarness, ProviderAdapter, RemoteAdapterSettings,
 };
 use crate::types::{
     ChatRequest, ChatResponse, CompleteRequest, CompletionOutcome, ConnectivityTestResult,
@@ -70,7 +70,7 @@ impl DefaultAiInferenceGateway {
 
 #[async_trait]
 impl AiInferenceGateway for DefaultAiInferenceGateway {
-    async fn chat(&self, request: ChatRequest) -> InferenceResult<ChatResponse> {
+    async fn chat(&self, _request: ChatRequest) -> InferenceResult<ChatResponse> {
         Err(InferenceError::Unsupported(
             "chat requires InferenceSession — use gateway_session()".into(),
         ))
@@ -392,69 +392,6 @@ impl<'a> GatewaySession<'a> {
                     settings.provider.as_str(),
                     settings.model,
                     crate::capabilities::ModelCapabilities::from_remote(settings.provider.as_str()),
-                    config.max_tokens,
-                    config.temperature,
-                    config.timeout_secs.saturating_mul(1000).max(1_000),
-                    cancel,
-                ))
-            }
-            InferenceMode::Local => {
-                if config.provider == crate::config::InferenceProvider::Ollama {
-                    let mut descriptor = TargetDescriptor {
-                        url: "http://127.0.0.1:11434/v1/chat/completions".into(),
-                        surface: TargetSurface::Ollama,
-                        ..TargetDescriptor::default()
-                    };
-                    if let Some(base) = self
-                        .inner
-                        .remote_settings
-                        .as_ref()
-                        .and_then(|s| s.base_url.clone())
-                    {
-                        if !base.trim().is_empty() {
-                            descriptor.url = format!(
-                                "{}/v1/chat/completions",
-                                base.trim().trim_end_matches('/')
-                            );
-                        }
-                    }
-                    return Ok(InferenceClient::from_harness(
-                        factory,
-                        descriptor,
-                        HarnessPurpose::assistant(),
-                        config.provider.as_str(),
-                        self.inner.model_entry.display_model_name(),
-                        crate::capabilities::ModelCapabilities::from_local_chat(),
-                        config.max_tokens,
-                        config.temperature,
-                        config.timeout_secs.saturating_mul(1000).max(1_000),
-                        cancel,
-                    ));
-                }
-                self.inner
-                    .manager
-                    .prepare_local_runtime(self.inner.model_entry, self.inner.runtime_manager)
-                    .await?;
-                let provider_runtime = promptlab_runtime::ModelProviderRuntime::new(
-                    self.inner.model_provider.clone(),
-                    self.inner.model_entry.id.clone(),
-                );
-                factory.register(Arc::new(LlamaCppAdapter::new(
-                    config.provider,
-                    self.inner.model_entry.display_model_name(),
-                    Arc::new(tokio::sync::Mutex::new(provider_runtime)),
-                )))?;
-                Ok(InferenceClient::from_harness(
-                    factory,
-                    TargetDescriptor {
-                        url: "local://llama".into(),
-                        surface: TargetSurface::LlamaCpp,
-                        ..TargetDescriptor::default()
-                    },
-                    HarnessPurpose::assistant(),
-                    config.provider.as_str(),
-                    self.inner.model_entry.display_model_name(),
-                    crate::capabilities::ModelCapabilities::from_local_chat(),
                     config.max_tokens,
                     config.temperature,
                     config.timeout_secs.saturating_mul(1000).max(1_000),

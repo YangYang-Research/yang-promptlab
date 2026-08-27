@@ -348,7 +348,6 @@ impl SequentialAttackExecutionAgent {
                             last_obs = obs;
                             last_obs.endpoint_error = Some(err.clone());
                             last_obs.endpoint_unhealthy = true;
-                            attacked = false;
                             // Empty batch is not fixed by pacing recover — fail the category.
                             stopped_reason = format!("attack_failed: {err}");
                             emit_and_record(
@@ -818,6 +817,7 @@ fn gate_seq_action(
     }
 }
 
+#[cfg(test)]
 fn parse_seq_action(raw: &str) -> Result<SeqAction, String> {
     match raw.trim().to_ascii_lowercase().replace('-', "_").as_str() {
         // generate_prompt is a Yazg/Attack-Factory verb; treat as payload generate here.

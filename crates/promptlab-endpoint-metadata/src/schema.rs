@@ -32,7 +32,7 @@ impl SchemaInferenceEngine {
         api_style: &str,
     ) -> (SchemaMetadata, InferenceFields) {
         let mut schema = SchemaMetadata::default();
-        let mut inference;
+        let inference;
 
         let ct = content_type.unwrap_or_default().to_ascii_lowercase();
         if ct.contains("multipart") {
@@ -112,6 +112,16 @@ fn infer_request_fields(
     }
     if IMAGES_PATH.is_match(url) {
         fields.push(field("prompt", "string", true));
+        fields.push(field("model", "string", false));
+        return fields;
+    }
+    if AUDIO_PATH.is_match(url) {
+        fields.push(field("file", "string", true));
+        fields.push(field("model", "string", false));
+        return fields;
+    }
+    if MODERATIONS_PATH.is_match(url) {
+        fields.push(field("input", "string", true));
         fields.push(field("model", "string", false));
         return fields;
     }

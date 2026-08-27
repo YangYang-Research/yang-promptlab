@@ -5,7 +5,7 @@ use promptlab_auth::AuthEngineConfig;
 use promptlab_agenttrace::SharedAgentTrace;
 use promptlab_core::{EnvironmentPaths, EventBus, EventLogGuard, EventRing, LogGuard};
 use promptlab_harness::HarnessFactory;
-use promptlab_models::{BuiltinCatalogMeta, LocalModelManager};
+use promptlab_models::LocalModelManager;
 use promptlab_plugin_host::PluginManager;
 use promptlab_inference::InferenceRuntimeManager;
 use promptlab_runtime::RuntimeManager;
@@ -26,7 +26,6 @@ pub struct AppState {
     plugin_manager: Arc<AsyncMutex<PluginManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: promptlab_runtime::SharedModelProvider,
-    model_catalog_meta: BuiltinCatalogMeta,
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
     inference_manager: Arc<AsyncMutex<InferenceRuntimeManager>>,
     runtime_config_cache: Arc<AsyncMutex<Option<crate::commands::runtime::RuntimeConfigurationDto>>>,
@@ -52,7 +51,6 @@ impl AppState {
         runtime_manager: RuntimeManager,
         model_manager: Arc<AsyncMutex<LocalModelManager>>,
         model_provider: promptlab_runtime::SharedModelProvider,
-        model_catalog_meta: BuiltinCatalogMeta,
         agent_trace: SharedAgentTrace,
     ) -> Self {
         let config_dir = environment.config.clone();
@@ -67,7 +65,6 @@ impl AppState {
             plugin_manager,
             model_manager,
             model_provider,
-            model_catalog_meta,
             runtime_manager: Arc::new(AsyncMutex::new(runtime_manager)),
             inference_manager: Arc::new(AsyncMutex::new(InferenceRuntimeManager::new(config_dir))),
             runtime_config_cache: Arc::new(AsyncMutex::new(None)),
@@ -129,10 +126,6 @@ impl AppState {
         self.environment.logs.clone()
     }
 
-    pub fn model_catalog_meta(&self) -> &BuiltinCatalogMeta {
-        &self.model_catalog_meta
-    }
-
     pub fn model_manager(&self) -> &Arc<AsyncMutex<LocalModelManager>> {
         &self.model_manager
     }
@@ -169,11 +162,6 @@ impl AppState {
 
     pub fn event_ring(&self) -> &Arc<EventRing> {
         &self.event_ring
-    }
-
-    pub async fn ollama_base_url(&self) -> String {
-        let _ = self.runtime_manager.lock().await;
-        "embedded".into()
     }
 
     pub fn auth_engine_config(&self) -> &AuthEngineConfig {

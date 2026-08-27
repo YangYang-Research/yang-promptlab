@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use crate::error::{PromptLabError, PromptLabResult};
 
 pub const ROOT_DIR_NAME: &str = ".promptlab";
-pub const ENV_CONFIG_FILE: &str = "environment.json";
 pub const DB_FILENAME: &str = "promptlab.db";
 pub const DB_PATH_ENV: &str = "PROMPTLAB_DB_PATH";
 pub const ROOT_PATH_ENV: &str = "PROMPTLAB_ROOT";
@@ -55,18 +54,13 @@ impl EnvironmentPaths {
         self.config.join("plugins_state.json")
     }
 
-    pub fn environment_config_path(&self) -> PathBuf {
-        self.config.join(ENV_CONFIG_FILE)
-    }
-
-    pub fn all_dirs(&self) -> [&Path; 9] {
+    pub fn all_dirs(&self) -> [&Path; 8] {
         [
             &self.config,
             &self.workspaces,
             &self.models,
             &self.runtime,
             &self.logs,
-            &self.plugins,
             &self.cache,
             &self.temp,
             &self.backups,
@@ -155,42 +149,16 @@ pub fn resolve_paths(config: &EnvironmentConfig) -> EnvironmentPaths {
     }
 }
 
-pub fn load_environment_config(root: &Path) -> EnvironmentConfig {
-    let path = root.join("config").join(ENV_CONFIG_FILE);
-    if !path.is_file() {
-        return EnvironmentConfig {
-            root: Some(root.to_path_buf()),
-            ..Default::default()
-        };
-    }
-    let raw = fs::read_to_string(&path).unwrap_or_default();
-    serde_json::from_str(&raw).unwrap_or_else(|_| EnvironmentConfig {
-        root: Some(root.to_path_buf()),
-        ..Default::default()
-    })
-}
-
-pub fn save_environment_config(paths: &EnvironmentPaths, config: &EnvironmentConfig) -> PromptLabResult<()> {
-    fs::create_dir_all(&paths.config).map_err(PromptLabError::from)?;
-    let raw = serde_json::to_string_pretty(config).map_err(|e| PromptLabError::internal(e.to_string()))?;
-    let file = paths.environment_config_path();
-    let tmp = file.with_extension("json.tmp");
-    fs::write(&tmp, raw).map_err(PromptLabError::from)?;
-    fs::rename(&tmp, &file).map_err(PromptLabError::from)?;
-    Ok(())
-}
-
-/// Load config, resolve paths, create missing directories, verify permissions.
+/// Resolve default layout (`PROMPTLAB_ROOT` or `~/.promptlab`) and create directories.
+/// Path overrides live in SQLite `app_settings.environment` after the DB opens.
 pub fn bootstrap_environment() -> PromptLabResult<EnvironmentPaths> {
     let root = default_root_dir();
-    let mut config = load_environment_config(&root);
-    if config.root.is_none() {
-        config.root = Some(root.clone());
-    }
-
+    let config = EnvironmentConfig {
+        root: Some(root),
+        ..Default::default()
+    };
     let paths = resolve_paths(&config);
     ensure_environment(&paths)?;
-    save_environment_config(&paths, &config)?;
     Ok(paths)
 }
 

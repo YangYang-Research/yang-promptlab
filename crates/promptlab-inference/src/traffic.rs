@@ -4,7 +4,7 @@
 //! Historical charts are built from persisted events via [`snapshot_from_events`].
 //!
 //! **Choke points (must record here, not in feature crates):**
-//! - [`crate::provider::RemoteProviderAdapter::complete`] / [`crate::provider::LlamaCppAdapter::complete`]
+//! - [`crate::provider::RemoteProviderAdapter::complete`]
 //!   — all [`crate::gateway::InferenceClient`] / session completions
 //! - Judge legacy backends (`promptlab-judge` `RemoteLlmBackend` / `LocalLlmBackend`)
 //! - Health probes: [`crate::gateway::InferenceClient::health`],

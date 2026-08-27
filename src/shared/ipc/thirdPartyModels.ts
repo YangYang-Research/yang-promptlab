@@ -104,7 +104,7 @@ export const THIRD_PARTY_PROVIDERS: Array<{
   {
     value: "nvidia",
     label: "NVIDIA",
-    modelPlaceholder: "meta/llama-3.1-8b-instruct",
+    modelPlaceholder: "meta/llama-3.2-3b-instruct",
     apiKeyEnv: "NVIDIA_API_KEY",
     baseUrlPlaceholder: "https://integrate.api.nvidia.com/v1",
     modelsDocsUrl: "https://build.nvidia.com/models",
@@ -262,10 +262,11 @@ export function thirdPartyConnectionTestFingerprint(form: ThirdPartyModelForm): 
 
 export function testThirdPartyModelConnectivity(
   form: ThirdPartyModelForm,
+  existingModelId?: string | null,
 ): Promise<ThirdPartyModelConnectivityResult> {
   return withModelOperationTimeout(
     invokeCommand<ThirdPartyModelConnectivityResult>("models_test_third_party", {
-      request: thirdPartyModelToSaveRequest(form),
+      request: thirdPartyModelToSaveRequest(form, existingModelId),
     }),
     "Connection test",
   );

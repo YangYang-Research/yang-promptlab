@@ -2,14 +2,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use promptlab_core::{PromptLabError, PromptLabResult};
+use promptlab_core::PromptLabResult;
 use time::{Duration, OffsetDateTime};
 use tracing::{debug, instrument};
 use url::Url;
 
 use crate::config::AuthEngineConfig;
 use crate::mock::SharedPlaywrightDriver;
-use crate::playwright::{PlaywrightClient, PlaywrightDriver};
+use crate::playwright::PlaywrightClient;
 use crate::session::SessionStore;
 use crate::types::{
     AuthSession, CookieRecord, ExtractedToken, PlaywrightStorageState, SessionValidationStatus,

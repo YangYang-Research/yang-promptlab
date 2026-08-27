@@ -95,6 +95,19 @@ export function yazgStop(): Promise<void> {
   return invokeCommand<void>("yazg_stop");
 }
 
+export type YazgChatStoreDto = {
+  threads: unknown[];
+  activeThreadId: string;
+};
+
+export function yazgChatThreadsGet(): Promise<YazgChatStoreDto | null> {
+  return invokeCommand<YazgChatStoreDto | null>("yazg_chat_threads_get");
+}
+
+export function yazgChatThreadsSave(store: YazgChatStoreDto): Promise<void> {
+  return invokeCommand<void>("yazg_chat_threads_save", { store });
+}
+
 /** Harness/LLM cooperative cancel from `yazg_stop`. */
 export function isYazgCancelledError(error: unknown): boolean {
   const message =

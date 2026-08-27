@@ -19,6 +19,15 @@ export {
   type ProjectSummaryResponse,
 } from "./projectSummary";
 export {
+  checkForUpdate,
+  applyUpdateIfAvailable,
+  updateDownloadPercent,
+  APP_UPDATE_PROGRESS_EVENT,
+  type UpdateCheckDto,
+  type UpdateProgressDto,
+} from "./updater";
+export { searchWorkspace, type WorkspaceSearchHit } from "./workspaceSearch";
+export {
   getTarget,
   getTargetWizardDescriptor,
   updateTargetDescriptor,
@@ -27,6 +36,7 @@ export {
   listTargets,
   healthCheck,
   getAppInfo,
+  getStartupStatus,
   listScans,
   getScan,
   listFindings,
@@ -75,16 +85,18 @@ export {
 } from "./findingRecommendations";
 export {
   listModels,
-  browseModels,
-  installModel,
   removeModel,
   verifyModel,
   testModelInference,
   testModelEmbeddings,
-  getModelsVaultPath,
   type ModelEntryDto,
-  type ModelCatalogEntryDto,
-  type ModelInstallRequest,
   type ModelInferenceTestResult,
   type ModelCapabilitiesDto,
 } from "./models";
+export {
+  listRecentActivity,
+  recordRecentActivity,
+  replaceRecentActivity,
+  type ActivityItemDto,
+  type ActivityRecordRequest,
+} from "./activity";

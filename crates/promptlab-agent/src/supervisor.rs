@@ -1030,15 +1030,6 @@ fn format_plan_summary(plan: &WizardAttackPlan) -> String {
     )
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    let t = s.trim();
-    if t.chars().count() <= max {
-        return t.to_string();
-    }
-    let shortened: String = t.chars().take(max.saturating_sub(1)).collect();
-    format!("{shortened}…")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

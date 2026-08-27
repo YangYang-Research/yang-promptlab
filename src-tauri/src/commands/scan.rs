@@ -293,16 +293,65 @@ pub async fn reconcile_interrupted_scans(state: &AppState, force: bool) -> usize
     reconciled
 }
 
-fn user_facing_scan_error(raw: &str) -> String {
-    if raw.contains("secret not found in secure storage")
-        || raw.contains("No matching entry found in secure storage")
+/// One-shot: `~/.promptlab/auto_retry_scan` contains a scan id to Retry after a rebuild.
+pub async fn maybe_auto_retry_scan(state: &AppState, app: &AppHandle) {
+    let path = state.root_dir().join("auto_retry_scan");
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let _ = std::fs::remove_file(&path);
+    let scan_id = raw.trim();
+    if scan_id.is_empty() {
+        return;
+    }
+
+    let repos = state.repositories();
+    let scan = match repos.scans().get(scan_id).await {
+        Ok(scan) => scan,
+        Err(err) => {
+            warn!(scan_id, error = %err, "auto-retry scan not found");
+            return;
+        }
+    };
+    let Some(target_id) = scan.target_id.clone() else {
+        warn!(scan_id = %scan.id, "auto-retry skipped: scan has no target");
+        return;
+    };
+    let params = match scan
+        .playbook_json
+        .as_deref()
+        .and_then(|raw| execution_params_from_playbook(raw).ok())
     {
-        return "stored API credentials are missing from the system keychain — re-save authentication in Step 3 and verify again".into();
+        Some(params) => params,
+        None => {
+            warn!(scan_id = %scan.id, "auto-retry skipped: missing playbook");
+            return;
+        }
+    };
+
+    info!(scan_id = %scan.id, "auto-retrying scan after rebuild");
+    if let Err(err) = scan_start_op(
+        state,
+        app,
+        scan.project_id,
+        target_id,
+        params.profile,
+        params.categories,
+        params.disabled_tests,
+        params.generator_mode,
+        params.payload_strategy,
+        Some(params.agentic),
+        Some(params.max_agent_attempts),
+        Some(params.reflection_enabled),
+        Some(params.adaptive_planning),
+        Some(scan.id.clone()),
+        Some(false),
+        Some(true),
+    )
+    .await
+    {
+        warn!(scan_id = %scan.id, error = %err, "auto-retry failed");
     }
-    if raw.contains("transport error") {
-        return format!("could not reach target ({raw})");
-    }
-    raw.to_string()
 }
 
 fn merge_scan_execution_playbook(
@@ -1689,12 +1738,6 @@ mod tests {
         assert!(!is_interrupted_scan_status("completed"));
         assert!(!is_interrupted_scan_status("stopped"));
         assert_eq!(INTERRUPTED_TERMINAL_STATUS, "stopped");
-    }
-
-    #[test]
-    fn user_facing_scan_error_maps_missing_vault_secret() {
-        let msg = user_facing_scan_error("[NOT_FOUND] secret not found in secure storage");
-        assert!(msg.contains("Step 3"));
     }
 
     #[test]

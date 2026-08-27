@@ -188,16 +188,16 @@ export function JudgeRoleWeightsPanel({ disabled = false }: { disabled?: boolean
             {PRESET_PROFILES.map((preset) => {
               const active = selectedPreset === preset.id;
               return (
-                <Button
-                  key={preset.id}
-                  variant={active ? "primary" : "secondary"}
-                  size="sm"
-                  disabled={disabled || saving}
-                  onClick={() => handleApplyPreset(preset.id)}
-                  title={preset.hint}
-                >
-                  {preset.label}
-                </Button>
+                <span key={preset.id} title={preset.hint}>
+                  <Button
+                    variant={active ? "primary" : "secondary"}
+                    size="sm"
+                    disabled={disabled || saving}
+                    onClick={() => handleApplyPreset(preset.id)}
+                  >
+                    {preset.label}
+                  </Button>
+                </span>
               );
             })}
           </div>

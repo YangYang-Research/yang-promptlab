@@ -3,31 +3,13 @@ import type { Target } from "@/shared/types";
 import { fullProfileUrl, type TargetProfileFormState } from "./targetProfile";
 
 /** Authentication methods exposed in the Targets / Scan wizard UI. */
-export type TargetAuthKind =
-  | "none"
-  | "username_password"
-  | "sso"
-  | "basic"
-  | "api_key"
-  | "jwt";
+export type TargetAuthKind = "none" | "basic" | "api_key" | "jwt";
 
-export type AuthEngineKind = "none" | "auth_engine" | "playwright";
+export type AuthEngineKind = "none" | "auth_engine";
 
 export type TargetFormState = {
   url: string;
   authKind: TargetAuthKind;
-  /** Playwright — form login (AuthEngine `UsernamePassword`). */
-  loginUrl: string;
-  loginUsername: string;
-  loginPassword: string;
-  usernameSelector: string;
-  passwordSelector: string;
-  submitSelector: string;
-  browserSessionId: string | null;
-  browserSessionReady: boolean;
-  /** Playwright — interactive SSO / OAuth flow. */
-  ssoLoginUrl: string;
-  ssoSuccessUrlPattern: string;
   /** AuthEngine — HTTP Basic (`Authorization: Basic …`). */
   basicUsername: string;
   basicPassword: string;
@@ -52,24 +34,8 @@ export const AUTH_METHOD_OPTIONS: Array<{
   label: string;
   engine: AuthEngineKind;
   hint: string;
-  /** When true, shown in Targets / Scan wizard but not selectable. */
-  disabled?: boolean;
 }> = [
   { value: "none", label: "None", engine: "none", hint: "No authentication" },
-  {
-    value: "username_password",
-    label: "Username / Password",
-    engine: "playwright",
-    hint: "Temporarily unavailable",
-    disabled: true,
-  },
-  {
-    value: "sso",
-    label: "SSO",
-    engine: "playwright",
-    hint: "Temporarily unavailable",
-    disabled: true,
-  },
   {
     value: "basic",
     label: "Basic",
@@ -92,7 +58,7 @@ export const AUTH_METHOD_OPTIONS: Array<{
 
 /** Auth kinds currently selectable in Targets / Scan wizard. */
 export function selectableAuthKinds(): TargetAuthKind[] {
-  return AUTH_METHOD_OPTIONS.filter((option) => !option.disabled).map((option) => option.value);
+  return AUTH_METHOD_OPTIONS.map((option) => option.value);
 }
 
 export function authEngineForKind(kind: TargetAuthKind): AuthEngineKind {
@@ -103,16 +69,6 @@ export function createInitialTargetForm(): TargetFormState {
   return {
     url: "",
     authKind: "none",
-    loginUrl: "",
-    loginUsername: "",
-    loginPassword: "",
-    usernameSelector: "#email",
-    passwordSelector: "#password",
-    submitSelector: "button[type=submit]",
-    browserSessionId: null,
-    browserSessionReady: false,
-    ssoLoginUrl: "",
-    ssoSuccessUrlPattern: "",
     basicUsername: "",
     basicPassword: "",
     apiKeyHeaderName: "Authorization",
@@ -146,25 +102,8 @@ export function targetFormFromDescriptor(descriptor: unknown, fallbackUrl = ""):
   const auth = asRecord(root?.auth);
   const kind = typeof auth?.kind === "string" ? auth.kind : "none";
   const config = asRecord(auth?.config);
-  const sessionId = typeof auth?.session_id === "string" ? auth.session_id : null;
 
   switch (kind) {
-    case "username_password":
-      form.authKind = "username_password";
-      form.loginUrl = typeof config?.login_url === "string" ? config.login_url : url;
-      form.loginUsername = typeof config?.username === "string" ? config.username : "";
-      form.loginPassword = typeof config?.password === "string" ? config.password : "";
-      form.browserSessionId = sessionId;
-      form.browserSessionReady = Boolean(sessionId);
-      break;
-    case "sso":
-      form.authKind = "sso";
-      form.ssoLoginUrl = typeof config?.login_url === "string" ? config.login_url : url;
-      form.ssoSuccessUrlPattern =
-        typeof config?.success_url_pattern === "string" ? config.success_url_pattern : "";
-      form.browserSessionId = sessionId;
-      form.browserSessionReady = Boolean(sessionId);
-      break;
     case "basic":
       form.authKind = "basic";
       form.basicUsername =
@@ -202,6 +141,7 @@ export function targetFormFromDescriptor(descriptor: unknown, fallbackUrl = ""):
       form.jwtVaultMissing = config?.token_vault_missing === true;
       break;
     default:
+      // Legacy Playwright kinds (username_password / sso) collapse to none.
       form.authKind = "none";
       break;
   }
@@ -217,8 +157,6 @@ export function targetFormNeedsSecretHydration(form: TargetFormState): boolean {
       return !form.jwtToken.trim();
     case "basic":
       return !form.basicPassword;
-    case "username_password":
-      return !form.loginPassword;
     default:
       return false;
   }
@@ -233,25 +171,16 @@ export function migrateTargetForm(form: Partial<TargetFormState> & Record<string
     next.basicUsername = form.username;
     next.basicPassword = typeof form.password === "string" ? form.password : "";
   }
-  if (typeof form.username === "string" && legacyKind === "username_password") {
-    next.loginUsername = form.username;
-    next.loginPassword = typeof form.password === "string" ? form.password : "";
-  }
   if (typeof form.headerName === "string") {
     next.apiKeyHeaderName = form.headerName;
   }
   if (typeof form.headerValue === "string") {
     next.apiKeyValue = form.headerValue;
   }
-  if (form.ssoSessionReady === true) {
-    next.browserSessionReady = true;
-  }
 
   const allowed = selectableAuthKinds();
   if (!allowed.includes(next.authKind)) {
     next.authKind = "none";
-    next.browserSessionReady = false;
-    next.browserSessionId = null;
   }
 
   return next;
@@ -590,14 +519,6 @@ export function validateTargetStep(input: TargetDescriptorInput): string | null 
   if (urlError) return urlError;
 
   switch (input.authKind) {
-    case "username_password":
-      if (!input.loginUsername.trim()) return "Username is required.";
-      if (!input.loginPassword) return "Password is required.";
-      if (!input.browserSessionReady) return "Record a browser login session before continuing.";
-      return null;
-    case "sso":
-      if (!input.browserSessionReady) return "Complete browser authentication before continuing.";
-      return null;
     case "basic":
       if (!input.basicUsername.trim()) return "Username is required for Basic auth.";
       if (!input.basicPassword) return "Password is required for Basic auth.";
@@ -618,33 +539,6 @@ function buildAuthBlock(input: TargetDescriptorInput): Record<string, unknown> {
   const engine = authEngineForKind(input.authKind);
 
   switch (input.authKind) {
-    case "username_password":
-      return {
-        kind: "username_password",
-        engine,
-        method: "username_password",
-        config: {
-          type: "username_password",
-          login_url: input.url.trim(),
-          username: input.loginUsername.trim(),
-          password: input.loginPassword,
-          recording_mode: "interactive",
-        },
-        session_id: input.browserSessionId,
-      };
-    case "sso":
-      return {
-        kind: "sso",
-        engine,
-        method: "oauth",
-        config: {
-          type: "oauth",
-          login_url: input.url.trim(),
-          recording_mode: "interactive",
-          provider: null,
-        },
-        session_id: input.browserSessionId,
-      };
     case "basic":
       return {
         kind: "basic",

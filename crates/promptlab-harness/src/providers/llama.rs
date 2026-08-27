@@ -5,10 +5,7 @@ use crate::models::{AttackRequest, HttpMethod, NormalizedResponse};
 use crate::providers::HttpHarness;
 use crate::traits::Harness;
 
-/// Local llama.cpp / Ollama OpenAI-compatible chat completions.
-///
-/// Embedded libllama is registered at runtime over this same id (`llama`)
-/// from `promptlab-inference`. This HTTP adapter covers llama-server and Ollama `/v1`.
+/// OpenAI-compatible chat completions for llama-server / Ollama `/v1` **scan targets**.
 #[derive(Clone)]
 pub struct LlamaHarness {
     inner: HttpHarness,

@@ -13,6 +13,7 @@ function sampleFinding(overrides: Partial<Finding> = {}): Finding {
     projectId: "project-1",
     targetId: "target-1",
     targetName: "api.example.com",
+    targetUrl: "https://api.example.com/v1",
     title: "Prompt Injection: Direct instruction override",
     description: "test",
     severity: "high",

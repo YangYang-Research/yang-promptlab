@@ -32,29 +32,32 @@ export function deriveAttackRuns(
   targets: Target[],
   liveStatus: Map<string, ScanStatusDto>,
 ): AttackRun[] {
-  return scans
-    .filter(isAttackScan)
-    .map((scan) => {
-      const live = liveStatus.get(scan.id);
-      const effectiveStatus = live?.status ?? scan.status;
-      if (!RUNNING_STATUSES.has(effectiveStatus)) return null;
+  const runs: AttackRun[] = [];
 
-      const total = live?.total ?? 0;
-      const completed = live?.completed ?? 0;
-      return {
-        id: scan.id,
-        targetId: scan.targetId ?? "",
-        targetName: targetName(targets, scan.targetId),
-        category: "prompt_injection",
-        status: effectiveStatus as AttackRun["status"],
-        payloadsTotal: total > 0 ? total : 100,
-        payloadsRun: completed,
-        findingsCount: live?.findings_count ?? 0,
-        startedAt: scan.startedAt ?? scan.createdAt,
-        completedAt: scan.completedAt,
-      } satisfies AttackRun;
-    })
-    .filter((run): run is AttackRun => run !== null);
+  for (const scan of scans) {
+    if (!isAttackScan(scan)) continue;
+
+    const live = liveStatus.get(scan.id);
+    const effectiveStatus = live?.status ?? scan.status;
+    if (!RUNNING_STATUSES.has(effectiveStatus)) continue;
+
+    const total = live?.total ?? 0;
+    const completed = live?.completed ?? 0;
+    runs.push({
+      id: scan.id,
+      targetId: scan.targetId ?? "",
+      targetName: targetName(targets, scan.targetId),
+      category: "prompt_injection",
+      status: effectiveStatus as AttackRun["status"],
+      payloadsTotal: total > 0 ? total : 100,
+      payloadsRun: completed,
+      findingsCount: live?.findings_count ?? 0,
+      startedAt: scan.startedAt ?? scan.createdAt,
+      completedAt: scan.completedAt,
+    });
+  }
+
+  return runs;
 }
 
 export function deriveActivity(

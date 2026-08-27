@@ -17,7 +17,7 @@ use promptlab_models::LocalModelManager;
 use promptlab_planner::{AttackPlan, PlannerLlm};
 use promptlab_runtime::{RuntimeManager, SharedModelProvider};
 use promptlab_storage::{Repositories, ScanRepository};
-use promptlab_target_profile::{MutationLevel, PayloadGenerationStrategy, PayloadStrategy};
+use promptlab_target_profile::{MutationLevel, PayloadStrategy};
 use promptlab_target_profile::wizard_plan::{
     enabled_tests_for_category, estimate_scan_requests, ExecutionStrategy,
 };
@@ -27,7 +27,7 @@ use tracing::{info, warn};
 
 use crate::agent_memory::SqliteAgentMemoryStore;
 use crate::commands::attack::{
-    CategoryRunOptions, CategoryRunResult, JudgedAttemptSummary, run_category_on_target_profile,
+    CategoryRunOptions, CategoryRunResult, run_category_on_target_profile,
 };
 use crate::commands::generator::{
     attack_plan_from_scan, generate_payloads_for_scan_job_with_options_and_catalog,
@@ -1949,6 +1949,7 @@ impl AttackExecutionTools for AgenticCategoryTools<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::attack::JudgedAttemptSummary;
     use promptlab_attack::AttackCategory;
     use promptlab_target_profile::{PayloadGenerationStrategy, PayloadStrategy};
 

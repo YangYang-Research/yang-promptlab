@@ -2,12 +2,15 @@ use sqlx::SqlitePool;
 
 mod agent_long_term_memory;
 mod agent_short_term_memory;
+mod app_settings;
 mod attack_catalog;
 mod attack_result;
 mod auth;
 mod endpoint;
 mod finding;
+mod hardware_profile;
 mod judge_role_weights;
+mod json_documents;
 mod model;
 mod mutator_settings;
 mod payload;
@@ -20,6 +23,9 @@ mod target;
 
 pub use agent_long_term_memory::SqliteAgentLongTermMemoryRepository;
 pub use agent_short_term_memory::SqliteAgentShortTermMemoryRepository;
+pub use app_settings::{
+    SqliteAppSettingsRepository, SETTING_AI_RUNTIME_CONFIG, SETTING_ENVIRONMENT,
+};
 pub use attack_catalog::SqliteAttackCatalogRepository;
 pub use attack_result::SqliteAttackResultRepository;
 pub use auth::{
@@ -27,7 +33,12 @@ pub use auth::{
 };
 pub use endpoint::SqliteEndpointRepository;
 pub use finding::SqliteFindingRepository;
+pub use hardware_profile::SqliteHardwareProfileRepository;
 pub use judge_role_weights::SqliteJudgeRoleWeightsRepository;
+pub use json_documents::{
+    JsonDocumentRecord, JsonDocumentRepository, SqliteRecentActivityRepository,
+    SqliteTokenUsageRepository, SqliteYazgChatThreadsRepository,
+};
 pub use model::SqliteModelRepository;
 pub use mutator_settings::SqliteMutatorSettingsRepository;
 pub use payload::SqlitePayloadRepository;
@@ -115,6 +126,26 @@ impl Repositories {
 
     pub fn mutator_settings(&self) -> SqliteMutatorSettingsRepository {
         SqliteMutatorSettingsRepository::new(self.pool.clone())
+    }
+
+    pub fn hardware_profile(&self) -> SqliteHardwareProfileRepository {
+        SqliteHardwareProfileRepository::new(self.pool.clone())
+    }
+
+    pub fn app_settings(&self) -> SqliteAppSettingsRepository {
+        SqliteAppSettingsRepository::new(self.pool.clone())
+    }
+
+    pub fn token_usage(&self) -> SqliteTokenUsageRepository {
+        SqliteTokenUsageRepository::new(self.pool.clone())
+    }
+
+    pub fn recent_activity(&self) -> SqliteRecentActivityRepository {
+        SqliteRecentActivityRepository::new(self.pool.clone())
+    }
+
+    pub fn yazg_chat_threads(&self) -> SqliteYazgChatThreadsRepository {
+        SqliteYazgChatThreadsRepository::new(self.pool.clone())
     }
 
     pub fn agent_short_term_memory(&self) -> SqliteAgentShortTermMemoryRepository {

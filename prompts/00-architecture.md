@@ -29,8 +29,8 @@ Database:
 Browser Automation:
 - Playwright
 
-Local AI Runtime:
-- llama.cpp
+AI Runtime (product inference):
+- Remote HTTP providers (OpenAI-compatible, Anthropic, Gemini, Azure, Bedrock, OpenRouter, custom)
 
 Requirements:
 

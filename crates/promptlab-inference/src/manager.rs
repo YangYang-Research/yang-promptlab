@@ -2,16 +2,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use promptlab_models::{ModelEntry, ModelProvider, ModelSource};
-use promptlab_runtime::{ModelProviderRuntime, RuntimeManager, SharedModelProvider};
-use tokio::sync::Mutex;
+use promptlab_runtime::{RuntimeManager, SharedModelProvider};
 
 use crate::capabilities::ModelCapabilities;
 use crate::config::{AiRuntimeConfiguration, InferenceMode, InferenceProvider, load_config, save_config};
 use crate::error::{InferenceError, InferenceResult};
-use crate::provider::{
-    LlamaCppAdapter, ProviderAdapter, RemoteAdapterSettings, RemoteProviderAdapter,
-};
-use crate::runtime::{LocalRuntimeAdapterBridge, RuntimeAdapter};
+use crate::provider::{ProviderAdapter, RemoteAdapterSettings, RemoteProviderAdapter};
 use crate::types::HealthStatus;
 
 /// Central AI runtime orchestrator — config, lifecycle coordination, provider selection.
@@ -38,6 +34,19 @@ impl InferenceRuntimeManager {
 
     pub async fn load(&mut self) -> InferenceResult<()> {
         self.config = load_config(&self.data_dir).await?;
+        // Migrate legacy local/embedded/ollama runtime labels to remote cloud route.
+        if matches!(
+            self.config.runtime.as_str(),
+            "local" | "embedded" | "ollama"
+        ) {
+            self.config.provider = InferenceProvider::OpenAi;
+            self.config.runtime = "cloud".into();
+            self.config.status = "not_configured".into();
+            self.config.initialized = false;
+            self.config.model.clear();
+            self.config.selected_model_id = None;
+            let _ = self.save().await;
+        }
         Ok(())
     }
 
@@ -67,41 +76,18 @@ impl InferenceRuntimeManager {
                 self.config.provider = remote.provider;
                 self.config.runtime = "cloud".into();
             }
-            ModelProvider::Ollama => {
-                self.config.mode = InferenceMode::Local;
-                self.config.provider = InferenceProvider::Ollama;
-                self.config.runtime = "ollama".into();
-            }
-            _ => {
-                self.config.mode = InferenceMode::Local;
-                self.config.provider = InferenceProvider::LlamaCpp;
-                self.config.runtime = "llama.cpp".into();
-            }
         }
         self.config.initialized = true;
         self.config.status = "configured".into();
         self.save().await
     }
 
-    pub async fn prepare_local_runtime(
-        &self,
-        entry: &ModelEntry,
-        runtime_manager: &mut RuntimeManager,
-    ) -> InferenceResult<()> {
-        let mut adapter = LocalRuntimeAdapterBridge::new(runtime_manager.supervisor_mut());
-        adapter.ensure_running().await?;
-        if entry.file_path.exists() && self.config.provider == InferenceProvider::LlamaCpp {
-            adapter.ensure_model_loaded(&entry.file_path).await?;
-        }
-        Ok(())
-    }
-
     pub async fn build_provider_adapter(
         &self,
-        entry: &ModelEntry,
+        _entry: &ModelEntry,
         remote: Option<RemoteAdapterSettings>,
-        model_provider: SharedModelProvider,
-        runtime_manager: &mut RuntimeManager,
+        _model_provider: SharedModelProvider,
+        _runtime_manager: &mut RuntimeManager,
     ) -> InferenceResult<Arc<dyn ProviderAdapter>> {
         match self.config.mode {
             InferenceMode::Deterministic => Err(InferenceError::NotReady(
@@ -112,17 +98,6 @@ impl InferenceRuntimeManager {
                     InferenceError::Config("missing remote credentials".into())
                 })?;
                 Ok(Arc::new(RemoteProviderAdapter::new(settings)))
-            }
-            InferenceMode::Local => {
-                self.prepare_local_runtime(entry, runtime_manager).await?;
-                let model_id = entry.id.clone();
-                let provider_runtime =
-                    ModelProviderRuntime::new(model_provider, model_id);
-                Ok(Arc::new(LlamaCppAdapter::new(
-                    self.config.provider,
-                    entry.display_model_name(),
-                    Arc::new(Mutex::new(provider_runtime)),
-                )))
             }
         }
     }
@@ -159,26 +134,22 @@ impl InferenceRuntimeManager {
         aws_secret: Option<String>,
         aws_session: Option<String>,
     ) -> InferenceResult<RemoteAdapterSettings> {
-        let ModelSource::Remote {
-            provider,
-            model,
-            base_url,
-            region,
-        } = &entry.source
-        else {
-            return Err(InferenceError::Config(
-                "model is not a third-party remote entry".into(),
-            ));
-        };
-        Ok(RemoteAdapterSettings {
-            provider: InferenceProvider::parse(provider),
-            model: model.clone(),
-            base_url: base_url.clone(),
-            api_key,
-            aws_secret_access_key: aws_secret,
-            aws_region: region.clone(),
-            aws_session_token: aws_session,
-        })
+        match &entry.source {
+            ModelSource::Remote {
+                provider,
+                model,
+                base_url,
+                region,
+            } => Ok(RemoteAdapterSettings {
+                provider: InferenceProvider::parse(provider),
+                model: model.clone(),
+                base_url: base_url.clone(),
+                api_key,
+                aws_secret_access_key: aws_secret,
+                aws_region: region.clone(),
+                aws_session_token: aws_session,
+            }),
+        }
     }
 }
 

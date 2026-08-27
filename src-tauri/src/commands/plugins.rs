@@ -1,6 +1,6 @@
 //! Plugin manager IPC commands.
 
-use promptlab_plugin_host::{PluginManager, PluginState, PluginType};
+use promptlab_plugin_host::{PluginState, PluginType};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 

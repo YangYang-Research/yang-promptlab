@@ -3,6 +3,8 @@ import { deleteAgentStmSession } from "@/shared/ipc/agentMemory";
 import { deleteAgentTraceSession } from "@/shared/ipc/agentTrace";
 import {
   yazgChat,
+  yazgChatThreadsGet,
+  yazgChatThreadsSave,
   yazgGenerateChatTitle,
   yazgResolveHilt,
   yazgStop,
@@ -57,7 +59,7 @@ type YazgChatHostHooks = {
   refresh?: () => void;
 };
 
-const HISTORY_STORAGE_KEY = "yazg-chat-threads-v2";
+const LEGACY_STORAGE_KEY = "yazg-chat-threads-v2";
 
 function newId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -129,63 +131,85 @@ function isChatThread(value: unknown): value is ChatThread {
   );
 }
 
-function loadStore(): ChatStore {
+function normalizeStore(parsed: Partial<ChatStore>): ChatStore | null {
+  const threads = Array.isArray(parsed.threads)
+    ? parsed.threads.filter(isChatThread).map((thread) => ({
+        ...thread,
+        createdAt: typeof thread.createdAt === "number" ? thread.createdAt : Date.now(),
+        updatedAt: typeof thread.updatedAt === "number" ? thread.updatedAt : Date.now(),
+        messages: thread.messages.map((msg) => ({
+          ...msg,
+          // HILT pending lives in an in-memory host store — drop stale cards.
+          pendingAction: undefined,
+          at: typeof msg.at === "number" ? msg.at : Date.now(),
+        })),
+      }))
+    : [];
+  if (threads.length === 0) return null;
+  const blanks = threads.filter(isBlankThread);
+  const conversations = threads.filter((thread) => !isBlankThread(thread));
+  const blank =
+    blanks.find((thread) => thread.id === parsed.activeThreadId) ??
+    blanks.sort((a, b) => b.updatedAt - a.updatedAt)[0] ??
+    null;
+  const normalized = blank ? [blank, ...conversations] : conversations;
+  if (normalized.length === 0) return null;
+  const activeThreadId =
+    typeof parsed.activeThreadId === "string" &&
+    normalized.some((thread) => thread.id === parsed.activeThreadId)
+      ? parsed.activeThreadId
+      : normalized[0].id;
+  return { threads: normalized, activeThreadId };
+}
+
+function loadLegacyLocalStorage(): ChatStore | null {
   try {
-    const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
-    if (!raw) return createStore();
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<ChatStore>;
-    const threads = Array.isArray(parsed.threads)
-      ? parsed.threads.filter(isChatThread).map((thread) => ({
-          ...thread,
-          createdAt: typeof thread.createdAt === "number" ? thread.createdAt : Date.now(),
-          updatedAt: typeof thread.updatedAt === "number" ? thread.updatedAt : Date.now(),
-          messages: thread.messages.map((msg) => ({
-            ...msg,
-            // HILT pending lives in an in-memory host store — drop stale cards.
-            pendingAction: undefined,
-            at: typeof msg.at === "number" ? msg.at : Date.now(),
-          })),
-        }))
-      : [];
-    if (threads.length === 0) return createStore();
-    const blanks = threads.filter(isBlankThread);
-    const conversations = threads.filter((thread) => !isBlankThread(thread));
-    const blank =
-      blanks.find((thread) => thread.id === parsed.activeThreadId) ??
-      blanks.sort((a, b) => b.updatedAt - a.updatedAt)[0] ??
-      null;
-    const normalized = blank ? [blank, ...conversations] : conversations;
-    if (normalized.length === 0) return createStore();
-    const activeThreadId =
-      typeof parsed.activeThreadId === "string" &&
-      normalized.some((thread) => thread.id === parsed.activeThreadId)
-        ? parsed.activeThreadId
-        : normalized[0].id;
-    return { threads: normalized, activeThreadId };
+    return normalizeStore(parsed);
   } catch {
-    return createStore();
+    return null;
   }
 }
 
-function persistStore(store: ChatStore) {
+function clearLegacyLocalStorage() {
   try {
-    const trimmed: ChatStore = {
-      activeThreadId: store.activeThreadId,
-      threads: store.threads.slice(0, 40).map((thread) => ({
-        ...thread,
-        messages: thread.messages.slice(-120),
-      })),
-    };
-    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(trimmed));
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
   } catch {
-    // ignore quota / private mode
+    // ignore
   }
+}
+
+function trimStore(store: ChatStore): ChatStore {
+  return {
+    activeThreadId: store.activeThreadId,
+    threads: store.threads.slice(0, 40).map((thread) => ({
+      ...thread,
+      messages: thread.messages.slice(-120),
+    })),
+  };
+}
+
+let hydrated = false;
+let hydratePromise: Promise<void> | null = null;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function persistStore(store: ChatStore) {
+  if (!hydrated) return;
+  const trimmed = trimStore(store);
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    void yazgChatThreadsSave(trimmed).catch(() => {
+      // Backend unavailable (mock mode) — keep in-memory only.
+    });
+  }, 250);
 }
 
 type Listener = () => void;
 
 let state: YazgChatSessionState = {
-  store: loadStore(),
+  store: createStore(),
   busy: false,
   stopping: false,
   pendingThreadId: null,
@@ -194,17 +218,53 @@ let state: YazgChatSessionState = {
 const listeners = new Set<Listener>();
 let hostHooks: YazgChatHostHooks = {};
 
-function emit() {
-  persistStore(state.store);
+function emit(shouldPersist = true) {
+  if (shouldPersist) {
+    persistStore(state.store);
+  }
   for (const listener of listeners) {
     listener();
   }
 }
 
-function setState(next: YazgChatSessionState) {
+function setState(next: YazgChatSessionState, shouldPersist = true) {
   state = next;
-  emit();
+  emit(shouldPersist);
 }
+
+/** Load threads from SQLite; one-shot migrate legacy localStorage. */
+export async function hydrateYazgChatThreads(): Promise<void> {
+  if (hydrated) return;
+  if (hydratePromise) return hydratePromise;
+  hydratePromise = (async () => {
+    try {
+      const fromDb = await yazgChatThreadsGet();
+      const normalizedDb = fromDb ? normalizeStore(fromDb as Partial<ChatStore>) : null;
+      if (normalizedDb) {
+        state = { ...state, store: normalizedDb };
+        clearLegacyLocalStorage();
+      } else {
+        const legacy = loadLegacyLocalStorage();
+        if (legacy) {
+          state = { ...state, store: legacy };
+          await yazgChatThreadsSave(trimStore(legacy)).catch(() => undefined);
+          clearLegacyLocalStorage();
+        }
+      }
+    } catch {
+      const legacy = loadLegacyLocalStorage();
+      if (legacy) {
+        state = { ...state, store: legacy };
+      }
+    } finally {
+      hydrated = true;
+      emit(false);
+    }
+  })();
+  return hydratePromise;
+}
+
+void hydrateYazgChatThreads();
 
 function patchStore(updater: (prev: ChatStore) => ChatStore) {
   setState({

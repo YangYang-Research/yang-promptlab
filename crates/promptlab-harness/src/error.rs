@@ -24,6 +24,8 @@ pub enum HarnessError {
     Timeout(String),
     #[error("empty completion")]
     Empty,
+    #[error("HTTP {status}: {message}")]
+    Http { status: u16, message: String },
 }
 
 pub type HarnessResult<T> = Result<T, HarnessError>;
@@ -50,7 +52,7 @@ impl HarnessError {
             Self::Empty => "empty",
             Self::Denied(_) => "denied",
             Self::Config(_) | Self::UnsupportedSurface(_) | Self::NotFound(_) => "config",
-            Self::Normalization(_) => "http",
+            Self::Normalization(_) | Self::Http { .. } => "http",
             Self::Transport(_) => "transport",
         }
     }

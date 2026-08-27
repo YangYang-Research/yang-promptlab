@@ -8,8 +8,7 @@ use promptlab_harness::{
 use super::ProviderAdapter;
 use crate::types::ToolDefinition;
 
-/// Registers a leftover [`ProviderAdapter`] on an isolated factory so tests still
-/// go through `HarnessFactory::execute`.
+/// Test harness wrapping a [`ProviderAdapter`] via `HarnessFactory::execute`.
 pub struct AdapterHarness {
     adapter: Arc<dyn ProviderAdapter>,
 }

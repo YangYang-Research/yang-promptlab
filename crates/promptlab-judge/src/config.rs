@@ -1,20 +1,33 @@
 //! Judge provider configuration and hybrid mode settings.
 
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
 
 use crate::types::JudgeMode;
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LocalProvider {
-    Ollama,
-    LlamaCpp,
+
+/// Local / vault model settings for LocalLlm judge mode.
+/// Inference goes through the ModelProvider bridge (vault model id), not a hardcoded URL.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalProviderSettings {
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default = "default_local_model")]
+    pub model: String,
+    /// Registered vault model id — resolved at judge engine build time.
+    #[serde(default)]
+    pub vault_model_id: Option<String>,
 }
 
-impl Default for LocalProvider {
+fn default_local_model() -> String {
+    String::new()
+}
+
+impl Default for LocalProviderSettings {
     fn default() -> Self {
-        Self::Ollama
+        Self {
+            base_url: String::new(),
+            model: default_local_model(),
+            vault_model_id: None,
+        }
     }
 }
 
@@ -34,55 +47,6 @@ pub enum RemoteProvider {
 impl Default for RemoteProvider {
     fn default() -> Self {
         Self::OpenAi
-    }
-}
-
-/// Local model settings (Ollama, llama.cpp / GGUF).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LocalProviderSettings {
-    pub provider: LocalProvider,
-    #[serde(default = "default_ollama_url")]
-    pub base_url: String,
-    #[serde(default = "default_local_model")]
-    pub model: String,
-    #[serde(default)]
-    pub model_path: Option<PathBuf>,
-    /// Registered vault model id — resolved to path/tag at judge engine build time.
-    #[serde(default)]
-    pub vault_model_id: Option<String>,
-    #[serde(default = "default_llama_binary")]
-    pub llama_binary: String,
-    #[serde(default = "default_llama_port")]
-    pub llama_port: u16,
-}
-
-fn default_ollama_url() -> String {
-    "http://127.0.0.1:11434".into()
-}
-
-fn default_local_model() -> String {
-    "llama3".into()
-}
-
-fn default_llama_binary() -> String {
-    "llama-server".into()
-}
-
-fn default_llama_port() -> u16 {
-    8081
-}
-
-impl Default for LocalProviderSettings {
-    fn default() -> Self {
-        Self {
-            provider: LocalProvider::Ollama,
-            base_url: default_ollama_url(),
-            model: default_local_model(),
-            model_path: None,
-            vault_model_id: None,
-            llama_binary: default_llama_binary(),
-            llama_port: default_llama_port(),
-        }
     }
 }
 

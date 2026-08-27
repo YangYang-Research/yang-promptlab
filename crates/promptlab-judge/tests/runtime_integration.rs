@@ -16,22 +16,6 @@ struct JsonJudgeProvider {
 
 #[async_trait]
 impl ModelProvider for JsonJudgeProvider {
-    async fn list_models(&self) -> promptlab_runtime::RuntimeResult<Vec<String>> {
-        Ok(vec!["vault-judge".into()])
-    }
-
-    async fn install_model(&self, _model_id: &str) -> promptlab_runtime::RuntimeResult<()> {
-        Ok(())
-    }
-
-    async fn remove_model(&self, _model_id: &str) -> promptlab_runtime::RuntimeResult<()> {
-        Ok(())
-    }
-
-    async fn run_inference(&self, _model_id: &str, _prompt: &str) -> promptlab_runtime::RuntimeResult<String> {
-        Ok(self.json.clone())
-    }
-
     async fn complete_for_model(
         &self,
         _model_id: &str,

@@ -18,17 +18,18 @@ pub mod scoring;
 pub mod types;
 
 pub use config::{
-    JudgeConnectivityResult, JudgeProviderConfig, LocalProvider, LocalProviderSettings,
-    RemoteProvider, RemoteProviderSettings,
+    JudgeConnectivityResult, JudgeProviderConfig, LocalProviderSettings, RemoteProvider,
+    RemoteProviderSettings,
 };
 pub use consensus::ConsensusEngine;
 pub use engine::JudgeEngine;
 pub use error::{JudgeError, JudgeResult};
 pub use evaluators::{LlmEvaluator, LlmResponseParser};
 pub use factory::{
-    build_judge_engine, build_judge_engine_with_adapter, build_judge_engine_with_client,
-    test_connectivity, test_model,
+    build_judge_engine, build_judge_engine_with_client, test_connectivity, test_model,
 };
+#[allow(deprecated)]
+pub use factory::build_judge_engine_with_adapter;
 pub use mock_runtime::JsonMockRuntime;
 pub use roles::ModelRolePool;
 pub use runtime_context::JudgeRuntimeContext;

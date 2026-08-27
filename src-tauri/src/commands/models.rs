@@ -1,19 +1,14 @@
-//! Local model vault commands — browse, install, remove, verify, inference test.
+//! Model registry commands — remote providers, verify, inference test.
 
-use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use promptlab_auth::SecretStore;
 use promptlab_core::{PromptLabError, LogCategory};
 use promptlab_models::{
-    DownloadManager, DownloadProgress, DownloadStatus, LocalModelManager, ModelCatalogEntry,
     ModelEntry, ModelFormat, ModelProvider, ModelSource, VerificationResult, remote_entry_id,
 };
-use promptlab_inference::prompts::PromptRegistry;
-use promptlab_runtime::{InferRequest, RuntimeError};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use tauri::async_runtime::Mutex as AsyncMutex;
 use tauri::State;
 
 use crate::inference_host::test_remote_connectivity_only;
@@ -72,27 +67,6 @@ pub struct ModelCapabilitiesDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ModelCatalogEntryDto {
-    pub id: String,
-    pub name: String,
-    pub provider: String,
-    pub version: String,
-    pub description: String,
-    pub purpose: String,
-    pub recommended: bool,
-    pub size_bytes: Option<u64>,
-    pub size_gb: Option<f64>,
-    pub quant: Option<String>,
-    pub capabilities: ModelCapabilitiesDto,
-    pub engine: String,
-    pub format: String,
-    pub download_url: Option<String>,
-    pub sha256: Option<String>,
-    pub size_label: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ModelRegistryInfoDto {
     pub entry_count: usize,
     pub remote_merged: bool,
@@ -121,26 +95,6 @@ pub struct ModelRegistryDiagnosticsDto {
     pub invalid_ids: Vec<String>,
     pub issues: Vec<RegistryValidationIssueDto>,
     pub healthy: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelInstallRequest {
-    pub catalog_id: String,
-    pub ollama_base_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelImportRequest {
-    pub name: String,
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelDownloadRequest {
-    pub catalog_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,9 +180,6 @@ fn third_party_edit_dto_from_entry(entry: &ModelEntry) -> Result<ThirdPartyModel
             )
             .is_some(),
         }),
-        _ => Err(CommandError::invalid_input(
-            "edit form only applies to third-party models",
-        )),
     }
 }
 
@@ -254,9 +205,6 @@ fn third_party_request_from_entry(
             mark_verified: false,
             test_latency_ms: None,
         }),
-        _ => Err(CommandError::invalid_input(
-            "connection test only applies to third-party models",
-        )),
     }
 }
 
@@ -282,6 +230,13 @@ fn apply_credential_fields(
 fn looks_like_openrouter_model(model: &str) -> bool {
     let model = model.trim();
     model.contains('/') && !model.contains(' ')
+}
+
+fn third_party_requires_api_key(provider: &str) -> bool {
+    matches!(
+        provider.trim().to_ascii_lowercase().as_str(),
+        "nvidia" | "openai" | "anthropic" | "gemini" | "openrouter" | "azure" | "bedrock"
+    )
 }
 
 fn normalize_third_party_provider(
@@ -437,6 +392,12 @@ async fn run_third_party_connectivity_test(
     )?;
     apply_credential_fields(&mut request, &credentials);
 
+    if third_party_requires_api_key(&request.provider) && credentials.api_key.trim().is_empty() {
+        return Err(CommandError::invalid_input(
+            "API key is required — re-enter it on the form, or save the model first so PromptLab can reuse the stored key",
+        ));
+    }
+
     let entry = staging_remote_entry(&request, metadata.as_ref())?;
     let remote = InferenceRuntimeManager::remote_settings_from_entry(
         &entry,
@@ -504,36 +465,12 @@ fn staging_remote_entry(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ModelDownloadProgressDto {
-    pub catalog_id: String,
-    pub status: String,
-    pub downloaded_bytes: u64,
-    pub total_bytes: Option<u64>,
-    pub remaining_bytes: Option<u64>,
-    pub percent: Option<f64>,
-    pub speed_bytes_per_sec: Option<f64>,
-    pub eta_seconds: Option<u64>,
-    pub resumed: bool,
-    pub destination: String,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ModelVaultStatsDto {
     pub vault_path: String,
     pub registered_count: usize,
     pub installed_local_count: usize,
     pub installed_bytes: u64,
     pub installed_gb: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelDownloadStatusDto {
-    pub active: bool,
-    pub progress: Option<ModelDownloadProgressDto>,
-    pub installed: Option<ModelEntryDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -555,7 +492,7 @@ fn registry_verified_status(entry: &ModelEntry) -> bool {
     entry.verified
 }
 
-pub(crate) fn entry_to_dto(entry: &ModelEntry, vault: &std::path::Path) -> ModelEntryDto {
+pub(crate) fn entry_to_dto(entry: &ModelEntry, _vault: &std::path::Path) -> ModelEntryDto {
     let size_gb = entry
         .size_bytes
         .map(|b| (b as f64) / (1024.0 * 1024.0 * 1024.0))
@@ -570,7 +507,7 @@ pub(crate) fn entry_to_dto(entry: &ModelEntry, vault: &std::path::Path) -> Model
         size_bytes: entry.size_bytes,
         size_gb,
         verified,
-        path: promptlab_models::ModelRegistry::display_uri(vault, &entry.file_path),
+        path: entry.file_path.to_string_lossy().into_owned(),
         sha256: entry.checksum_sha256.clone(),
         capabilities: ModelCapabilitiesDto {
             chat: entry.capabilities.chat,
@@ -583,206 +520,6 @@ pub(crate) fn entry_to_dto(entry: &ModelEntry, vault: &std::path::Path) -> Model
             "available".into()
         },
     }
-}
-
-fn catalog_to_dto(entry: &ModelCatalogEntry) -> ModelCatalogEntryDto {
-    ModelCatalogEntryDto {
-        id: entry.id.clone(),
-        name: entry.name.clone(),
-        provider: if entry.provider_label.trim().is_empty() {
-            entry.provider.as_str().into()
-        } else {
-            entry.provider_label.clone()
-        },
-        version: entry.version.clone(),
-        description: entry.description.clone(),
-        purpose: entry.purpose.clone(),
-        recommended: entry.recommended,
-        size_bytes: entry.size_bytes,
-        size_gb: entry
-            .size_bytes
-            .map(|b| (b as f64) / (1024.0 * 1024.0 * 1024.0)),
-        quant: entry.quant.clone(),
-        capabilities: ModelCapabilitiesDto {
-            chat: entry.capabilities.chat,
-            completion: entry.capabilities.completion,
-            embeddings: entry.capabilities.embeddings,
-        },
-        engine: entry.engine.clone(),
-        format: entry.format.clone(),
-        download_url: entry.download_url.clone(),
-        sha256: entry.sha256.clone(),
-        size_label: entry.size_label.clone(),
-    }
-}
-
-fn status_str(status: DownloadStatus) -> &'static str {
-    match status {
-        DownloadStatus::Pending => "pending",
-        DownloadStatus::Downloading => "downloading",
-        DownloadStatus::Paused => "paused",
-        DownloadStatus::Verifying => "verifying",
-        DownloadStatus::AwaitingVerify => "downloaded",
-        DownloadStatus::VerifyFailed => "verify_failed",
-        DownloadStatus::Completed => "completed",
-        DownloadStatus::Failed => "failed",
-        DownloadStatus::Verified => "verified",
-    }
-}
-
-fn progress_to_dto(progress: &DownloadProgress) -> ModelDownloadProgressDto {
-    let percent = progress.total_bytes.and_then(|total| {
-        if total == 0 {
-            None
-        } else {
-            Some((progress.downloaded_bytes as f64 / total as f64) * 100.0)
-        }
-    });
-    let remaining_bytes = progress
-        .total_bytes
-        .map(|total| total.saturating_sub(progress.downloaded_bytes));
-    ModelDownloadProgressDto {
-        catalog_id: progress.model_id.clone(),
-        status: status_str(progress.status).into(),
-        downloaded_bytes: progress.downloaded_bytes,
-        total_bytes: progress.total_bytes,
-        remaining_bytes,
-        percent,
-        speed_bytes_per_sec: progress.speed_bytes_per_sec,
-        eta_seconds: progress.eta_seconds,
-        resumed: progress.resumed,
-        destination: progress.destination.to_string_lossy().into_owned(),
-        error: progress.error.clone(),
-    }
-}
-
-async fn progress_to_dto_enriched(progress: &DownloadProgress) -> ModelDownloadProgressDto {
-    let mut dto = progress_to_dto(progress);
-    if progress.status == DownloadStatus::Completed
-        && DownloadManager::is_post_download_awaiting_verify(&progress.destination).await
-    {
-        dto.status = "downloaded".to_string();
-    }
-    dto
-}
-
-fn finalize_lock() -> &'static AsyncMutex<()> {
-    static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| AsyncMutex::new(()))
-}
-
-static PENDING_INSTALL: Mutex<Option<ModelEntryDto>> = Mutex::new(None);
-
-fn take_pending_install() -> Option<ModelEntryDto> {
-    PENDING_INSTALL.lock().ok()?.take()
-}
-
-fn store_pending_install(dto: ModelEntryDto) {
-    if let Ok(mut guard) = PENDING_INSTALL.lock() {
-        *guard = Some(dto);
-    }
-}
-
-async fn run_download_finalize(
-    model_manager: Arc<AsyncMutex<LocalModelManager>>,
-) -> CommandResult<Option<ModelEntryDto>> {
-    let _finalize_guard = finalize_lock().lock().await;
-
-    let plan = {
-        let mut manager = model_manager.lock().await;
-        manager
-            .prepare_finalize()
-            .await
-            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?
-    };
-
-    let Some(plan) = plan else {
-        return Ok(None);
-    };
-
-    let expected_sha256 = plan.catalog.sha256.as_deref().filter(|s| !s.is_empty());
-    if expected_sha256.is_none() {
-        tracing::warn!(
-            catalog_id = %plan.catalog_id,
-            "registry entry has no sha256; installing without integrity verification"
-        );
-    }
-
-    let verification = match promptlab_models::VerificationEngine::verify_file(
-        &plan.destination,
-        expected_sha256,
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(err) => {
-            let message = format!("verify error: {err}");
-            let mut manager = model_manager.lock().await;
-            let _ = manager
-                .record_verify_error(&plan.destination, message)
-                .await;
-            return Ok(None);
-        }
-    };
-
-    let mut manager = model_manager.lock().await;
-    let entry = manager
-        .complete_finalize(plan, verification)
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-
-    let vault = manager.vault_path().to_path_buf();
-    Ok(entry.map(|item| entry_to_dto(&item, &vault)))
-}
-
-fn spawn_download_finalize(state: &AppState) {
-    let model_manager = state.model_manager().clone();
-    tauri::async_runtime::spawn(async move {
-        match run_download_finalize(model_manager).await {
-            Ok(Some(dto)) => store_pending_install(dto),
-            Ok(None) => {}
-            Err(err) => tracing::warn!(error = %err, "background download finalize failed"),
-        }
-    });
-}
-
-async fn download_status_snapshot(
-    state: &AppState,
-    kick_finalize: bool,
-) -> CommandResult<ModelDownloadStatusDto> {
-    if let Some(installed) = take_pending_install() {
-        return Ok(ModelDownloadStatusDto {
-            active: false,
-            progress: None,
-            installed: Some(installed),
-        });
-    }
-
-    {
-        let mut manager = state.model_manager().lock().await;
-        if manager.download_status().await.is_none() {
-            let _ = manager.restore_persisted_pipelines().await;
-        }
-    }
-
-    if kick_finalize {
-        spawn_download_finalize(state);
-    }
-
-    let manager = state.model_manager().lock().await;
-    let progress = if let Some(active) = manager.download_status().await {
-        Some(progress_to_dto_enriched(&active).await)
-    } else if let Some(persisted) = manager.persisted_pipeline_progress().await {
-        Some(progress_to_dto_enriched(&persisted).await)
-    } else {
-        None
-    };
-
-    Ok(ModelDownloadStatusDto {
-        active: progress.is_some(),
-        progress,
-        installed: None,
-    })
 }
 
 #[tauri::command]
@@ -805,41 +542,27 @@ pub async fn models_registry_info(state: State<'_, AppState>) -> CommandResult<M
     models_registry_info_op(state.inner())
 }
 
-pub fn models_registry_info_op(state: &AppState) -> CommandResult<ModelRegistryInfoDto> {
-    let meta = state.model_catalog_meta();
-    let validation = &meta.validation;
+pub fn models_registry_info_op(_state: &AppState) -> CommandResult<ModelRegistryInfoDto> {
     Ok(ModelRegistryInfoDto {
-        entry_count: meta.entry_count,
-        remote_merged: meta.remote_merged,
-        remote_url: meta.remote_url.clone(),
-        source_path: meta
-            .source_path
-            .as_ref()
-            .map(|p| p.to_string_lossy().into_owned()),
-        total_models: validation.total,
-        valid_models: validation.valid,
-        invalid_models: validation.invalid,
+        entry_count: 0,
+        remote_merged: false,
+        remote_url: None,
+        source_path: None,
+        total_models: 0,
+        valid_models: 0,
+        invalid_models: 0,
     })
 }
 
-pub fn models_registry_diagnostics_op(state: &AppState) -> CommandResult<ModelRegistryDiagnosticsDto> {
-    let validation = &state.model_catalog_meta().validation;
+pub fn models_registry_diagnostics_op(_state: &AppState) -> CommandResult<ModelRegistryDiagnosticsDto> {
     Ok(ModelRegistryDiagnosticsDto {
-        total_models: validation.total,
-        valid_models: validation.valid,
-        invalid_models: validation.invalid,
-        valid_ids: validation.valid_ids.clone(),
-        invalid_ids: validation.invalid_ids.clone(),
-        issues: validation
-            .issues
-            .iter()
-            .map(|issue| RegistryValidationIssueDto {
-                id: issue.id.clone(),
-                field: issue.field.clone(),
-                message: issue.message.clone(),
-            })
-            .collect(),
-        healthy: validation.is_healthy(),
+        total_models: 0,
+        valid_models: 0,
+        invalid_models: 0,
+        valid_ids: Vec::new(),
+        invalid_ids: Vec::new(),
+        issues: Vec::new(),
+        healthy: true,
     })
 }
 
@@ -848,34 +571,6 @@ pub async fn models_registry_diagnostics(
     state: State<'_, AppState>,
 ) -> CommandResult<ModelRegistryDiagnosticsDto> {
     models_registry_diagnostics_op(state.inner())
-}
-
-#[tauri::command]
-pub async fn models_browse(state: State<'_, AppState>) -> CommandResult<Vec<ModelCatalogEntryDto>> {
-    models_browse_op(state.inner()).await
-}
-
-pub async fn models_browse_op(state: &AppState) -> CommandResult<Vec<ModelCatalogEntryDto>> {
-    let manager = state.model_manager().lock().await;
-    Ok(manager
-        .browse_catalog()
-        .iter()
-        .map(catalog_to_dto)
-        .collect())
-}
-
-#[tauri::command]
-pub async fn models_install(
-    state: State<'_, AppState>,
-    request: ModelInstallRequest,
-) -> CommandResult<ModelEntryDto> {
-    let mut manager = state.model_manager().lock().await;
-    let entry = manager
-        .install_catalog(&request.catalog_id, None)
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    let vault = manager.vault_path().to_path_buf();
-    Ok(entry_to_dto(&entry, &vault))
 }
 
 #[tauri::command]
@@ -914,6 +609,7 @@ pub async fn models_save_third_party(
             resolve_third_party_base_url(&provider, request.base_url.clone(), Some(model)),
             request.region.clone().filter(|value| !value.trim().is_empty()),
         )
+        .await
         .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
 
     if let Some(old_id) = existing_id {
@@ -948,6 +644,7 @@ pub async fn models_save_third_party(
 
         manager
             .update_model_metadata(&entry.id, metadata)
+            .await
             .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
 
         let is_new_model = existing_id.is_none();
@@ -964,13 +661,16 @@ pub async fn models_save_third_party(
             apply_model_connectivity_metadata(&mut metadata, true, latency_ms, &checked_at);
             manager
                 .update_model_metadata(&entry.id, metadata)
+                .await
                 .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
             manager
                 .set_model_verified(&entry.id, true)
+                .await
                 .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
         } else if is_new_model || renamed || credential_input_changed {
             manager
                 .set_model_verified(&entry.id, false)
+                .await
                 .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
         }
     } else {
@@ -1008,19 +708,33 @@ pub async fn models_test_third_party(
     let provider = request.provider.trim().to_string();
     let model = request.model.trim().to_string();
     with_model_operation_timeout(async {
-        let model_id = remote_entry_id(&provider, &model);
-        let metadata = {
+        let normalized_provider = normalize_third_party_provider(
+            request.provider.trim(),
+            request.base_url.as_deref(),
+            Some(request.model.trim()),
+        );
+        let new_id = remote_entry_id(&normalized_provider, request.model.trim());
+        let existing_id = request
+            .existing_model_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let (metadata, persist_existing) = {
             let manager = state.model_manager().lock().await;
-            manager
-                .get_model(&model_id)
-                .map(|entry| entry.metadata.clone())
+            let metadata = existing_id
+                .as_deref()
+                .and_then(|id| manager.get_model(id).map(|entry| entry.metadata.clone()))
+                .or_else(|| manager.get_model(&new_id).map(|entry| entry.metadata.clone()));
+            let persist_existing = manager.get_model(&new_id).is_some();
+            (metadata, persist_existing)
         };
         let result =
-            run_third_party_connectivity_test(state.inner(), request, metadata.clone()).await?;
-        if metadata.is_some() {
+            run_third_party_connectivity_test(state.inner(), request, metadata).await?;
+        if persist_existing {
             persist_third_party_model_connectivity(
                 state.inner(),
-                &model_id,
+                &new_id,
                 result.ok,
                 result.latency_ms,
             )
@@ -1074,7 +788,10 @@ pub(crate) async fn test_third_party_model_connection(
         let request = third_party_request_from_entry(entry)?;
         (request, metadata)
     };
-    let result = run_third_party_connectivity_test(state, request, Some(metadata)).await?;
+    *state.runtime_model_testing_id().lock().await = Some(model_id.to_string());
+    let result = run_third_party_connectivity_test(state, request, Some(metadata)).await;
+    *state.runtime_model_testing_id().lock().await = None;
+    let result = result?;
     persist_third_party_model_connectivity(state, model_id, result.ok, result.latency_ms).await?;
     Ok(result)
 }
@@ -1096,9 +813,11 @@ async fn persist_third_party_model_connectivity(
         apply_model_connectivity_metadata(&mut metadata, ok, latency_ms, &checked_at);
         manager
             .update_model_metadata(model_id, metadata)
+            .await
             .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
         manager
             .set_model_verified(model_id, ok)
+            .await
             .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     }
 
@@ -1117,117 +836,6 @@ async fn persist_third_party_model_connectivity(
     }
 
     Ok(())
-}
-
-#[tauri::command]
-pub async fn models_import_gguf(
-    state: State<'_, AppState>,
-    request: ModelImportRequest,
-) -> CommandResult<ModelEntryDto> {
-    let mut manager = state.model_manager().lock().await;
-    let entry = manager
-        .import_local(&request.name, &request.path)
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    let vault = manager.vault_path().to_path_buf();
-    Ok(entry_to_dto(&entry, &vault))
-}
-
-#[tauri::command]
-pub async fn models_import_zip(
-    state: State<'_, AppState>,
-    request: ModelImportRequest,
-) -> CommandResult<ModelEntryDto> {
-    let mut manager = state.model_manager().lock().await;
-    let entry = manager
-        .import_zip_package(&request.name, &request.path)
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    let vault = manager.vault_path().to_path_buf();
-    Ok(entry_to_dto(&entry, &vault))
-}
-
-#[tauri::command]
-pub async fn models_download_start(
-    state: State<'_, AppState>,
-    request: ModelDownloadRequest,
-) -> CommandResult<ModelDownloadProgressDto> {
-    let mut manager = state.model_manager().lock().await;
-    let progress = manager
-        .start_catalog_download(&request.catalog_id)
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    Ok(progress_to_dto(&progress))
-}
-
-#[tauri::command]
-pub async fn models_download_status(
-    state: State<'_, AppState>,
-) -> CommandResult<ModelDownloadStatusDto> {
-    download_status_snapshot(state.inner(), true).await
-}
-
-#[tauri::command]
-pub async fn models_download_pause(
-    state: State<'_, AppState>,
-) -> CommandResult<ModelDownloadProgressDto> {
-    let manager = state.model_manager().lock().await;
-    let progress = manager
-        .pause_download()
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    Ok(progress_to_dto(&progress))
-}
-
-#[tauri::command]
-pub async fn models_download_resume(
-    state: State<'_, AppState>,
-) -> CommandResult<ModelDownloadProgressDto> {
-    let manager = state.model_manager().lock().await;
-    let progress = manager
-        .resume_download()
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    Ok(progress_to_dto(&progress))
-}
-
-#[tauri::command]
-pub async fn models_download_retry_verify(
-    state: State<'_, AppState>,
-    request: ModelDownloadRequest,
-) -> CommandResult<ModelDownloadStatusDto> {
-    let progress = {
-        let mut manager = state.model_manager().lock().await;
-        manager
-            .begin_catalog_verify(&request.catalog_id)
-            .await
-            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?
-    };
-    spawn_download_finalize(state.inner());
-    Ok(ModelDownloadStatusDto {
-        active: true,
-        progress: Some(progress_to_dto_enriched(&progress).await),
-        installed: None,
-    })
-}
-
-#[tauri::command]
-pub async fn models_download_cancel_verify(
-    state: State<'_, AppState>,
-) -> CommandResult<ModelDownloadProgressDto> {
-    let mut manager = state.model_manager().lock().await;
-    let progress = manager
-        .cancel_catalog_verify()
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    Ok(progress_to_dto_enriched(&progress).await)
-}
-
-#[tauri::command]
-pub async fn models_download_cancel(state: State<'_, AppState>) -> CommandResult<()> {
-    let manager = state.model_manager().lock().await;
-    manager
-        .cancel_download()
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 
 #[tauri::command]
@@ -1256,174 +864,33 @@ pub async fn models_verify(
         .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 
-fn runtime_unavailable_error() -> CommandError {
-    CommandError::invalid_input(
-        "embedded libllama engine is unavailable — reinitialize the engine from AI Runtime",
-    )
-}
-
-fn map_runtime_err(err: RuntimeError) -> CommandError {
-    match err {
-        RuntimeError::Unavailable => runtime_unavailable_error(),
-        other => CommandError::from(PromptLabError::internal(other.to_string())),
-    }
-}
-
-fn map_runtime_test_error(err: RuntimeError, _supervisor: &promptlab_runtime::RuntimeSupervisor) -> CommandError {
-    match err {
-        RuntimeError::Unavailable => runtime_unavailable_error(),
-        other => CommandError::from(PromptLabError::internal(other.to_string())),
-    }
-}
-
 #[tauri::command]
 pub async fn models_test_inference(
     state: State<'_, AppState>,
     model_id: String,
 ) -> CommandResult<ModelInferenceTestResult> {
-    let entry = {
+    let _entry = {
         let manager = state.model_manager().lock().await;
-        let entry = manager
+        manager
             .get_model(&model_id)
-            .ok_or_else(|| CommandError::invalid_input(format!("model not found: {model_id}")))?;
-
-        if entry.provider == ModelProvider::Remote {
-            return Err(CommandError::invalid_input(
-                "use Test Connection for third-party cloud models",
-            ));
-        }
-
-        if !entry.file_path.exists() {
-            return Err(CommandError::invalid_input(format!(
-                "model file missing: {}",
-                entry.file_path.display()
-            )));
-        }
-        entry.clone()
+            .ok_or_else(|| CommandError::invalid_input(format!("model not found: {model_id}")))?
+            .clone()
     };
 
-    let file_path = entry.file_path.clone();
-    let use_chat = entry.capabilities.chat;
-
-    if let Some(testing) = state.runtime_model_testing_id().lock().await.clone() {
-        return Err(CommandError::invalid_input(if testing == model_id {
-            "model verify already in progress".into()
-        } else {
-            format!("another model verify is in progress ({testing})")
-        }));
-    }
-
-    crate::commands::runtime::set_runtime_model_testing(state.inner(), Some(model_id.clone())).await;
-    let test_result = with_model_operation_timeout(async {
-        let need_load = {
-            let runtime_mgr = state.runtime_manager().lock().await;
-            !runtime_mgr.is_same_model_loaded_at(&file_path).await
-        };
-
-        if need_load {
-            if state
-                .runtime_model_loading_id()
-                .lock()
-                .await
-                .as_deref()
-                == Some(model_id.as_str())
-            {
-                crate::commands::runtime::wait_for_runtime_model_load(
-                    state.inner(),
-                    &model_id,
-                    &file_path,
-                )
-                .await
-                .map_err(map_runtime_err)?;
-            } else {
-                let mut runtime_mgr = state.runtime_manager().lock().await;
-                if !runtime_mgr.supervisor().runtime_available() {
-                    return Err(runtime_unavailable_error());
-                }
-                crate::commands::runtime::load_model_with_loading_cache(
-                    state.inner(),
-                    &mut runtime_mgr,
-                    &file_path,
-                    &model_id,
-                )
-                .await
-                .map_err(|err| map_runtime_test_error(err, runtime_mgr.supervisor()))?;
-                runtime_mgr.sync_lifecycle_from_supervisor();
-            }
-        }
-
-        let mut runtime_mgr = state.runtime_manager().lock().await;
-        if !runtime_mgr.supervisor().runtime_available() {
-            return Err(runtime_unavailable_error());
-        }
-
-        let prompt = format!(
-            "{}\n\n{}",
-            PromptRegistry::health_check_system(),
-            PromptRegistry::health_check_user()
-        );
-        let started = std::time::Instant::now();
-        promptlab_inference::record_sent();
-        let response = runtime_mgr
-            .supervisor()
-            .infer(InferRequest {
-                prompt,
-                max_tokens: 32,
-                temperature: 0.0,
-            })
-            .await
-            .map_err(|err| map_runtime_test_error(err, runtime_mgr.supervisor()))?;
-        promptlab_inference::record_received();
-        let sample = response.text;
-        let ok = !sample.trim().is_empty();
-
-        Ok(ModelInferenceTestResult {
-            ok,
-            mode: if use_chat {
-                "chat".into()
-            } else {
-                "completion".into()
-            },
-            sample,
-            message: if ok {
-                format!(
-                    "Inference smoke test succeeded ({} ms)",
-                    started.elapsed().as_millis()
-                )
-            } else {
-                "Inference smoke test returned an empty response".into()
-            },
-        })
-    })
-    .await;
-
-    crate::commands::runtime::set_runtime_model_testing(state.inner(), None).await;
-    test_result
+    Err(CommandError::invalid_input(
+        "use Test Connection for third-party cloud models",
+    ))
 }
 
 #[tauri::command]
 pub async fn models_test_embeddings(
-    state: State<'_, AppState>,
-    model_id: String,
-    input: Option<String>,
+    _state: State<'_, AppState>,
+    _model_id: String,
+    _input: Option<String>,
 ) -> CommandResult<ModelInferenceTestResult> {
-    let manager = state.model_manager().lock().await;
-    let engine = manager
-        .inference_engine(&model_id)
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    let response = engine
-        .embeddings(promptlab_models::EmbeddingRequest {
-            input: input.unwrap_or_else(|| "PromptLab embedding test".into()),
-        })
-        .await
-        .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
-    Ok(ModelInferenceTestResult {
-        ok: !response.vector.is_empty(),
-        mode: "embeddings".into(),
-        sample: format!("{} dimensions", response.dimensions),
-        message: "Embedding inference succeeded".into(),
-    })
+    Err(CommandError::invalid_input(
+        "use a remote third-party provider",
+    ))
 }
 
 #[tauri::command]
@@ -1448,30 +915,4 @@ pub async fn models_vault_stats_op(state: &AppState) -> CommandResult<ModelVault
         installed_bytes: stats.installed_bytes,
         installed_gb: stats.installed_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn progress_percent_computes() {
-        let dto = progress_to_dto(&DownloadProgress {
-            model_id: "hf-llama3-8b-q4".into(),
-            status: DownloadStatus::Downloading,
-            url: String::new(),
-            destination: std::path::PathBuf::from("/tmp/model.gguf"),
-            downloaded_bytes: 500,
-            total_bytes: Some(1000),
-            speed_bytes_per_sec: Some(100.0),
-            eta_seconds: Some(5),
-            resumed: false,
-            updated_at: time::OffsetDateTime::now_utc(),
-            error: None,
-        });
-        assert_eq!(dto.percent, Some(50.0));
-        assert_eq!(dto.remaining_bytes, Some(500));
-        assert_eq!(dto.speed_bytes_per_sec, Some(100.0));
-        assert_eq!(dto.eta_seconds, Some(5));
-    }
 }

@@ -53,7 +53,7 @@ function scanDuration(scan: ScanRun): string {
 
 export function ScansPage() {
   const navigate = useNavigate();
-  const { scans, targets, projects, findings, loading, error, actions } = useAppStore();
+  const { scans, targets, projects, findings, ui, loading, error, actions } = useAppStore();
   const { notify, dismiss } = useToast();
   const [viewMode, setViewMode] = useViewPreference("scans");
   const [pageSize, setPageSize] = usePageSizePreference("scans");
@@ -70,11 +70,26 @@ export function ScansPage() {
   }, [findings]);
 
   const attackScans = useMemo(
-    () =>
-      scans
+    () => {
+      const query = ui.searchQuery.toLowerCase().trim();
+      return scans
         .filter(isListedScan)
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-    [scans],
+        .filter((scan) => {
+          if (!query) return true;
+          const projectName =
+            projects.find((project) => project.id === scan.projectId)?.name ?? "";
+          const targetName =
+            targets.find((target) => target.id === scan.targetId)?.name ?? "";
+          return (
+            scan.name.toLowerCase().includes(query) ||
+            scan.status.toLowerCase().includes(query) ||
+            projectName.toLowerCase().includes(query) ||
+            targetName.toLowerCase().includes(query)
+          );
+        })
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    },
+    [scans, ui.searchQuery, projects, targets],
   );
 
   const { page, setPage, pagination } = usePaginatedList(attackScans, pageSize);
@@ -293,7 +308,7 @@ export function ScansPage() {
       key: "actions",
       header: "",
       width: "56px",
-      align: "right",
+      align: "right" as const,
       render: (scan: ScanRun) => (
         <span className="table-actions" onClick={(event) => event.stopPropagation()}>
           <ActionsDropdown

@@ -102,7 +102,7 @@ fn apply_auth_config(mut target: AttackTarget, auth: &DescriptorAuth) -> AttackT
     target
 }
 
-fn apply_basic_auth(mut target: AttackTarget, auth: &DescriptorAuth) -> AttackTarget {
+fn apply_basic_auth(target: AttackTarget, auth: &DescriptorAuth) -> AttackTarget {
     let (username, password) = if let Some(config) = &auth.config {
         if let Ok(parsed) = serde_json::from_value::<BasicConfig>(config.clone()) {
             (
@@ -159,7 +159,7 @@ fn format_credential_with_prefix(prefix: Option<&str>, credential: &str) -> Stri
     format!("{normalized}{trimmed}")
 }
 
-fn apply_api_key_auth(mut target: AttackTarget, auth: &DescriptorAuth) -> AttackTarget {
+fn apply_api_key_auth(target: AttackTarget, auth: &DescriptorAuth) -> AttackTarget {
     if let Some(config) = &auth.config {
         if let Ok(parsed) = serde_json::from_value::<ApiKeyConfig>(config.clone()) {
             if !parsed.key.trim().is_empty() {
@@ -183,7 +183,7 @@ fn apply_api_key_auth(mut target: AttackTarget, auth: &DescriptorAuth) -> Attack
     target.with_header(header, value)
 }
 
-fn apply_jwt_auth(mut target: AttackTarget, auth: &DescriptorAuth) -> AttackTarget {
+fn apply_jwt_auth(target: AttackTarget, auth: &DescriptorAuth) -> AttackTarget {
     let Some(config) = &auth.config else {
         return target;
     };

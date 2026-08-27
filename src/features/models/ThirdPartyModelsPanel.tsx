@@ -154,7 +154,7 @@ export function ThirdPartyModelsPanel({
         recordLocalActivity({
           type: "model",
           message: `Added model: ${savedForm.model || "Third-party model"}`,
-        });
+        }).catch(() => undefined);
       }
       onSaved?.();
     } catch (err) {
@@ -176,7 +176,7 @@ export function ThirdPartyModelsPanel({
     setError(null);
     setTesting(true);
     try {
-      const result = await testThirdPartyModelConnectivity(form);
+      const result = await testThirdPartyModelConnectivity(form, editingModelId);
       const toast = connectivityToast(result);
       notify(toast.message, toast.type);
       if (result.ok) {

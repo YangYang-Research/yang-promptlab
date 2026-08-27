@@ -34,10 +34,10 @@ function formatStatus(status: Finding["status"]): string {
 }
 
 export function FindingsPage() {
-  const { findings, projects, scans, loading, error, actions } = useAppStore();
+  const { findings, projects, scans, ui, dispatch, loading, error, actions } = useAppStore();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [searchQuery, setSearchQuery] = useState("");
+  const searchQuery = ui.searchQuery;
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const [scanIds, setScanIds] = useState<string[]>([]);
   const [severityFilter, setSeverityFilter] = useState<Severity[]>([]);
@@ -165,7 +165,7 @@ export function FindingsPage() {
     statusFilter.length > 0;
 
   function clearFilters() {
-    setSearchQuery("");
+    dispatch({ type: "SET_SEARCH", query: "" });
     setProjectIds([]);
     setScanIds([]);
     setSeverityFilter([]);
@@ -204,7 +204,7 @@ export function FindingsPage() {
           <div className="findings-filters">
             <SearchInput
               value={searchQuery}
-              onChange={setSearchQuery}
+              onChange={(query) => dispatch({ type: "SET_SEARCH", query })}
               placeholder="Search title, target, category, project, scan…"
             />
             <MultiSelect

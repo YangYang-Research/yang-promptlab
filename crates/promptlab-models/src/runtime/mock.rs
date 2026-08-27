@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -17,13 +16,9 @@ pub struct MockInferenceRuntime {
 impl MockInferenceRuntime {
     pub fn new(response_text: impl Into<String>) -> Self {
         Self {
-            state: Arc::new(AtomicU32::new(RuntimeState::Unloaded as u32)),
+            state: Arc::new(AtomicU32::new(RuntimeState::Ready as u32)),
             response_text: response_text.into(),
         }
-    }
-
-    fn set_state(&self, state: RuntimeState) {
-        self.state.store(state as u32, Ordering::SeqCst);
     }
 }
 
@@ -36,17 +31,6 @@ impl InferenceRuntime for MockInferenceRuntime {
             x if x == RuntimeState::Ready as u32 => RuntimeState::Ready,
             _ => RuntimeState::Error,
         }
-    }
-
-    async fn load_model(&mut self, _model_path: &Path) -> ModelResult<()> {
-        self.set_state(RuntimeState::Loading);
-        self.set_state(RuntimeState::Ready);
-        Ok(())
-    }
-
-    async fn unload(&mut self) -> ModelResult<()> {
-        self.set_state(RuntimeState::Unloaded);
-        Ok(())
     }
 
     async fn complete(&self, request: InferenceRequest) -> ModelResult<InferenceResponse> {
@@ -71,8 +55,7 @@ mod tests {
 
     #[tokio::test]
     async fn mock_complete() {
-        let mut runtime = MockInferenceRuntime::new("ok");
-        runtime.load_model(Path::new("/fake/model.gguf")).await.unwrap();
+        let runtime = MockInferenceRuntime::new("ok");
         let resp = runtime
             .complete(InferenceRequest {
                 system: None,

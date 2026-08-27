@@ -108,7 +108,7 @@ fn format_console_stamp(timestamp: &str) -> String {
         Ok(offset) => parsed.to_offset(offset),
         Err(_) => parsed,
     };
-    let Ok(desc) = time::format_description::parse("[hour]:[minute]:[second]") else {
+    let Ok(desc) = time::format_description::parse_borrowed::<2>("[hour]:[minute]:[second]") else {
         return "--:--:--".into();
     };
     local.format(&desc).unwrap_or_else(|_| "--:--:--".into())

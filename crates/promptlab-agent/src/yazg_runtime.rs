@@ -45,7 +45,7 @@ use crate::yazg_tools::{
     SummaryTool, TargetDetailTool, YazgLlms, YazgRunState, YazgSpecialistContext,
 };
 use promptlab_agenttrace::{
-    soft_end_span, soft_end_trace, soft_start_span, SharedAgentTrace, SpanEnd, SpanKind, SpanStart,
+    soft_end_span, soft_end_trace, SharedAgentTrace, SpanEnd, SpanKind, SpanStart,
     TraceHandle, TraceStart, TraceStatus,
 };
 use promptlab_planner::PlannerLlm;
@@ -242,7 +242,7 @@ impl AgentHook<YazgModel> for YazgAgentHook {
                 )
                 .await;
                 {
-                    let mut guard = self.state.lock().await;
+                    let guard = self.state.lock().await;
                     let trace = guard.active_trace.clone();
                     let parent = guard
                         .active_llm_span

@@ -10,8 +10,8 @@ use promptlab_desktop_lib::state::AppState;
 async fn make_state(dir: &Path) -> AppState {
     let db = open_database(&dir.join("promptlab.db")).await.expect("open db");
     let guard = init_logging(LogOptions::bootstrap("runtime-it")).unwrap();
-    let (manager, provider, meta, harness_factory, plugin_manager) =
-        promptlab_desktop_lib::model_registry::open_test_model_stack(dir).expect("model stack");
+    let (manager, provider, harness_factory, plugin_manager) =
+        promptlab_desktop_lib::model_registry::open_test_model_stack(dir, &db).await.expect("model stack");
     AppState::new(
         db,
         dir.to_path_buf(),
@@ -22,7 +22,6 @@ async fn make_state(dir: &Path) -> AppState {
         promptlab_runtime::RuntimeManager::new(dir, None),
         manager,
         provider,
-        meta,
     )
 }
 
@@ -33,6 +32,5 @@ async fn runtime_status_reports_unavailable_without_binary() {
 
     let status = runtime_status_op(&state).await.expect("runtime status");
     assert_eq!(status.lifecycle_state, "not_installed");
-    assert!(!status.binary_available);
     assert!(status.message.to_lowercase().contains("runtime"));
 }

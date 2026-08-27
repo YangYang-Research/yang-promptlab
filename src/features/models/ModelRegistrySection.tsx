@@ -20,15 +20,8 @@ import { formatBytes } from "@/shared/utils/format";
 
 import { RegistryProviderIcon } from "./ProviderLogo";
 
-function isThirdPartyModel(model: ModelEntryDto): boolean {
-  return model.format === "api" || model.id.startsWith("remote-");
-}
-
 function registryDisplayName(model: ModelEntryDto): string {
-  if (isThirdPartyModel(model)) {
-    return model.version || model.name;
-  }
-  return model.name;
+  return model.version || model.name;
 }
 
 function formatModelSize(model: ModelEntryDto): string {
@@ -50,33 +43,13 @@ function formatModelCapabilities(model: ModelEntryDto): string {
   return caps.length > 0 ? caps.join(", ") : "N/A";
 }
 
-function ModelTypeBadge({ model }: { model: ModelEntryDto }) {
-  if (isThirdPartyModel(model)) {
-    return <Badge variant="info">Third-party</Badge>;
-  }
-  return <Badge variant="muted">Local</Badge>;
-}
-
-function ModelStatusBadge({ model }: { model: ModelEntryDto }) {
-  if (isThirdPartyModel(model)) {
-    return (
-      <Badge variant={model.verified ? "success" : "warning"}>
-        {model.verified ? "Verified" : "Not Verified"}
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant={model.verified ? "success" : "warning"}>
-      {model.verified ? "Installed" : "Unverified"}
-    </Badge>
-  );
-}
-
 function ModelRegistryBadges({ model }: { model: ModelEntryDto }) {
   return (
     <div className="model-registry-badges">
-      <ModelTypeBadge model={model} />
-      <ModelStatusBadge model={model} />
+      <Badge variant="info">Third-party</Badge>
+      <Badge variant={model.verified ? "success" : "warning"}>
+        {model.verified ? "Verified" : "Not Verified"}
+      </Badge>
     </div>
   );
 }
@@ -84,9 +57,6 @@ function ModelRegistryBadges({ model }: { model: ModelEntryDto }) {
 type ModelRegistrySectionProps = {
   models: ModelEntryDto[];
   isModelBusy: (modelId: string) => boolean;
-  runtimeModelLoading: boolean;
-  runtimeModelTesting: boolean;
-  runtimeTestingModelId: string | null;
   onTest: (model: ModelEntryDto) => void;
   onEdit: (model: ModelEntryDto) => void;
   onRemove: (modelId: string) => void;
@@ -95,9 +65,6 @@ type ModelRegistrySectionProps = {
 export function ModelRegistrySection({
   models,
   isModelBusy,
-  runtimeModelLoading,
-  runtimeModelTesting,
-  runtimeTestingModelId,
   onTest,
   onEdit,
   onRemove,
@@ -106,19 +73,9 @@ export function ModelRegistrySection({
   const [pageSize, setPageSize] = usePageSizePreference("models-registry");
   const { page, setPage, pagination } = usePaginatedList(models, pageSize);
 
-  const actionsDisabled = (modelId: string) =>
-    isModelBusy(modelId) || (runtimeModelTesting && runtimeTestingModelId === modelId);
-  const localActionsDisabled = (modelId: string) =>
-    isModelBusy(modelId) ||
-    runtimeModelLoading ||
-    (runtimeModelTesting && runtimeTestingModelId === modelId);
+  const actionsDisabled = (modelId: string) => isModelBusy(modelId);
 
   function renderTableActions(model: ModelEntryDto) {
-    const thirdParty = isThirdPartyModel(model);
-    const testRemoveDisabled = thirdParty
-      ? actionsDisabled(model.id)
-      : localActionsDisabled(model.id);
-
     return (
       <ActionsDropdown
         items={[
@@ -127,14 +84,14 @@ export function ModelRegistrySection({
             label: "Edit",
             icon: <IconEdit />,
             onClick: () => onEdit(model),
-            disabled: !thirdParty || actionsDisabled(model.id),
+            disabled: actionsDisabled(model.id),
           },
           {
             id: "verify",
             label: "Verify",
             icon: <IconCheck />,
             onClick: () => onTest(model),
-            disabled: testRemoveDisabled,
+            disabled: actionsDisabled(model.id),
           },
           {
             id: "remove",
@@ -142,7 +99,7 @@ export function ModelRegistrySection({
             icon: <IconTrash />,
             onClick: () => onRemove(model.id),
             tone: "danger",
-            disabled: testRemoveDisabled,
+            disabled: actionsDisabled(model.id),
           },
         ]}
       />
@@ -150,42 +107,20 @@ export function ModelRegistrySection({
   }
 
   function renderListActions(model: ModelEntryDto) {
-    if (isThirdPartyModel(model)) {
-      return (
-        <>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={actionsDisabled(model.id)}
-            onClick={() => onEdit(model)}
-          >
-            Edit
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={actionsDisabled(model.id)}
-            onClick={() => onTest(model)}
-          >
-            Test
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={actionsDisabled(model.id)}
-            onClick={() => onRemove(model.id)}
-          >
-            Remove
-          </Button>
-        </>
-      );
-    }
     return (
       <>
         <Button
           variant="ghost"
           size="sm"
-          disabled={localActionsDisabled(model.id)}
+          disabled={actionsDisabled(model.id)}
+          onClick={() => onEdit(model)}
+        >
+          Edit
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={actionsDisabled(model.id)}
           onClick={() => onTest(model)}
         >
           Test
@@ -193,7 +128,7 @@ export function ModelRegistrySection({
         <Button
           variant="ghost"
           size="sm"
-          disabled={localActionsDisabled(model.id)}
+          disabled={actionsDisabled(model.id)}
           onClick={() => onRemove(model.id)}
         >
           Remove
@@ -217,13 +152,17 @@ export function ModelRegistrySection({
       key: "type",
       header: "Type",
       width: "110px",
-      render: (model: ModelEntryDto) => <ModelTypeBadge model={model} />,
+      render: () => <Badge variant="info">Third-party</Badge>,
     },
     {
       key: "status",
       header: "Status",
       width: "120px",
-      render: (model: ModelEntryDto) => <ModelStatusBadge model={model} />,
+      render: (model: ModelEntryDto) => (
+        <Badge variant={model.verified ? "success" : "warning"}>
+          {model.verified ? "Verified" : "Not Verified"}
+        </Badge>
+      ),
     },
     {
       key: "provider",

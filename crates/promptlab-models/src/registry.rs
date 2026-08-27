@@ -2,15 +2,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use time::OffsetDateTime;
-use uuid::Uuid;
 
 use crate::error::{ModelError, ModelResult};
-use crate::runtime::{infer_capabilities, infer_provider, infer_version};
+use crate::runtime::infer_capabilities;
 use crate::types::{ModelEntry, ModelFormat, ModelProvider, ModelSource};
 
 const REGISTRY_VERSION: u32 = 1;
-pub const MODEL_REGISTRY_DIR: &str = "model-registry";
-const LEGACY_MODEL_STORAGE_DIR: &str = "models";
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct RegistrySnapshot {
@@ -18,7 +15,7 @@ struct RegistrySnapshot {
     entries: Vec<ModelEntry>,
 }
 
-/// In-memory model registry with vault-backed paths.
+/// In-memory model registry (SQLite-backed via [`crate::manager::LocalModelManager`]).
 #[derive(Debug, Default)]
 pub struct ModelRegistry {
     entries: HashMap<String, ModelEntry>,
@@ -27,6 +24,14 @@ pub struct ModelRegistry {
 impl ModelRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn from_entries(entries: impl IntoIterator<Item = ModelEntry>) -> Self {
+        let mut registry = Self::new();
+        for entry in entries {
+            registry.entries.insert(entry.id.clone(), entry);
+        }
+        registry
     }
 
     pub fn registry_path(vault: &Path) -> PathBuf {
@@ -43,11 +48,23 @@ impl ModelRegistry {
             tracing::warn!(path = %path.display(), "model registry file is empty — starting fresh");
             return Ok(Self::new());
         }
-        let snapshot: RegistrySnapshot =
+        let snapshot: serde_json::Value =
             serde_json::from_str(&raw).map_err(|e| ModelError::invalid(e.to_string()))?;
+        let entries = snapshot
+            .get("entries")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
         let mut registry = Self::new();
-        for entry in snapshot.entries {
-            registry.entries.insert(entry.id.clone(), entry);
+        for raw_entry in entries {
+            match serde_json::from_value::<ModelEntry>(raw_entry) {
+                Ok(entry) => {
+                    registry.entries.insert(entry.id.clone(), entry);
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "skipping unreadable model registry entry");
+                }
+            }
         }
         Ok(registry)
     }
@@ -85,97 +102,6 @@ impl ModelRegistry {
         self.entries.get_mut(id)
     }
 
-    pub fn register_local(
-        &mut self,
-        name: impl Into<String>,
-        path: impl AsRef<Path>,
-    ) -> ModelResult<ModelEntry> {
-        let path = path.as_ref().to_path_buf();
-        if !path.exists() {
-            return Err(ModelError::invalid(format!(
-                "model file not found: {}",
-                path.display()
-            )));
-        }
-
-        let format = ModelFormat::from_path(&path)
-            .ok_or_else(|| ModelError::invalid("only .gguf models are supported"))?;
-
-        let source = ModelSource::Local { path: path.clone() };
-        let provider = infer_provider(&source);
-        let size_bytes = std::fs::metadata(&path).ok().map(|m| m.len());
-        let now = OffsetDateTime::now_utc();
-        let id = Uuid::new_v4().to_string();
-
-        let entry = ModelEntry {
-            id: id.clone(),
-            name: name.into(),
-            format,
-            provider,
-            version: infer_version(&source),
-            capabilities: infer_capabilities(provider),
-            source,
-            file_path: path,
-            size_bytes,
-            checksum_sha256: None,
-            verified: false,
-            created_at: now,
-            updated_at: now,
-            metadata: serde_json::json!({}),
-        };
-
-        self.entries.insert(id, entry.clone());
-        Ok(entry)
-    }
-
-    pub fn register_ollama(
-        &mut self,
-        vault: &Path,
-        name: impl Into<String>,
-        model: impl Into<String>,
-        base_url: impl Into<String>,
-    ) -> ModelResult<ModelEntry> {
-        let name = name.into();
-        let model = model.into();
-        let base_url = base_url.into();
-        let id = Uuid::new_v4().to_string();
-        let model_dir = Self::model_dir(vault, &id);
-        std::fs::create_dir_all(&model_dir).map_err(ModelError::Io)?;
-        let ref_path = model_dir.join("reference.json");
-        let source = ModelSource::Ollama {
-            model: model.clone(),
-            base_url: base_url.clone(),
-        };
-        let sidecar = serde_json::json!({
-            "model": model,
-            "base_url": base_url,
-        });
-        std::fs::write(&ref_path, serde_json::to_string_pretty(&sidecar).unwrap())
-            .map_err(ModelError::Io)?;
-
-        let now = OffsetDateTime::now_utc();
-        let provider = ModelProvider::Ollama;
-        let entry = ModelEntry {
-            id: id.clone(),
-            name,
-            format: ModelFormat::Gguf,
-            provider,
-            version: infer_version(&source),
-            capabilities: infer_capabilities(provider),
-            source,
-            file_path: ref_path,
-            size_bytes: None,
-            checksum_sha256: None,
-            verified: false,
-            created_at: now,
-            updated_at: now,
-            metadata: serde_json::json!({ "runtime": "ollama" }),
-        };
-
-        self.entries.insert(id, entry.clone());
-        Ok(entry)
-    }
-
     pub fn register_entry(&mut self, entry: ModelEntry) -> ModelResult<()> {
         if self.entries.contains_key(&entry.id) {
             return Err(ModelError::invalid(format!(
@@ -191,7 +117,7 @@ impl ModelRegistry {
         self.entries.insert(entry.id.clone(), entry);
     }
 
-    /// Register or update a third-party cloud API model reference (no local GGUF file).
+    /// Register or update a third-party cloud API model reference.
     pub fn register_remote(
         &mut self,
         provider: impl Into<String>,
@@ -263,74 +189,6 @@ impl ModelRegistry {
             .remove(id)
             .ok_or_else(|| ModelError::not_found(id))
     }
-
-    pub fn model_storage_root(vault: &Path) -> PathBuf {
-        vault.join(MODEL_REGISTRY_DIR)
-    }
-
-    pub fn model_dir(vault: &Path, model_id: &str) -> PathBuf {
-        Self::model_storage_root(vault).join(model_id)
-    }
-
-    pub fn model_file(vault: &Path, model_id: &str, filename: &str) -> PathBuf {
-        Self::model_dir(vault, model_id).join(filename)
-    }
-
-    /// User-facing URI for a model file under the app data vault (`app://models/...`).
-    pub fn display_uri(vault: &Path, file_path: &Path) -> String {
-        let raw = file_path.to_string_lossy();
-        if raw.starts_with("remote://") {
-            return raw.into_owned();
-        }
-        if let Ok(rel) = file_path.strip_prefix(vault) {
-            let rel = rel
-                .to_string_lossy()
-                .replace('\\', "/")
-                .trim_start_matches('/')
-                .to_string();
-            return format!("app://models/{rel}");
-        }
-        raw.into_owned()
-    }
-
-    /// Move `vault/models/{id}` → `vault/model-registry/{id}` and rewrite registry paths.
-    pub fn migrate_storage_layout(vault: &Path, registry: &mut Self) -> ModelResult<bool> {
-        let legacy = vault.join(LEGACY_MODEL_STORAGE_DIR);
-        let current = Self::model_storage_root(vault);
-        let mut changed = false;
-
-        if legacy.is_dir() {
-            std::fs::create_dir_all(&current).map_err(ModelError::Io)?;
-            for entry in std::fs::read_dir(&legacy).map_err(ModelError::Io)? {
-                let entry = entry.map_err(ModelError::Io)?;
-                let path = entry.path();
-                if !path.is_dir() {
-                    continue;
-                }
-                let dest = current.join(entry.file_name());
-                if dest.exists() {
-                    continue;
-                }
-                std::fs::rename(&path, &dest).map_err(ModelError::Io)?;
-                changed = true;
-            }
-            if std::fs::read_dir(&legacy)
-                .map(|mut dir| dir.next().is_none())
-                .unwrap_or(false)
-            {
-                let _ = std::fs::remove_dir(&legacy);
-            }
-        }
-
-        for entry in registry.entries.values_mut() {
-            if let Ok(rel) = entry.file_path.strip_prefix(&legacy) {
-                entry.file_path = current.join(rel);
-                changed = true;
-            }
-        }
-
-        Ok(changed)
-    }
 }
 
 /// Stable registry id for a third-party provider + model pair.
@@ -378,93 +236,12 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn model_dir_uses_model_registry() {
-        let vault = Path::new("/data/models");
-        assert_eq!(
-            ModelRegistry::model_dir(vault, "abc"),
-            Path::new("/data/models/model-registry/abc")
-        );
-    }
-
-    #[test]
-    fn display_uri_formats_app_scheme() {
-        let vault = Path::new("/data/app/models");
-        let file = vault.join("model-registry/abc/model.gguf");
-        assert_eq!(
-            ModelRegistry::display_uri(vault, &file),
-            "app://models/model-registry/abc/model.gguf"
-        );
-    }
-
-    #[test]
-    fn register_local_gguf() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("test.gguf");
-        std::fs::write(&path, b"gguf-stub").unwrap();
-
-        let mut registry = ModelRegistry::new();
-        let entry = registry.register_local("test-model", &path).unwrap();
-        assert_eq!(entry.format, ModelFormat::Gguf);
-        assert_eq!(entry.provider, ModelProvider::Gguf);
-        assert_eq!(registry.len(), 1);
-    }
-
-    #[test]
-    fn migrates_legacy_model_storage() {
-        let dir = tempdir().unwrap();
-        let vault = dir.path().join("vault");
-        std::fs::create_dir_all(vault.join("models/model-a")).unwrap();
-        std::fs::write(vault.join("models/model-a/weights.gguf"), b"gguf").unwrap();
-
-        let mut registry = ModelRegistry::new();
-        registry
-            .upsert_entry(ModelEntry {
-                id: "model-a".into(),
-                name: "model-a".into(),
-                format: ModelFormat::Gguf,
-                provider: ModelProvider::Gguf,
-                version: "1".into(),
-                capabilities: infer_capabilities(ModelProvider::Gguf),
-                source: ModelSource::Local {
-                    path: vault.join("models/model-a/weights.gguf"),
-                },
-                file_path: vault.join("models/model-a/weights.gguf"),
-                size_bytes: Some(4),
-                checksum_sha256: None,
-                verified: true,
-                created_at: OffsetDateTime::now_utc(),
-                updated_at: OffsetDateTime::now_utc(),
-                metadata: serde_json::json!({}),
-            });
-
-        let changed = ModelRegistry::migrate_storage_layout(&vault, &mut registry).unwrap();
-        assert!(changed);
-        assert!(vault.join("model-registry/model-a/weights.gguf").is_file());
-        assert_eq!(
-            registry.get("model-a").unwrap().file_path,
-            vault.join("model-registry/model-a/weights.gguf")
-        );
-    }
-
-    #[test]
-    fn rejects_non_gguf() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("model.bin");
-        std::fs::write(&path, b"x").unwrap();
-
-        let mut registry = ModelRegistry::new();
-        assert!(registry.register_local("bad", &path).is_err());
-    }
-
-    #[test]
     fn persists_registry() {
         let dir = tempdir().unwrap();
         let vault = dir.path().join("vault");
-        let path = dir.path().join("test.gguf");
-        std::fs::write(&path, b"gguf-stub").unwrap();
 
         let mut registry = ModelRegistry::new();
-        registry.register_local("test-model", &path).unwrap();
+        registry.register_remote("openai", "gpt-4o", None, None);
         registry.save_to_vault(&vault).unwrap();
 
         let loaded = ModelRegistry::load_from_vault(&vault).unwrap();
@@ -498,4 +275,5 @@ mod tests {
             Some("OPENAI_API_KEY")
         );
     }
+
 }

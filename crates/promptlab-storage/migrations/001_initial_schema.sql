@@ -1,5 +1,6 @@
 -- PromptLab consolidated schema (fresh installs).
--- Includes core tables, agent memory, mutator settings, and project health_score.
+-- Includes core tables, agent memory, mutator settings, model registry,
+-- hardware profile, app settings, and project health_score.
 
 PRAGMA foreign_keys = ON;
 
@@ -357,4 +358,57 @@ VALUES (
     '["base64_wrap","unicode_homoglyph","delimiter_injection","role_swap","chunk_split","json_escape","repeat_amplify","hex_wrap","html_wrap","rot13_wrap","leetspeak","reversed_text","token_split","markdown_code_fence","zero_width_dense"]',
     '{"prompt_injection":["delimiter_injection","role_swap","markdown_code_fence","base64_wrap","html_wrap","hex_wrap","token_split"],"jailbreak":["role_swap","unicode_homoglyph","base64_wrap","html_wrap","leetspeak","chunk_split","zero_width_dense","rot13_wrap","reversed_text"],"system_prompt_extraction":["repeat_amplify","delimiter_injection","role_swap","markdown_code_fence","base64_wrap","hex_wrap"],"tool_abuse":["json_escape","html_wrap","base64_wrap","delimiter_injection","token_split","markdown_code_fence"],"mcp_abuse":["json_escape","html_wrap","base64_wrap","delimiter_injection","token_split","markdown_code_fence"],"rag_leakage":["repeat_amplify","delimiter_injection","markdown_code_fence","zero_width_dense","token_split"],"memory_poisoning":["repeat_amplify","role_swap","delimiter_injection","markdown_code_fence","chunk_split"],"cross_user_leakage":["role_swap","delimiter_injection","repeat_amplify","markdown_code_fence","zero_width_dense"],"agent_goal_hijacking":["role_swap","delimiter_injection","markdown_code_fence","repeat_amplify","token_split"]}',
     '1970-01-01T00:00:00Z'
+);
+
+-- Model registry (replaces ~/.promptlab/models/registry.json).
+CREATE TABLE IF NOT EXISTS models (
+    id               TEXT PRIMARY KEY NOT NULL,
+    name             TEXT NOT NULL,
+    provider         TEXT NOT NULL DEFAULT '',
+    format           TEXT NOT NULL DEFAULT 'api',
+    file_path        TEXT NOT NULL DEFAULT '',
+    checksum_sha256  TEXT,
+    size_bytes       INTEGER,
+    verified         INTEGER NOT NULL DEFAULT 0,
+    entry_json       TEXT NOT NULL,
+    metadata_json    TEXT,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_models_updated_at ON models(updated_at);
+
+-- Host hardware profile (replaces ~/.promptlab/runtime/hardware.json).
+CREATE TABLE IF NOT EXISTS hardware_profile (
+    id            TEXT PRIMARY KEY NOT NULL,
+    profile_json  TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+
+-- Lifetime AI Runtime token usage totals (per agent).
+CREATE TABLE IF NOT EXISTS token_usage (
+    id          TEXT PRIMARY KEY NOT NULL,
+    data_json   TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- Dashboard Recent Activity (runtime / model local events).
+CREATE TABLE IF NOT EXISTS recent_activity (
+    id          TEXT PRIMARY KEY NOT NULL,
+    data_json   TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- Yazg Assistant chat threads / messages.
+CREATE TABLE IF NOT EXISTS yazg_chat_threads (
+    id          TEXT PRIMARY KEY NOT NULL,
+    data_json   TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- App settings only (environment overrides, ai_runtime_config, …).
+CREATE TABLE IF NOT EXISTS app_settings (
+    key         TEXT PRIMARY KEY NOT NULL,
+    value_json  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
 );

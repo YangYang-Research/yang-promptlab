@@ -3,7 +3,7 @@ import type {
   AttackRun,
   DashboardStats,
   Finding,
-  LocalModel,
+  RegisteredModel,
   Project,
   Report,
   ScanRun,
@@ -33,7 +33,7 @@ export type AppDataState = {
   attackRuns: AttackRun[];
   findings: Finding[];
   reports: Report[];
-  models: LocalModel[];
+  models: RegisteredModel[];
   activity: ActivityItem[];
   settings: AppSettings;
   ui: UiState;

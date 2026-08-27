@@ -108,9 +108,6 @@ function connectProbeKey(profile: TargetProfileFormState, authForm: TargetFormSt
     requestTemplate: profile.requestTemplate,
     promptPlaceholder: profile.promptPlaceholder,
     authKind: authForm.authKind,
-    loginUrl: authForm.loginUrl,
-    loginUsername: authForm.loginUsername,
-    loginPassword: authForm.loginPassword,
     basicUsername: authForm.basicUsername,
     basicPassword: authForm.basicPassword,
     apiKeyHeaderName: authForm.apiKeyHeaderName,
@@ -119,7 +116,6 @@ function connectProbeKey(profile: TargetProfileFormState, authForm: TargetFormSt
     jwtToken: authForm.jwtToken,
     jwtHeaderName: authForm.jwtHeaderName,
     jwtPrefix: authForm.jwtPrefix,
-    browserSessionId: authForm.browserSessionId,
   });
 }
 

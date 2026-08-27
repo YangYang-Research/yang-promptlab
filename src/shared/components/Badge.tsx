@@ -117,20 +117,15 @@ export function FindingStatusBadge({ status }: FindingStatusBadgeProps) {
   return <Badge variant={variant}>{status.replace(/_/g, " ")}</Badge>;
 }
 
-const AUTH_KIND_CLASS: Record<
-  "none" | "username_password" | "sso" | "basic" | "api_key" | "jwt",
-  string
-> = {
+const AUTH_KIND_CLASS: Record<"none" | "basic" | "api_key" | "jwt", string> = {
   none: "badge--auth-none",
-  username_password: "badge--auth-username",
-  sso: "badge--auth-sso",
   basic: "badge--auth-basic",
   api_key: "badge--auth-api-key",
   jwt: "badge--auth-jwt",
 };
 
 type AuthTypeBadgeProps = {
-  kind: "none" | "username_password" | "sso" | "basic" | "api_key" | "jwt";
+  kind: "none" | "basic" | "api_key" | "jwt";
   label: string;
 };
 

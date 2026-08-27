@@ -12,7 +12,6 @@ import {
   targetFormNeedsSecretHydration,
 } from "./targetDescriptor";
 import {
-  createEmptyVerification,
   createInitialTargetProfile,
   normalizeVerification,
   profileFromDto,

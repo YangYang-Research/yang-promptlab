@@ -12,7 +12,6 @@ pub mod gateway;
 pub mod manager;
 pub mod prompts;
 pub mod provider;
-pub mod runtime;
 pub mod token_usage;
 pub mod traffic;
 pub mod types;
@@ -29,8 +28,7 @@ pub use gateway::{
 };
 pub use manager::InferenceRuntimeManager;
 pub use prompts::{PromptBuilder, PromptComposer, PromptContext, PromptId, PromptRegistry, PromptTemplate};
-pub use provider::{LlamaCppAdapter, ProviderAdapter, RemoteAdapterSettings, RemoteProviderAdapter};
-pub use runtime::{LocalRuntimeAdapterBridge, RuntimeAdapter};
+pub use provider::{ProviderAdapter, RemoteAdapterSettings, RemoteProviderAdapter};
 pub use token_usage::{
     AgentTokenUsage, AgentTokenUsageRow, TokenUsageSnapshot, estimate_tokens,
     export_map as token_usage_export_map, humanize_agent_id, record_completion,

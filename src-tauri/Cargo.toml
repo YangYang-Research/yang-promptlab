@@ -25,7 +25,7 @@ promptlab-report = { workspace = true }
 promptlab-endpoint-metadata = { workspace = true }
 promptlab-attack = { workspace = true }
 promptlab-auth = { workspace = true }
-promptlab-harness = { workspace = true, features = ["playwright"] }
+promptlab-harness = { workspace = true }
 promptlab-runtime = { workspace = true }
 promptlab-inference = { workspace = true }
 promptlab-judge = { workspace = true }
@@ -45,11 +45,13 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
+tauri-plugin-single-instance = "2"
 reqwest = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing = { workspace = true }
 base64 = "0.22"
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"

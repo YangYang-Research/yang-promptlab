@@ -35,6 +35,7 @@ impl Attack for AgentGoalHijackingAttack {
             category: self.category(),
             mutators: vec![
                 MutatorKind::RoleSwap,
+                MutatorKind::LanguagePivot,
                 MutatorKind::DelimiterInjection,
                 MutatorKind::MarkdownCodeFence,
                 MutatorKind::RepeatAmplify,

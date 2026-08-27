@@ -115,9 +115,6 @@ function isHuggingFaceProvider(provider: string): boolean {
     key === "hugging face" ||
     key === "huggingface" ||
     key === "hf" ||
-    key === "local" ||
-    key === "gguf" ||
-    key === "ollama" ||
     key === "meta" ||
     key === "qwen team" ||
     key === "mistral ai"

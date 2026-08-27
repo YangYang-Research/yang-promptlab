@@ -33,7 +33,7 @@ import {
 import { toAppError } from "@/shared/errors";
 import { createLogger } from "@/shared/logging";
 import { computeDashboardStats } from "@/shared/stats";
-import { LOCAL_ACTIVITY_CHANGED_EVENT } from "@/shared/activity/localActivity";
+import { LOCAL_ACTIVITY_CHANGED_EVENT, hydrateLocalActivity } from "@/shared/activity/localActivity";
 import {
   deriveActivity,
   deriveAttackRuns,
@@ -57,15 +57,14 @@ import type {
 import type { LocalModel, ModelStatus } from "@/shared/types";
 import { loadThemePreference } from "@/shared/theme/theme";
 
-function mapLocalModels(entries: ModelEntryDto[]): LocalModel[] {
+function mapRegisteredModels(entries: ModelEntryDto[]): LocalModel[] {
   return entries.map((entry) => ({
     id: entry.id,
     name: entry.name,
     provider: entry.provider,
     sizeGb: entry.sizeGb,
     status: (entry.status as ModelStatus) || "available",
-    downloadProgress: entry.status === "downloading" ? 50 : entry.status === "installed" ? 100 : 0,
-    quant: entry.format,
+    format: entry.format,
     path: entry.path || null,
     sha256: entry.sha256,
   }));
@@ -201,6 +200,7 @@ async function loadAll(): Promise<LoadedData> {
   );
 
   const reports = mapReports(reportDtos, projectDtos, scanDtos);
+  const localActivity = await hydrateLocalActivity();
 
   return {
     projects,
@@ -208,9 +208,9 @@ async function loadAll(): Promise<LoadedData> {
     scans,
     findings,
     reports,
-    models: mapLocalModels(modelEntries),
+    models: mapRegisteredModels(modelEntries),
     attackRuns: deriveAttackRuns(scans, targets, liveStatusMap),
-    activity: deriveActivity(findings, scans, targets, projects, reports),
+    activity: deriveActivity(findings, scans, targets, projects, reports, localActivity),
   };
 }
 

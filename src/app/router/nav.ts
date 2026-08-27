@@ -42,7 +42,6 @@ export const navItems: NavItem[] = [
 
 export const routeTitles: Record<string, string> = {
   ...Object.fromEntries(navItems.map((item) => [item.path, item.label])),
-  "/plugins": "Plugins",
   "/scans/new": "New Scan",
   "/scans/:scanId": "Scan Details",
   "/projects/:projectId": "Project Details",

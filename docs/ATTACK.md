@@ -85,7 +85,7 @@ Playbook: `agent_mode: true`, `max_agent_attempts`. `scan_start` then runs `run_
 
 ## Judge (`promptlab-judge`)
 
-Rules + regex + optional LLM roles (judge / classifier / attacker) → consensus. **No** direct llama.cpp/HTTP in this crate — [RUNTIME.md](RUNTIME.md).
+Rules + regex + optional LLM roles (judge / classifier / attacker) → consensus. Inference goes through the gateway / harness — [RUNTIME.md](RUNTIME.md).
 
 | Mode | Path |
 |------|------|

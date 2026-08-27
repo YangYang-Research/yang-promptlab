@@ -200,7 +200,7 @@ mod tests {
                 ResponseTemplate::new(200)
                     .set_body_string(r#"{"response":"pong"}"#)
                     .insert_header("Content-Type", "application/json; charset=utf-8")
-                    .insert_header("Server", "llama.cpp"),
+                    .insert_header("Server", "mock-upstream"),
             )
             .mount(&server)
             .await;
@@ -226,7 +226,7 @@ mod tests {
         );
         assert_eq!(
             response.headers.get("server").map(String::as_str),
-            Some("llama.cpp")
+            Some("mock-upstream")
         );
         assert!(!response.headers.contains_key("harness"));
         assert_eq!(

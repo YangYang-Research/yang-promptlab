@@ -24,14 +24,6 @@ impl ModelCapabilities {
         }
     }
 
-    pub fn from_local_chat() -> Self {
-        Self {
-            supports_chat: true,
-            supports_json: true,
-            ..Self::default()
-        }
-    }
-
     pub fn from_remote(provider: &str) -> Self {
         let mut caps = Self {
             supports_chat: true,

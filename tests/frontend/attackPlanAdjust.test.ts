@@ -13,6 +13,7 @@ describe("resolveCategoriesForAdjust", () => {
   const profileModes = [
     {
       profileId: "standard" as const,
+      description: "",
       categories: [...suggested],
       executionStrategy: "sequential" as const,
       maxAttempts: 5,
@@ -33,6 +34,7 @@ describe("resolveCategoriesForAdjust", () => {
     },
     {
       profileId: "quick" as const,
+      description: "",
       categories: ["prompt_injection", "jailbreak", "system_prompt_extraction"] as const,
       executionStrategy: "sequential" as const,
       maxAttempts: 3,

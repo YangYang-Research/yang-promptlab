@@ -40,15 +40,11 @@ export function extractTargetUrl(descriptor: unknown): string {
   return "";
 }
 
-export function extractAuthKind(
-  descriptor: unknown,
-): "none" | "username_password" | "sso" | "basic" | "api_key" | "jwt" {
+export function extractAuthKind(descriptor: unknown): "none" | "basic" | "api_key" | "jwt" {
   const obj = asRecord(descriptor);
   const auth = asRecord(obj?.auth) as AuthDescriptor | null;
   const kind = auth?.kind ?? "none";
   switch (kind) {
-    case "username_password":
-    case "sso":
     case "basic":
     case "api_key":
     case "jwt":
@@ -64,10 +60,6 @@ export function extractAuthType(descriptor: unknown): string {
   const kind = auth?.kind ?? "none";
 
   switch (kind) {
-    case "username_password":
-      return "Username / Password";
-    case "sso":
-      return "SSO";
     case "basic":
       return "Basic";
     case "api_key":
@@ -87,22 +79,6 @@ export function extractAuthSummary(descriptor: unknown): string {
   const config = asRecord(auth.config);
 
   switch (auth.kind) {
-    case "username_password":
-      return [
-        config?.login_url ? `Login: ${config.login_url}` : null,
-        config?.username ? `User: ${config.username}` : null,
-        auth.session_id ? `Session: ${auth.session_id}` : "Session not recorded yet",
-      ]
-        .filter(Boolean)
-        .join(" · ");
-    case "sso":
-      return [
-        config?.login_url ? `Login: ${config.login_url}` : null,
-        config?.success_url_pattern ? `Success: ${config.success_url_pattern}` : null,
-        auth.session_id ? `Session: ${auth.session_id}` : "Session not recorded yet",
-      ]
-        .filter(Boolean)
-        .join(" · ");
     case "basic":
       return config?.username
         ? `HTTP Basic user: ${config.username}`
@@ -120,7 +96,7 @@ export function extractAuthSummary(descriptor: unknown): string {
         ? `JWT via ${config.header_name}`
         : "Configured JWT bearer token";
     default:
-      return auth.kind;
+      return "No authentication configured";
   }
 }
 

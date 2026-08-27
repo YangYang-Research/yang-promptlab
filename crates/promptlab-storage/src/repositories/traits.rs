@@ -91,6 +91,12 @@ pub trait ModelRepository: Send + Sync {
     async fn list(&self) -> PromptLabResult<Vec<ModelRecord>>;
     async fn update(&self, id: &str, input: UpdateModel) -> PromptLabResult<ModelRecord>;
     async fn delete(&self, id: &str) -> PromptLabResult<()>;
+    async fn count(&self) -> PromptLabResult<i64>;
+    async fn upsert_entry(&self, input: crate::models::UpsertModelEntry) -> PromptLabResult<ModelRecord>;
+    async fn replace_all(
+        &self,
+        entries: Vec<crate::models::UpsertModelEntry>,
+    ) -> PromptLabResult<()>;
 }
 
 #[async_trait]
@@ -137,6 +143,19 @@ pub trait JudgeRoleWeightsRepository: Send + Sync {
 pub trait MutatorSettingsRepository: Send + Sync {
     async fn get(&self) -> PromptLabResult<MutatorSettings>;
     async fn update(&self, input: UpdateMutatorSettings) -> PromptLabResult<MutatorSettings>;
+}
+
+#[async_trait]
+pub trait HardwareProfileRepository: Send + Sync {
+    async fn get(&self) -> PromptLabResult<Option<HardwareProfileRecord>>;
+    async fn upsert(&self, profile_json: &str) -> PromptLabResult<HardwareProfileRecord>;
+}
+
+#[async_trait]
+pub trait AppSettingsRepository: Send + Sync {
+    async fn get(&self, key: &str) -> PromptLabResult<Option<AppSettingRecord>>;
+    async fn upsert(&self, key: &str, value_json: &str) -> PromptLabResult<AppSettingRecord>;
+    async fn delete(&self, key: &str) -> PromptLabResult<()>;
 }
 
 #[async_trait]

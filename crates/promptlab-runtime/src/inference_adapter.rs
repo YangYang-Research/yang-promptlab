@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use promptlab_models::runtime::InferenceRuntime;
 use promptlab_models::types::{InferenceRequest, InferenceResponse, RuntimeState};
 
-use crate::error::RuntimeResult;
 use crate::provider::ModelProvider;
 
 /// Bridges [`ModelProvider`] to the [`InferenceRuntime`] contract used by the judge.
@@ -32,17 +31,6 @@ impl InferenceRuntime for ModelProviderRuntime {
         RuntimeState::Ready
     }
 
-    async fn load_model(
-        &mut self,
-        _model_path: &std::path::Path,
-    ) -> promptlab_models::error::ModelResult<()> {
-        Ok(())
-    }
-
-    async fn unload(&mut self) -> promptlab_models::error::ModelResult<()> {
-        Ok(())
-    }
-
     async fn complete(
         &self,
         request: InferenceRequest,
@@ -67,28 +55,13 @@ impl InferenceRuntime for ModelProviderRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::RuntimeResult;
     use crate::provider::ModelProviderHealth;
 
     struct MockProvider;
 
     #[async_trait]
     impl ModelProvider for MockProvider {
-        async fn list_models(&self) -> RuntimeResult<Vec<String>> {
-            Ok(vec!["vault-model".into()])
-        }
-
-        async fn install_model(&self, _model_id: &str) -> RuntimeResult<()> {
-            Ok(())
-        }
-
-        async fn remove_model(&self, _model_id: &str) -> RuntimeResult<()> {
-            Ok(())
-        }
-
-        async fn run_inference(&self, _model_id: &str, _prompt: &str) -> RuntimeResult<String> {
-            Ok("ok".into())
-        }
-
         async fn complete_for_model(
             &self,
             _model_id: &str,
@@ -112,7 +85,7 @@ mod tests {
     #[tokio::test]
     async fn provider_runtime_completes_via_model_provider() {
         let provider: Arc<dyn ModelProvider> = Arc::new(MockProvider);
-        let mut runtime = ModelProviderRuntime::new(provider, "vault-model");
+        let runtime = ModelProviderRuntime::new(provider, "vault-model");
         let response = runtime
             .complete(InferenceRequest {
                 system: None,

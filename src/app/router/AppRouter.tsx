@@ -41,9 +41,6 @@ const ReportDetailsPage = lazy(() =>
 const ModelsPage = lazy(() =>
   import("@/features/models/ModelsPage").then((m) => ({ default: m.ModelsPage })),
 );
-const PluginsPage = lazy(() =>
-  import("@/features/plugins/PluginsPage").then((m) => ({ default: m.PluginsPage })),
-);
 const AttackCategoriesPage = lazy(() =>
   import("@/features/attack-catalog/AttackCategoriesPage").then((m) => ({
     default: m.AttackCategoriesPage,
@@ -216,15 +213,7 @@ export function AppRouter() {
             }
           />
           <Route
-            path="plugins"
-            element={
-              <Suspense fallback={<PageLoader />}>
-                <PluginsPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="attack-categories"
+            path="attack-categories/:techniqueId?"
             element={
               <Suspense fallback={<PageLoader />}>
                 <AttackCategoriesPage />

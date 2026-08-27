@@ -6,12 +6,12 @@ PromptLab is an offline-first Tauri 2 desktop app for authorized AI security tes
 
 | Principle | Implementation |
 |-----------|----------------|
-| Offline-first | SQLite + local GGUF via in-process libllama |
+| Offline-capable | SQLite + remote HTTP AI providers (incl. custom OpenAI-compatible) |
 | Local data sovereignty | All state under `~/.promptlab/` (`PROMPTLAB_ROOT`) |
 | Extensibility | Harness providers |
 | Auditability | Scan console, AgentTrace SQLite, structured logs |
 
-Platforms: **Windows**, **macOS**, **Linux**. There is **no** `llama-server` and **no** embedded Ollama.
+Platforms: **Windows**, **macOS**, **Linux**. Product AI is **remote-only** (no embedded llama.cpp). Local servers such as Ollama are added as a custom OpenAI-compatible endpoint (`baseUrl` + model id).
 
 ---
 
@@ -22,7 +22,7 @@ React UI (HashRouter)  src/features/* → src/shared/ipc
         │ invoke / listen
 promptlab-desktop (src-tauri)  commands/* → AppState → crates
         │
-   storage (SQLite)   harness (AI I/O)   inference (gateway)   runtime (libllama)
+   storage (SQLite)   harness (AI I/O)   inference (gateway)   runtime (remote host)
 ```
 
 Browser-only `npm run dev` has **no IPC** — empty workspace, not mock fixtures.
@@ -46,8 +46,8 @@ yang-promptlab/
 ├── crates/                     # engines (table below)
 ├── packages/plugin-sdk-{python,js}/  # leftover
 ├── plugins/                    # leftover samples
-├── resources/models.json       # GGUF catalog
-├── runtime/                    # libllama notes
+├── resources/                  # optional bundled assets
+├── runtime/                    # legacy notes
 └── tests/{frontend,integration}/
 ```
 
@@ -58,8 +58,6 @@ npm run tauri dev        # desktop + IPC
 npm run build
 npm test
 cargo test -p promptlab-core
-npm run setup:playwright
-npm run bundle:playwright
 ```
 
 | Concern | Location |
@@ -79,15 +77,15 @@ npm run bundle:playwright
 | `promptlab-storage` | SQLite + repositories |
 | `promptlab-harness` | Normalized AI I/O |
 | `promptlab-inference` | Gateway, token usage, traffic |
-| `promptlab-runtime` | Embedded libllama |
-| `promptlab-models` | GGUF vault, catalog, downloads |
+| `promptlab-runtime` | Remote-oriented runtime host |
+| `promptlab-models` | Model vault / third-party registry |
 | `promptlab-target-profile` | Wizard target SSOT + verify |
 | `promptlab-planner` | Attack-plan types |
 | `promptlab-payload` / `promptlab-generator` | Catalog + plan → probes |
 | `promptlab-attack` / `promptlab-judge` | Execute / verdict |
 | `promptlab-agent` / `promptlab-agenttrace` | Yazg supervisor + sub-agents, spans |
 | `promptlab-report` | HTML / PDF / JSON / SARIF / CSV |
-| `promptlab-auth` | Playwright + keychain |
+| `promptlab-auth` | Keychain + descriptor secret hydrate |
 | `promptlab-plugin-host` | **Unused by product** (leftover sandbox crate) |
 | `promptlab-desktop` | `src-tauri` |
 | `promptlab-integration-tests` | `tests/integration` |
@@ -100,8 +98,8 @@ npm run bundle:playwright
 ```
 config/          environment.json, ai_runtime_config.json, plugins_state.json
 workspaces/      promptlab.db, reports/, AuthSessions/*.storage.enc
-models/          GGUF vault
-runtime/         hardware.json, manifest.json
+models/          legacy path (registry is SQLite; no local weight vault)
+runtime/         (legacy local-runtime dir; hardware profile is in SQLite)
 logs/  plugins/  cache/  temp/  backups/
 agenttrace/agenttrace.db
 ```
@@ -112,7 +110,7 @@ Not Tauri `app_data_dir`. Secrets: OS keychain `com.promptlab.app` — see [AUTH
 
 WAL, `PRAGMA foreign_keys = ON`. Schema: `crates/promptlab-storage/migrations/001_initial_schema.sql`.
 
-GGUF files are **not** SQLite rows. AgentTrace is a separate DB.
+Model registry rows live in SQLite (`models`). AgentTrace is a separate DB.
 
 | Table | Notes |
 |-------|-------|
@@ -127,7 +125,7 @@ GGUF files are **not** SQLite rows. AgentTrace is a separate DB.
 | `runtime_traffic_*` / `judge_role_weights` / `mutator_settings` | |
 | `agent_short_term_memory` / `agent_long_term_memory` | |
 
-IDs are UUID `TEXT`; timestamps RFC 3339 UTC. Access: `Database::connect` → `db.repositories()`. `ModelRepository` exists in the crate but **001 has no `models` table**.
+IDs are UUID `TEXT`; timestamps RFC 3339 UTC. Access: `Database::connect` → `db.repositories()`. Model registry: `models` table via `ModelRepository`.
 
 ---
 
@@ -144,11 +142,11 @@ Every completion: `HarnessFactory::execute` + `HarnessPurpose`. Feature crates m
 Caller → HarnessFactory::execute
   → purpose policy (token caps)
   → interceptors
-  → Harness (http | openai | anthropic | gemini | bedrock | llama | dify | mcp | websocket | playwright)
+  → Harness (http | openai | anthropic | gemini | bedrock | llama | dify | mcp | websocket)
   → NormalizedResponse
 ```
 
-Playwright harness is registered **per-scan** on an isolated factory. Target-descriptor auth is for attack/verify; vault credentials are `AuthMaterial` for assistant/judge.
+Target-descriptor auth is for attack/verify; vault credentials are `AuthMaterial` for assistant/judge.
 
 Add a provider: implement `Harness` under `crates/promptlab-harness/src/providers/`, `registry.register`. Details: [RUNTIME.md](RUNTIME.md).
 
@@ -174,7 +172,7 @@ Execute: `Approved plan → generator → harness → target → judge → findi
 | Adjust | `attack_planner_adjust` |
 | Run | `scan_start` — payloads lazy at step 5 |
 
-Playbook stores `target_profile: true` (not `endpoint_ids`). Wizard extras: **Import API** (cURL → profile), **Playwright record**, drafts (`scan_wizard_save/load`). Jobs: `scan_pause` / `resume` / `stop`; interrupted scans reconciled on startup/shutdown.
+Playbook stores `target_profile: true` (not `endpoint_ids`). Wizard extras: **Import API** (cURL → profile), drafts (`scan_wizard_save/load`). Jobs: `scan_pause` / `resume` / `stop`; interrupted scans reconciled on startup/shutdown.
 
 Pipeline: [ATTACK.md](ATTACK.md). Yazg: [YAZG.md](YAZG.md).
 
@@ -192,7 +190,7 @@ Handlers in `src-tauri/src/lib.rs`. Clients: `src/shared/ipc/`.
 | CRUD | `project_*`, `target_*`, `scan_create/list/get/delete`, `finding_*`, `report_*` |
 | Scan job | `scan_start/status/pause/resume/stop`, `scan_console_tail`, `scan_wizard_*`, `*_recommendations_generate`, `project_summary_generate` |
 | Profile | `target_profile_*`, `planner_generate_from_profile`, `attack_planner_adjust` |
-| Auth | `auth_record_session_*`, `auth_session_validate/status` |
+| Auth | (credential path via target/profile commands; see [AUTH.md](AUTH.md)) |
 | Models / runtime | `models_*`, `runtime_*`, `mutator_settings_*` |
 | Yazg | `yazg_*`, `agenttrace_*`, `agent_memory_*` |
 | Catalog | `attack_catalog_*` |

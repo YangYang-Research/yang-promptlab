@@ -14,7 +14,7 @@ pub fn sanitize_target_descriptor(
 ) -> PromptLabResult<(String, bool)> {
     let mut value: Value = serde_json::from_str(descriptor_json)
         .map_err(|err| PromptLabError::invalid_input(format!("invalid descriptor json: {err}")))?;
-    let mut changed = sanitize_auth_block(value.get_mut("auth"), secrets)?;
+    let changed = sanitize_auth_block(value.get_mut("auth"), secrets)?;
     Ok((value.to_string(), changed))
 }
 

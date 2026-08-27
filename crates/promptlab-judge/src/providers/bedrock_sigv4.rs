@@ -65,12 +65,14 @@ pub fn sign_bedrock_post(
     let now = time::OffsetDateTime::now_utc();
     let amz_date = now
         .format(
-            &time::format_description::parse("[year][month][day]T[hour][minute][second]Z")
-                .unwrap(),
+            &time::format_description::parse_borrowed::<2>(
+                "[year][month][day]T[hour][minute][second]Z",
+            )
+            .unwrap(),
         )
         .map_err(|e| e.to_string())?;
     let date_stamp = now
-        .format(&time::format_description::parse("[year][month][day]").unwrap())
+        .format(&time::format_description::parse_borrowed::<2>("[year][month][day]").unwrap())
         .map_err(|e| e.to_string())?;
 
     let payload_hash = hex::encode(Sha256::digest(body.as_bytes()));

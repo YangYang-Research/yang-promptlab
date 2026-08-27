@@ -28,9 +28,7 @@ pub struct AiInferenceSettingsDto {
     pub selected_model_id: Option<String>,
     pub selected_model_name: Option<String>,
     pub third_party_available: bool,
-    pub local_available: bool,
     pub third_party_models: Vec<AiInferenceModelOptionDto>,
-    pub local_models: Vec<AiInferenceModelOptionDto>,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connectivity_test_ok: Option<bool>,
@@ -41,7 +39,7 @@ pub struct AiInferenceSettingsDto {
 pub fn mode_to_route(mode: InferenceMode) -> &'static str {
     match mode {
         InferenceMode::ThirdParty => "third_party",
-        InferenceMode::Local | InferenceMode::Deterministic => "local",
+        InferenceMode::Deterministic => "deterministic",
     }
 }
 
@@ -50,22 +48,11 @@ pub fn parse_route(raw: &str) -> Option<InferenceMode> {
 }
 
 pub fn is_third_party_model(entry: &ModelEntry) -> bool {
-    entry.provider == ModelProvider::Remote
-}
-
-pub fn is_local_model(entry: &ModelEntry) -> bool {
-    matches!(
-        entry.provider,
-        ModelProvider::Gguf | ModelProvider::HuggingFace | ModelProvider::Ollama
-    )
+    matches!(entry.provider, ModelProvider::Remote)
 }
 
 pub fn is_configured_third_party(entry: &ModelEntry) -> bool {
     is_third_party_model(entry) && has_third_party_credentials_metadata(&entry.metadata)
-}
-
-pub fn is_configured_local(entry: &ModelEntry) -> bool {
-    is_local_model(entry) && (entry.verified || entry.file_path.is_file())
 }
 
 fn third_party_connectivity(config: &AiRuntimeConfiguration) -> Option<&str> {
@@ -73,29 +60,6 @@ fn third_party_connectivity(config: &AiRuntimeConfiguration) -> Option<&str> {
         Some(config.health.message.as_str())
     } else {
         None
-    }
-}
-
-fn third_party_last_health_check(config: &AiRuntimeConfiguration) -> Option<&str> {
-    if config.mode == InferenceMode::ThirdParty {
-        config.health.checked_at.as_deref()
-    } else {
-        None
-    }
-}
-
-fn local_model_option(entry: &ModelEntry, configured: bool) -> AiInferenceModelOptionDto {
-    AiInferenceModelOptionDto {
-        id: entry.id.clone(),
-        name: entry.display_model_name(),
-        provider: entry.display_provider(),
-        verified: entry.verified,
-        configured,
-        status_label: if configured {
-            "Ready".into()
-        } else {
-            "Needs setup".into()
-        },
     }
 }
 
@@ -126,18 +90,6 @@ fn third_party_model_option(
     }
 }
 
-fn sort_local_models(mut entries: Vec<&ModelEntry>) -> Vec<AiInferenceModelOptionDto> {
-    entries.sort_by(|a, b| {
-        b.verified
-            .cmp(&a.verified)
-            .then_with(|| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()))
-    });
-    entries
-        .into_iter()
-        .map(|entry| local_model_option(entry, is_configured_local(entry)))
-        .collect()
-}
-
 fn sort_third_party_models(
     mut entries: Vec<&ModelEntry>,
     selected_model_id: Option<&str>,
@@ -158,8 +110,10 @@ pub fn reconcile_config(
     mut config: AiRuntimeConfiguration,
     models: &[ModelEntry],
 ) -> AiRuntimeConfiguration {
-    if !config.initialized {
-        return config;
+    config.mode = InferenceMode::ThirdParty;
+    config.initialized = true;
+    if config.runtime == "local" || config.runtime.is_empty() {
+        config.runtime = "cloud".into();
     }
 
     let third_party = sort_third_party_models(
@@ -167,41 +121,33 @@ pub fn reconcile_config(
         config.selected_model_id.as_deref(),
         third_party_connectivity(&config),
     );
-    let local = sort_local_models(models.iter().filter(|e| is_local_model(e)).collect());
 
     let previous_selected = config.selected_model_id.clone();
-
-    let pool = match config.mode {
-        InferenceMode::ThirdParty => &third_party,
-        InferenceMode::Local | InferenceMode::Deterministic => &local,
-    };
 
     let selected_valid = config
         .selected_model_id
         .as_ref()
-        .and_then(|id| pool.iter().find(|m| &m.id == id));
+        .and_then(|id| third_party.iter().find(|m| &m.id == id));
 
-    if selected_valid.is_none() {
+    if selected_valid.is_none() && !third_party.is_empty() {
         config.selected_model_id = None;
     }
 
-    if config.mode == InferenceMode::ThirdParty {
-        let previous_third_party = previous_selected.as_deref().and_then(|id| {
-            third_party
-                .iter()
-                .find(|model| model.id == id)
-                .map(|model| model.id.as_str())
-        });
-        let selected_third_party = config.selected_model_id.as_deref().and_then(|id| {
-            third_party
-                .iter()
-                .find(|model| model.id == id)
-                .map(|model| model.id.as_str())
-        });
-        if let (Some(previous), Some(selected)) = (previous_third_party, selected_third_party) {
-            if previous != selected {
-                config.health = Default::default();
-            }
+    let previous_third_party = previous_selected.as_deref().and_then(|id| {
+        third_party
+            .iter()
+            .find(|model| model.id == id)
+            .map(|model| model.id.as_str())
+    });
+    let selected_third_party = config.selected_model_id.as_deref().and_then(|id| {
+        third_party
+            .iter()
+            .find(|model| model.id == id)
+            .map(|model| model.id.as_str())
+    });
+    if let (Some(previous), Some(selected)) = (previous_third_party, selected_third_party) {
+        if previous != selected {
+            config.health = Default::default();
         }
     }
 
@@ -280,7 +226,6 @@ pub fn config_to_dto_with_connectivity_test(
         config.selected_model_id.as_deref(),
         third_party_connectivity(config),
     );
-    let local = sort_local_models(models.iter().filter(|e| is_local_model(e)).collect());
 
     let selected_model_name = config
         .selected_model_id
@@ -288,24 +233,16 @@ pub fn config_to_dto_with_connectivity_test(
         .and_then(|id| models.iter().find(|m| &m.id == id).map(|m| m.display_model_name()));
 
     let third_party_available = third_party.iter().any(|m| m.configured);
-    let local_available = local.iter().any(|m| m.configured);
 
-    let message = if !config.initialized {
-        "Choose Third-party Providers or Local Runtime to configure AI features".into()
-    } else {
-        match config.mode {
-            InferenceMode::ThirdParty if third_party_available => {
-                "Using third-party cloud API for AI features".into()
-            }
-            InferenceMode::ThirdParty => {
-                "Third-party route selected — add a cloud model in Models".into()
-            }
-            InferenceMode::Local if local_available => {
-                "Using local llama.cpp runtime for AI features".into()
-            }
-            InferenceMode::Local | InferenceMode::Deterministic => {
-                "Local route selected — install a GGUF model or repair AI Runtime".into()
-            }
+    let message = match config.mode {
+        InferenceMode::ThirdParty if third_party_available => {
+            "Using remote HTTP provider for AI features".into()
+        }
+        InferenceMode::ThirdParty => {
+            "Add a remote provider model in Models, then select it here".into()
+        }
+        InferenceMode::Deterministic => {
+            "Deterministic mode has no LLM provider — select a remote model".into()
         }
     };
 
@@ -315,11 +252,48 @@ pub fn config_to_dto_with_connectivity_test(
         selected_model_id: config.selected_model_id.clone(),
         selected_model_name,
         third_party_available,
-        local_available,
         third_party_models: third_party,
-        local_models: local,
         message,
         connectivity_test_ok: connectivity_test.as_ref().map(|(ok, _)| *ok),
         connectivity_test_detail: connectivity_test.map(|(_, detail)| detail),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use promptlab_models::ModelRegistry;
+
+    fn remote_entry(provider: &str, model: &str) -> ModelEntry {
+        ModelRegistry::new().register_remote(provider, model, None, None)
+    }
+
+    #[test]
+    fn reconcile_keeps_selection_when_model_list_is_empty() {
+        let mut config = AiRuntimeConfiguration::default();
+        config.selected_model_id = Some("remote-nvidia-nemotron".into());
+        let out = reconcile_config(config, &[]);
+        assert_eq!(
+            out.selected_model_id.as_deref(),
+            Some("remote-nvidia-nemotron")
+        );
+    }
+
+    #[test]
+    fn reconcile_clears_selection_when_selected_model_is_gone() {
+        let other = remote_entry("nvidia", "other");
+        let mut config = AiRuntimeConfiguration::default();
+        config.selected_model_id = Some("remote-nvidia-missing".into());
+        let out = reconcile_config(config, std::slice::from_ref(&other));
+        assert_eq!(out.selected_model_id, None);
+    }
+
+    #[test]
+    fn reconcile_keeps_selection_when_selected_model_is_present() {
+        let entry = remote_entry("nvidia", "foo");
+        let mut config = AiRuntimeConfiguration::default();
+        config.selected_model_id = Some(entry.id.clone());
+        let out = reconcile_config(config, std::slice::from_ref(&entry));
+        assert_eq!(out.selected_model_id.as_deref(), Some(entry.id.as_str()));
     }
 }

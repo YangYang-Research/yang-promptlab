@@ -16,9 +16,8 @@ pub use canary::{
     CANARY_PLACEHOLDER,
 };
 pub use environment::{
-    bootstrap_environment, ensure_environment, load_environment_config, resolve_db_path,
-    resolve_paths, save_environment_config, user_home, EnvironmentConfig, EnvironmentPaths,
-    DB_FILENAME, DB_PATH_ENV, ENV_CONFIG_FILE, ROOT_DIR_NAME, ROOT_PATH_ENV,
+    bootstrap_environment, ensure_environment, resolve_db_path, resolve_paths, user_home,
+    EnvironmentConfig, EnvironmentPaths, DB_FILENAME, DB_PATH_ENV, ROOT_DIR_NAME, ROOT_PATH_ENV,
 };
 pub use error::{ErrorCode, PromptLabError, PromptLabResult};
 pub use event_log::{

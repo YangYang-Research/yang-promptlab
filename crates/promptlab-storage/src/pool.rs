@@ -40,7 +40,11 @@ impl Database {
         MIGRATOR
             .run(&pool)
             .await
-            .map_err(|err| promptlab_core::PromptLabError::internal(format!("migration failed: {err}")))?;
+            .map_err(|err| {
+                promptlab_core::PromptLabError::storage(format!(
+                    "database migration failed (schema incompatible or corrupt): {err}"
+                ))
+            })?;
 
         tracing::debug!(%database_url, "database connected and migrations applied");
 
@@ -100,7 +104,11 @@ impl Database {
         MIGRATOR
             .run(&pool)
             .await
-            .map_err(|err| PromptLabError::internal(format!("migration failed: {err}")))?;
+            .map_err(|err| {
+                PromptLabError::storage(format!(
+                    "database migration failed (schema incompatible or corrupt): {err}"
+                ))
+            })?;
 
         Ok(Self { pool })
     }

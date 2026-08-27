@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use tracing::{info, instrument};
 
-use crate::error::{ReportError, ReportResult};
-use crate::formatters::{formatter_for, ReportFormatter};
+use crate::error::ReportResult;
+use crate::formatters::formatter_for;
 use crate::types::{GeneratedReport, ReportFormat, ReportInput, ReportKind};
 
 /// Reporting engine — generates executive, technical, and compliance reports.
@@ -31,7 +31,7 @@ impl ReportingEngine {
         input: &ReportInput,
     ) -> ReportResult<GeneratedReport> {
         let formatter = formatter_for(format);
-        let mut report = formatter.render(kind, input).await?;
+        let report = formatter.render(kind, input).await?;
 
         let path = self.output_dir.join(&report.filename);
         std::fs::write(&path, &report.bytes)?;

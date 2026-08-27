@@ -16,17 +16,18 @@ pub mod inference_settings;
 pub mod model_registry;
 pub mod third_party_credentials;
 pub mod embedded_runtime;
+pub mod environment_persist;
 pub mod plugin_interceptor;
 pub mod plugin_service;
 pub mod plugin_transport;
-pub mod playwright_runtime;
-pub mod runtime_watch;
 pub mod session_auth;
 pub mod scan_console_log;
 pub mod scan_playbook;
 pub mod state;
+pub mod startup;
 pub mod traffic_persist;
 pub mod token_usage_persist;
+pub mod updater;
 
 use promptlab_models::ModelEntry;
 use state::AppState;
@@ -42,50 +43,70 @@ pub fn run() {
     };
 
     app.run(|app_handle, event| {
-        if let RunEvent::Exit = event {
-            if let Some(state) = app_handle.try_state::<AppState>() {
-                tauri::async_runtime::block_on(async {
-                    let reconciled =
-                        commands::scan::reconcile_interrupted_scans(state.inner(), true).await;
-                    if reconciled > 0 {
-                        tracing::info!(
-                            reconciled,
-                            "marked interrupted scans as stopped on shutdown"
-                        );
-                    }
-                    let mut manager = state.runtime_manager().lock().await;
-                    let _ = manager.stop_runtime().await;
-                    tracing::info!("embedded runtime stopped (graceful shutdown)");
-                    state.database().close().await;
-                });
-                tracing::info!("SQLite database closed (graceful shutdown)");
+        match event {
+            RunEvent::Exit => {
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    tauri::async_runtime::block_on(async {
+                        let reconciled =
+                            commands::scan::reconcile_interrupted_scans(state.inner(), true).await;
+                        if reconciled > 0 {
+                            tracing::info!(
+                                reconciled,
+                                "marked interrupted scans as stopped on shutdown"
+                            );
+                        }
+                        let mut manager = state.runtime_manager().lock().await;
+                        let _ = manager.stop_runtime().await;
+                        tracing::info!("embedded runtime stopped (graceful shutdown)");
+                        state.database().close().await;
+                    });
+                    tracing::info!("SQLite database closed (graceful shutdown)");
+                }
             }
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { has_visible_windows, .. } => {
+                if !has_visible_windows {
+                    focus_main_window(app_handle);
+                }
+            }
+            _ => {}
         }
     });
+}
+
+fn focus_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 /// Build the Tauri application: initialize logging, open the database, and store
 /// it in shared state. Separated from [`run`] so startup wiring is unit-testable.
 fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            focus_main_window(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            let environment = promptlab_core::bootstrap_environment()
+            let bootstrap = promptlab_core::bootstrap_environment()
                 .map_err(crate::error::CommandError::from)?;
 
-            let _ = promptlab_core::bootstrap_proxy_settings(&environment.config)
+            let _ = promptlab_core::bootstrap_proxy_settings(&bootstrap.config)
                 .map_err(|err| {
                     tracing::warn!(error = %err, "failed to load proxy settings; using defaults");
                     err
                 });
 
             let (event_bus, event_ring, event_log_guard) =
-                promptlab_core::spawn_event_logger(environment.logs.clone());
+                promptlab_core::spawn_event_logger(bootstrap.logs.clone());
             let event_bus = std::sync::Arc::new(event_bus);
 
-            let log_guard = logging::init_app_logging(&environment)?;
+            let log_guard = logging::init_app_logging(&bootstrap)?;
 
             event_bus.info(
                 promptlab_core::LogCategory::Application,
@@ -95,24 +116,18 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 "PromptLab backend starting",
             );
 
-            let root = environment.root.clone();
-            let db_path = db::resolve_db_path(&environment.workspaces);
+            let root = bootstrap.root.clone();
+            let db_path = db::resolve_db_path(&bootstrap.workspaces);
 
-            let database = tauri::async_runtime::block_on(db::open_database(&db_path))
-                .map_err(crate::error::CommandError::from)?;
+            let database = match tauri::async_runtime::block_on(async {
+                let database = db::open_database(&db_path).await?;
+                attack_catalog::seed_attack_catalog(&database).await?;
 
-            tauri::async_runtime::block_on(attack_catalog::seed_attack_catalog(&database))?;
-
-            let vault_dir = environment.auth_sessions_dir();
-            let auth_engine_config =
-                playwright_runtime::resolve_auth_engine_config(app.handle())
-                    .map_err(crate::error::CommandError::from)?
-                    .with_vault_dir(vault_dir.clone());
-
-            tauri::async_runtime::block_on(async {
-                let store = promptlab_auth::SessionStore::new(database.clone(), vault_dir.clone())
-                    .await
-                    .map_err(crate::error::CommandError::from)?;
+                let vault_dir = bootstrap.auth_sessions_dir();
+                let store =
+                    promptlab_auth::SessionStore::new(database.clone(), vault_dir.clone())
+                        .await
+                        .map_err(crate::error::CommandError::from)?;
                 promptlab_auth::migrate_legacy_auth_data(&database, store.secrets())
                     .await
                     .map_err(crate::error::CommandError::from)?;
@@ -126,11 +141,44 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 )
                 .await
                 .map_err(crate::error::CommandError::from)?;
-                Ok::<(), crate::error::CommandError>(())
-            })?;
+                Ok::<_, crate::error::CommandError>(database)
+            }) {
+                Ok(database) => database,
+                Err(err) => {
+                    let message = startup::format_database_startup_error(&db_path, &err);
+                    tracing::error!(
+                        error = %err,
+                        path = %db_path.display(),
+                        "database startup failed; continuing without backend state"
+                    );
+                    app.manage(startup::BackendStartup::database_failed(
+                        db_path.clone(),
+                        message,
+                    ));
+                    // Keep the window alive so the frontend boot screen can show the error.
+                    return Ok(());
+                }
+            };
 
-            let (mut model_manager, model_catalog_meta) = tauri::async_runtime::block_on(
-                model_registry::open_model_manager_with_registry(app.handle(), &root),
+            let environment = match tauri::async_runtime::block_on(
+                environment_persist::hydrate_environment_paths(&database, &bootstrap),
+            ) {
+                Ok(paths) => paths,
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "failed to load environment settings from database; using defaults"
+                    );
+                    bootstrap
+                }
+            };
+
+            let vault_dir = environment.auth_sessions_dir();
+            let auth_engine_config =
+                promptlab_auth::AuthEngineConfig::default().with_vault_dir(vault_dir.clone());
+
+            let model_manager = tauri::async_runtime::block_on(
+                model_registry::open_model_manager_with_registry(app.handle(), &root, &database),
             )
             .map_err(crate::error::CommandError::from)?;
 
@@ -141,6 +189,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 tauri::async_runtime::block_on(embedded_runtime::bootstrap_runtime_manager(
                     app.handle(),
                     &root,
+                    &database,
                 ))
                 .map_err(crate::error::CommandError::from)?;
 
@@ -180,9 +229,9 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 runtime_manager,
                 model_manager_arc,
                 model_provider,
-                model_catalog_meta,
                 agent_trace,
             ));
+            app.manage(startup::BackendStartup::ok());
 
             let startup_state = app.state::<AppState>();
             let reconciled = tauri::async_runtime::block_on(
@@ -192,6 +241,13 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 tracing::info!(reconciled, "marked interrupted scans as stopped on startup");
             }
 
+            let retry_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                let state = retry_app.state::<AppState>();
+                commands::scan::maybe_auto_retry_scan(state.inner(), &retry_app).await;
+            });
+
             let app_handle = app.handle().clone();
             promptlab_inference::traffic_ensure_started();
             tauri::async_runtime::spawn(async move {
@@ -199,8 +255,19 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 {
                     let mut inference = state.inference_manager().lock().await;
                     let _ = inference.load().await;
+                    let models: Vec<_> = {
+                        let manager = state.model_manager().lock().await;
+                        manager.list_models().into_iter().cloned().collect()
+                    };
+                    let before = inference.config().clone();
+                    let after = crate::inference_settings::reconcile_config(before.clone(), &models);
+                    if after != before {
+                        *inference.config_mut() = after;
+                        if let Err(err) = inference.save().await {
+                            tracing::warn!(error = %err, "failed to persist runtime config migration");
+                        }
+                    }
                 }
-                embedded_runtime::resume_local_runtime_on_startup(&app_handle, state.inner()).await;
                 commands::runtime::startup_connectivity_check(state.inner()).await;
             });
 
@@ -227,6 +294,9 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
         .invoke_handler(tauri::generate_handler![
             commands::health,
             commands::app_info,
+            commands::startup_status,
+            commands::updater::updater_check,
+            commands::updater::updater_apply_if_available,
             commands::app::app_clear_all_data,
             commands::environment::environment_get,
             commands::environment::environment_open_root,
@@ -239,6 +309,9 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::environment::logs_recent_events,
             commands::environment::logs_emit,
             commands::environment::logs_open_folder,
+            commands::activity::activity_list,
+            commands::activity::activity_record,
+            commands::activity::activity_replace_all,
             commands::agent_memory::agent_memory_list_sessions,
             commands::agent_memory::agent_memory_list_events,
             commands::agent_memory::agent_memory_delete_session,
@@ -248,6 +321,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::agenttrace::agenttrace_get_trace,
             commands::agenttrace::agenttrace_delete_session,
             commands::db_health,
+            commands::workspace_search::workspace_search,
             commands::projects::project_create,
             commands::projects::project_list,
             commands::projects::project_get,
@@ -284,29 +358,13 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::wizard_scan::scan_wizard_create,
             commands::wizard_scan::scan_wizard_save,
             commands::wizard_scan::scan_wizard_load,
-            commands::auth::auth_record_session_start,
-            commands::auth::auth_record_session_finish,
-            commands::auth::auth_record_session_cancel,
-            commands::auth::auth_session_validate,
-            commands::auth::auth_session_status,
             commands::models::models_list,
             commands::models::models_registry_info,
             commands::models::models_registry_diagnostics,
-            commands::models::models_browse,
-            commands::models::models_install,
-            commands::models::models_import_gguf,
             commands::models::models_save_third_party,
             commands::models::models_third_party_edit_form,
             commands::models::models_test_third_party,
             commands::models::models_test_connection,
-            commands::models::models_import_zip,
-            commands::models::models_download_start,
-            commands::models::models_download_status,
-            commands::models::models_download_pause,
-            commands::models::models_download_resume,
-            commands::models::models_download_cancel,
-            commands::models::models_download_retry_verify,
-            commands::models::models_download_cancel_verify,
             commands::models::models_remove,
             commands::models::models_verify,
             commands::models::models_test_inference,
@@ -326,27 +384,22 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::yazg::yazg_stop,
             commands::yazg::yazg_generate_chat_title,
             commands::yazg::yazg_resolve_hilt,
+            commands::yazg::yazg_chat_threads_get,
+            commands::yazg::yazg_chat_threads_save,
             commands::scan_recommendations::scan_recommendations_generate,
             commands::finding_recommendations::finding_recommendations_generate,
             commands::project_summary::project_summary_generate,
             commands::planner::attack_planner_adjust,
             commands::runtime::runtime_status,
-            commands::runtime::runtime_install,
-            commands::runtime::runtime_repair,
             commands::runtime::runtime_start,
             commands::runtime::runtime_stop,
             commands::runtime::runtime_delete,
-            commands::runtime::runtime_load_model,
-            commands::runtime::runtime_unload_model,
             commands::runtime::runtime_restart,
             commands::runtime::runtime_health,
             commands::runtime::runtime_traffic_stats,
             commands::runtime::runtime_token_usage,
             commands::runtime::runtime_token_usage_reset,
-            commands::runtime::runtime_benchmark,
             commands::runtime::runtime_logs,
-            commands::runtime::runtime_hardware,
-            commands::runtime::hardware_refresh,
             commands::runtime::runtime_configuration,
             commands::runtime::runtime_inference_settings,
             commands::runtime::runtime_set_inference_route,
@@ -358,18 +411,12 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::runtime::runtime_test_inference,
             commands::security::security_audit,
             commands::security::security_migrate_secrets,
-            commands::plugins::plugins_list,
-            commands::plugins::plugins_refresh,
-            commands::plugins::plugins_enable,
-            commands::plugins::plugins_disable,
-            commands::plugins::plugins_info,
             commands::attack_catalog::attack_catalog_list,
             commands::attack_catalog::attack_catalog_categories,
             commands::attack_catalog::attack_catalog_update,
             commands::attack_catalog::attack_catalog_reset,
             commands::attack_catalog::attack_catalog_generate_prompt,
         ])
-        .manage(AsyncMutex::new(commands::auth::AuthRecordingState::new()))
         .build(tauri::generate_context!())?;
 
     Ok(app)

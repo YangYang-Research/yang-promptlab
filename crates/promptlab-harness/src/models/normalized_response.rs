@@ -105,6 +105,51 @@ impl NormalizedResponse {
     }
 }
 
+/// Extract a provider error message from RFC 7807 / OpenAI-style error JSON.
+/// Returns `None` when the body is not a provider error payload.
+pub fn provider_error_detail(body: &str) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
+    if json.get("isAiEndpoint").is_some() || json.get("is_ai_endpoint").is_some() {
+        return None;
+    }
+    if let Some(message) = json
+        .pointer("/error/message")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        return Some(message.to_string());
+    }
+    let status = json.get("status").and_then(|value| {
+        value
+            .as_u64()
+            .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+    });
+    let detail = json
+        .get("detail")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty());
+    let title = json
+        .get("title")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty());
+    if let Some(status) = status.filter(|code| *code >= 400) {
+        if let Some(detail) = detail {
+            return Some(detail.to_string());
+        }
+        if let Some(title) = title {
+            return Some(format!("HTTP {status} {title}"));
+        }
+        return Some(format!("HTTP {status}"));
+    }
+    if title == Some("Gone") {
+        return Some(detail.unwrap_or("Gone").to_string());
+    }
+    None
+}
+
 pub fn classify_http(status: u16) -> Option<String> {
     match status {
         0 => Some("transport".into()),
@@ -372,5 +417,30 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(normalized.judge_text(), "plain text response");
+    }
+
+    #[test]
+    fn provider_error_detail_reads_rfc7807_gone() {
+        let body = r#"{"type":"about:blank","title":"Gone","status":410,"detail":"The model 'meta/llama-3.1-8b-instruct' has reached its end of life on 2026-08-26T09:00:00Z and is no longer available."}"#;
+        assert!(
+            provider_error_detail(body)
+                .expect("detail")
+                .contains("end of life")
+        );
+    }
+
+    #[test]
+    fn provider_error_detail_reads_openai_error() {
+        let body = r#"{"error":{"message":"model_not_found","type":"invalid_request_error"}}"#;
+        assert_eq!(
+            provider_error_detail(body).as_deref(),
+            Some("model_not_found")
+        );
+    }
+
+    #[test]
+    fn provider_error_detail_ignores_classifier_json() {
+        let body = r#"{"isAiEndpoint":true,"confidence":0.9,"rationale":"assistant reply"}"#;
+        assert_eq!(provider_error_detail(body), None);
     }
 }

@@ -10,8 +10,11 @@ use crate::classify::EndpointClassifier;
 use crate::risk::RiskScorer;
 use crate::schema::SchemaInferenceEngine;
 use crate::types::{
-    AiEndpointMetadata, DiscoveryProvenance, EndpointBasic, EndpointClassification,
-    EndpointCapabilities, FingerprintMetadata, InferenceFields, RawObservation, SchemaMetadata,
+    AiEndpointMetadata, DiscoveryProvenance, EndpointBasic, FingerprintMetadata, RawObservation,
+};
+#[cfg(test)]
+use crate::types::{
+    EndpointCapabilities, EndpointClassification, InferenceFields, SchemaMetadata,
 };
 
 /// Input for a single endpoint analysis pass.

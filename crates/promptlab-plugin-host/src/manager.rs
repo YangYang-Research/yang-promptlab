@@ -23,7 +23,6 @@ pub struct PluginManager {
 impl PluginManager {
     pub fn new(plugins_dir: impl AsRef<Path>) -> PluginResult<Self> {
         let plugins_dir = plugins_dir.as_ref().to_path_buf();
-        std::fs::create_dir_all(&plugins_dir)?;
         Ok(Self {
             plugins_dir,
             records: HashMap::new(),

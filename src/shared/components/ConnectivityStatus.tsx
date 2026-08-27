@@ -10,18 +10,14 @@ export function connectivityStatusVariant(
     value.startsWith("Connected") ||
     value.startsWith("Reachable") ||
     value === "Running" ||
-    value === "Live" ||
-    value.startsWith("In-process")
+    value === "Live"
   ) {
     return "success";
   }
   if (
     value === "Ready" ||
-    value === "Loading model" ||
-    value === "Verifying model" ||
     value === "Starting" ||
     value === "Stopping" ||
-    value === "Installing" ||
     value === "Idle"
   ) {
     return "warning";
@@ -31,8 +27,6 @@ export function connectivityStatusVariant(
     value === "Failed" ||
     value === "Offline" ||
     value === "Stopped" ||
-    value === "Not Installed" ||
-    value === "Repair Required" ||
     value === "Setup Required" ||
     value.startsWith("Unreachable")
   ) {

@@ -35,6 +35,7 @@ impl Attack for MemoryPoisoningAttack {
             category: self.category(),
             mutators: vec![
                 MutatorKind::RepeatAmplify,
+                MutatorKind::LanguagePivot,
                 MutatorKind::RoleSwap,
                 MutatorKind::DelimiterInjection,
                 MutatorKind::MarkdownCodeFence,

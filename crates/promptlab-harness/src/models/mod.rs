@@ -7,5 +7,5 @@ pub use attack_request::{AttackRequest, AuthMaterial, HarnessPurpose, HttpMethod
 /// Canonical name for the target I/O request. `AttackRequest` is the same type.
 pub type HarnessRequest = AttackRequest;
 pub use chat::{ChatMessage, ChatTool, StreamChunk};
-pub use normalized_response::{NormalizedResponse, NormalizedToolCall};
+pub use normalized_response::{provider_error_detail, NormalizedResponse, NormalizedToolCall};
 pub use target_descriptor::{HarnessKind, TargetDescriptor, TargetSurface};

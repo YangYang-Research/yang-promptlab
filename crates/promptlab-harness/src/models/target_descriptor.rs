@@ -230,6 +230,7 @@ impl TargetDescriptor {
     }
 
     pub fn preferred_harness(&self) -> HarnessKind {
+        #[cfg(feature = "playwright")]
         if self.browser_session_id.is_some() || self.surface == TargetSurface::BrowserChat {
             return HarnessKind::Playwright;
         }
@@ -238,7 +239,16 @@ impl TargetDescriptor {
             TargetSurface::AnthropicCompatible => HarnessKind::Anthropic,
             TargetSurface::Gemini => HarnessKind::Gemini,
             TargetSurface::Dify => HarnessKind::Dify,
-            TargetSurface::BrowserChat => HarnessKind::Playwright,
+            TargetSurface::BrowserChat => {
+                #[cfg(feature = "playwright")]
+                {
+                    HarnessKind::Playwright
+                }
+                #[cfg(not(feature = "playwright"))]
+                {
+                    HarnessKind::Http
+                }
+            }
             TargetSurface::McpServer => HarnessKind::Mcp,
             TargetSurface::WebSocket => HarnessKind::WebSocket,
             TargetSurface::Bedrock => HarnessKind::Bedrock,
@@ -251,14 +261,6 @@ impl TargetDescriptor {
 }
 
 fn infer_surface(value: &serde_json::Value) -> TargetSurface {
-    if value
-        .get("auth")
-        .and_then(|a| a.get("engine"))
-        .and_then(|v| v.as_str())
-        == Some("playwright")
-    {
-        return TargetSurface::BrowserChat;
-    }
     if let Some(kind) = value.get("type").and_then(|v| v.as_str()) {
         if let Some(parsed) = TargetSurface::parse(kind) {
             return parsed;
@@ -387,7 +389,10 @@ mod tests {
         }"#;
         let descriptor = TargetDescriptor::from_descriptor_json(json).unwrap();
         assert_eq!(descriptor.browser_session_id.as_deref(), Some("sess-1"));
+        #[cfg(feature = "playwright")]
         assert_eq!(descriptor.preferred_harness(), HarnessKind::Playwright);
+        #[cfg(not(feature = "playwright"))]
+        assert_eq!(descriptor.preferred_harness(), HarnessKind::Http);
     }
 
     #[test]

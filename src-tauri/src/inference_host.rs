@@ -9,11 +9,11 @@ use promptlab_auth::SecretStore;
 use promptlab_core::PromptLabError;
 use promptlab_inference::{
     CompleteRequest, ConnectivityTestResult, GatewaySession,
-    InferenceMode, InferenceProvider, InferenceRuntimeManager, InferenceSession,
+    InferenceMode, InferenceRuntimeManager, InferenceSession,
     PromptRegistry, RemoteAdapterSettings,
 };
 use promptlab_judge::{build_judge_engine_with_client, JudgeEngine, JudgeMode, JudgeProviderConfig};
-use promptlab_models::{BuiltinCatalog, LocalModelManager, ModelEntry, ModelProvider};
+use promptlab_models::{LocalModelManager, ModelEntry, ModelProvider};
 use promptlab_planner::PlannerLlm;
 use promptlab_generator::GeneratorLlm;
 use promptlab_runtime::{RuntimeManager, SharedModelProvider};
@@ -55,12 +55,12 @@ pub fn current_assistant_cancel() -> CancelFlag {
         .unwrap_or_default()
 }
 
-pub fn open_model_manager(
+pub async fn open_model_manager(
     data_dir: &Path,
-    catalog: BuiltinCatalog,
+    db: &promptlab_storage::Database,
 ) -> CommandResult<LocalModelManager> {
-    LocalModelManager::new(models_vault_path(data_dir))
-        .map(|mgr| mgr.with_catalog(catalog))
+    LocalModelManager::new_with_db(models_vault_path(data_dir), db.clone())
+        .await
         .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
 }
 
@@ -321,12 +321,172 @@ pub async fn gateway_complete_outcome_messages_as(
     .await
 }
 
+/// Clone the selected model + credentials, then drop registry locks before HTTP.
+async fn snapshot_selected_model(
+    data_dir: &Path,
+    inference: &AsyncMutex<InferenceRuntimeManager>,
+    model_manager: &AsyncMutex<LocalModelManager>,
+) -> CommandResult<(ModelEntry, Option<RemoteAdapterSettings>)> {
+    let entry = {
+        let inference = inference.lock().await;
+        let manager = model_manager.lock().await;
+        model_entry(&manager, &inference)?.clone()
+    };
+    let remote = if entry.provider == ModelProvider::Remote {
+        Some(resolve_remote_settings(data_dir, &entry).await?)
+    } else {
+        None
+    };
+    Ok((entry, remote))
+}
+
+fn detached_gateway_session<'a>(
+    scratch: &'a mut InferenceRuntimeManager,
+    runtime_mgr: &'a mut RuntimeManager,
+    entry: &'a ModelEntry,
+    remote: Option<RemoteAdapterSettings>,
+    model_provider: SharedModelProvider,
+) -> CommandResult<GatewaySession<'a>> {
+    configure_scratch_for_entry(scratch, entry, remote.as_ref())?;
+    Ok(GatewaySession {
+        inner: InferenceSession {
+            manager: scratch,
+            runtime_manager: runtime_mgr,
+            model_provider,
+            model_entry: entry,
+            remote_settings: remote,
+            harness_factory: promptlab_harness::HarnessFactory::new().unwrap_or_else(|_| {
+                promptlab_harness::HarnessFactory::from_registry(Default::default())
+            }),
+            cancel: current_assistant_cancel(),
+        },
+    })
+}
+
+async fn detached_complete_outcome_messages_as(
+    data_dir: &Path,
+    inference: &AsyncMutex<InferenceRuntimeManager>,
+    model_manager: &AsyncMutex<LocalModelManager>,
+    model_provider: SharedModelProvider,
+    agent_id: &str,
+    messages: Vec<serde_json::Value>,
+    max_tokens: u32,
+    temperature: f32,
+    tools: &[promptlab_inference::ToolDefinition],
+    tool_choice: Option<serde_json::Value>,
+) -> CommandResult<promptlab_inference::CompletionOutcome> {
+    let data_dir = data_dir.to_path_buf();
+    let agent_id = agent_id.to_string();
+    let tools = tools.to_vec();
+    let (entry, remote) = snapshot_selected_model(&data_dir, inference, model_manager).await?;
+    promptlab_inference::with_agent(&agent_id.clone(), move || async move {
+        let mut scratch = InferenceRuntimeManager::new(&data_dir);
+        let mut runtime_mgr = RuntimeManager::new(&data_dir, None);
+        let mut session = detached_gateway_session(
+            &mut scratch,
+            &mut runtime_mgr,
+            &entry,
+            remote,
+            model_provider,
+        )?;
+        session
+            .client()
+            .await
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?
+            .complete_outcome(CompleteRequest {
+                prompt: String::new(),
+                system: None,
+                max_tokens: Some(max_tokens),
+                temperature: Some(temperature),
+                tools,
+                tool_choice,
+                messages,
+                purpose: Some(agent_id.clone()),
+            })
+            .await
+            .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))
+    })
+    .await
+}
+
+async fn detached_complete_outcome_as(
+    data_dir: &Path,
+    inference: &AsyncMutex<InferenceRuntimeManager>,
+    model_manager: &AsyncMutex<LocalModelManager>,
+    model_provider: SharedModelProvider,
+    agent_id: &str,
+    system: Option<&str>,
+    prompt: &str,
+    max_tokens: u32,
+    temperature: f32,
+    tools: &[promptlab_inference::ToolDefinition],
+    tool_choice: Option<serde_json::Value>,
+) -> CommandResult<promptlab_inference::CompletionOutcome> {
+    let mut messages = Vec::new();
+    if let Some(system) = system.map(str::trim).filter(|s| !s.is_empty()) {
+        messages.push(serde_json::json!({
+            "role": "system",
+            "content": system,
+        }));
+    }
+    messages.push(serde_json::json!({
+        "role": "user",
+        "content": prompt,
+    }));
+    detached_complete_outcome_messages_as(
+        data_dir,
+        inference,
+        model_manager,
+        model_provider,
+        agent_id,
+        messages,
+        max_tokens,
+        temperature,
+        tools,
+        tool_choice,
+    )
+    .await
+}
+
+pub async fn detached_complete_as(
+    data_dir: &Path,
+    inference: &AsyncMutex<InferenceRuntimeManager>,
+    model_manager: &AsyncMutex<LocalModelManager>,
+    model_provider: SharedModelProvider,
+    agent_id: &str,
+    system: Option<&str>,
+    prompt: &str,
+    max_tokens: u32,
+    temperature: f32,
+) -> CommandResult<String> {
+    let outcome = detached_complete_outcome_as(
+        data_dir,
+        inference,
+        model_manager,
+        model_provider,
+        agent_id,
+        system,
+        prompt,
+        max_tokens,
+        temperature,
+        &[],
+        None,
+    )
+    .await?;
+    outcome.content.ok_or_else(|| {
+        CommandError::from(PromptLabError::internal(
+            "model returned tool_calls without text content",
+        ))
+    })
+}
+
 /// Wizard attack-plan LLM — higher token budget and JSON-focused system prompt.
 pub struct HostWizardPlannerLlm {
     data_dir: PathBuf,
     inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
+    #[allow(dead_code)]
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
 }
 
@@ -351,15 +511,11 @@ impl HostWizardPlannerLlm {
 #[async_trait]
 impl PlannerLlm for HostWizardPlannerLlm {
     async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
-        let inference = self.inference.lock().await;
-        let manager = self.model_manager.lock().await;
-        let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete_as(
+        detached_complete_as(
             &self.data_dir,
-            &inference,
-            &manager,
+            &self.inference,
+            &self.model_manager,
             self.model_provider.clone(),
-            &mut runtime_mgr,
             "attack_plan",
             Some(PromptRegistry::wizard_profile_system()),
             prompt,
@@ -377,6 +533,7 @@ pub struct HostEndpointVerifyLlm {
     inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
+    #[allow(dead_code)]
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
 }
 
@@ -401,15 +558,11 @@ impl HostEndpointVerifyLlm {
 #[async_trait]
 impl PlannerLlm for HostEndpointVerifyLlm {
     async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
-        let inference = self.inference.lock().await;
-        let manager = self.model_manager.lock().await;
-        let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete_as(
+        detached_complete_as(
             &self.data_dir,
-            &inference,
-            &manager,
+            &self.inference,
+            &self.model_manager,
             self.model_provider.clone(),
-            &mut runtime_mgr,
             "analyze_endpoint",
             Some(PromptRegistry::endpoint_verify_system()),
             prompt,
@@ -486,19 +639,15 @@ impl PlannerLlm for HostYazgReactLlm {
         system: Option<&str>,
         prompt: &str,
     ) -> promptlab_planner::PlannerResult<String> {
-        let inference = self.inference.lock().await;
-        let manager = self.model_manager.lock().await;
-        let mut runtime_mgr = self.runtime_manager.lock().await;
         let system = system
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| PromptRegistry::yazg_react_system());
-        gateway_complete_as(
+        detached_complete_as(
             &self.data_dir,
-            &inference,
-            &manager,
+            &self.inference,
+            &self.model_manager,
             self.model_provider.clone(),
-            &mut runtime_mgr,
             &self.agent_id,
             Some(system),
             prompt,
@@ -528,9 +677,6 @@ impl PlannerLlm for HostYazgReactLlm {
         prompt: &str,
         tools: &[promptlab_planner::ToolSpec],
     ) -> promptlab_planner::PlannerResult<promptlab_planner::LlmCompletion> {
-        let inference = self.inference.lock().await;
-        let manager = self.model_manager.lock().await;
-        let mut runtime_mgr = self.runtime_manager.lock().await;
         let wire_tools: Vec<promptlab_inference::ToolDefinition> = tools
             .iter()
             .map(|tool| promptlab_inference::ToolDefinition {
@@ -543,12 +689,11 @@ impl PlannerLlm for HostYazgReactLlm {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| PromptRegistry::yazg_react_system());
-        let outcome = gateway_complete_outcome_as(
+        let outcome = detached_complete_outcome_as(
             &self.data_dir,
-            &inference,
-            &manager,
+            &self.inference,
+            &self.model_manager,
             self.model_provider.clone(),
-            &mut runtime_mgr,
             &self.agent_id,
             Some(system),
             prompt,
@@ -580,9 +725,6 @@ impl PlannerLlm for HostYazgReactLlm {
         messages: &[serde_json::Value],
         tools: &[promptlab_planner::ToolSpec],
     ) -> promptlab_planner::PlannerResult<promptlab_planner::LlmCompletion> {
-        let inference = self.inference.lock().await;
-        let manager = self.model_manager.lock().await;
-        let mut runtime_mgr = self.runtime_manager.lock().await;
         let wire_tools: Vec<promptlab_inference::ToolDefinition> = tools
             .iter()
             .map(|tool| promptlab_inference::ToolDefinition {
@@ -591,12 +733,11 @@ impl PlannerLlm for HostYazgReactLlm {
                 parameters: tool.parameters.clone(),
             })
             .collect();
-        let outcome = gateway_complete_outcome_messages_as(
+        let outcome = detached_complete_outcome_messages_as(
             &self.data_dir,
-            &inference,
-            &manager,
+            &self.inference,
+            &self.model_manager,
             self.model_provider.clone(),
-            &mut runtime_mgr,
             &self.agent_id,
             messages.to_vec(),
             1024,
@@ -629,6 +770,7 @@ pub struct HostGeneratePromptLlm {
     inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
+    #[allow(dead_code)]
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
 }
 
@@ -653,15 +795,11 @@ impl HostGeneratePromptLlm {
 #[async_trait]
 impl PlannerLlm for HostGeneratePromptLlm {
     async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
-        let inference = self.inference.lock().await;
-        let manager = self.model_manager.lock().await;
-        let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete_as(
+        detached_complete_as(
             &self.data_dir,
-            &inference,
-            &manager,
+            &self.inference,
+            &self.model_manager,
             self.model_provider.clone(),
-            &mut runtime_mgr,
             "generate_prompt",
             Some(PromptRegistry::attack_catalog_prompt_system()),
             prompt,
@@ -679,6 +817,7 @@ pub struct HostAttackRecommendLlm {
     inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
+    #[allow(dead_code)]
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
 }
 
@@ -703,15 +842,11 @@ impl HostAttackRecommendLlm {
 #[async_trait]
 impl PlannerLlm for HostAttackRecommendLlm {
     async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
-        let inference = self.inference.lock().await;
-        let manager = self.model_manager.lock().await;
-        let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete_as(
+        detached_complete_as(
             &self.data_dir,
-            &inference,
-            &manager,
+            &self.inference,
+            &self.model_manager,
             self.model_provider.clone(),
-            &mut runtime_mgr,
             "recommend",
             Some(PromptRegistry::attack_results_recommend_system()),
             prompt,
@@ -729,6 +864,7 @@ pub struct HostFindingRecommendLlm {
     inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
+    #[allow(dead_code)]
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
 }
 
@@ -753,15 +889,11 @@ impl HostFindingRecommendLlm {
 #[async_trait]
 impl PlannerLlm for HostFindingRecommendLlm {
     async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
-        let inference = self.inference.lock().await;
-        let manager = self.model_manager.lock().await;
-        let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete_as(
+        detached_complete_as(
             &self.data_dir,
-            &inference,
-            &manager,
+            &self.inference,
+            &self.model_manager,
             self.model_provider.clone(),
-            &mut runtime_mgr,
             "recommend",
             Some(PromptRegistry::finding_remediation_recommend_system()),
             prompt,
@@ -779,6 +911,7 @@ pub struct HostProjectSummaryLlm {
     inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
+    #[allow(dead_code)]
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
 }
 
@@ -803,15 +936,11 @@ impl HostProjectSummaryLlm {
 #[async_trait]
 impl PlannerLlm for HostProjectSummaryLlm {
     async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
-        let inference = self.inference.lock().await;
-        let manager = self.model_manager.lock().await;
-        let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete_as(
+        detached_complete_as(
             &self.data_dir,
-            &inference,
-            &manager,
+            &self.inference,
+            &self.model_manager,
             self.model_provider.clone(),
-            &mut runtime_mgr,
             "summary",
             Some(PromptRegistry::project_summary_system()),
             prompt,
@@ -829,6 +958,7 @@ pub struct HostScanSummaryLlm {
     inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
+    #[allow(dead_code)]
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
 }
 
@@ -853,15 +983,11 @@ impl HostScanSummaryLlm {
 #[async_trait]
 impl PlannerLlm for HostScanSummaryLlm {
     async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
-        let inference = self.inference.lock().await;
-        let manager = self.model_manager.lock().await;
-        let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete_as(
+        detached_complete_as(
             &self.data_dir,
-            &inference,
-            &manager,
+            &self.inference,
+            &self.model_manager,
             self.model_provider.clone(),
-            &mut runtime_mgr,
             "summary",
             Some(PromptRegistry::scan_summary_system()),
             prompt,
@@ -1035,6 +1161,7 @@ pub struct HostGeneratorLlm {
     inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
     model_provider: SharedModelProvider,
+    #[allow(dead_code)]
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
 }
 
@@ -1059,15 +1186,11 @@ impl HostGeneratorLlm {
 #[async_trait]
 impl GeneratorLlm for HostGeneratorLlm {
     async fn complete(&self, prompt: &str) -> promptlab_generator::GeneratorResult<String> {
-        let inference = self.inference.lock().await;
-        let manager = self.model_manager.lock().await;
-        let mut runtime_mgr = self.runtime_manager.lock().await;
-        gateway_complete_as(
+        detached_complete_as(
             &self.data_dir,
-            &inference,
-            &manager,
+            &self.inference,
+            &self.model_manager,
             self.model_provider.clone(),
-            &mut runtime_mgr,
             "generate_prompt",
             Some(PromptRegistry::generator_system()),
             prompt,
@@ -1101,16 +1224,6 @@ fn configure_scratch_for_entry(
             })?;
             config.provider = remote.provider;
             config.runtime = "cloud".into();
-        }
-        ModelProvider::Ollama => {
-            config.mode = InferenceMode::Local;
-            config.provider = InferenceProvider::Ollama;
-            config.runtime = "ollama".into();
-        }
-        _ => {
-            config.mode = InferenceMode::Local;
-            config.provider = InferenceProvider::LlamaCpp;
-            config.runtime = "llama.cpp".into();
         }
     }
     Ok(())

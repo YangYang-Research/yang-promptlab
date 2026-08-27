@@ -112,7 +112,7 @@ export function ScanWizardPage() {
     targetId: lockedTargetId,
     step: requestedStep,
   });
-  const { projects, targets, scans, findings, reports, loading, error, dispatch, actions } = useAppStore();
+  const { projects, targets, scans, reports, loading, error, dispatch, actions } = useAppStore();
   const { notify, dismiss } = useToast();
   const deepLinkApplied = useRef(false);
   const deepLinkTargetId = useRef<string | null>(null);

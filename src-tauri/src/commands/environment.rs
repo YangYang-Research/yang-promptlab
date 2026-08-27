@@ -3,15 +3,15 @@
 use std::path::PathBuf;
 
 use promptlab_core::{
-    ensure_environment, list_log_files, load_environment_config, read_log_tail, resolve_paths,
-    save_environment_config, EnvironmentConfig, EnvironmentPaths, LogCategory, OcsfEvent,
-    OcsfSeverity,
+    ensure_environment, list_log_files, read_log_tail, resolve_paths, EnvironmentConfig,
+    EnvironmentPaths, LogCategory, OcsfEvent, OcsfSeverity,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tauri::State;
 
 use crate::error::{CommandError, CommandResult};
+use crate::environment_persist;
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize)]
@@ -101,7 +101,14 @@ pub async fn environment_update(
     state: State<'_, AppState>,
     request: EnvironmentUpdateRequest,
 ) -> CommandResult<EnvironmentStatusDto> {
-    let mut config = load_environment_config(&state.environment().root);
+    let mut config = environment_persist::load_environment_config(state.database())
+        .await
+        .map_err(CommandError::from)?
+        .unwrap_or_else(|| EnvironmentConfig {
+            root: Some(state.environment().root.clone()),
+            ..Default::default()
+        });
+
     if let Some(root) = parse_optional_path(request.root) {
         config.root = Some(root);
     }
@@ -114,9 +121,17 @@ pub async fn environment_update(
     config.temp = parse_optional_path(request.temp).or(config.temp);
     config.backups = parse_optional_path(request.backups).or(config.backups);
 
-    let paths = resolve_paths(&config);
+    // Live process keeps the already-open DB location; root/workspaces overrides
+    // are stored for display and require PROMPTLAB_ROOT / restart to relocate the DB.
+    let mut paths = resolve_paths(&config);
+    paths.root = state.environment().root.clone();
+    paths.workspaces = state.environment().workspaces.clone();
+    paths.config = state.environment().config.clone();
+
     ensure_environment(&paths).map_err(CommandError::from)?;
-    save_environment_config(&paths, &config).map_err(CommandError::from)?;
+    environment_persist::save_environment_config(state.database(), &config)
+        .await
+        .map_err(CommandError::from)?;
     state.event_bus().info(
         LogCategory::Settings,
         "Environment Updated",

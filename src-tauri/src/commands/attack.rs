@@ -7,7 +7,7 @@ use promptlab_attack::{
 use promptlab_endpoint_metadata::body_template_from_metadata;
 use crate::dto::metadata_from_endpoint;
 use promptlab_target_profile::{TargetProfile, TargetProvider};
-use promptlab_auth::{resolve_descriptor_for_runtime, resolve_descriptor_for_wizard, AuthSessionManager, SecretStore};
+use promptlab_auth::{resolve_descriptor_for_runtime, resolve_descriptor_for_wizard, SecretStore};
 use promptlab_agent::JudgeCoordinatorAgent;
 use promptlab_judge::{JudgeRequest, JudgeVerdict, Severity as JudgeSeverity};
 use promptlab_planner::PlannerLlm;
@@ -15,12 +15,12 @@ use promptlab_plugin_host::evaluate_with_judge_plugins;
 use promptlab_inference::InferenceRuntimeManager;
 use promptlab_runtime::{RuntimeManager, SharedModelProvider};
 use promptlab_storage::{
-    AttackResultRepository, CreateAttackResult, CreateFinding, Endpoint,
-    EndpointRepository, FindingRepository, JudgeRoleWeightsRepository, Repositories,
-    ScanRepository, TargetRepository, UpdateFinding, UpdateScan,
+    AttackResultRepository, CreateAttackResult, CreateFinding, Endpoint, FindingRepository,
+    JudgeRoleWeightsRepository, Repositories, ScanRepository, TargetRepository, UpdateFinding,
+    UpdateScan,
 };
 use time::OffsetDateTime;
-use tracing::{info, instrument, warn};
+use tracing::{info, warn};
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -36,10 +36,9 @@ use crate::dto::FindingDto;
 use crate::error::{CommandError, CommandResult};
 use crate::events::{ScanProgressEmitter, ScanProgressLevel};
 use crate::inference_host::build_judge_engine_from_gateway;
-use crate::session_auth::{attack_executor_with_variants, build_attack_runtime, AttackRuntime};
+use crate::session_auth::{attack_executor_with_variants, AttackRuntime};
 use crate::jobs::{bump_scan_progress, ScanBatchCheckpoint, ScanJobControls, ScanProgress};
 use crate::scan_playbook::persist_scan_playbook_state;
-use crate::state::AppState;
 
 #[derive(Clone)]
 pub struct CategoryRunOptions {
@@ -737,7 +736,7 @@ struct CategoryJudgeEnv<'a> {
 
 async fn judge_single_attempt(
     env: &CategoryJudgeEnv<'_>,
-    seq: usize,
+    _seq: usize,
     attempt: PayloadAttempt,
     accum: &mut CategoryJudgeAccum,
 ) -> CommandResult<()> {
@@ -1498,16 +1497,6 @@ pub async fn run_category_on_endpoint(
         }
     }
 
-    if let Some(ctx) = &runtime.session {
-        let mut headers = AuthSessionManager::auth_headers(ctx);
-        if let Some(cookie) = AuthSessionManager::cookie_header_for_url(ctx, &endpoint.url) {
-            headers.insert("Cookie".into(), cookie);
-        }
-        for (key, value) in headers {
-            target = target.with_header(&key, value);
-        }
-    }
-
     let probe_id = format!("{}-{}", endpoint.id, category.as_str());
     let mut ctx = AttackContext::new(scan_id, probe_id, target);
     ctx.target_id = target_id.clone();
@@ -1629,16 +1618,6 @@ pub async fn run_category_on_target_profile(
 
     if let Ok(stored_target) = repos.targets().get(target_id).await {
         target = merge_descriptor_auth_target(target, &stored_target.descriptor_json, target_id)?;
-    }
-
-    if let Some(ctx) = &runtime.session {
-        let mut headers = AuthSessionManager::auth_headers(ctx);
-        if let Some(cookie) = AuthSessionManager::cookie_header_for_url(ctx, &url) {
-            headers.insert("Cookie".into(), cookie);
-        }
-        for (key, value) in headers {
-            target = target.with_header(&key, value);
-        }
     }
 
     let probe_id = format!("{target_id}-{}", category.as_str());

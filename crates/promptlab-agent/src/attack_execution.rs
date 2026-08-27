@@ -567,10 +567,6 @@ impl AgenticAttackExecutionAgent {
                     match tools.run_attack_attempt(attempt).await {
                         Ok(obs) if obs.produced_no_requests() => {
                             let err = "attack produced no requests (empty payload batch or executor skipped all)".to_string();
-                            last_obs = obs;
-                            last_obs.endpoint_error = Some(err.clone());
-                            last_obs.endpoint_unhealthy = true;
-                            attacked_for_attempt = None;
                             stopped_reason = format!("attack_failed: {err}");
                             emit_and_record(
                                 tools,

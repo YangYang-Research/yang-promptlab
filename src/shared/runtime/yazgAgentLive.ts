@@ -15,14 +15,10 @@ export function isYazgAgentLive(
     return false;
   }
 
-  if (configuration.mode === "third_party") {
-    const hasModel = Boolean(
-      configuration.modelName ?? configuration.settings.selectedModelId,
-    );
-    if (!hasModel) return false;
-  } else if (configuration.mode === "local") {
-    if (!configuration.runtimeStatus.modelLoaded) return false;
-  }
+  const hasModel = Boolean(
+    configuration.modelName ?? configuration.settings.selectedModelId,
+  );
+  if (!hasModel) return false;
 
   return (
     connectivityStatusVariant(configuration.connectivity) === "success" ||

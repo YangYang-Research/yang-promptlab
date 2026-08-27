@@ -96,7 +96,7 @@ impl HarnessPurpose {
     }
 
     /// Target-facing probes keep HTTP error status as observations (recover/judge).
-    /// Product inference must not treat 429/timeout/empty bodies as completions.
+    /// Product inference must not treat HTTP errors, 429, timeout, or empty bodies as completions.
     pub fn fails_on_retryable_http(&self) -> bool {
         !matches!(
             self.0.as_str(),

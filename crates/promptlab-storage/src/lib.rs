@@ -7,18 +7,25 @@ pub mod models;
 pub mod pool;
 pub mod repositories;
 pub mod util;
+pub mod workspace_search;
 
 pub use auth_models::*;
 pub use error::{map_sqlx_error, StorageResultExt};
 pub use health_score::compute_health_score;
 pub use models::*;
 pub use pool::Database;
+pub use workspace_search::{search_workspace, WorkspaceSearchHit};
 pub use repositories::{
-    AgentLongTermMemoryRepository, AgentShortTermMemoryRepository, AttackCatalogRepository,
-    AttackResultRepository, AuthProfileRepository, AuthRecordingRepository, AuthSessionRepository,
-    EndpointRepository, FindingRepository, JudgeRoleWeightsRepository, ModelRepository,
+    AgentLongTermMemoryRepository, AgentShortTermMemoryRepository, AppSettingsRepository,
+    AttackCatalogRepository, AttackResultRepository, AuthProfileRepository,
+    AuthRecordingRepository, AuthSessionRepository, EndpointRepository, FindingRepository,
+    HardwareProfileRepository, JudgeRoleWeightsRepository, ModelRepository,
     MutatorSettingsRepository, PayloadRepository, PluginRepository, ProjectRepository,
     ReportRepository, Repositories, RuntimeTrafficRepository, ScanRepository, TargetRepository,
+};
+
+pub use repositories::sqlite::{
+    JsonDocumentRecord, JsonDocumentRepository, SETTING_AI_RUNTIME_CONFIG, SETTING_ENVIRONMENT,
 };
 
 #[cfg(test)]
@@ -127,11 +134,14 @@ mod integration_tests {
         repos
             .models()
             .create(CreateModel {
-                name: "local-eval".into(),
-                file_path: "/models/eval.gguf".into(),
-                format: None,
+                name: "remote-eval".into(),
+                file_path: "remote://openai/gpt".into(),
+                format: Some("api".into()),
+                provider: Some("remote".into()),
                 checksum_sha256: None,
                 size_bytes: None,
+                verified: None,
+                entry_json: None,
                 metadata_json: None,
             })
             .await

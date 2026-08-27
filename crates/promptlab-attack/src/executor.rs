@@ -148,15 +148,17 @@ impl<T: TargetTransport + Clone + 'static> AttackExecutor<T> {
         work_items: Vec<WorkItem>,
         attempt_tx: Option<mpsc::Sender<AttemptStreamItem>>,
     ) -> AttackResult<Vec<PayloadAttempt>> {
-        let concurrency = ctx.budget.concurrent_limit();
+        let mut live_limit = ctx.budget.concurrent_limit();
         let ctx = Arc::new(ctx.clone());
         let transport = self.transport.clone();
         let mut join_set = JoinSet::new();
         let mut items = work_items.into_iter();
         let mut indexed = Vec::new();
+        let mut timeouts = 0u32;
+        let mut http_ok = 0u32;
 
         loop {
-            while join_set.len() < concurrency {
+            while join_set.len() < live_limit {
                 let Some(item) = items.next() else {
                     break;
                 };
@@ -184,6 +186,22 @@ impl<T: TargetTransport + Clone + 'static> AttackExecutor<T> {
                 .map_err(|err| AttackError::invalid_state(format!("attack worker failed: {err}")))?
                 .map_err(|err| AttackError::invalid_state(format!("attack attempt failed: {err}")))?;
 
+            if attempt_is_timeout(&attempt) {
+                timeouts = timeouts.saturating_add(1);
+            } else if attempt.response.status > 0 {
+                http_ok = http_ok.saturating_add(1);
+            }
+            let next_limit = collapsed_pool_limit(live_limit, timeouts, http_ok);
+            if next_limit < live_limit {
+                info!(
+                    previous = live_limit,
+                    timeouts,
+                    http_ok,
+                    "collapsing attack pool to serial after in-batch timeouts"
+                );
+                live_limit = next_limit;
+            }
+
             if let Some(ref tx) = attempt_tx {
                 let _ = tx.send((seq, attempt.clone())).await;
             }
@@ -200,6 +218,35 @@ struct WorkItem {
     payload: AttackPayload,
     content: String,
     mutators: Vec<MutatorKind>,
+}
+
+fn attempt_is_timeout(attempt: &PayloadAttempt) -> bool {
+    if attempt.response.status != 0 {
+        return false;
+    }
+    let class = attempt
+        .response
+        .normalized
+        .error_class
+        .as_deref()
+        .unwrap_or("");
+    if class == "timeout" {
+        return true;
+    }
+    let body = attempt.response.body.to_ascii_lowercase();
+    body.contains("timeout") || body.contains("timed out")
+}
+
+/// Drop to serial after a handful of timeouts once they catch up with HTTP successes.
+fn collapsed_pool_limit(current: usize, timeouts: u32, http_ok: u32) -> usize {
+    if current <= 1 {
+        return 1;
+    }
+    if timeouts >= 3 && timeouts >= http_ok {
+        1
+    } else {
+        current
+    }
 }
 
 fn build_work_items(
@@ -423,5 +470,13 @@ mod tests {
         seqs.sort_unstable();
         assert_eq!(seqs, (0..result.attempts.len()).collect::<Vec<_>>());
         assert_eq!(DEFAULT_ATTACK_CONCURRENCY, 10);
+    }
+
+    #[test]
+    fn collapses_pool_when_timeouts_dominate() {
+        assert_eq!(collapsed_pool_limit(10, 2, 2), 10);
+        assert_eq!(collapsed_pool_limit(10, 3, 2), 1);
+        assert_eq!(collapsed_pool_limit(10, 3, 10), 10);
+        assert_eq!(collapsed_pool_limit(1, 8, 0), 1);
     }
 }

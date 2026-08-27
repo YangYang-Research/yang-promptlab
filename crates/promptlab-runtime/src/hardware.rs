@@ -1,8 +1,9 @@
-//! Hardware detection with persistence (first launch + manual refresh only).
+//! Hardware detection with SQLite persistence.
 
 use std::path::{Path, PathBuf};
 
 use promptlab_models::detect_hardware;
+use promptlab_storage::{Database, HardwareProfileRepository};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -32,28 +33,57 @@ pub struct RuntimeHardwareProfile {
 
 pub struct HardwareDetector {
     data_dir: PathBuf,
+    db: Option<Database>,
 }
 
 impl HardwareDetector {
     pub fn new(data_dir: impl Into<PathBuf>) -> Self {
         Self {
             data_dir: data_dir.into(),
+            db: None,
         }
     }
 
-    fn profile_path(&self) -> PathBuf {
-        self.data_dir.join("runtime").join("hardware.json")
+    pub fn with_db(data_dir: impl Into<PathBuf>, db: Database) -> Self {
+        Self {
+            data_dir: data_dir.into(),
+            db: Some(db),
+        }
+    }
+
+    async fn load_from_db(&self, db: &Database) -> RuntimeResult<Option<RuntimeHardwareProfile>> {
+        let record = db
+            .repositories()
+            .hardware_profile()
+            .get()
+            .await
+            .map_err(|err| RuntimeError::Config(err.to_string()))?;
+        match record {
+            Some(row) => {
+                let profile = serde_json::from_str(&row.profile_json)
+                    .map_err(|err| RuntimeError::Config(err.to_string()))?;
+                Ok(Some(profile))
+            }
+            None => Ok(None),
+        }
+    }
+
+    async fn save_to_db(&self, db: &Database, profile: &RuntimeHardwareProfile) -> RuntimeResult<()> {
+        let raw = serde_json::to_string(profile)
+            .map_err(|err| RuntimeError::Config(err.to_string()))?;
+        db.repositories()
+            .hardware_profile()
+            .upsert(&raw)
+            .await
+            .map_err(|err| RuntimeError::Config(err.to_string()))?;
+        Ok(())
     }
 
     pub async fn load(&self) -> RuntimeResult<Option<RuntimeHardwareProfile>> {
-        let path = self.profile_path();
-        if !path.is_file() {
+        let Some(db) = &self.db else {
             return Ok(None);
-        }
-        let raw = tokio::fs::read_to_string(&path)
-            .await
-            .map_err(|err| RuntimeError::Config(err.to_string()))?;
-        serde_json::from_str(&raw).map_err(|err| RuntimeError::Config(err.to_string()))
+        };
+        self.load_from_db(db).await
     }
 
     pub async fn detect_and_persist(&self) -> RuntimeResult<RuntimeHardwareProfile> {
@@ -90,16 +120,9 @@ impl HardwareDetector {
             detected_at: OffsetDateTime::now_utc(),
         };
 
-        if let Some(parent) = self.profile_path().parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|err| RuntimeError::Config(err.to_string()))?;
+        if let Some(db) = &self.db {
+            self.save_to_db(db, &profile).await?;
         }
-        let raw = serde_json::to_string_pretty(&profile)
-            .map_err(|err| RuntimeError::Config(err.to_string()))?;
-        tokio::fs::write(self.profile_path(), raw)
-            .await
-            .map_err(|err| RuntimeError::Config(err.to_string()))?;
 
         Ok(profile)
     }

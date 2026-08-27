@@ -53,8 +53,7 @@ pub async fn app_clear_all_data_op(state: &AppState, app: &AppHandle) -> Command
         "All PromptLab data removed; relaunching",
     );
     info!("clear all data complete; relaunching application");
-    app.restart();
-    Ok(())
+    app.restart()
 }
 
 #[tauri::command]

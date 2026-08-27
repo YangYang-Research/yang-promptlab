@@ -35,6 +35,7 @@ impl Attack for PromptInjectionAttack {
             category: self.category(),
             mutators: vec![
                 MutatorKind::DelimiterInjection,
+                MutatorKind::LanguagePivot,
                 MutatorKind::RoleSwap,
                 MutatorKind::MarkdownCodeFence,
                 MutatorKind::Base64Wrap,
@@ -73,6 +74,7 @@ impl Attack for PromptInjectionAttack {
     fn supported_mutators(&self) -> Vec<MutatorKind> {
         vec![
             MutatorKind::DelimiterInjection,
+            MutatorKind::LanguagePivot,
             MutatorKind::RoleSwap,
             MutatorKind::Base64Wrap,
         ]
