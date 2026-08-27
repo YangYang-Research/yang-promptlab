@@ -188,6 +188,13 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 tracing::info!(reconciled, "marked interrupted scans as stopped on startup");
             }
 
+            let retry_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                let state = retry_app.state::<AppState>();
+                commands::scan::maybe_auto_retry_scan(state.inner(), &retry_app).await;
+            });
+
             let app_handle = app.handle().clone();
             promptlab_inference::traffic_ensure_started();
             tauri::async_runtime::spawn(async move {

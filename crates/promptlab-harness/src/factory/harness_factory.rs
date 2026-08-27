@@ -153,7 +153,8 @@ impl HarnessFactory {
                     }
                     let mut response = self.normalizer.normalize(&request, response)?;
                     crate::redact::redact_response(&request, &mut response);
-                    if should_retry_response(&request.purpose, &response) && attempts < MAX_ATTEMPTS
+                    if should_retry_response(&request.purpose, &response)
+                        && attempts < retry_response_limit(response.error_class.as_deref())
                     {
                         let wait_ms = retry_after_ms(&response)
                             .unwrap_or_else(|| backoff_ms(attempts));
@@ -195,7 +196,7 @@ impl HarnessFactory {
                     request.emit_finish(None, Some(err.error_class().into()));
                     return Err(err);
                 }
-                Err(err) if err.is_retryable() && attempts < MAX_ATTEMPTS => {
+                Err(err) if err.is_retryable() && attempts < retry_error_limit(&err) => {
                     let wait_ms = match &err {
                         HarnessError::RateLimited { retry_after_ms } => {
                             retry_after_ms.unwrap_or_else(|| backoff_ms(attempts))
@@ -221,7 +222,23 @@ impl HarnessFactory {
 }
 
 const MAX_ATTEMPTS: u32 = 4;
+/// Timeouts already waited the full request timeout — one retry, not 3×121s pile-ups.
+const TIMEOUT_ATTEMPTS: u32 = 2;
 const MAX_RAW_BYTES: usize = 2 * 1024 * 1024;
+
+fn retry_error_limit(err: &HarnessError) -> u32 {
+    match err {
+        HarnessError::Timeout(_) => TIMEOUT_ATTEMPTS,
+        _ => MAX_ATTEMPTS,
+    }
+}
+
+fn retry_response_limit(error_class: Option<&str>) -> u32 {
+    match error_class {
+        Some("timeout") => TIMEOUT_ATTEMPTS,
+        _ => MAX_ATTEMPTS,
+    }
+}
 
 fn apply_purpose_policy(request: &mut crate::models::AttackRequest) {
     match request.purpose.as_str() {
@@ -430,5 +447,19 @@ mod tests {
             }
             other => panic!("expected Http, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn timeout_retries_once_not_three_times() {
+        assert_eq!(
+            retry_error_limit(&HarnessError::Timeout("slow".into())),
+            2
+        );
+        assert_eq!(retry_response_limit(Some("timeout")), 2);
+        assert_eq!(
+            retry_error_limit(&HarnessError::Transport("reset".into())),
+            4
+        );
+        assert_eq!(retry_response_limit(Some("rate_limit")), 4);
     }
 }

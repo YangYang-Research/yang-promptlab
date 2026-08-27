@@ -293,6 +293,67 @@ pub async fn reconcile_interrupted_scans(state: &AppState, force: bool) -> usize
     reconciled
 }
 
+/// One-shot: `~/.promptlab/auto_retry_scan` contains a scan id to Retry after a rebuild.
+pub async fn maybe_auto_retry_scan(state: &AppState, app: &AppHandle) {
+    let path = state.root_dir().join("auto_retry_scan");
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let _ = std::fs::remove_file(&path);
+    let scan_id = raw.trim();
+    if scan_id.is_empty() {
+        return;
+    }
+
+    let repos = state.repositories();
+    let scan = match repos.scans().get(scan_id).await {
+        Ok(scan) => scan,
+        Err(err) => {
+            warn!(scan_id, error = %err, "auto-retry scan not found");
+            return;
+        }
+    };
+    let Some(target_id) = scan.target_id.clone() else {
+        warn!(scan_id = %scan.id, "auto-retry skipped: scan has no target");
+        return;
+    };
+    let params = match scan
+        .playbook_json
+        .as_deref()
+        .and_then(|raw| execution_params_from_playbook(raw).ok())
+    {
+        Some(params) => params,
+        None => {
+            warn!(scan_id = %scan.id, "auto-retry skipped: missing playbook");
+            return;
+        }
+    };
+
+    info!(scan_id = %scan.id, "auto-retrying scan after rebuild");
+    if let Err(err) = scan_start_op(
+        state,
+        app,
+        scan.project_id,
+        target_id,
+        params.profile,
+        params.categories,
+        params.disabled_tests,
+        params.generator_mode,
+        params.payload_strategy,
+        Some(params.agentic),
+        Some(params.max_agent_attempts),
+        Some(params.reflection_enabled),
+        Some(params.adaptive_planning),
+        Some(scan.id.clone()),
+        Some(false),
+        Some(true),
+    )
+    .await
+    {
+        warn!(scan_id = %scan.id, error = %err, "auto-retry failed");
+    }
+}
+
 fn merge_scan_execution_playbook(
     existing_playbook_json: Option<&str>,
     execution_playbook: &mut serde_json::Value,
