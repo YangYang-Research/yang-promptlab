@@ -19,8 +19,69 @@ permissions:
   pull-requests: write
 
 jobs:
-  build:
+  release-notes:
+    name: Generate release notes
     if: contains(github.event.pull_request.labels.*.name, 'release')
+    runs-on: ubuntu-22.04
+    outputs:
+      body: ${{ steps.gen.outputs.body }}
+      tag: ${{ steps.gen.outputs.tag }}
+      title: ${{ steps.gen.outputs.title }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Generate release notes
+        id: gen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/generate-release-notes.sh
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          TAG="v${VERSION}-pr.${PR_NUMBER}"
+          TITLE="PromptLab v${VERSION} (PR #${PR_NUMBER})"
+          scripts/generate-release-notes.sh release-notes.md
+
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --repo "${{ github.repository }}" \
+              --title "$TITLE" \
+              --notes-file release-notes.md \
+              --draft
+          else
+            gh release create "$TAG" \
+              --repo "${{ github.repository }}" \
+              --target "$HEAD_SHA" \
+              --title "$TITLE" \
+              --notes-file release-notes.md \
+              --draft
+          fi
+
+          {
+            echo "tag=$TAG"
+            echo "title=$TITLE"
+            echo "body<<EOF"
+            cat release-notes.md
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "----- release notes ($TAG) -----"
+          cat release-notes.md
+
+  build:
+    name: build
+    needs: release-notes
     strategy:
       fail-fast: false
       matrix:
@@ -52,8 +113,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -92,21 +151,6 @@ jobs:
 
       - name: Install JS deps
         run: npm ci
-
-      - name: Generate release notes
-        id: notes
-        shell: bash
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          chmod +x scripts/generate-release-notes.sh
-          scripts/generate-release-notes.sh release-notes.md
-          {
-            echo "body<<EOF"
-            cat release-notes.md
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Create Windows self-signed cert (secret-gated)
         id: win_sign
@@ -201,11 +245,11 @@ jobs:
         with:
           projectPath: .
           args: ${{ matrix.args }} ${{ steps.win_sign.outputs.config }}
-          tagName: v__VERSION__-pr.${{ github.event.pull_request.number }}
-          releaseName: PromptLab v__VERSION__ (PR #${{ github.event.pull_request.number }})
+          tagName: ${{ needs.release-notes.outputs.tag }}
+          releaseName: ${{ needs.release-notes.outputs.title }}
           releaseAssetNamePattern: '[name]-[version]-[platform]-[arch][setup][ext]'
           generateReleaseNotes: false
-          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseBody: ${{ needs.release-notes.outputs.body }}
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: false
