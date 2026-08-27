@@ -8,7 +8,7 @@ name: Release
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, labeled]
+    types: [reopened, synchronize, labeled]
 
 concurrency:
   group: release-pr-${{ github.event.pull_request.number }}
