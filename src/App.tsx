@@ -34,7 +34,7 @@ function AppBootstrap() {
               message:
                 startup.databaseError ??
                 "The application database could not be opened.",
-              databasePath: startup.databasePath,
+              databasePath: startup.databasePath ?? undefined,
             });
             dispatch({
               type: "SET_BACKEND",
