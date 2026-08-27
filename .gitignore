@@ -9,6 +9,8 @@ target-*/
 # Tauri
 src-tauri/target/
 src-tauri/gen/
+src-tauri/signing.windows.json
+src-tauri/signing.*.json
 
 # Logs and local data
 *.log
@@ -29,6 +31,11 @@ logs/
 # Environment
 .env
 .env.*
+
+# Local signing material (self-signed / exported certs — never commit)
+.local-certs/
+*.pfx
+*.p12
 
 # Build artifacts
 *.local

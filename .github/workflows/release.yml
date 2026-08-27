@@ -1,5 +1,11 @@
 name: Release
 
+# Code signing (optional — unsigned if secrets missing):
+#   Windows: WINDOWS_CODESIGN_PASSWORD — CI generates self-signed cert when set
+#   macOS:   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD,
+#            APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD (app-specific),
+#            APPLE_TEAM_ID
+
 on:
   pull_request:
     types: [opened, reopened, synchronize, labeled]
@@ -85,13 +91,74 @@ jobs:
       - name: Install JS deps
         run: npm ci
 
+      - name: Create Windows self-signed cert (secret-gated)
+        id: win_sign
+        if: runner.os == 'Windows' && secrets.WINDOWS_CODESIGN_PASSWORD != ''
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Bind Subject to the secret so forks without it cannot mint the same OU token.
+          $hmac = [System.Security.Cryptography.HMACSHA256]::new(
+            [Text.Encoding]::UTF8.GetBytes($env:WINDOWS_CODESIGN_PASSWORD)
+          )
+          $token = [BitConverter]::ToString(
+            $hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes('PromptLab-codesign-v1'))
+          ).Replace('-', '').Substring(0, 16).ToLowerInvariant()
+          $subject = "CN=YangYang Research, O=YangYang Research, OU=CI $token"
+
+          Write-Host "Creating self-signed code signing cert..."
+          $cert = New-SelfSignedCertificate `
+            -Type CodeSigningCert `
+            -Subject $subject `
+            -CertStoreLocation 'Cert:\CurrentUser\My' `
+            -KeyExportPolicy Exportable `
+            -KeySpec Signature `
+            -KeyLength 2048 `
+            -HashAlgorithm SHA256 `
+            -NotAfter (Get-Date).AddYears(1)
+
+          $securePass = ConvertTo-SecureString -String $env:WINDOWS_CODESIGN_PASSWORD -Force -AsPlainText
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'windows-codesign.pfx'
+          Export-PfxCertificate -Cert $cert -FilePath $pfxPath -Password $securePass | Out-Null
+          Import-PfxCertificate `
+            -FilePath $pfxPath `
+            -CertStoreLocation 'Cert:\CurrentUser\My' `
+            -Password $securePass `
+            | Out-Null
+
+          $thumbprint = $cert.Thumbprint
+          Write-Host "Windows self-signed thumbprint=$thumbprint subject=$subject"
+
+          $signConfig = @{
+            bundle = @{
+              windows = @{
+                certificateThumbprint = $thumbprint
+                digestAlgorithm       = 'sha256'
+              }
+            }
+          } | ConvertTo-Json -Depth 6 -Compress
+          $configPath = Join-Path $env:GITHUB_WORKSPACE 'src-tauri/signing.windows.json'
+          Set-Content -Path $configPath -Value $signConfig -Encoding utf8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "config=--config signing.windows.json"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "enabled=true"
+
       - name: Build installers
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS Developer ID + notarization (tauri-action imports .p12 when set)
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: .
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} ${{ steps.win_sign.outputs.config }}
           tagName: v__VERSION__-pr.${{ github.event.pull_request.number }}
           releaseName: PromptLab v__VERSION__ (PR #${{ github.event.pull_request.number }})
           releaseBody: |
@@ -102,6 +169,8 @@ jobs:
             - macOS Intel `.dmg` (x86_64)
             - Windows x64 `.msi` / `.exe`
             - Linux x64 `.deb` / AppImage
+
+            Signing: Windows secret-gated self-signed cert when `WINDOWS_CODESIGN_PASSWORD` is set; macOS when Apple secrets are set.
 
             Review the installers, then publish this release when ready.
           releaseDraft: true
