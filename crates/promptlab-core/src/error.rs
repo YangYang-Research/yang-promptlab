@@ -71,6 +71,14 @@ impl PromptLabError {
         }
     }
 
+    pub fn storage(message: impl Into<String>) -> Self {
+        Self::Tagged {
+            code: ErrorCode::Storage,
+            message: message.into(),
+            source: None,
+        }
+    }
+
     pub fn config(message: impl Into<String>) -> Self {
         Self::Config(message.into())
     }

@@ -1,9 +1,10 @@
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use promptlab_storage::ProjectRepository;
 
 use crate::error::{CommandError, CommandResult};
+use crate::startup::{BackendStartup, BackendStartupDto};
 use crate::state::AppState;
 
 pub mod app;
@@ -49,7 +50,16 @@ pub struct AppInfoResponse {
 
 /// Bootstrap health check command for IPC wiring verification.
 #[tauri::command]
-pub fn health() -> CommandResult<HealthResponse> {
+pub fn health(app: AppHandle) -> CommandResult<HealthResponse> {
+    if let Some(startup) = app.try_state::<BackendStartup>() {
+        if !startup.ok {
+            let detail = startup
+                .database_error
+                .clone()
+                .unwrap_or_else(|| "Database startup failed".into());
+            return Err(CommandError::storage(detail));
+        }
+    }
     Ok(HealthResponse {
         status: "ok",
         version: env!("CARGO_PKG_VERSION"),
@@ -64,6 +74,20 @@ pub fn app_info() -> CommandResult<AppInfoResponse> {
         version: env!("CARGO_PKG_VERSION"),
         identifier: "com.promptlab.desktop",
         platform: detect_host_platform(),
+    })
+}
+
+/// Soft startup status (database open/migrate). Always available when the window is up.
+#[tauri::command]
+pub fn startup_status(app: AppHandle) -> CommandResult<BackendStartupDto> {
+    if let Some(startup) = app.try_state::<BackendStartup>() {
+        return Ok(startup.to_dto());
+    }
+    // Window up but setup still running / unexpected — treat as not ready.
+    Ok(BackendStartupDto {
+        ok: false,
+        database_error: Some("Backend startup status is unavailable.".into()),
+        database_path: None,
     })
 }
 

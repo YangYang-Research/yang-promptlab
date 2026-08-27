@@ -30,6 +30,13 @@ impl CommandError {
             message: message.into(),
         }
     }
+
+    pub fn storage(message: impl Into<String>) -> Self {
+        Self {
+            code: ErrorCode::Storage.as_str().to_string(),
+            message: message.into(),
+        }
+    }
 }
 
 impl From<PromptLabError> for CommandError {

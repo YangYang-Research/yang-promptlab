@@ -20,6 +20,16 @@ export function getAppInfo(): Promise<AppInfoResponse> {
   return invokeCommand<AppInfoResponse>("app_info");
 }
 
+export type StartupStatusResponse = {
+  ok: boolean;
+  databaseError?: string | null;
+  databasePath?: string | null;
+};
+
+export function getStartupStatus(): Promise<StartupStatusResponse> {
+  return invokeCommand<StartupStatusResponse>("startup_status");
+}
+
 // ---------------------------------------------------------------------------
 // Domain DTOs (mirror the Rust command responses; timestamps are RFC 3339)
 // ---------------------------------------------------------------------------

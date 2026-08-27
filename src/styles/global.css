@@ -184,6 +184,40 @@ a:hover {
   letter-spacing: 0.01em;
 }
 
+.boot-screen--error {
+  padding: 2rem;
+  max-width: 40rem;
+  margin-inline: auto;
+  text-align: center;
+}
+
+.boot-screen__error {
+  margin: 0.5rem 0 0;
+  padding: 1rem 1.125rem;
+  width: min(100%, 36rem);
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--text);
+  background: color-mix(in srgb, var(--danger, #c44) 12%, var(--bg-app));
+  border: 1px solid color-mix(in srgb, var(--danger, #c44) 35%, var(--border));
+  border-radius: 8px;
+}
+
+.boot-screen__path,
+.boot-screen__hint {
+  margin: 0.75rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.boot-screen__path code {
+  font-size: 0.75rem;
+}
+
 .page-loader {
   display: flex;
   align-items: center;

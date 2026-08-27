@@ -23,6 +23,7 @@ pub mod session_auth;
 pub mod scan_console_log;
 pub mod scan_playbook;
 pub mod state;
+pub mod startup;
 pub mod traffic_persist;
 pub mod token_usage_persist;
 
@@ -96,19 +97,15 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             let root = environment.root.clone();
             let db_path = db::resolve_db_path(&environment.workspaces);
 
-            let database = tauri::async_runtime::block_on(db::open_database(&db_path))
-                .map_err(crate::error::CommandError::from)?;
+            let database = match tauri::async_runtime::block_on(async {
+                let database = db::open_database(&db_path).await?;
+                attack_catalog::seed_attack_catalog(&database).await?;
 
-            tauri::async_runtime::block_on(attack_catalog::seed_attack_catalog(&database))?;
-
-            let vault_dir = environment.auth_sessions_dir();
-            let auth_engine_config =
-                promptlab_auth::AuthEngineConfig::default().with_vault_dir(vault_dir.clone());
-
-            tauri::async_runtime::block_on(async {
-                let store = promptlab_auth::SessionStore::new(database.clone(), vault_dir.clone())
-                    .await
-                    .map_err(crate::error::CommandError::from)?;
+                let vault_dir = environment.auth_sessions_dir();
+                let store =
+                    promptlab_auth::SessionStore::new(database.clone(), vault_dir.clone())
+                        .await
+                        .map_err(crate::error::CommandError::from)?;
                 promptlab_auth::migrate_legacy_auth_data(&database, store.secrets())
                     .await
                     .map_err(crate::error::CommandError::from)?;
@@ -122,8 +119,29 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 )
                 .await
                 .map_err(crate::error::CommandError::from)?;
-                Ok::<(), crate::error::CommandError>(())
-            })?;
+                Ok::<_, crate::error::CommandError>(database)
+            }) {
+                Ok(database) => database,
+                Err(err) => {
+                    let message = startup::format_database_startup_error(&db_path, &err);
+                    tracing::error!(
+                        error = %err,
+                        path = %db_path.display(),
+                        "database startup failed; continuing without backend state"
+                    );
+                    startup::show_database_error_dialog(app, &message);
+                    app.manage(startup::BackendStartup::database_failed(
+                        db_path.clone(),
+                        message,
+                    ));
+                    // Keep the window alive so the frontend can show the same error.
+                    return Ok(());
+                }
+            };
+
+            let vault_dir = environment.auth_sessions_dir();
+            let auth_engine_config =
+                promptlab_auth::AuthEngineConfig::default().with_vault_dir(vault_dir.clone());
 
             let model_manager = tauri::async_runtime::block_on(
                 model_registry::open_model_manager_with_registry(app.handle(), &root, &database),
@@ -179,6 +197,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 model_provider,
                 agent_trace,
             ));
+            app.manage(startup::BackendStartup::ok());
 
             let startup_state = app.state::<AppState>();
             let reconciled = tauri::async_runtime::block_on(
@@ -241,6 +260,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
         .invoke_handler(tauri::generate_handler![
             commands::health,
             commands::app_info,
+            commands::startup_status,
             commands::app::app_clear_all_data,
             commands::environment::environment_get,
             commands::environment::environment_open_root,

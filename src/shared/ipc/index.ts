@@ -27,6 +27,7 @@ export {
   listTargets,
   healthCheck,
   getAppInfo,
+  getStartupStatus,
   listScans,
   getScan,
   listFindings,
