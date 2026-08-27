@@ -38,10 +38,6 @@ impl ModelRegistry {
         vault.join("registry.json")
     }
 
-    pub fn migrated_registry_path(vault: &Path) -> PathBuf {
-        vault.join("registry.json.migrated")
-    }
-
     pub fn load_from_vault(vault: &Path) -> ModelResult<Self> {
         let path = Self::registry_path(vault);
         if !path.exists() {

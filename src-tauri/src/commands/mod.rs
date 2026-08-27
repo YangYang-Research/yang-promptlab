@@ -109,16 +109,7 @@ fn detect_host_platform() -> String {
 
     #[cfg(target_os = "windows")]
     {
-        let raw = std::process::Command::new("cmd")
-            .args(["/C", "ver"])
-            .output()
-            .ok()
-            .and_then(|output| String::from_utf8(output.stdout).ok())
-            .unwrap_or_default();
-        if let Some(version) = parse_windows_version(&raw) {
-            return version;
-        }
-        return "Windows".into();
+        return detect_windows_platform();
     }
 
     #[cfg(target_os = "linux")]
@@ -147,23 +138,48 @@ fn detect_host_platform() -> String {
 }
 
 #[cfg(target_os = "windows")]
-fn parse_windows_version(raw: &str) -> Option<String> {
-    let start = raw.find(|c: char| c.is_ascii_digit())?;
-    let end = raw[start..]
-        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
-        .map(|offset| start + offset)
-        .unwrap_or(raw.len());
-    let version = raw[start..end].trim_matches(|c: char| c == '.' || c.is_whitespace());
-    if version.is_empty() {
-        return None;
+fn detect_windows_platform() -> String {
+    #[repr(C)]
+    struct OsVersionInfoW {
+        os_version_info_size: u32,
+        major_version: u32,
+        minor_version: u32,
+        build_number: u32,
+        platform_id: u32,
+        csd_version: [u16; 128],
     }
-    let build = version
-        .split('.')
-        .nth(2)
-        .and_then(|part| part.parse::<u32>().ok())
-        .unwrap_or(0);
-    let family = if build >= 22000 { "Windows 11" } else { "Windows 10" };
-    Some(format!("{family} ({version})"))
+
+    #[link(name = "ntdll")]
+    unsafe extern "system" {
+        fn RtlGetVersion(info: *mut OsVersionInfoW) -> i32;
+    }
+
+    let mut info = OsVersionInfoW {
+        os_version_info_size: std::mem::size_of::<OsVersionInfoW>() as u32,
+        major_version: 0,
+        minor_version: 0,
+        build_number: 0,
+        platform_id: 0,
+        csd_version: [0; 128],
+    };
+
+    let status = unsafe { RtlGetVersion(&mut info) };
+    if status != 0 {
+        return "Windows".into();
+    }
+
+    let version = format!(
+        "{}.{}.{}",
+        info.major_version, info.minor_version, info.build_number
+    );
+    let family = if info.build_number >= 22000 {
+        "Windows 11"
+    } else if info.major_version >= 10 {
+        "Windows 10"
+    } else {
+        "Windows"
+    };
+    format!("{family} ({version})")
 }
 
 #[cfg(target_os = "linux")]

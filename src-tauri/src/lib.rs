@@ -16,6 +16,7 @@ pub mod inference_settings;
 pub mod model_registry;
 pub mod third_party_credentials;
 pub mod embedded_runtime;
+pub mod environment_persist;
 pub mod plugin_interceptor;
 pub mod plugin_service;
 pub mod plugin_transport;
@@ -41,50 +42,70 @@ pub fn run() {
     };
 
     app.run(|app_handle, event| {
-        if let RunEvent::Exit = event {
-            if let Some(state) = app_handle.try_state::<AppState>() {
-                tauri::async_runtime::block_on(async {
-                    let reconciled =
-                        commands::scan::reconcile_interrupted_scans(state.inner(), true).await;
-                    if reconciled > 0 {
-                        tracing::info!(
-                            reconciled,
-                            "marked interrupted scans as stopped on shutdown"
-                        );
-                    }
-                    let mut manager = state.runtime_manager().lock().await;
-                    let _ = manager.stop_runtime().await;
-                    tracing::info!("embedded runtime stopped (graceful shutdown)");
-                    state.database().close().await;
-                });
-                tracing::info!("SQLite database closed (graceful shutdown)");
+        match event {
+            RunEvent::Exit => {
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    tauri::async_runtime::block_on(async {
+                        let reconciled =
+                            commands::scan::reconcile_interrupted_scans(state.inner(), true).await;
+                        if reconciled > 0 {
+                            tracing::info!(
+                                reconciled,
+                                "marked interrupted scans as stopped on shutdown"
+                            );
+                        }
+                        let mut manager = state.runtime_manager().lock().await;
+                        let _ = manager.stop_runtime().await;
+                        tracing::info!("embedded runtime stopped (graceful shutdown)");
+                        state.database().close().await;
+                    });
+                    tracing::info!("SQLite database closed (graceful shutdown)");
+                }
             }
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { has_visible_windows, .. } => {
+                if !has_visible_windows {
+                    focus_main_window(app_handle);
+                }
+            }
+            _ => {}
         }
     });
+}
+
+fn focus_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 /// Build the Tauri application: initialize logging, open the database, and store
 /// it in shared state. Separated from [`run`] so startup wiring is unit-testable.
 fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            focus_main_window(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            let environment = promptlab_core::bootstrap_environment()
+            let bootstrap = promptlab_core::bootstrap_environment()
                 .map_err(crate::error::CommandError::from)?;
 
-            let _ = promptlab_core::bootstrap_proxy_settings(&environment.config)
+            let _ = promptlab_core::bootstrap_proxy_settings(&bootstrap.config)
                 .map_err(|err| {
                     tracing::warn!(error = %err, "failed to load proxy settings; using defaults");
                     err
                 });
 
             let (event_bus, event_ring, event_log_guard) =
-                promptlab_core::spawn_event_logger(environment.logs.clone());
+                promptlab_core::spawn_event_logger(bootstrap.logs.clone());
             let event_bus = std::sync::Arc::new(event_bus);
 
-            let log_guard = logging::init_app_logging(&environment)?;
+            let log_guard = logging::init_app_logging(&bootstrap)?;
 
             event_bus.info(
                 promptlab_core::LogCategory::Application,
@@ -94,14 +115,14 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 "PromptLab backend starting",
             );
 
-            let root = environment.root.clone();
-            let db_path = db::resolve_db_path(&environment.workspaces);
+            let root = bootstrap.root.clone();
+            let db_path = db::resolve_db_path(&bootstrap.workspaces);
 
             let database = match tauri::async_runtime::block_on(async {
                 let database = db::open_database(&db_path).await?;
                 attack_catalog::seed_attack_catalog(&database).await?;
 
-                let vault_dir = environment.auth_sessions_dir();
+                let vault_dir = bootstrap.auth_sessions_dir();
                 let store =
                     promptlab_auth::SessionStore::new(database.clone(), vault_dir.clone())
                         .await
@@ -135,6 +156,19 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                     ));
                     // Keep the window alive so the frontend boot screen can show the error.
                     return Ok(());
+                }
+            };
+
+            let environment = match tauri::async_runtime::block_on(
+                environment_persist::hydrate_environment_paths(&database, &bootstrap),
+            ) {
+                Ok(paths) => paths,
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "failed to load environment settings from database; using defaults"
+                    );
+                    bootstrap
                 }
             };
 

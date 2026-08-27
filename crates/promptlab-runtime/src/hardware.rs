@@ -1,4 +1,4 @@
-//! Hardware detection with persistence (SQLite; one-shot migrate from hardware.json).
+//! Hardware detection with SQLite persistence.
 
 use std::path::{Path, PathBuf};
 
@@ -6,7 +6,6 @@ use promptlab_models::detect_hardware;
 use promptlab_storage::{Database, HardwareProfileRepository};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use tracing::{info, warn};
 
 use crate::error::{RuntimeError, RuntimeResult};
 
@@ -52,47 +51,6 @@ impl HardwareDetector {
         }
     }
 
-    fn profile_path(&self) -> PathBuf {
-        self.data_dir.join("runtime").join("hardware.json")
-    }
-
-    fn migrated_path(&self) -> PathBuf {
-        self.data_dir.join("runtime").join("hardware.json.migrated")
-    }
-
-    async fn load_from_file(&self) -> RuntimeResult<Option<RuntimeHardwareProfile>> {
-        let path = self.profile_path();
-        if !path.is_file() {
-            return Ok(None);
-        }
-        let raw = tokio::fs::read_to_string(&path)
-            .await
-            .map_err(|err| RuntimeError::Config(err.to_string()))?;
-        serde_json::from_str(&raw).map_err(|err| RuntimeError::Config(err.to_string()))
-    }
-
-    async fn retire_legacy_file(&self) {
-        let path = self.profile_path();
-        if !path.is_file() {
-            return;
-        }
-        let dest = self.migrated_path();
-        if let Some(parent) = dest.parent() {
-            let _ = tokio::fs::create_dir_all(parent).await;
-        }
-        match tokio::fs::rename(&path, &dest).await {
-            Ok(()) => info!(
-                from = %path.display(),
-                to = %dest.display(),
-                "migrated hardware.json to SQLite; renamed legacy file"
-            ),
-            Err(err) => {
-                warn!(error = %err, path = %path.display(), "could not rename hardware.json after DB migrate");
-                let _ = tokio::fs::remove_file(&path).await;
-            }
-        }
-    }
-
     async fn load_from_db(&self, db: &Database) -> RuntimeResult<Option<RuntimeHardwareProfile>> {
         let record = db
             .repositories()
@@ -121,33 +79,11 @@ impl HardwareDetector {
         Ok(())
     }
 
-    async fn save_to_file(&self, profile: &RuntimeHardwareProfile) -> RuntimeResult<()> {
-        if let Some(parent) = self.profile_path().parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|err| RuntimeError::Config(err.to_string()))?;
-        }
-        let raw = serde_json::to_string_pretty(profile)
-            .map_err(|err| RuntimeError::Config(err.to_string()))?;
-        tokio::fs::write(self.profile_path(), raw)
-            .await
-            .map_err(|err| RuntimeError::Config(err.to_string()))?;
-        Ok(())
-    }
-
     pub async fn load(&self) -> RuntimeResult<Option<RuntimeHardwareProfile>> {
-        if let Some(db) = &self.db {
-            if let Some(profile) = self.load_from_db(db).await? {
-                return Ok(Some(profile));
-            }
-            if let Some(profile) = self.load_from_file().await? {
-                self.save_to_db(db, &profile).await?;
-                self.retire_legacy_file().await;
-                return Ok(Some(profile));
-            }
+        let Some(db) = &self.db else {
             return Ok(None);
-        }
-        self.load_from_file().await
+        };
+        self.load_from_db(db).await
     }
 
     pub async fn detect_and_persist(&self) -> RuntimeResult<RuntimeHardwareProfile> {
@@ -186,9 +122,6 @@ impl HardwareDetector {
 
         if let Some(db) = &self.db {
             self.save_to_db(db, &profile).await?;
-            self.retire_legacy_file().await;
-        } else {
-            self.save_to_file(&profile).await?;
         }
 
         Ok(profile)

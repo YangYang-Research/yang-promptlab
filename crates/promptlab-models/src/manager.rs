@@ -34,24 +34,20 @@ impl LocalModelManager {
         })
     }
 
-    /// Load registry from SQLite, one-shot migrating `registry.json` when the table is empty.
+    /// Load registry from SQLite.
     pub async fn new_with_db(vault_path: impl AsRef<Path>, db: Database) -> ModelResult<Self> {
         let vault_path = vault_path.as_ref().to_path_buf();
         std::fs::create_dir_all(&vault_path).map_err(ModelError::Io)?;
 
         let hardware = detect_hardware()?;
-        let (registry, dirty) = load_registry_with_migration(&vault_path, &db).await?;
+        let registry = load_registry_from_db(&db).await?;
 
-        let mgr = Self {
+        Ok(Self {
             vault_path,
             registry,
             db: Some(db),
             hardware,
-        };
-        if dirty {
-            mgr.persist().await?;
-        }
-        Ok(mgr)
+        })
     }
 
     pub fn vault_path(&self) -> &Path {
@@ -233,65 +229,28 @@ fn model_entry_to_upsert(entry: &ModelEntry) -> ModelResult<UpsertModelEntry> {
     })
 }
 
-async fn load_registry_with_migration(
-    vault: &Path,
-    db: &Database,
-) -> ModelResult<(ModelRegistry, bool)> {
+async fn load_registry_from_db(db: &Database) -> ModelResult<ModelRegistry> {
     let repo = db.repositories().models();
     let count = repo.count().await.map_err(ModelError::from)?;
-    let mut dirty = false;
-
-    let mut registry = if count > 0 {
-        let rows = repo.list().await.map_err(ModelError::from)?;
-        let mut entries = Vec::with_capacity(rows.len());
-        for row in rows {
-            match serde_json::from_str::<ModelEntry>(&row.entry_json) {
-                Ok(entry) => entries.push(entry),
-                Err(err) => {
-                    tracing::warn!(
-                        id = %row.id,
-                        error = %err,
-                        "skipping unreadable model row"
-                    );
-                }
-            }
-        }
-        ModelRegistry::from_entries(entries)
-    } else {
-        ModelRegistry::new()
-    };
-
-    if registry.is_empty() {
-        let json_path = ModelRegistry::registry_path(vault);
-        if json_path.exists() {
-            let file_registry = ModelRegistry::load_from_vault(vault)?;
-            if !file_registry.is_empty() {
-                let upserts = file_registry
-                    .list()
-                    .into_iter()
-                    .map(|entry| model_entry_to_upsert(entry))
-                    .collect::<ModelResult<Vec<_>>>()?;
-                repo.replace_all(upserts)
-                    .await
-                    .map_err(ModelError::from)?;
-                info!(
-                    count = file_registry.len(),
-                    "migrated model registry.json into SQLite"
-                );
-                registry = file_registry;
-                dirty = true;
-            }
-            let migrated = ModelRegistry::migrated_registry_path(vault);
-            std::fs::rename(&json_path, &migrated).map_err(ModelError::Io)?;
-            info!(
-                from = %json_path.display(),
-                to = %migrated.display(),
-                "renamed registry.json after SQLite migration"
-            );
-        }
+    if count == 0 {
+        return Ok(ModelRegistry::new());
     }
 
-    Ok((registry, dirty))
+    let rows = repo.list().await.map_err(ModelError::from)?;
+    let mut entries = Vec::with_capacity(rows.len());
+    for row in rows {
+        match serde_json::from_str::<ModelEntry>(&row.entry_json) {
+            Ok(entry) => entries.push(entry),
+            Err(err) => {
+                tracing::warn!(
+                    id = %row.id,
+                    error = %err,
+                    "skipping unreadable model row"
+                );
+            }
+        }
+    }
+    Ok(ModelRegistry::from_entries(entries))
 }
 
 #[cfg(test)]

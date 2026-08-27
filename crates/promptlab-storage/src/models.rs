@@ -482,7 +482,7 @@ pub struct UpdateMutatorSettings {
     pub category_mutators: std::collections::BTreeMap<String, Vec<String>>,
 }
 
-/// Singleton host hardware profile (replaces `runtime/hardware.json`).
+/// Singleton host hardware profile.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct HardwareProfileRow {
     pub id: String,
