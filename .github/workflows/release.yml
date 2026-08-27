@@ -238,8 +238,9 @@ jobs:
             echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
           } >> "$GITHUB_ENV"
 
+      # Pin action-v0.6.2: floating @v0 uses assetNamePattern (not releaseAssetNamePattern).
       - name: Build installers
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -247,7 +248,8 @@ jobs:
           args: ${{ matrix.args }} ${{ steps.win_sign.outputs.config }}
           tagName: ${{ needs.release-notes.outputs.tag }}
           releaseName: ${{ needs.release-notes.outputs.title }}
-          releaseAssetNamePattern: '[name]-[version]-[platform]-[arch][setup][ext]'
+          # → PromptLab-0.1.0-darwin-aarch64.dmg, PromptLab-0.1.0-windows-x64-setup.exe, …
+          assetNamePattern: '[name]-[version]-[platform]-[arch][setup][ext]'
           generateReleaseNotes: false
           releaseBody: ${{ needs.release-notes.outputs.body }}
           releaseDraft: true
