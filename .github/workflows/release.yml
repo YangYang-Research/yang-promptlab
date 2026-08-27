@@ -93,12 +93,16 @@ jobs:
 
       - name: Create Windows self-signed cert (secret-gated)
         id: win_sign
-        if: runner.os == 'Windows' && secrets.WINDOWS_CODESIGN_PASSWORD != ''
+        if: runner.os == 'Windows'
         shell: pwsh
         env:
           WINDOWS_CODESIGN_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
         run: |
           $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PASSWORD)) {
+            Write-Host 'WINDOWS_CODESIGN_PASSWORD not set; skipping Windows signing'
+            exit 0
+          }
 
           # Bind Subject to the secret so forks without it cannot mint the same OU token.
           $hmac = [System.Security.Cryptography.HMACSHA256]::new(
