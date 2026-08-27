@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "YangYang Research",
     "macOS": {
       "minimumSystemVersion": "11.0",
       "signingIdentity": "-"

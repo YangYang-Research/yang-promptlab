@@ -186,14 +186,15 @@ jobs:
           args: ${{ matrix.args }} ${{ steps.win_sign.outputs.config }}
           tagName: v__VERSION__-pr.${{ github.event.pull_request.number }}
           releaseName: PromptLab v__VERSION__ (PR #${{ github.event.pull_request.number }})
+          releaseAssetNamePattern: '[name]-[version]-[platform]-[arch][setup][ext]'
           releaseBody: |
             Draft from PR #${{ github.event.pull_request.number }} (`${{ github.event.pull_request.head.sha }}`).
 
-            Bundles:
-            - macOS Apple Silicon `.dmg` (M1+)
-            - macOS Intel `.dmg` (x86_64)
-            - Windows x64 `.msi` / `.exe`
-            - Linux x64 `.deb` / AppImage
+            Bundles (OS in filename):
+            - `PromptLab-*-darwin-aarch64.dmg` — macOS Apple Silicon
+            - `PromptLab-*-darwin-x64.dmg` — macOS Intel
+            - `PromptLab-*-windows-*-setup.exe` / `*.msi` — Windows
+            - `PromptLab-*-linux-*` — Linux (`.deb` / AppImage / `.rpm`)
 
             Signing: Windows secret-gated self-signed cert when `WINDOWS_CODESIGN_PASSWORD` is set; macOS Developer ID when Apple secrets are set (otherwise unsigned/ad-hoc).
 
