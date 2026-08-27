@@ -270,11 +270,12 @@ jobs:
         with:
           node-version: 22
 
-      - name: Generate and upload latest.json
+      - name: Generate and upload version.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-notes.outputs.tag }}
           REPO: ${{ github.repository }}
+          BUILD_RESULT: ${{ needs.build.result }}
         run: |
           set -euo pipefail
           mkdir -p dist-assets
@@ -284,5 +285,16 @@ jobs:
           VERSION="$VERSION" TAG="$TAG" REPO="$REPO" ASSET_DIR=./dist-assets \
             NOTES="${NOTES:-Current release.}" \
             node scripts/generate-update-manifest.mjs
-          gh release upload "$TAG" updates/latest.json --repo "$REPO" --clobber
+          gh release upload "$TAG" manifests/version.json --repo "$REPO" --clobber
+
+          # Apps fetch https://github.com/$REPO/releases/latest/download/version.json
+          # which only resolves for published (non-draft) releases. Undraft when we
+          # have at least one hashed installer and the matrix build did not fail.
+          HASHED="$(node -e "const m=require('./manifests/version.json'); console.log(Object.values(m.platforms).filter(p=>p.sha256).length)")"
+          if [[ "$BUILD_RESULT" == "success" && "$HASHED" -gt 0 ]]; then
+            gh release edit "$TAG" --repo "$REPO" --draft=false
+            echo "Published $TAG ($HASHED platform hash(es)) for auto-update"
+          else
+            echo "Leaving $TAG as draft (build=$BUILD_RESULT hashed=$HASHED)"
+          fi
 

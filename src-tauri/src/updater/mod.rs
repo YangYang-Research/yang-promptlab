@@ -1,4 +1,4 @@
-//! PromptLab auto-update: fetch `updates/latest.json`, download, install, relaunch.
+//! PromptLab auto-update: fetch release `version.json`, download, install, relaunch.
 
 mod download;
 mod install;
@@ -23,9 +23,12 @@ pub const SKIP_UPDATE_ENV: &str = "PROMPTLAB_SKIP_UPDATE";
 pub const FORCE_UPDATE_ENV: &str = "PROMPTLAB_FORCE_UPDATE";
 pub const MANIFEST_URL_ENV: &str = "PROMPTLAB_UPDATE_MANIFEST_URL";
 
-/// Canonical remote copy of `updates/latest.json` on `main`.
+/// Live update manifest: latest *published* GitHub Release asset `version.json`.
+///
+/// The release workflow uploads this file and undrafts the release so
+/// `/releases/latest/download/version.json` resolves automatically.
 pub const DEFAULT_MANIFEST_URL: &str =
-    "https://raw.githubusercontent.com/YangYang-Research/yang-promptlab/main/updates/latest.json";
+    "https://github.com/YangYang-Research/yang-promptlab/releases/latest/download/version.json";
 
 pub(crate) const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -329,6 +332,7 @@ mod tests {
     #[test]
     fn default_manifest_url_is_https() {
         assert!(DEFAULT_MANIFEST_URL.starts_with("https://"));
-        assert!(DEFAULT_MANIFEST_URL.ends_with("updates/latest.json"));
+        assert!(DEFAULT_MANIFEST_URL.contains("/releases/latest/download/"));
+        assert!(DEFAULT_MANIFEST_URL.ends_with("/version.json"));
     }
 }

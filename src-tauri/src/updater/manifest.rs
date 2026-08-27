@@ -207,13 +207,13 @@ mod tests {
         assert_eq!(manifest.version, "0.2.0");
         let asset = resolve_asset(
             &manifest,
-            "https://example.com/updates/latest.json",
+            "https://example.com/manifests/version.json",
             "darwin-aarch64",
         )
         .expect("resolve");
         assert_eq!(
             asset.url,
-            "https://example.com/updates/PromptLab-0.2.0-darwin-aarch64.dmg"
+            "https://example.com/manifests/PromptLab-0.2.0-darwin-aarch64.dmg"
         );
         assert_eq!(asset.filename, "PromptLab-0.2.0-darwin-aarch64.dmg");
         assert_eq!(asset.sha256, "abc");
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn rejects_non_https_asset_urls() {
-        let err = resolve_url("https://example.com/latest.json", "file:///tmp/evil").unwrap_err();
+        let err = resolve_url("https://example.com/version.json", "file:///tmp/evil").unwrap_err();
         match err {
             UpdateError::UnsafeUrl(_) => {}
             other => panic!("expected UnsafeUrl, got {other}"),
@@ -257,8 +257,8 @@ mod tests {
     }
 
     #[test]
-    fn committed_latest_json_parses() {
-        let manifest = parse_manifest(include_str!("../../../updates/latest.json")).expect("parse");
+    fn committed_version_json_parses() {
+        let manifest = parse_manifest(include_str!("../../../manifests/version.json")).expect("parse");
         assert!(!manifest.version.is_empty());
         for key in ["darwin-aarch64", "darwin-x86_64", "linux-x86_64", "windows-x86_64"] {
             assert!(manifest.platforms.contains_key(key), "missing {key}");

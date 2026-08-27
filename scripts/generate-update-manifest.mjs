@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Generate updates/latest.json from a version + optional local asset directory.
+ * Generate manifests/version.json from a version + optional local asset directory.
  *
  * Usage:
  *   node scripts/generate-update-manifest.mjs
@@ -13,7 +13,7 @@
  *   ASSET_DIR   directory of built installers; when set, sha256/size are filled
  *   NOTES       release notes (optional)
  *   PUB_DATE    RFC 3339 (default: now UTC)
- *   OUT         output path (default: updates/latest.json)
+ *   OUT         output path (default: manifests/version.json)
  */
 
 import { createHash } from "node:crypto";
@@ -55,7 +55,7 @@ const REPO = process.env.REPO || "YangYang-Research/yang-promptlab";
 const ASSET_DIR = process.env.ASSET_DIR ? resolve(process.env.ASSET_DIR) : "";
 const NOTES = process.env.NOTES || "Current release.";
 const PUB_DATE = process.env.PUB_DATE || new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-const OUT = resolve(process.env.OUT || join(ROOT, "updates/latest.json"));
+const OUT = resolve(process.env.OUT || join(ROOT, "manifests/version.json"));
 const BASE = `https://github.com/${REPO}/releases/download/${TAG}`;
 
 const PLATFORMS = [
