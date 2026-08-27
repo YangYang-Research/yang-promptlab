@@ -3,9 +3,6 @@
 use serde::Serialize;
 use std::path::PathBuf;
 
-use tauri::App;
-use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-
 /// Shared flag so IPC can report a soft DB/startup failure without exiting.
 #[derive(Debug, Clone)]
 pub struct BackendStartup {
@@ -51,24 +48,7 @@ pub struct BackendStartupDto {
     pub database_path: Option<String>,
 }
 
-/// User-facing copy for native dialog + frontend boot screen.
-pub fn format_database_startup_error(path: &std::path::Path, err: &dyn std::fmt::Display) -> String {
-    format!(
-        "The application database could not be opened or migrated.\n\n\
-Path: {path}\n\
-Error: {err}\n\n\
-This usually happens after an upgrade when the existing database schema is incompatible \
-with this version of PromptLab.\n\n\
-Close the app, back up or delete the database file above, then open PromptLab again.",
-        path = path.display(),
-        err = err
-    )
-}
-
-pub fn show_database_error_dialog(app: &App, message: &str) {
-    app.dialog()
-        .message(message)
-        .title("PromptLab — Database error")
-        .kind(MessageDialogKind::Error)
-        .blocking_show();
+/// User-facing copy for the frontend boot error screen.
+pub fn format_database_startup_error(_path: &std::path::Path, err: &dyn std::fmt::Display) -> String {
+    format!("Error: {err}")
 }

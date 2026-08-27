@@ -129,12 +129,11 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                         path = %db_path.display(),
                         "database startup failed; continuing without backend state"
                     );
-                    startup::show_database_error_dialog(app, &message);
                     app.manage(startup::BackendStartup::database_failed(
                         db_path.clone(),
                         message,
                     ));
-                    // Keep the window alive so the frontend can show the same error.
+                    // Keep the window alive so the frontend boot screen can show the error.
                     return Ok(());
                 }
             };

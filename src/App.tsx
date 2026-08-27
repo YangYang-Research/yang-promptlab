@@ -31,9 +31,7 @@ function AppBootstrap() {
           if (!startup.ok) {
             if (cancelled) return;
             setBootFailure({
-              message:
-                startup.databaseError ??
-                "The application database could not be opened.",
+              message: startup.databaseError ?? "Error: database could not be opened.",
               databasePath: startup.databasePath ?? undefined,
             });
             dispatch({
@@ -107,20 +105,11 @@ function AppBootstrap() {
         <div className="boot-screen__logo" aria-hidden="true">
           <BrandMark size={56} />
         </div>
-        <h1 className="boot-screen__title">Database error</h1>
+        <h1 className="boot-screen__title">Application error</h1>
         <p className="boot-screen__subtitle">
-          PromptLab could not open or migrate its database. The app stayed open so you can
-          recover without a silent crash.
+          PromptLab could not open or migrate its database.
         </p>
         <pre className="boot-screen__error">{bootFailure.message}</pre>
-        {bootFailure.databasePath ? (
-          <p className="boot-screen__path">
-            Database path: <code>{bootFailure.databasePath}</code>
-          </p>
-        ) : null}
-        <p className="boot-screen__hint">
-          Back up or delete the database file, then restart PromptLab.
-        </p>
       </div>
     );
   }
