@@ -682,6 +682,8 @@ a.setup-checklist__item:hover {
   backdrop-filter: blur(10px) saturate(130%);
   -webkit-backdrop-filter: blur(10px) saturate(130%);
   flex-shrink: 0;
+  position: relative;
+  z-index: var(--z-topbar);
 }
 
 .topbar__left {
@@ -786,6 +788,85 @@ a.setup-checklist__item:hover {
 
 .search-input__field::placeholder {
   color: var(--text-subtle);
+}
+
+.topbar-search {
+  position: relative;
+  width: 100%;
+}
+
+.topbar-search__results {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  right: 0;
+  z-index: var(--z-dropdown);
+  max-height: min(22rem, calc(100dvh - var(--topbar-height) - 2rem));
+  overflow-y: auto;
+  padding: 0.35rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  box-shadow: 0 12px 32px color-mix(in srgb, #000 28%, transparent);
+}
+
+.topbar-search__empty {
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.topbar-search__group + .topbar-search__group {
+  margin-top: 0.2rem;
+  padding-top: 0.2rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.topbar-search__group-label {
+  margin: 0;
+  padding: 0.4rem 0.7rem 0.15rem;
+  color: var(--text-subtle);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.topbar-search__hit {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.08rem;
+  width: 100%;
+  padding: 0.45rem 0.7rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.topbar-search__hit:hover,
+.topbar-search__hit--active {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-surface));
+}
+
+.topbar-search__hit-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.topbar-search__hit-subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 0.75rem;
 }
 
 /* Page */

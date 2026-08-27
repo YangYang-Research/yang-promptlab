@@ -1,13 +1,17 @@
+import type { InputHTMLAttributes } from "react";
+
 type SearchInputProps = {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  inputProps?: Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "placeholder">;
 };
 
 export function SearchInput({
   value,
   onChange,
   placeholder = "Search…",
+  inputProps,
 }: SearchInputProps) {
   return (
     <div className="search-input">
@@ -24,6 +28,8 @@ export function SearchInput({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         aria-label={placeholder}
+        autoComplete="off"
+        {...inputProps}
       />
     </div>
   );

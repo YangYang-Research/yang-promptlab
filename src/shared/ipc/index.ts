@@ -26,6 +26,7 @@ export {
   type UpdateCheckDto,
   type UpdateProgressDto,
 } from "./updater";
+export { searchWorkspace, type WorkspaceSearchHit } from "./workspaceSearch";
 export {
   getTarget,
   getTargetWizardDescriptor,

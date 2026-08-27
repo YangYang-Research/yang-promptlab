@@ -17,20 +17,27 @@ import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
 import { buildReportScanRows, type ReportScanRow } from "./reportDownloads";
 
 export function ReportsPage() {
-  const { reports, scans, findings, projects, loading, error, actions } = useAppStore();
+  const { reports, scans, findings, projects, ui, loading, error, actions } = useAppStore();
   const navigate = useNavigate();
   const [pageSize, setPageSize] = usePageSizePreference("reports-scans");
 
-  const rows = useMemo(
-    () =>
-      buildReportScanRows({
-        scans,
-        findings,
-        reports,
-        projects,
-      }),
-    [scans, findings, reports, projects],
-  );
+  const rows = useMemo(() => {
+    const query = ui.searchQuery.toLowerCase().trim();
+    const all = buildReportScanRows({
+      scans,
+      findings,
+      reports,
+      projects,
+    });
+    if (!query) return all;
+    return all.filter(
+      (row) =>
+        row.projectName.toLowerCase().includes(query) ||
+        row.scanName.toLowerCase().includes(query) ||
+        row.scanId.toLowerCase().includes(query) ||
+        row.reportId.toLowerCase().includes(query),
+    );
+  }, [scans, findings, reports, projects, ui.searchQuery]);
 
   const { page, setPage, pagination } = usePaginatedList(rows, pageSize);
 

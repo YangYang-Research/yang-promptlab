@@ -321,6 +321,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::agenttrace::agenttrace_get_trace,
             commands::agenttrace::agenttrace_delete_session,
             commands::db_health,
+            commands::workspace_search::workspace_search,
             commands::projects::project_create,
             commands::projects::project_list,
             commands::projects::project_get,

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "react-router-dom";
 
 import {
   Button,
@@ -61,7 +62,9 @@ function matchesOwaspBrowse(row: AttackCatalogTechniqueDto, browse: OwaspBrowseI
 }
 
 export function AttackCategoriesPage() {
+  const { techniqueId } = useParams<{ techniqueId?: string }>();
   const { backendConnected } = useAppStore();
+  const appliedTechniqueId = useRef<string | null>(null);
   const [categories, setCategories] = useState<AttackCatalogCategoryDto[]>([]);
   const [techniques, setTechniques] = useState<AttackCatalogTechniqueDto[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -183,6 +186,31 @@ export function AttackCategoriesPage() {
   }, [selectedCategory, selectedOwasp, selectedNist, query]);
 
   useEffect(() => {
+    if (!techniqueId) {
+      appliedTechniqueId.current = null;
+      return;
+    }
+    if (techniques.length === 0) return;
+    if (appliedTechniqueId.current === techniqueId) return;
+    const row = techniques.find((item) => item.id === techniqueId);
+    if (!row) return;
+    appliedTechniqueId.current = techniqueId;
+    setSelectedOwasp("all");
+    setSelectedNist("all");
+    setQuery("");
+    setSelectedCategory(row.categoryId);
+    setSelectedId(row.id);
+  }, [techniqueId, techniques]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const index = filtered.findIndex((row) => row.id === selectedId);
+    if (index < 0) return;
+    const nextPage = Math.floor(index / TECHNIQUES_PAGE_SIZE) + 1;
+    setPage((current) => (current === nextPage ? current : nextPage));
+  }, [selectedId, filtered]);
+
+  useEffect(() => {
     if (page > pagination.totalPages) {
       setPage(pagination.totalPages);
     }
@@ -206,13 +234,13 @@ export function AttackCategoriesPage() {
 
   useEffect(() => {
     if (filtered.length === 0) {
-      setSelectedId(null);
+      if (!techniqueId) setSelectedId(null);
       return;
     }
     if (!selectedId || !filtered.some((row) => row.id === selectedId)) {
       setSelectedId(pagination.items[0]?.id ?? filtered[0].id);
     }
-  }, [filtered, selectedId, pagination.items]);
+  }, [filtered, selectedId, pagination.items, techniqueId]);
 
   async function handleSave() {
     if (!selected) return;

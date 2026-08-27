@@ -7,12 +7,14 @@ pub mod models;
 pub mod pool;
 pub mod repositories;
 pub mod util;
+pub mod workspace_search;
 
 pub use auth_models::*;
 pub use error::{map_sqlx_error, StorageResultExt};
 pub use health_score::compute_health_score;
 pub use models::*;
 pub use pool::Database;
+pub use workspace_search::{search_workspace, WorkspaceSearchHit};
 pub use repositories::{
     AgentLongTermMemoryRepository, AgentShortTermMemoryRepository, AppSettingsRepository,
     AttackCatalogRepository, AttackResultRepository, AuthProfileRepository,

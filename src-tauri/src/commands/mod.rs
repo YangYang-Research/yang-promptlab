@@ -33,6 +33,7 @@ pub mod target_profile;
 pub mod updater;
 pub mod yazg;
 pub mod wizard_scan;
+pub mod workspace_search;
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {

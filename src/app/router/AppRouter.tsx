@@ -213,7 +213,7 @@ export function AppRouter() {
             }
           />
           <Route
-            path="attack-categories"
+            path="attack-categories/:techniqueId?"
             element={
               <Suspense fallback={<PageLoader />}>
                 <AttackCategoriesPage />
