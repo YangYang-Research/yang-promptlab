@@ -187,18 +187,30 @@ jobs:
           tagName: v__VERSION__-pr.${{ github.event.pull_request.number }}
           releaseName: PromptLab v__VERSION__ (PR #${{ github.event.pull_request.number }})
           releaseAssetNamePattern: '[name]-[version]-[platform]-[arch][setup][ext]'
+          generateReleaseNotes: true
           releaseBody: |
-            Draft from PR #${{ github.event.pull_request.number }} (`${{ github.event.pull_request.head.sha }}`).
+            ## Overview
+            PromptLab **v__VERSION__** draft built from PR #${{ github.event.pull_request.number }} (`${{ github.event.pull_request.head.sha }}`).
 
-            Bundles (OS in filename):
+            Edit this draft before publishing: fill in the sections below, then remove any placeholder bullets.
+
+            ## New Features / What's Changed
+            - _Add user-facing changes here_
+
+            ## Bug Fixes
+            - _Add fixes here_
+
+            ## Downloads
+            Asset names include OS + arch:
             - `PromptLab-*-darwin-aarch64.dmg` — macOS Apple Silicon
             - `PromptLab-*-darwin-x64.dmg` — macOS Intel
             - `PromptLab-*-windows-*-setup.exe` / `*.msi` — Windows
             - `PromptLab-*-linux-*` — Linux (`.deb` / AppImage / `.rpm`)
 
-            Signing: Windows secret-gated self-signed cert when `WINDOWS_CODESIGN_PASSWORD` is set; macOS Developer ID when Apple secrets are set (otherwise unsigned/ad-hoc).
-
-            Review the installers, then publish this release when ready.
+            ## Notes
+            - Windows: Authenticode self-sign when `WINDOWS_CODESIGN_PASSWORD` is set (SmartScreen may still warn).
+            - macOS: Developer ID + notarization when Apple secrets are set; otherwise Gatekeeper requires Right-click → Open.
+            - Publisher (Add/Remove Programs): YangYang Research.
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: false
