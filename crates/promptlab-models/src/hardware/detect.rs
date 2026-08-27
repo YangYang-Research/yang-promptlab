@@ -204,11 +204,6 @@ fn detect_macos_gpus() -> Vec<GpuDevice> {
     vec![]
 }
 
-#[cfg(not(target_os = "macos"))]
-fn detect_macos_gpus() -> Vec<GpuDevice> {
-    vec![]
-}
-
 #[cfg(target_os = "macos")]
 fn parse_system_profiler_gpus(json: &serde_json::Value) -> Vec<GpuDevice> {
     let mut devices = Vec::new();
