@@ -43,14 +43,13 @@ jobs:
         id: gen
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           chmod +x scripts/generate-release-notes.sh
           VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-          TAG="v${VERSION}-pr.${PR_NUMBER}"
-          TITLE="PromptLab v${VERSION} (PR #${PR_NUMBER})"
+          TAG="v${VERSION}"
+          TITLE="PromptLab v${VERSION}"
           scripts/generate-release-notes.sh release-notes.md
 
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
