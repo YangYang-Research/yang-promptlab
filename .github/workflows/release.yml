@@ -149,17 +149,38 @@ jobs:
           Add-Content -Path $env:GITHUB_OUTPUT -Value "config=--config src-tauri/signing.windows.json"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "enabled=true"
 
-      - name: Build installers
-        uses: tauri-apps/tauri-action@v0
+      - name: Configure macOS signing env
+        if: runner.os == 'macOS'
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS Developer ID + notarization (tauri-action imports .p12 when set)
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Empty APPLE_* env vars make Tauri attempt `security import` and fail.
+          # Only export them when secrets are actually configured.
+          if [ -z "${APPLE_CERTIFICATE}" ]; then
+            echo "No APPLE_CERTIFICATE secret; building macOS unsigned (ad-hoc)."
+            exit 0
+          fi
+          {
+            echo "APPLE_CERTIFICATE<<EOF"
+            echo "$APPLE_CERTIFICATE"
+            echo "EOF"
+            echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
+            echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY"
+            echo "APPLE_ID=$APPLE_ID"
+            echo "APPLE_PASSWORD=$APPLE_PASSWORD"
+            echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
+          } >> "$GITHUB_ENV"
+
+      - name: Build installers
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: .
           args: ${{ matrix.args }} ${{ steps.win_sign.outputs.config }}
@@ -174,7 +195,7 @@ jobs:
             - Windows x64 `.msi` / `.exe`
             - Linux x64 `.deb` / AppImage
 
-            Signing: Windows secret-gated self-signed cert when `WINDOWS_CODESIGN_PASSWORD` is set; macOS when Apple secrets are set.
+            Signing: Windows secret-gated self-signed cert when `WINDOWS_CODESIGN_PASSWORD` is set; macOS Developer ID when Apple secrets are set (otherwise unsigned/ad-hoc).
 
             Review the installers, then publish this release when ready.
           releaseDraft: true
