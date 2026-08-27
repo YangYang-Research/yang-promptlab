@@ -146,7 +146,7 @@ jobs:
           } | ConvertTo-Json -Depth 6 -Compress
           $configPath = Join-Path $env:GITHUB_WORKSPACE 'src-tauri/signing.windows.json'
           Set-Content -Path $configPath -Value $signConfig -Encoding utf8
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "config=--config signing.windows.json"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "config=--config src-tauri/signing.windows.json"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "enabled=true"
 
       - name: Build installers
