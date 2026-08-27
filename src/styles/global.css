@@ -184,6 +184,11 @@ a:hover {
   letter-spacing: 0.01em;
 }
 
+.boot-screen__progress {
+  width: min(20rem, 80vw);
+  margin-top: 0.25rem;
+}
+
 .boot-screen--error {
   padding: 2rem;
   max-width: 40rem;

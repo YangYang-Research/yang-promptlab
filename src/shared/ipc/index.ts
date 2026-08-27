@@ -19,6 +19,14 @@ export {
   type ProjectSummaryResponse,
 } from "./projectSummary";
 export {
+  checkForUpdate,
+  applyUpdateIfAvailable,
+  updateDownloadPercent,
+  APP_UPDATE_PROGRESS_EVENT,
+  type UpdateCheckDto,
+  type UpdateProgressDto,
+} from "./updater";
+export {
   getTarget,
   getTargetWizardDescriptor,
   updateTargetDescriptor,

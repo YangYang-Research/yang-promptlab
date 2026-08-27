@@ -7,7 +7,7 @@ import { Button, Card, PageHeader, RefreshButton, Select, Badge } from "@/shared
 import type { AppSettings } from "@/app/store/types";
 import { toAppError } from "@/shared/errors";
 import { clearAllAppData } from "@/shared/ipc/app";
-import { getAppInfo } from "@/shared/ipc";
+import { applyUpdateIfAvailable, checkForUpdate, getAppInfo } from "@/shared/ipc";
 
 import { EnvironmentsPanel } from "./EnvironmentsPanel";
 import { JudgeRoleWeightsPanel } from "./JudgeRoleWeightsPanel";
@@ -108,6 +108,11 @@ function AboutPanel({
   backendVersion: string;
 }) {
   const [platform, setPlatform] = useState(() => detectClientPlatform());
+  const [updateBusy, setUpdateBusy] = useState<"check" | "install" | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+  const [latestVersion, setLatestVersion] = useState<string | null>(null);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const version = backendVersion || "0.1.0";
 
   useEffect(() => {
@@ -124,6 +129,51 @@ function AboutPanel({
     };
   }, []);
 
+  async function handleCheckForUpdate() {
+    if (!backendConnected || updateBusy) return;
+    setUpdateBusy("check");
+    setUpdateError(null);
+    try {
+      const result = await checkForUpdate();
+      setLatestVersion(result.latestVersion ?? null);
+      setUpdateAvailable(result.updateAvailable);
+      if (result.updateAvailable) {
+        setUpdateStatus(
+          result.latestVersion
+            ? `Version ${result.latestVersion} is available.`
+            : "A newer version is available.",
+        );
+      } else {
+        setUpdateStatus(result.skippedReason || "PromptLab is up to date.");
+      }
+    } catch (err) {
+      setUpdateError(toAppError(err).message);
+    } finally {
+      setUpdateBusy(null);
+    }
+  }
+
+  async function handleInstallUpdate() {
+    if (!backendConnected || updateBusy) return;
+    setUpdateBusy("install");
+    setUpdateError(null);
+    setUpdateStatus("Downloading and installing the new version…");
+    try {
+      const result = await applyUpdateIfAvailable();
+      setLatestVersion(result.latestVersion ?? null);
+      setUpdateAvailable(result.updateAvailable && !result.applied);
+      if (result.applied) {
+        setUpdateStatus("Restarting the new version…");
+        return;
+      }
+      setUpdateStatus(result.skippedReason || "No update was installed.");
+    } catch (err) {
+      setUpdateError(toAppError(err).message);
+    } finally {
+      setUpdateBusy(null);
+    }
+  }
+
   return (
     <SettingsSection
       title="Application"
@@ -139,6 +189,10 @@ function AboutPanel({
           <dd>v{version}</dd>
         </div>
         <div>
+          <dt>Latest</dt>
+          <dd>{latestVersion ? `v${latestVersion}` : "Not checked"}</dd>
+        </div>
+        <div>
           <dt>Backend</dt>
           <dd>
             {backendConnected
@@ -151,6 +205,25 @@ function AboutPanel({
           <dd>{platform}</dd>
         </div>
       </dl>
+      {updateStatus ? <p className="text-muted text-sm">{updateStatus}</p> : null}
+      {updateError ? <p className="text-danger text-sm">{updateError}</p> : null}
+      <div className="settings-section__actions">
+        <Button
+          disabled={!backendConnected || updateBusy !== null}
+          onClick={() => void handleCheckForUpdate()}
+        >
+          {updateBusy === "check" ? "Checking…" : "Check for updates"}
+        </Button>
+        {updateAvailable ? (
+          <Button
+            variant="primary"
+            disabled={!backendConnected || updateBusy !== null}
+            onClick={() => void handleInstallUpdate()}
+          >
+            {updateBusy === "install" ? "Installing…" : "Install and restart"}
+          </Button>
+        ) : null}
+      </div>
     </SettingsSection>
   );
 }

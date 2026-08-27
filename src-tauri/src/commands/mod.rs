@@ -30,6 +30,7 @@ pub mod scan_recommendations;
 pub mod finding_recommendations;
 pub mod security;
 pub mod target_profile;
+pub mod updater;
 pub mod yazg;
 pub mod wizard_scan;
 

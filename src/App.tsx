@@ -1,9 +1,19 @@
 import { useEffect, useState } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { AppRouter } from "@/app/router/AppRouter";
 import { useAppStore } from "@/app/store/AppStore";
 import { BrandMark } from "@/shared/components/BrandMark";
-import { getAppInfo, getStartupStatus, healthCheck } from "@/shared/ipc";
+import { ProgressBar } from "@/shared/components";
+import {
+  applyUpdateIfAvailable,
+  APP_UPDATE_PROGRESS_EVENT,
+  getAppInfo,
+  getStartupStatus,
+  healthCheck,
+  updateDownloadPercent,
+  type UpdateProgressDto,
+} from "@/shared/ipc";
 import { createLogger } from "@/shared/logging";
 import { toAppError } from "@/shared/errors";
 
@@ -17,6 +27,9 @@ type BootFailure = {
 function AppBootstrap() {
   const { dispatch } = useAppStore();
   const [ready, setReady] = useState(false);
+  const [relaunching, setRelaunching] = useState(false);
+  const [bootMessage, setBootMessage] = useState("Starting security workspace…");
+  const [downloadPct, setDownloadPct] = useState<number | null>(null);
   const [bootFailure, setBootFailure] = useState<BootFailure | null>(null);
 
   useEffect(() => {
@@ -25,6 +38,40 @@ function AppBootstrap() {
     async function bootstrap() {
       try {
         log.info("bootstrapping frontend");
+
+        try {
+          let unlisten: UnlistenFn | undefined;
+          try {
+            unlisten = await listen<UpdateProgressDto>(APP_UPDATE_PROGRESS_EVENT, (event) => {
+              if (cancelled) return;
+              setBootMessage(event.payload.message);
+              setDownloadPct(updateDownloadPercent(event.payload));
+            });
+          } catch {
+            unlisten = undefined;
+          }
+
+          const update = await applyUpdateIfAvailable();
+          await unlisten?.();
+          if (cancelled) return;
+          if (update.applied) {
+            setRelaunching(true);
+            setBootMessage("Restarting the new version…");
+            setDownloadPct(null);
+            log.info("update applied; waiting for relaunch", { update });
+            return;
+          }
+          setDownloadPct(null);
+          setBootMessage("Starting security workspace…");
+        } catch (updateError) {
+          log.warn("startup update check skipped", {
+            error: toAppError(updateError),
+          });
+          if (!cancelled) {
+            setDownloadPct(null);
+            setBootMessage("Starting security workspace…");
+          }
+        }
 
         try {
           const startup = await getStartupStatus();
@@ -86,7 +133,7 @@ function AppBootstrap() {
     };
   }, [dispatch]);
 
-  if (!ready) {
+  if (!ready || relaunching) {
     return (
       <div className="boot-screen">
         <div className="boot-screen__logo" aria-hidden="true">
@@ -94,7 +141,12 @@ function AppBootstrap() {
         </div>
         <h1 className="boot-screen__title">PromptLab</h1>
         <div className="page-loader__spinner" />
-        <p className="boot-screen__subtitle">Starting security workspace…</p>
+        <p className="boot-screen__subtitle">{bootMessage}</p>
+        {downloadPct !== null ? (
+          <div className="boot-screen__progress">
+            <ProgressBar value={downloadPct} size="sm" label="Downloading update" />
+          </div>
+        ) : null}
       </div>
     );
   }

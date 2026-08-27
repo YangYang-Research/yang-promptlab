@@ -27,6 +27,7 @@ pub mod state;
 pub mod startup;
 pub mod traffic_persist;
 pub mod token_usage_persist;
+pub mod updater;
 
 use promptlab_models::ModelEntry;
 use state::AppState;
@@ -294,6 +295,8 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::health,
             commands::app_info,
             commands::startup_status,
+            commands::updater::updater_check,
+            commands::updater::updater_apply_if_available,
             commands::app::app_clear_all_data,
             commands::environment::environment_get,
             commands::environment::environment_open_root,

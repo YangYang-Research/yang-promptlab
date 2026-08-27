@@ -255,3 +255,34 @@ jobs:
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: false
+
+  update-manifest:
+    name: Publish update manifest
+    needs: [release-notes, build]
+    if: ${{ always() && !cancelled() && needs.release-notes.result == 'success' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Generate and upload latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-notes.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist-assets
+          gh release download "$TAG" --repo "$REPO" --dir dist-assets --pattern 'PromptLab-*' || true
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          NOTES="$(gh release view "$TAG" --repo "$REPO" --json body --jq .body 2>/dev/null | head -c 2000 || true)"
+          VERSION="$VERSION" TAG="$TAG" REPO="$REPO" ASSET_DIR=./dist-assets \
+            NOTES="${NOTES:-Current release.}" \
+            node scripts/generate-update-manifest.mjs
+          gh release upload "$TAG" updates/latest.json --repo "$REPO" --clobber
+
