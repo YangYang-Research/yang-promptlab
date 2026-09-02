@@ -39,6 +39,7 @@ const finding: Finding = {
   severity: "high",
   category: "prompt_injection",
   status: "open",
+  statusComment: "",
   confidence: 0.82,
   verdict: "vulnerable",
   discoveredAt: "2026-01-01T00:30:00Z",

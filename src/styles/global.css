@@ -5827,6 +5827,18 @@ a.setup-checklist__item:hover {
 .finding-details__signal-item--compliance {
   grid-column: 1 / -1;
 }
+.finding-details__signal-item--comment {
+  grid-column: 1 / -1;
+}
+.finding-details__status-comment {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 .finding-details__compliance-list {
   display: flex;
   flex-wrap: wrap;

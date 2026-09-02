@@ -56,6 +56,7 @@ pub struct Finding {
     pub description: Option<String>,
     pub evidence_json: Option<String>,
     pub status: String,
+    pub status_comment: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -246,6 +247,7 @@ pub struct UpdateFinding {
     pub description: Option<String>,
     pub evidence_json: Option<serde_json::Value>,
     pub status: Option<String>,
+    pub status_comment: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

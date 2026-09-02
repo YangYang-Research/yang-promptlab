@@ -19,6 +19,7 @@ function sampleFinding(overrides: Partial<Finding> = {}): Finding {
     severity: "high",
     category: "prompt_injection",
     status: "open",
+    statusComment: "",
     confidence: 0.9,
     verdict: "vulnerable",
     discoveredAt: "2026-01-01T00:00:00Z",

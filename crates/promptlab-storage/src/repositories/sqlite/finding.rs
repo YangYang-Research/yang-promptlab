@@ -31,9 +31,9 @@ impl FindingRepository for SqliteFindingRepository {
             r#"
             INSERT INTO findings (
                 id, scan_id, project_id, target_id, title, severity, category,
-                description, evidence_json, status, created_at, updated_at
+                description, evidence_json, status, status_comment, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&id)
@@ -46,6 +46,7 @@ impl FindingRepository for SqliteFindingRepository {
         .bind(&input.description)
         .bind(&evidence_json)
         .bind(&status)
+        .bind(None::<String>)
         .bind(timestamp)
         .bind(timestamp)
         .execute(&self.pool)
@@ -118,13 +119,24 @@ impl FindingRepository for SqliteFindingRepository {
             None => existing.evidence_json,
         };
         let status = input.status.unwrap_or(existing.status);
+        let status_comment = match input.status_comment {
+            Some(value) => {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            }
+            None => existing.status_comment,
+        };
         let updated_at = now();
 
         let result = sqlx::query(
             r#"
             UPDATE findings
             SET title = ?, severity = ?, category = ?, description = ?,
-                evidence_json = ?, status = ?, updated_at = ?
+                evidence_json = ?, status = ?, status_comment = ?, updated_at = ?
             WHERE id = ?
             "#,
         )
@@ -134,6 +146,7 @@ impl FindingRepository for SqliteFindingRepository {
         .bind(&description)
         .bind(&evidence_json)
         .bind(&status)
+        .bind(&status_comment)
         .bind(updated_at)
         .bind(id)
         .execute(&self.pool)

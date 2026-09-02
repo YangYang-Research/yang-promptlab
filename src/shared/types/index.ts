@@ -81,6 +81,7 @@ export type Finding = {
   severity: Severity;
   category: string;
   status: "open" | "confirmed" | "false_positive" | "fixed";
+  statusComment: string;
   confidence: number;
   verdict: "vulnerable" | "not_vulnerable" | null;
   discoveredAt: string;
