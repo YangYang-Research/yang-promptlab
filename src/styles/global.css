@@ -5462,6 +5462,8 @@ a.setup-checklist__item:hover {
   background: transparent;
   box-shadow: none;
   padding: 0;
+  min-width: 0;
+  max-width: 100%;
 }
 .finding-detail__judge--untitled .finding-detail__score-summary {
   margin-top: 1rem;
@@ -5600,12 +5602,16 @@ a.setup-checklist__item:hover {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.75rem;
+  align-items: start;
+  min-width: 0;
 }
 .finding-detail__role {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
   min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
   padding: 0.75rem 0.875rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
@@ -5625,6 +5631,7 @@ a.setup-checklist__item:hover {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  min-width: 0;
 }
 .finding-detail__role-title {
   display: flex;
@@ -5650,13 +5657,20 @@ a.setup-checklist__item:hover {
 }
 .finding-detail__role-category {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .finding-detail__role-rationale {
   margin: 0;
+  min-width: 0;
   font-size: 0.8125rem;
   line-height: 1.55;
   color: color-mix(in srgb, var(--text) 92%, var(--text-muted));
   text-wrap: pretty;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 .finding-detail__consensus {
   margin: 0.75rem 0 0;
@@ -5744,6 +5758,7 @@ a.setup-checklist__item:hover {
 }
 .finding-detail--embedded {
   gap: 1.35rem;
+  min-width: 0;
 }
 
 .finding-details {
@@ -5847,6 +5862,7 @@ a.setup-checklist__item:hover {
 }
 .finding-details__panel .finding-detail {
   padding: 0;
+  min-width: 0;
 }
 .finding-details__panel > .detail-section__title {
   margin-bottom: 1rem;
