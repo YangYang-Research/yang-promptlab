@@ -13,6 +13,7 @@ pub mod method_heuristic;
 pub mod harness_runtime;
 pub mod inference_host;
 pub mod inference_settings;
+pub mod llm_mutator;
 pub mod model_registry;
 pub mod third_party_credentials;
 pub mod embedded_runtime;

@@ -36,6 +36,7 @@ use crate::dto::FindingDto;
 use crate::error::{CommandError, CommandResult};
 use crate::events::{ScanProgressEmitter, ScanProgressLevel};
 use crate::inference_host::build_judge_engine_from_gateway;
+use crate::llm_mutator::maybe_llm_mutator_backend;
 use crate::session_auth::{attack_executor_with_variants, AttackRuntime};
 use crate::jobs::{bump_scan_progress, ScanBatchCheckpoint, ScanJobControls, ScanProgress};
 use crate::scan_playbook::persist_scan_playbook_state;
@@ -44,6 +45,7 @@ use crate::scan_playbook::persist_scan_playbook_state;
 pub struct CategoryRunOptions {
     pub max_payloads: usize,
     pub variants_per_test: usize,
+    pub mutation_level: String,
     pub max_concurrent_requests: Option<usize>,
     pub inter_request_delay_ms: Option<u64>,
     pub timeout_ms: Option<u64>,
@@ -70,6 +72,12 @@ impl CategoryRunOptions {
                 .saturating_mul(budget)
                 .max(1),
             variants_per_test: variants,
+            mutation_level: match strategy.mutation_level {
+                promptlab_target_profile::MutationLevel::Low => "low".into(),
+                promptlab_target_profile::MutationLevel::Medium => "medium".into(),
+                promptlab_target_profile::MutationLevel::High => "high".into(),
+                promptlab_target_profile::MutationLevel::Extreme => "extreme".into(),
+            },
             max_concurrent_requests: None,
             inter_request_delay_ms: None,
             timeout_ms: None,
@@ -1508,7 +1516,18 @@ pub async fn run_category_on_endpoint(
     let variants = options
         .map(|opts| opts.variants_per_test.max(1))
         .unwrap_or(1);
-    let executor = attack_executor_with_variants(runtime.transport, variants);
+    let mutation_level = options.map(|opts| opts.mutation_level.as_str());
+    let llm = maybe_llm_mutator_backend(
+        data_dir,
+        &inference_manager,
+        &model_manager,
+        model_provider.clone(),
+        &runtime_manager,
+        mutation_level,
+    )
+    .await;
+    let executor =
+        attack_executor_with_variants(runtime.transport, variants, mutation_level, llm);
 
     info!(
         scan_id = %scan_id,
@@ -1631,7 +1650,18 @@ pub async fn run_category_on_target_profile(
     let variants = options
         .map(|opts| opts.variants_per_test.max(1))
         .unwrap_or(1);
-    let executor = attack_executor_with_variants(runtime.transport, variants);
+    let mutation_level = options.map(|opts| opts.mutation_level.as_str());
+    let llm = maybe_llm_mutator_backend(
+        data_dir,
+        &inference_manager,
+        &model_manager,
+        model_provider.clone(),
+        &runtime_manager,
+        mutation_level,
+    )
+    .await;
+    let executor =
+        attack_executor_with_variants(runtime.transport, variants, mutation_level, llm);
 
     info!(
         scan_id = %scan_id,

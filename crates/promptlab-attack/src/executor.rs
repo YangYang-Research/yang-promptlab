@@ -92,7 +92,7 @@ impl<T: TargetTransport + Clone + 'static> AttackExecutor<T> {
 
         lifecycle.transition(AttackPhase::Preparing, Some("preparing payloads".into()))?;
         let payloads = select_payloads(attack.as_ref(), &plan, ctx);
-        let work_items = build_work_items(&self.mutator, &plan, &payloads, ctx)?;
+        let work_items = build_work_items(&self.mutator, &plan, &payloads, ctx).await?;
 
         lifecycle.transition(AttackPhase::Executing, None)?;
 
@@ -249,7 +249,7 @@ fn collapsed_pool_limit(current: usize, timeouts: u32, http_ok: u32) -> usize {
     }
 }
 
-fn build_work_items(
+async fn build_work_items(
     mutator: &PayloadMutator,
     plan: &crate::types::AttackPlan,
     payloads: &[AttackPayload],
@@ -264,7 +264,9 @@ fn build_work_items(
             break;
         }
 
-        let variants = mutator.expand(&payload.content, &allowed_mutators)?;
+        let variants = mutator
+            .expand_async(&payload.content, &allowed_mutators)
+            .await?;
         for (content, mutators) in variants {
             if work_items.len() >= ctx.budget.max_payloads {
                 break;

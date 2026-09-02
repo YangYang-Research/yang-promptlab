@@ -116,16 +116,32 @@ pub fn attack_executor(transport: PluginAwareTransport) -> AttackExecutor<Plugin
 pub fn attack_executor_with_variants(
     transport: PluginAwareTransport,
     variants_per_test: usize,
+    mutation_level: Option<&str>,
+    llm: Option<std::sync::Arc<dyn promptlab_attack::LlmComplete>>,
 ) -> AttackExecutor<PluginAwareTransport> {
     use promptlab_attack::{MutatorConfig, MutatorKind, PayloadMutator};
     let max_per_payload = variants_per_test.saturating_sub(1);
+    let chain_depth = match mutation_level
+        .unwrap_or("medium")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "extreme" => 2,
+        "high" => 1,
+        _ => 0,
+    };
+    let config = MutatorConfig {
+        enabled: MutatorKind::all().to_vec(),
+        max_per_payload,
+        chain_depth,
+    };
     let mutator = if max_per_payload == 0 {
         PayloadMutator::identity()
+    } else if let Some(llm) = llm {
+        PayloadMutator::with_llm(config, llm)
     } else {
-        PayloadMutator::new(MutatorConfig {
-            enabled: MutatorKind::all().to_vec(),
-            max_per_payload,
-        })
+        PayloadMutator::new(config)
     };
     attack_executor(transport).with_mutator(mutator)
 }

@@ -1,10 +1,22 @@
 mod encodings;
 mod language;
+mod llm_prompts;
+mod obfuscation;
 
 use serde::{Deserialize, Serialize};
 
 pub use encodings::{base64_encode, hex_encode, html_encode, unicode_obfuscate};
 pub use language::{language_pivot, language_pivot_locale};
+pub use obfuscation::{
+    bidi_override, caesar_cipher, capitalization_shuffle, crossover_wrap, disemvowel,
+    expand_after_wrap, expand_before_wrap, fullwidth_ascii, inject_prefix_wrap, math_alphanumeric,
+    morse_encode, refusal_suppression_wrap, rule_rephrase, shorten_payload, tag_char_smuggle,
+    url_encode, zero_width_variants,
+};
+pub use llm_prompts::{
+    llm_crossover_prompt, llm_few_shot_prompt, llm_rephrase_prompt, llm_transfer_prompt,
+    sanitize_llm_mutator_output, LLM_MUTATOR_SYSTEM,
+};
 
 use crate::error::{PayloadError, PayloadResult};
 use crate::types::MutationKind;
