@@ -31,11 +31,24 @@ impl ModelCapabilities {
             supports_json: true,
             supports_tool_calling: matches!(
                 provider,
-                "openai" | "anthropic" | "gemini" | "nvidia" | "openrouter" | "azure" | "custom"
+                "openai"
+                    | "anthropic"
+                    | "gemini"
+                    | "nvidia"
+                    | "openrouter"
+                    | "yangyang"
+                    | "azure"
+                    | "custom"
             ),
             supports_function_calling: matches!(
                 provider,
-                "openai" | "anthropic" | "nvidia" | "openrouter" | "azure" | "custom"
+                "openai"
+                    | "anthropic"
+                    | "nvidia"
+                    | "openrouter"
+                    | "yangyang"
+                    | "azure"
+                    | "custom"
             ),
             ..Self::default()
         };

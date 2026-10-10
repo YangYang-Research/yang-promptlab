@@ -235,7 +235,14 @@ fn looks_like_openrouter_model(model: &str) -> bool {
 fn third_party_requires_api_key(provider: &str) -> bool {
     matches!(
         provider.trim().to_ascii_lowercase().as_str(),
-        "nvidia" | "openai" | "anthropic" | "gemini" | "openrouter" | "azure" | "bedrock"
+        "nvidia"
+            | "openai"
+            | "anthropic"
+            | "gemini"
+            | "openrouter"
+            | "azure"
+            | "bedrock"
+            | "yangyang"
     )
 }
 
@@ -263,6 +270,7 @@ fn default_base_url_for_provider(provider: &str) -> Option<String> {
     match provider {
         "openrouter" => Some("https://openrouter.ai/api/v1".into()),
         "nvidia" => Some("https://integrate.api.nvidia.com/v1".into()),
+        "yangyang" => Some("https://inference.yyng.icu/v1".into()),
         _ => None,
     }
 }

@@ -10,6 +10,7 @@ export type ThirdPartyProvider =
   | "bedrock"
   | "openrouter"
   | "nvidia"
+  | "yangyang"
   | "custom";
 
 export type ThirdPartyModelForm = {
@@ -55,6 +56,7 @@ const KNOWN_THIRD_PARTY_PROVIDERS = new Set<ThirdPartyProvider>([
   "bedrock",
   "openrouter",
   "nvidia",
+  "yangyang",
 ]);
 
 export const THIRD_PARTY_PROVIDERS: Array<{
@@ -124,6 +126,14 @@ export const THIRD_PARTY_PROVIDERS: Array<{
     apiKeyEnv: "OPENROUTER_API_KEY",
     baseUrlPlaceholder: "https://openrouter.ai/api/v1",
     modelsDocsUrl: "https://openrouter.ai/models",
+  },
+  {
+    value: "yangyang",
+    label: "YangYang",
+    modelPlaceholder: "@cf/meta/llama-3.1-8b-instruct",
+    apiKeyEnv: "YANG_API_TOKEN",
+    baseUrlPlaceholder: "https://inference.yyng.icu/v1",
+    modelsDocsUrl: "https://yyng.icu/docs/models",
   },
   {
     value: "custom",
