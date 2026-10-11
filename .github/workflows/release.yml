@@ -59,11 +59,11 @@ jobs:
           scripts/generate-release-notes.sh release-notes.md
 
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            # Refresh notes/title only — do not force --draft (would unpublish a live release).
             gh release edit "$TAG" \
               --repo "${{ github.repository }}" \
               --title "$TITLE" \
-              --notes-file release-notes.md \
-              --draft
+              --notes-file release-notes.md
           else
             gh release create "$TAG" \
               --repo "${{ github.repository }}" \
