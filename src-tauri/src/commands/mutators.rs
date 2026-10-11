@@ -201,6 +201,7 @@ async fn prompt_lab_factory_upgrade(
     }
 }
 
+#[cfg(test)]
 fn expand_variants_sync(content: &str) -> CommandResult<Vec<PromptLabVariantDto>> {
     let kinds = MutatorKind::all();
     let mutator = PayloadMutator::new(MutatorConfig {
