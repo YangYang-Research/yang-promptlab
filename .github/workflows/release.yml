@@ -90,13 +90,8 @@ jobs:
     runs-on: macos-latest
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
+      # Do not put APPLE_* here — empty secret → empty env var → Tauri security import fails.
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/release-build
@@ -106,6 +101,12 @@ jobs:
           tag: ${{ needs.release-notes.outputs.tag }}
           release_name: ${{ needs.release-notes.outputs.title }}
           release_body: ${{ needs.release-notes.outputs.body }}
+          apple_certificate: ${{ secrets.APPLE_CERTIFICATE }}
+          apple_certificate_password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          apple_signing_identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          apple_id: ${{ secrets.APPLE_ID }}
+          apple_password: ${{ secrets.APPLE_PASSWORD }}
+          apple_team_id: ${{ secrets.APPLE_TEAM_ID }}
 
   build-macos-x86_64:
     name: build macOS Intel
@@ -114,12 +115,6 @@ jobs:
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/release-build
@@ -129,6 +124,12 @@ jobs:
           tag: ${{ needs.release-notes.outputs.tag }}
           release_name: ${{ needs.release-notes.outputs.title }}
           release_body: ${{ needs.release-notes.outputs.body }}
+          apple_certificate: ${{ secrets.APPLE_CERTIFICATE }}
+          apple_certificate_password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          apple_signing_identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          apple_id: ${{ secrets.APPLE_ID }}
+          apple_password: ${{ secrets.APPLE_PASSWORD }}
+          apple_team_id: ${{ secrets.APPLE_TEAM_ID }}
 
   build-linux:
     name: build Linux
