@@ -1,8 +1,9 @@
 name: Release
 
-# One workflow. Stages = jobs. Fail one platform → Actions → Re-run failed jobs
-# re-runs only that job (same commit). Push a code fix → synchronize rebuilds
-# all platforms at the new SHA.
+# One workflow. Stages = jobs:
+#   notes → 4× build → Publish update manifest → Upload to R2 CDN
+# Fail one platform → Re-run failed jobs (that job only). Manifest + R2 only
+# run after all 4 builds succeed. Push code fix → synchronize rebuilds all.
 #
 # Code signing (optional — unsigned if secrets missing):
 #   Windows: WINDOWS_CODESIGN_PASSWORD
@@ -160,7 +161,8 @@ jobs:
           release_name: ${{ needs.release-notes.outputs.title }}
           release_body: ${{ needs.release-notes.outputs.body }}
 
-  update-manifest:
+  # Gate: only after all 4 platform builds succeed (no always()).
+  publish-manifest:
     name: Publish update manifest
     needs:
       - release-notes
@@ -168,7 +170,6 @@ jobs:
       - build-macos-x86_64
       - build-linux
       - build-windows
-    if: ${{ always() && !cancelled() && needs.release-notes.result == 'success' }}
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
@@ -184,59 +185,68 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-notes.outputs.tag }}
           REPO: ${{ github.repository }}
-          BUILD_MAC_ARM: ${{ needs.build-macos-aarch64.result }}
-          BUILD_MAC_INTEL: ${{ needs.build-macos-x86_64.result }}
-          BUILD_LINUX: ${{ needs.build-linux.result }}
-          BUILD_WINDOWS: ${{ needs.build-windows.result }}
         run: |
           set -euo pipefail
           mkdir -p dist-assets
-          gh release download "$TAG" --repo "$REPO" --dir dist-assets --pattern 'PromptLab-*' || true
+          gh release download "$TAG" --repo "$REPO" --dir dist-assets --pattern 'PromptLab-*'
           VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
           NOTES="$(gh release view "$TAG" --repo "$REPO" --json body --jq .body 2>/dev/null | head -c 2000 || true)"
           VERSION="$VERSION" TAG="$TAG" REPO="$REPO" ASSET_DIR=./dist-assets \
             NOTES="${NOTES:-Current release.}" \
             node scripts/generate-update-manifest.mjs
-          gh release upload "$TAG" manifests/version.json --repo "$REPO" --clobber
-
-          all_ok=true
-          for result in "$BUILD_MAC_ARM" "$BUILD_MAC_INTEL" "$BUILD_LINUX" "$BUILD_WINDOWS"; do
-            [[ "$result" == "success" ]] || all_ok=false
-          done
 
           HASHED="$(node -e "const m=require('./manifests/version.json'); console.log(Object.values(m.platforms).filter(p=>p.sha256).length)")"
-          if [[ "$all_ok" == "true" && "$HASHED" -gt 0 ]]; then
-            gh release edit "$TAG" --repo "$REPO" --draft=false
-            echo "Published $TAG ($HASHED platform hash(es)) for auto-update"
-          else
-            echo "Leaving $TAG as draft (hashed=$HASHED mac_arm=$BUILD_MAC_ARM mac_intel=$BUILD_MAC_INTEL linux=$BUILD_LINUX windows=$BUILD_WINDOWS)"
+          if [[ "$HASHED" -lt 4 ]]; then
+            echo "error: expected 4 platform hashes in version.json, got $HASHED" >&2
+            node -e "console.log(JSON.stringify(require('./manifests/version.json').platforms,null,2))"
+            exit 1
           fi
 
-      - name: Mirror release to yangyang R2 CDN
+          gh release upload "$TAG" manifests/version.json --repo "$REPO" --clobber
+          gh release edit "$TAG" --repo "$REPO" --draft=false
+          echo "Published $TAG ($HASHED platform hash(es)) for auto-update"
+
+  upload-r2:
+    name: Upload to R2 CDN
+    needs:
+      - release-notes
+      - publish-manifest
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Download release assets + publish to R2
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-notes.outputs.tag }}
+          REPO: ${{ github.repository }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: yangyang-org-public
-          TAG: ${{ needs.release-notes.outputs.tag }}
-          BUILD_MAC_ARM: ${{ needs.build-macos-aarch64.result }}
-          BUILD_MAC_INTEL: ${{ needs.build-macos-x86_64.result }}
-          BUILD_LINUX: ${{ needs.build-linux.result }}
-          BUILD_WINDOWS: ${{ needs.build-windows.result }}
         run: |
           set -euo pipefail
-          all_ok=true
-          for result in "$BUILD_MAC_ARM" "$BUILD_MAC_INTEL" "$BUILD_LINUX" "$BUILD_WINDOWS"; do
-            [[ "$result" == "success" ]] || all_ok=false
+          for var in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY; do
+            if [[ -z "${!var:-}" ]]; then
+              echo "error: secret ${var} is required for R2 upload" >&2
+              exit 1
+            fi
           done
-          if [[ "$all_ok" != "true" ]]; then
-            echo "Skipping R2 mirror (not all platform jobs succeeded)"
-            exit 0
+
+          mkdir -p dist-assets
+          gh release download "$TAG" --repo "$REPO" --dir dist-assets --pattern 'PromptLab-*'
+          gh release download "$TAG" --repo "$REPO" --dir dist-assets --pattern 'version.json'
+          # Prefer freshly downloaded version.json as the R2 manifest source
+          if [[ -f dist-assets/version.json ]]; then
+            cp dist-assets/version.json manifests/version.json
           fi
-          if [[ -z "${R2_ACCOUNT_ID:-}" || -z "${R2_ACCESS_KEY_ID:-}" || -z "${R2_SECRET_ACCESS_KEY:-}" ]]; then
-            echo "Skipping R2 mirror (R2_* secrets not configured)"
-            exit 0
-          fi
+
           VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
           chmod +x scripts/publish-r2-release.sh
           VERSION="$VERSION" TAG="$TAG" ASSET_DIR=./dist-assets \
