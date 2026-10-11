@@ -49,6 +49,7 @@ mod tests {
             description: None,
             evidence_json: None,
             status: "open".into(),
+            status_comment: None,
             created_at: now,
             updated_at: now,
         }

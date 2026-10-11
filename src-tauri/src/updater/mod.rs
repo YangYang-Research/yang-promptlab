@@ -23,12 +23,18 @@ pub const SKIP_UPDATE_ENV: &str = "PROMPTLAB_SKIP_UPDATE";
 pub const FORCE_UPDATE_ENV: &str = "PROMPTLAB_FORCE_UPDATE";
 pub const MANIFEST_URL_ENV: &str = "PROMPTLAB_UPDATE_MANIFEST_URL";
 
-/// Live update manifest: latest *published* GitHub Release asset `version.json`.
+/// Primary update manifest (GitHub Release `version.json`).
 ///
-/// The release workflow uploads this file and undrafts the release so
-/// `/releases/latest/download/version.json` resolves automatically.
+/// Release workflow uploads this file and undrafts so
+/// `/releases/latest/download/version.json` resolves.
 pub const DEFAULT_MANIFEST_URL: &str =
     "https://github.com/YangYang-Research/yang-promptlab/releases/latest/download/version.json";
+
+/// CDN backup on yangyang R2 public bucket (`yangyang-org-public`).
+pub const DEFAULT_MANIFEST_BACKUP_URL: &str =
+    "https://cdn.yyng.icu/products/yang-promptlab/manifests/version.json";
+
+pub const MANIFEST_BACKUP_URL_ENV: &str = "PROMPTLAB_UPDATE_MANIFEST_BACKUP_URL";
 
 pub(crate) const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -81,6 +87,24 @@ pub fn manifest_url() -> String {
         .unwrap_or_else(|| DEFAULT_MANIFEST_URL.into())
 }
 
+pub fn manifest_backup_url() -> Option<String> {
+    std::env::var(MANIFEST_BACKUP_URL_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| Some(DEFAULT_MANIFEST_BACKUP_URL.into()))
+        .filter(|backup| backup != &manifest_url())
+}
+
+/// GitHub primary, then CDN backup (if distinct).
+pub fn manifest_urls() -> Vec<String> {
+    let mut urls = vec![manifest_url()];
+    if let Some(backup) = manifest_backup_url() {
+        urls.push(backup);
+    }
+    urls
+}
+
 pub fn auto_apply_blocked() -> Option<String> {
     if env_flag(SKIP_UPDATE_ENV) {
         return Some("updates disabled (PROMPTLAB_SKIP_UPDATE)".into());
@@ -131,11 +155,12 @@ pub async fn check_for_update(app: Option<&AppHandle>) -> CommandResult<UpdateCh
         );
     }
 
-    let url = manifest_url();
-    let manifest = match download::fetch_manifest(&url).await {
+    let urls = manifest_urls();
+    let primary = urls.first().cloned().unwrap_or_default();
+    let manifest = match download::fetch_manifest(&urls).await {
         Ok(manifest) => manifest,
         Err(err) => {
-            warn!(error = %err, url = %url, "update manifest fetch failed");
+            warn!(error = %err, "update manifest fetch failed on all sources");
             dto.skipped_reason = Some(err.to_string());
             if let Some(app) = app {
                 emit_progress(
@@ -172,7 +197,7 @@ pub async fn check_for_update(app: Option<&AppHandle>) -> CommandResult<UpdateCh
     }
 
     let platform = current_platform_key();
-    if resolve_asset(&manifest, &url, &platform).is_err() {
+    if resolve_asset(&manifest, &primary, &platform).is_err() {
         dto.skipped_reason = Some(format!("no installer for platform {platform}"));
         return Ok(dto);
     }
@@ -206,10 +231,11 @@ pub async fn apply_if_available(app: &AppHandle) -> CommandResult<UpdateCheckDto
         return Ok(dto);
     }
 
-    let url = manifest_url();
-    let manifest = download::fetch_manifest(&url).await.map_err(map_err)?;
+    let urls = manifest_urls();
+    let primary = urls.first().cloned().unwrap_or_default();
+    let manifest = download::fetch_manifest(&urls).await.map_err(map_err)?;
     let platform = current_platform_key();
-    let asset = resolve_asset(&manifest, &url, &platform).map_err(map_err)?;
+    let asset = resolve_asset(&manifest, &primary, &platform).map_err(map_err)?;
 
     if asset.sha256.trim().is_empty() {
         dto.skipped_reason = Some("update skipped: installer sha256 is missing".into());
@@ -334,5 +360,15 @@ mod tests {
         assert!(DEFAULT_MANIFEST_URL.starts_with("https://"));
         assert!(DEFAULT_MANIFEST_URL.contains("/releases/latest/download/"));
         assert!(DEFAULT_MANIFEST_URL.ends_with("/version.json"));
+        assert!(DEFAULT_MANIFEST_BACKUP_URL.starts_with("https://cdn.yyng.icu/"));
+        assert!(DEFAULT_MANIFEST_BACKUP_URL.contains("/products/yang-promptlab/manifests/"));
+    }
+
+    #[test]
+    fn manifest_urls_primary_then_backup() {
+        let urls = manifest_urls();
+        assert_eq!(urls.len(), 2);
+        assert_eq!(urls[0], DEFAULT_MANIFEST_URL);
+        assert_eq!(urls[1], DEFAULT_MANIFEST_BACKUP_URL);
     }
 }

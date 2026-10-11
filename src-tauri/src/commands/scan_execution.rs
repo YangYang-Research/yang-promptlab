@@ -234,6 +234,7 @@ fn merge_run_options_with_pacing(
         CategoryRunOptions {
             max_payloads: 20,
             variants_per_test: 1,
+            mutation_level: "medium".into(),
             max_concurrent_requests: None,
             inter_request_delay_ms: None,
             timeout_ms: None,

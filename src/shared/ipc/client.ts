@@ -81,6 +81,7 @@ export type FindingDto = {
   description: string | null;
   evidence: unknown;
   status: string;
+  status_comment: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -222,8 +223,8 @@ export const importFindingsSarif = (path: string, projectId?: string | null) =>
     projectId: projectId || null,
   });
 
-export const updateFindingStatus = (id: string, status: string) =>
-  invokeCommand<FindingDto>("finding_update", { id, status });
+export const updateFindingStatus = (id: string, status: string, comment?: string) =>
+  invokeCommand<FindingDto>("finding_update", { id, status, comment: comment ?? null });
 
 export const rejudgeFinding = (id: string) =>
   invokeCommand<FindingDto>("finding_rejudge", { id });

@@ -17,6 +17,7 @@ function finding(id: string, discoveredAt: string): Finding {
     severity: "high",
     category: "prompt_injection",
     status: "open",
+    statusComment: "",
     confidence: 0.9,
     verdict: "vulnerable",
     discoveredAt,

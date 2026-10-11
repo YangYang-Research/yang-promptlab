@@ -13,24 +13,32 @@ const STATUS_OPTIONS: Array<{ value: Finding["status"]; label: string }> = [
 type UpdateFindingStatusModalProps = {
   open: boolean;
   currentStatus: Finding["status"];
+  currentComment?: string;
   submitting?: boolean;
   onClose: () => void;
-  onSubmit: (status: Finding["status"]) => void | Promise<void>;
+  onSubmit: (status: Finding["status"], comment: string) => void | Promise<void>;
 };
 
 export function UpdateFindingStatusModal({
   open,
   currentStatus,
+  currentComment = "",
   submitting = false,
   onClose,
   onSubmit,
 }: UpdateFindingStatusModalProps) {
   const [status, setStatus] = useState<Finding["status"]>(currentStatus);
+  const [comment, setComment] = useState(currentComment);
 
   useEffect(() => {
     if (!open) return;
     setStatus(currentStatus);
-  }, [open, currentStatus]);
+    setComment(currentComment);
+  }, [open, currentStatus, currentComment]);
+
+  const trimmedComment = comment.trim();
+  const trimmedCurrentComment = currentComment.trim();
+  const unchanged = status === currentStatus && trimmedComment === trimmedCurrentComment;
 
   return (
     <Modal
@@ -46,8 +54,8 @@ export function UpdateFindingStatusModal({
           </Button>
           <Button
             variant="primary"
-            disabled={submitting || status === currentStatus}
-            onClick={() => void onSubmit(status)}
+            disabled={submitting || unchanged}
+            onClick={() => void onSubmit(status, comment)}
           >
             {submitting ? "Saving…" : "Save"}
           </Button>
@@ -70,6 +78,20 @@ export function UpdateFindingStatusModal({
             </option>
           ))}
         </Select>
+      </div>
+      <div className="field">
+        <label className="field__label" htmlFor="finding-status-comment">
+          Comment
+        </label>
+        <textarea
+          id="finding-status-comment"
+          className="input textarea"
+          rows={4}
+          value={comment}
+          onChange={(event) => setComment(event.target.value)}
+          disabled={submitting}
+          placeholder="Add a note about this status change (optional)"
+        />
       </div>
     </Modal>
   );

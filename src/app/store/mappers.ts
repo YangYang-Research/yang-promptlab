@@ -159,6 +159,7 @@ export function mapFindings(findings: FindingDto[], targets: TargetDto[]): Findi
       severity: coerceSeverity(f.severity),
       category: f.category ?? "general",
       status: coerceFindingStatus(f.status),
+      statusComment: f.status_comment ?? "",
       confidence: extractConfidence(f.evidence),
       verdict: extractVerdict(f.evidence),
       discoveredAt: f.created_at,

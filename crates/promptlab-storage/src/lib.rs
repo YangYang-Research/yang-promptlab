@@ -21,7 +21,8 @@ pub use repositories::{
     AuthRecordingRepository, AuthSessionRepository, EndpointRepository, FindingRepository,
     HardwareProfileRepository, JudgeRoleWeightsRepository, ModelRepository,
     MutatorSettingsRepository, PayloadRepository, PluginRepository, ProjectRepository,
-    ReportRepository, Repositories, RuntimeTrafficRepository, ScanRepository, TargetRepository,
+    PromptLabHistoryRepository, ReportRepository, Repositories, RuntimeTrafficRepository,
+    ScanRepository, TargetRepository,
 };
 
 pub use repositories::sqlite::{

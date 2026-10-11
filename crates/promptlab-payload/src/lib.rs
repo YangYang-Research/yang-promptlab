@@ -12,8 +12,13 @@ pub mod types;
 pub use error::{PayloadError, PayloadResult};
 pub use library::{parse_category, CatalogSeedEntry, PayloadDatabase};
 pub use mutation::{
-    base64_encode, hex_encode, html_encode, language_pivot, unicode_obfuscate, MutatedVariant,
-    MutationConfig, MutationEngine,
+    base64_encode, bidi_override, caesar_cipher, capitalization_shuffle, crossover_wrap,
+    disemvowel, expand_after_wrap, expand_before_wrap, fullwidth_ascii, hex_encode, html_encode,
+    inject_prefix_wrap, language_pivot, math_alphanumeric, morse_encode, refusal_suppression_wrap,
+    rule_rephrase, shorten_payload, tag_char_smuggle, unicode_obfuscate, url_encode,
+    zero_width_variants, llm_crossover_prompt, llm_few_shot_prompt, llm_rephrase_prompt,
+    llm_transfer_prompt, sanitize_llm_mutator_output, LLM_MUTATOR_SYSTEM,
+    MutatedVariant, MutationConfig, MutationEngine,
 };
 pub use pipeline::{GenerateRequest, PayloadPipeline};
 pub use types::{

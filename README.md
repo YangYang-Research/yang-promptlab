@@ -93,7 +93,7 @@ Yazg, planning, and judging use the model you register in Models / Settings (rem
 
 | Model | Provider |
 |-------|----------|
-| Remote | OpenAI, Anthropic, Google, Azure, AWS Bedrock, NVIDIA, OpenRouter, Custom (`/v1`) |
+| Remote | OpenAI, Anthropic, Google, Azure, AWS Bedrock, NVIDIA, OpenRouter, YangYang, Custom (`/v1`) |
 |-------|----------|
 
 ---

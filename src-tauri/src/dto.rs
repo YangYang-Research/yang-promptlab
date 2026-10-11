@@ -291,6 +291,7 @@ pub struct FindingDto {
     pub description: Option<String>,
     pub evidence: Option<serde_json::Value>,
     pub status: String,
+    pub status_comment: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -308,6 +309,7 @@ impl From<Finding> for FindingDto {
             description: f.description,
             evidence: json_opt(f.evidence_json),
             status: f.status,
+            status_comment: f.status_comment,
             created_at: ts(f.created_at),
             updated_at: ts(f.updated_at),
         }

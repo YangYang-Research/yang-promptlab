@@ -56,6 +56,7 @@ pub struct Finding {
     pub description: Option<String>,
     pub evidence_json: Option<String>,
     pub status: String,
+    pub status_comment: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -246,6 +247,7 @@ pub struct UpdateFinding {
     pub description: Option<String>,
     pub evidence_json: Option<serde_json::Value>,
     pub status: Option<String>,
+    pub status_comment: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -456,6 +458,21 @@ pub struct UpdateJudgeRoleWeights {
     pub classifier: f64,
     pub attacker: f64,
     pub default_llm: f64,
+}
+
+/// Prompt Lab expand history entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct PromptLabHistory {
+    pub id: String,
+    pub seed_prompt: String,
+    pub variants_json: String,
+    pub created_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreatePromptLabHistory {
+    pub seed_prompt: String,
+    pub variants_json: String,
 }
 
 /// App-wide attack mutator allowlist (Advanced → Mutators).

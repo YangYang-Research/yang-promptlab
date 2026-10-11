@@ -6,16 +6,39 @@ use sha2::{Digest, Sha256};
 use tauri::AppHandle;
 use url::Url;
 
-use super::manifest::{validate_https_url, UpdateManifest};
-use super::manifest::{parse_manifest, ResolvedAsset};
+use super::manifest::{parse_manifest, validate_https_url, ResolvedAsset, UpdateManifest};
 use super::{emit_progress, UpdateError, UpdateProgressDto, CURRENT_VERSION};
+use tracing::warn;
 
 const MANIFEST_TIMEOUT: Duration = Duration::from_secs(15);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_INSTALLER_BYTES: u64 = 512 * 1024 * 1024;
 
-pub async fn fetch_manifest(url: &str) -> Result<UpdateManifest, UpdateError> {
+/// Fetch manifest from the first working URL (GitHub primary, CDN backup).
+pub async fn fetch_manifest(urls: &[String]) -> Result<UpdateManifest, UpdateError> {
+    if urls.is_empty() {
+        return Err(UpdateError::Network("no manifest URLs configured".into()));
+    }
+    let mut last_err = UpdateError::Network("manifest fetch failed".into());
+    for (index, url) in urls.iter().enumerate() {
+        match fetch_manifest_once(url).await {
+            Ok(manifest) => {
+                if index > 0 {
+                    warn!(url = %url, "update manifest loaded from backup");
+                }
+                return Ok(manifest);
+            }
+            Err(err) => {
+                warn!(error = %err, url = %url, "update manifest fetch attempt failed");
+                last_err = err;
+            }
+        }
+    }
+    Err(last_err)
+}
+
+async fn fetch_manifest_once(url: &str) -> Result<UpdateManifest, UpdateError> {
     let parsed = Url::parse(url).map_err(|err| UpdateError::UnsafeUrl(err.to_string()))?;
     validate_https_url(&parsed)?;
     let client = http_client(MANIFEST_TIMEOUT)?;
@@ -43,17 +66,47 @@ pub async fn download_installer(
     dest_dir: &Path,
     latest_version: &str,
 ) -> Result<PathBuf, UpdateError> {
-    let parsed = Url::parse(&asset.url).map_err(|err| UpdateError::UnsafeUrl(err.to_string()))?;
-    validate_https_url(&parsed)?;
+    if asset.urls.is_empty() {
+        return Err(UpdateError::Network("no installer URLs".into()));
+    }
 
     let dest = dest_dir.join(&asset.filename);
     if dest.exists() {
         let _ = std::fs::remove_file(&dest);
     }
 
+    let mut last_err = UpdateError::Network("download failed".into());
+    for (index, url) in asset.urls.iter().enumerate() {
+        match download_installer_once(app, asset, url, &dest, latest_version).await {
+            Ok(path) => {
+                if index > 0 {
+                    warn!(url = %url, "installer downloaded from backup CDN");
+                }
+                return Ok(path);
+            }
+            Err(err) => {
+                warn!(error = %err, url = %url, "installer download attempt failed");
+                let _ = std::fs::remove_file(dest.with_extension("partial"));
+                last_err = err;
+            }
+        }
+    }
+    Err(last_err)
+}
+
+async fn download_installer_once(
+    app: &AppHandle,
+    asset: &ResolvedAsset,
+    url: &str,
+    dest: &Path,
+    latest_version: &str,
+) -> Result<PathBuf, UpdateError> {
+    let parsed = Url::parse(url).map_err(|err| UpdateError::UnsafeUrl(err.to_string()))?;
+    validate_https_url(&parsed)?;
+
     let client = http_client(DOWNLOAD_TIMEOUT)?;
     let mut response = client
-        .get(&asset.url)
+        .get(url)
         .send()
         .await
         .map_err(|err| UpdateError::Network(format!("download failed: {err}")))?;
@@ -73,6 +126,9 @@ pub async fn download_installer(
     }
 
     let tmp = dest.with_extension("partial");
+    if tmp.exists() {
+        let _ = std::fs::remove_file(&tmp);
+    }
     let mut file = std::fs::File::create(&tmp)
         .map_err(|err| UpdateError::Network(format!("cannot write installer: {err}")))?;
     let mut downloaded = 0u64;
@@ -111,9 +167,9 @@ pub async fn download_installer(
     file.flush()
         .map_err(|err| UpdateError::Network(format!("cannot flush installer: {err}")))?;
     drop(file);
-    std::fs::rename(&tmp, &dest)
+    std::fs::rename(&tmp, dest)
         .map_err(|err| UpdateError::Network(format!("cannot finalize installer: {err}")))?;
-    Ok(dest)
+    Ok(dest.to_path_buf())
 }
 
 pub fn verify_sha256(path: &Path, expected: &str) -> Result<(), UpdateError> {

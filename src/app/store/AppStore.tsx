@@ -298,8 +298,8 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
         }
       },
       deleteTarget: (id) => runMutation("deleteTarget", () => deleteTargetCmd(id)),
-      updateFindingStatus: (id, status) =>
-        runMutation("updateFindingStatus", () => updateFindingStatusCmd(id, status)),
+      updateFindingStatus: (id, status, comment) =>
+        runMutation("updateFindingStatus", () => updateFindingStatusCmd(id, status, comment)),
       deleteFinding: (id) => runMutation("deleteFinding", () => deleteFindingCmd(id)),
       generateReport: (projectId, scanId, format, kind) =>
         runMutation("generateReport", () =>

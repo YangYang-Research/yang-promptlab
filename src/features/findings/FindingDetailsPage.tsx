@@ -47,11 +47,11 @@ export function FindingDetailsPage() {
   );
 
   const handleUpdateStatus = useCallback(
-    async (status: Finding["status"]) => {
+    async (status: Finding["status"], comment: string) => {
       if (!finding) return;
       setBusy("status");
       try {
-        await actions.updateFindingStatus(finding.id, status);
+        await actions.updateFindingStatus(finding.id, status, comment);
         notify("Finding status updated", "success");
         setStatusModalOpen(false);
       } catch (error) {
@@ -161,6 +161,7 @@ export function FindingDetailsPage() {
       <UpdateFindingStatusModal
         open={statusModalOpen}
         currentStatus={finding.status}
+        currentComment={finding.statusComment}
         submitting={busy === "status"}
         onClose={() => {
           if (busy !== "status") setStatusModalOpen(false);
@@ -258,6 +259,12 @@ export function FindingDetailsPage() {
               <span className="finding-details__signal-label">Status</span>
               <FindingStatusBadge status={finding.status} />
             </div>
+            {finding.statusComment ? (
+              <div className="finding-details__signal-item finding-details__signal-item--comment">
+                <span className="finding-details__signal-label">Status comment</span>
+                <p className="finding-details__status-comment">{finding.statusComment}</p>
+              </div>
+            ) : null}
             <div className="finding-details__signal-item finding-details__signal-item--compliance">
               <span className="finding-details__signal-label">Compliance</span>
               <div className="finding-details__compliance-list">

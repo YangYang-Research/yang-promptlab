@@ -13,6 +13,7 @@ pub mod method_heuristic;
 pub mod harness_runtime;
 pub mod inference_host;
 pub mod inference_settings;
+pub mod llm_mutator;
 pub mod model_registry;
 pub mod third_party_credentials;
 pub mod embedded_runtime;
@@ -407,6 +408,11 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::runtime::runtime_set_judge_role_weights,
             commands::mutators::mutator_settings_get,
             commands::mutators::mutator_settings_set,
+            commands::mutators::prompt_lab_upgrade,
+            commands::mutators::prompt_lab_expand,
+            commands::mutators::prompt_lab_history_list,
+            commands::mutators::prompt_lab_history_get,
+            commands::mutators::prompt_lab_history_delete,
             commands::runtime::runtime_test_connectivity,
             commands::runtime::runtime_test_inference,
             commands::security::security_audit,

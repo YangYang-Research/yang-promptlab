@@ -13,19 +13,23 @@ use crate::util::now;
 const DEFAULT_ENABLED_JSON: &str = concat!(
     r#"["base64_wrap","unicode_homoglyph","delimiter_injection","role_swap","chunk_split","#,
     r#""json_escape","repeat_amplify","hex_wrap","html_wrap","rot13_wrap","leetspeak","#,
-    r#""reversed_text","token_split","markdown_code_fence","zero_width_dense","language_pivot"]"#
+    r#""reversed_text","token_split","markdown_code_fence","zero_width_dense","language_pivot","#,
+    r#""refusal_suppression","inject_prefix","url_wrap","caesar_wrap","morse_wrap","fullwidth_ascii","#,
+    r#""bidi_override","tag_char_smuggle","zero_width_variants","math_alphanumeric","disemvowel","#,
+    r#""expand_before","expand_after","capitalization_shuffle","rephrase","shorten","crossover","#,
+    r#""llm_rephrase","llm_crossover","llm_few_shot","llm_transfer"]"#
 );
 
 const DEFAULT_CATEGORY_MUTATORS_JSON: &str = concat!(
-    r#"{"prompt_injection":["delimiter_injection","language_pivot","role_swap","markdown_code_fence","base64_wrap","html_wrap","hex_wrap","token_split"],"#,
-    r#""jailbreak":["role_swap","language_pivot","unicode_homoglyph","base64_wrap","html_wrap","leetspeak","chunk_split","zero_width_dense","rot13_wrap","reversed_text"],"#,
-    r#""system_prompt_extraction":["repeat_amplify","language_pivot","delimiter_injection","role_swap","markdown_code_fence","base64_wrap","hex_wrap"],"#,
-    r#""tool_abuse":["json_escape","html_wrap","base64_wrap","delimiter_injection","token_split","markdown_code_fence"],"#,
-    r#""mcp_abuse":["json_escape","html_wrap","base64_wrap","delimiter_injection","token_split","markdown_code_fence"],"#,
-    r#""rag_leakage":["repeat_amplify","delimiter_injection","markdown_code_fence","zero_width_dense","token_split"],"#,
-    r#""memory_poisoning":["repeat_amplify","language_pivot","role_swap","delimiter_injection","markdown_code_fence","chunk_split"],"#,
-    r#""cross_user_leakage":["role_swap","delimiter_injection","repeat_amplify","markdown_code_fence","zero_width_dense"],"#,
-    r#""agent_goal_hijacking":["role_swap","language_pivot","delimiter_injection","markdown_code_fence","repeat_amplify","token_split"]}"#
+    r#"{"prompt_injection":["delimiter_injection","language_pivot","role_swap","markdown_code_fence","base64_wrap","html_wrap","hex_wrap","token_split","refusal_suppression","inject_prefix","url_wrap","expand_before","tag_char_smuggle","fullwidth_ascii","bidi_override","rephrase","crossover","llm_rephrase","llm_crossover","llm_few_shot"],"#,
+    r#""jailbreak":["role_swap","language_pivot","unicode_homoglyph","base64_wrap","html_wrap","leetspeak","chunk_split","zero_width_dense","rot13_wrap","reversed_text","refusal_suppression","inject_prefix","expand_before","expand_after","morse_wrap","caesar_wrap","math_alphanumeric","disemvowel","capitalization_shuffle","rephrase","crossover","bidi_override","tag_char_smuggle","fullwidth_ascii","zero_width_variants","llm_rephrase","llm_crossover","llm_few_shot","llm_transfer"],"#,
+    r#""system_prompt_extraction":["repeat_amplify","language_pivot","delimiter_injection","role_swap","markdown_code_fence","base64_wrap","hex_wrap","refusal_suppression","expand_before","expand_after","url_wrap","disemvowel","rephrase","llm_rephrase","llm_transfer"],"#,
+    r#""tool_abuse":["json_escape","html_wrap","base64_wrap","delimiter_injection","token_split","markdown_code_fence","url_wrap","tag_char_smuggle","bidi_override"],"#,
+    r#""mcp_abuse":["json_escape","html_wrap","base64_wrap","delimiter_injection","token_split","markdown_code_fence","url_wrap","tag_char_smuggle","bidi_override"],"#,
+    r#""rag_leakage":["repeat_amplify","delimiter_injection","markdown_code_fence","zero_width_dense","token_split","zero_width_variants","tag_char_smuggle","refusal_suppression"],"#,
+    r#""memory_poisoning":["repeat_amplify","language_pivot","role_swap","delimiter_injection","markdown_code_fence","chunk_split","expand_before","rephrase","crossover"],"#,
+    r#""cross_user_leakage":["role_swap","delimiter_injection","repeat_amplify","markdown_code_fence","zero_width_dense","inject_prefix","bidi_override","tag_char_smuggle"],"#,
+    r#""agent_goal_hijacking":["role_swap","language_pivot","delimiter_injection","markdown_code_fence","repeat_amplify","token_split","refusal_suppression","expand_after","rephrase","crossover"]}"#
 );
 
 fn known_mutator_ids() -> &'static [&'static str] {
@@ -46,6 +50,27 @@ fn known_mutator_ids() -> &'static [&'static str] {
         "markdown_code_fence",
         "zero_width_dense",
         "language_pivot",
+        "refusal_suppression",
+        "inject_prefix",
+        "url_wrap",
+        "caesar_wrap",
+        "morse_wrap",
+        "fullwidth_ascii",
+        "bidi_override",
+        "tag_char_smuggle",
+        "zero_width_variants",
+        "math_alphanumeric",
+        "disemvowel",
+        "expand_before",
+        "expand_after",
+        "capitalization_shuffle",
+        "rephrase",
+        "shorten",
+        "crossover",
+        "llm_rephrase",
+        "llm_crossover",
+        "llm_few_shot",
+        "llm_transfer",
     ]
 }
 
@@ -61,6 +86,15 @@ fn known_category_ids() -> &'static [&'static str] {
         "tool_abuse",
         "mcp_abuse",
     ]
+}
+
+fn to_settings(row: MutatorSettingsRow) -> MutatorSettings {
+    MutatorSettings {
+        id: row.id,
+        enabled_mutators: parse_enabled(&row.enabled_mutators_json),
+        category_mutators: parse_category_map(&row.category_mutators_json),
+        updated_at: row.updated_at,
+    }
 }
 
 #[derive(Clone)]
@@ -118,15 +152,6 @@ fn parse_category_map(raw: &str) -> BTreeMap<String, Vec<String>> {
         )
     } else {
         cleaned
-    }
-}
-
-fn to_settings(row: MutatorSettingsRow) -> MutatorSettings {
-    MutatorSettings {
-        id: row.id,
-        enabled_mutators: parse_enabled(&row.enabled_mutators_json),
-        category_mutators: parse_category_map(&row.category_mutators_json),
-        updated_at: row.updated_at,
     }
 }
 

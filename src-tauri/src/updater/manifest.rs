@@ -23,9 +23,12 @@ pub struct UpdateManifest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePlatformAsset {
-    /// Absolute HTTPS URL or path relative to the manifest URL.
+    /// Primary download URL (GitHub Release). Absolute HTTPS or path relative to manifest.
     #[serde(alias = "path")]
     pub url: String,
+    /// Optional CDN backup (yangyang R2) when primary fails.
+    #[serde(default)]
+    pub backup_url: String,
     #[serde(default)]
     pub filename: String,
     #[serde(default)]
@@ -94,14 +97,22 @@ pub fn resolve_asset(
     let asset = manifest.platforms.get(platform).ok_or_else(|| {
         UpdateError::InvalidManifest(format!("no asset for platform {platform}"))
     })?;
-    let url = resolve_url(manifest_url, asset.url.trim())?;
+    let primary = resolve_url(manifest_url, asset.url.trim())?;
+    let mut urls = vec![primary.clone()];
+    let backup = asset.backup_url.trim();
+    if !backup.is_empty() {
+        let backup_url = resolve_url(manifest_url, backup)?;
+        if backup_url != primary {
+            urls.push(backup_url);
+        }
+    }
     let filename = sanitize_filename(if asset.filename.trim().is_empty() {
-        filename_from_url(&url)
+        filename_from_url(&primary)
     } else {
         asset.filename.trim()
     })?;
     Ok(ResolvedAsset {
-        url,
+        urls,
         filename,
         sha256: asset.sha256.trim().to_ascii_lowercase(),
         size: asset.size,
@@ -110,10 +121,17 @@ pub fn resolve_asset(
 
 #[derive(Debug, Clone)]
 pub struct ResolvedAsset {
-    pub url: String,
+    /// Primary first (GitHub), then optional CDN backup.
+    pub urls: Vec<String>,
     pub filename: String,
     pub sha256: String,
     pub size: Option<u64>,
+}
+
+impl ResolvedAsset {
+    pub fn primary_url(&self) -> &str {
+        self.urls.first().map(String::as_str).unwrap_or("")
+    }
 }
 
 pub fn resolve_url(manifest_url: &str, asset: &str) -> Result<String, UpdateError> {
@@ -212,12 +230,38 @@ mod tests {
         )
         .expect("resolve");
         assert_eq!(
-            asset.url,
+            asset.primary_url(),
             "https://example.com/manifests/PromptLab-0.2.0-darwin-aarch64.dmg"
         );
+        assert_eq!(asset.urls.len(), 1);
         assert_eq!(asset.filename, "PromptLab-0.2.0-darwin-aarch64.dmg");
         assert_eq!(asset.sha256, "abc");
         assert_eq!(asset.size, Some(12));
+    }
+
+    #[test]
+    fn resolves_primary_and_backup_urls() {
+        let raw = r#"{
+          "version": "0.2.0",
+          "platforms": {
+            "darwin-aarch64": {
+              "url": "https://github.com/org/repo/releases/download/v0.2.0/PromptLab-0.2.0-darwin-aarch64.dmg",
+              "backupUrl": "https://cdn.yyng.icu/products/yang-promptlab/releases/v0.2.0/PromptLab-0.2.0-darwin-aarch64.dmg",
+              "filename": "PromptLab-0.2.0-darwin-aarch64.dmg",
+              "sha256": "abc"
+            }
+          }
+        }"#;
+        let manifest = parse_manifest(raw).expect("parse");
+        let asset = resolve_asset(
+            &manifest,
+            "https://github.com/org/repo/releases/latest/download/version.json",
+            "darwin-aarch64",
+        )
+        .expect("resolve");
+        assert_eq!(asset.urls.len(), 2);
+        assert!(asset.urls[0].contains("github.com"));
+        assert!(asset.urls[1].contains("cdn.yyng.icu"));
     }
 
     #[test]

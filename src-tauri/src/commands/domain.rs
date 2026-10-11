@@ -531,6 +531,7 @@ pub async fn finding_update_op(
     state: &AppState,
     id: String,
     status: String,
+    comment: Option<String>,
 ) -> CommandResult<FindingDto> {
     let status = normalize_finding_status(&status)?;
     let finding = state
@@ -540,6 +541,7 @@ pub async fn finding_update_op(
             &id,
             UpdateFinding {
                 status: Some(status),
+                status_comment: comment,
                 ..Default::default()
             },
         )
@@ -1082,8 +1084,9 @@ pub async fn finding_update(
     state: State<'_, AppState>,
     id: String,
     status: String,
+    comment: Option<String>,
 ) -> CommandResult<FindingDto> {
-    finding_update_op(state.inner(), id, status).await
+    finding_update_op(state.inner(), id, status, comment).await
 }
 
 #[tauri::command]

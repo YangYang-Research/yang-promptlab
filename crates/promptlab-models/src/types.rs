@@ -153,6 +153,7 @@ fn remote_provider_display_name(provider: &str) -> String {
         "bedrock" | "aws_bedrock" => "Amazon Bedrock".to_string(),
         "openrouter" => "OpenRouter".to_string(),
         "nvidia" => "NVIDIA".to_string(),
+        "yangyang" | "yang_yang" => "YangYang".to_string(),
         "custom" => "Custom".to_string(),
         other => {
             let mut label = other.to_string();

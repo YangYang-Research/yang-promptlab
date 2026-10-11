@@ -58,6 +58,23 @@ export function IconTree({ className }: IconProps) {
   );
 }
 
+/** Clock / history mark. */
+export function IconHistory({ className }: IconProps) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <circle cx="9" cy="9" r="6.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M9 5.75V9l2.25 1.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** Vertical execution / timeline mark. */
 export function IconTimeline({ className }: IconProps) {
   return (
