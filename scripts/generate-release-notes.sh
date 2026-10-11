@@ -29,10 +29,11 @@ git fetch origin main --depth=200 2>/dev/null || true
 git fetch --tags --force 2>/dev/null || true
 
 if [[ -z "$BASE" ]]; then
-  # Prefer previous published tag so notes cover everything since last release,
-  # not only commits after the last merge to main (which drops already-merged feats).
+  # Prefer previous stable tag (vX.Y.Z only — skip v0.1.0-pr.*, etc.) so notes
+  # cover everything since last release, not only post-merge-to-main commits.
   BASE="$(
     git tag -l 'v*' --sort=-v:refname \
+      | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
       | grep -Ev "^${CURRENT_TAG}$" \
       | head -n1 \
       || true
