@@ -6,26 +6,34 @@ name: Release
 #            APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD (app-specific),
 #            APPLE_TEAM_ID
 
-# Retry guidance:
-#   Prefer Actions → Re-run failed jobs (keeps successful matrix shards).
-#   Do NOT push/synchronize to "retry" — that used to cancel the whole run.
-#   Fresh full release: remove + re-add the `release` label, or workflow_dispatch.
+# Retry / rebuild:
+#   Flaky CI (same commit): Actions → Re-run failed jobs — only that platform
+#   job (+ Publish update manifest). Does not start a new run / cancel others.
+#   Code fix (new commit): push to the PR → synchronize cancels the old run and
+#   rebuilds ALL platforms at the new SHA (so every installer has the fix).
+#   Rebuild one platform at HEAD: workflow_dispatch → pick platform.
 
 on:
   pull_request:
-    # No `synchronize`: a push must not cancel/rebuild platforms that already passed.
-    types: [labeled, reopened]
+    types: [labeled, reopened, synchronize]
   workflow_dispatch:
     inputs:
-      pr_number:
-        description: "PR number with the `release` label (optional if run from that PR)"
-        required: false
-        type: string
+      platform:
+        description: "Which platform job(s) to build"
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - macos-aarch64
+          - macos-x86_64
+          - linux
+          - windows
 
 concurrency:
-  # One release attempt per PR. Queue newer triggers; never cancel in-flight builds.
-  group: release-pr-${{ github.event.pull_request.number || github.event.inputs.pr_number || github.run_id }}
-  cancel-in-progress: false
+  group: release-pr-${{ github.event.pull_request.number || github.run_id }}
+  # Cancel only on new push (code changed). Re-run failed jobs is same run — safe.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}
 
 permissions:
   contents: write
@@ -93,226 +101,94 @@ jobs:
           echo "----- release notes ($TAG) -----"
           cat release-notes.md
 
-  build:
-    name: build
+  build-macos-aarch64:
+    name: build macOS Apple Silicon
     needs: release-notes
-    strategy:
-      # Keep other platforms running when one fails — enables Re-run failed jobs.
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-latest
-            os_name: macOS Apple Silicon
-            args: --target aarch64-apple-darwin
-            rust_target: aarch64-apple-darwin
-            macos_deployment_target: "11.0"
-            asset_glob: 'PromptLab-*-darwin-aarch64.*'
-          - platform: macos-15-intel
-            os_name: macOS Intel
-            args: --target x86_64-apple-darwin
-            rust_target: x86_64-apple-darwin
-            macos_deployment_target: "11.0"
-            asset_glob: 'PromptLab-*-darwin-x86_64.*'
-          - platform: ubuntu-22.04
-            os_name: Linux
-            args: ""
-            rust_target: x86_64-unknown-linux-gnu
-            macos_deployment_target: ""
-            asset_glob: 'PromptLab-*-linux-*'
-          - platform: windows-latest
-            os_name: Windows
-            args: ""
-            rust_target: x86_64-pc-windows-msvc
-            macos_deployment_target: ""
-            asset_glob: 'PromptLab-*-windows-*'
-    runs-on: ${{ matrix.platform }}
-    env:
-      # Keep macOS deployment target aligned with Tauri / Apple Silicon CI.
-      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_deployment_target }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+    if: >-
+      needs.release-notes.result == 'success' &&
+      (github.event_name != 'workflow_dispatch' ||
+       github.event.inputs.platform == 'all' ||
+       github.event.inputs.platform == 'macos-aarch64')
+    uses: ./.github/workflows/release-build-platform.yml
+    with:
+      platform: macos-latest
+      os_name: macOS Apple Silicon
+      args: --target aarch64-apple-darwin
+      rust_target: aarch64-apple-darwin
+      macos_deployment_target: "11.0"
+      tag: ${{ needs.release-notes.outputs.tag }}
+      release_name: ${{ needs.release-notes.outputs.title }}
+      release_body: ${{ needs.release-notes.outputs.body }}
+    secrets: inherit
 
-      - name: Skip if installer already on draft release
-        id: skip
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.release-notes.outputs.tag }}
-          REPO: ${{ github.repository }}
-          ASSET_GLOB: ${{ matrix.asset_glob }}
-        run: |
-          set -euo pipefail
-          # Idempotent: full re-run / queued duplicate skips platforms that already uploaded.
-          if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          while IFS= read -r name; do
-            [[ -z "$name" ]] && continue
-            # shellcheck disable=SC2254
-            case "$name" in
-              $ASSET_GLOB)
-                echo "Asset already present: $name — skipping ${{ matrix.os_name }} build"
-                echo "skip=true" >> "$GITHUB_OUTPUT"
-                exit 0
-                ;;
-            esac
-          done < <(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' 2>/dev/null || true)
-          echo "skip=false" >> "$GITHUB_OUTPUT"
+  build-macos-x86_64:
+    name: build macOS Intel
+    needs: release-notes
+    if: >-
+      needs.release-notes.result == 'success' &&
+      (github.event_name != 'workflow_dispatch' ||
+       github.event.inputs.platform == 'all' ||
+       github.event.inputs.platform == 'macos-x86_64')
+    uses: ./.github/workflows/release-build-platform.yml
+    with:
+      platform: macos-15-intel
+      os_name: macOS Intel
+      args: --target x86_64-apple-darwin
+      rust_target: x86_64-apple-darwin
+      macos_deployment_target: "11.0"
+      tag: ${{ needs.release-notes.outputs.tag }}
+      release_name: ${{ needs.release-notes.outputs.title }}
+      release_body: ${{ needs.release-notes.outputs.body }}
+    secrets: inherit
 
-      - name: Setup Node
-        if: steps.skip.outputs.skip != 'true'
-        uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
+  build-linux:
+    name: build Linux
+    needs: release-notes
+    if: >-
+      needs.release-notes.result == 'success' &&
+      (github.event_name != 'workflow_dispatch' ||
+       github.event.inputs.platform == 'all' ||
+       github.event.inputs.platform == 'linux')
+    uses: ./.github/workflows/release-build-platform.yml
+    with:
+      platform: ubuntu-22.04
+      os_name: Linux
+      args: ""
+      rust_target: x86_64-unknown-linux-gnu
+      macos_deployment_target: ""
+      tag: ${{ needs.release-notes.outputs.tag }}
+      release_name: ${{ needs.release-notes.outputs.title }}
+      release_body: ${{ needs.release-notes.outputs.body }}
+    secrets: inherit
 
-      - name: Setup Rust
-        if: steps.skip.outputs.skip != 'true'
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target }}
-
-      - name: Rust cache
-        if: steps.skip.outputs.skip != 'true'
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            . -> target
-            src-tauri -> target
-
-      - name: Linux Tauri deps
-        if: steps.skip.outputs.skip != 'true' && matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev \
-            build-essential \
-            libssl-dev \
-            libxdo-dev \
-            patchelf \
-            libfuse2
-
-      - name: Install JS deps
-        if: steps.skip.outputs.skip != 'true'
-        run: npm ci
-
-      - name: Create Windows self-signed cert (secret-gated)
-        id: win_sign
-        if: steps.skip.outputs.skip != 'true' && runner.os == 'Windows'
-        shell: pwsh
-        env:
-          WINDOWS_CODESIGN_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PASSWORD)) {
-            Write-Host 'WINDOWS_CODESIGN_PASSWORD not set; skipping Windows signing'
-            exit 0
-          }
-
-          # Bind Subject to the secret so forks without it cannot mint the same OU token.
-          $hmac = [System.Security.Cryptography.HMACSHA256]::new(
-            [Text.Encoding]::UTF8.GetBytes($env:WINDOWS_CODESIGN_PASSWORD)
-          )
-          $token = [BitConverter]::ToString(
-            $hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes('PromptLab-codesign-v1'))
-          ).Replace('-', '').Substring(0, 16).ToLowerInvariant()
-          $subject = "CN=YangYang Research, O=YangYang Research, OU=CI $token"
-
-          Write-Host "Creating self-signed code signing cert..."
-          $cert = New-SelfSignedCertificate `
-            -Type CodeSigningCert `
-            -Subject $subject `
-            -CertStoreLocation 'Cert:\CurrentUser\My' `
-            -KeyExportPolicy Exportable `
-            -KeySpec Signature `
-            -KeyLength 2048 `
-            -HashAlgorithm SHA256 `
-            -NotAfter (Get-Date).AddYears(1)
-
-          $securePass = ConvertTo-SecureString -String $env:WINDOWS_CODESIGN_PASSWORD -Force -AsPlainText
-          $pfxPath = Join-Path $env:RUNNER_TEMP 'windows-codesign.pfx'
-          Export-PfxCertificate -Cert $cert -FilePath $pfxPath -Password $securePass | Out-Null
-          Import-PfxCertificate `
-            -FilePath $pfxPath `
-            -CertStoreLocation 'Cert:\CurrentUser\My' `
-            -Password $securePass `
-            | Out-Null
-
-          $thumbprint = $cert.Thumbprint
-          Write-Host "Windows self-signed thumbprint=$thumbprint subject=$subject"
-
-          $signConfig = @{
-            bundle = @{
-              windows = @{
-                certificateThumbprint = $thumbprint
-                digestAlgorithm       = 'sha256'
-              }
-            }
-          } | ConvertTo-Json -Depth 6 -Compress
-          $configPath = Join-Path $env:GITHUB_WORKSPACE 'src-tauri/signing.windows.json'
-          Set-Content -Path $configPath -Value $signConfig -Encoding utf8
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "config=--config src-tauri/signing.windows.json"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "enabled=true"
-
-      - name: Configure macOS signing env
-        if: steps.skip.outputs.skip != 'true' && runner.os == 'macOS'
-        shell: bash
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          # Empty APPLE_* env vars make Tauri attempt `security import` and fail.
-          # Only export them when secrets are actually configured.
-          if [ -z "${APPLE_CERTIFICATE}" ]; then
-            echo "No APPLE_CERTIFICATE secret; building macOS unsigned (ad-hoc)."
-            exit 0
-          fi
-          {
-            echo "APPLE_CERTIFICATE<<EOF"
-            echo "$APPLE_CERTIFICATE"
-            echo "EOF"
-            echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
-            echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY"
-            echo "APPLE_ID=$APPLE_ID"
-            echo "APPLE_PASSWORD=$APPLE_PASSWORD"
-            echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
-          } >> "$GITHUB_ENV"
-
-      # Pin action-v0.6.2: floating @v0 uses assetNamePattern (not releaseAssetNamePattern).
-      - name: Build installers
-        if: steps.skip.outputs.skip != 'true'
-        uses: tauri-apps/tauri-action@action-v0.6.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: .
-          args: ${{ matrix.args }} ${{ steps.win_sign.outputs.config }}
-          tagName: ${{ needs.release-notes.outputs.tag }}
-          releaseName: ${{ needs.release-notes.outputs.title }}
-          # → PromptLab-0.1.0-darwin-aarch64.dmg, PromptLab-0.1.0-windows-x64-setup.exe, …
-          assetNamePattern: '[name]-[version]-[platform]-[arch][setup][ext]'
-          generateReleaseNotes: false
-          releaseBody: ${{ needs.release-notes.outputs.body }}
-          releaseDraft: true
-          prerelease: false
-          includeUpdaterJson: false
+  build-windows:
+    name: build Windows
+    needs: release-notes
+    if: >-
+      needs.release-notes.result == 'success' &&
+      (github.event_name != 'workflow_dispatch' ||
+       github.event.inputs.platform == 'all' ||
+       github.event.inputs.platform == 'windows')
+    uses: ./.github/workflows/release-build-platform.yml
+    with:
+      platform: windows-latest
+      os_name: Windows
+      args: ""
+      rust_target: x86_64-pc-windows-msvc
+      macos_deployment_target: ""
+      tag: ${{ needs.release-notes.outputs.tag }}
+      release_name: ${{ needs.release-notes.outputs.title }}
+      release_body: ${{ needs.release-notes.outputs.body }}
+    secrets: inherit
 
   update-manifest:
     name: Publish update manifest
-    needs: [release-notes, build]
-    # Run after builds finish (incl. partial failure). Skip only hard cancel.
-    # Re-run failed jobs will re-execute this when a matrix shard or this job fails.
+    needs:
+      - release-notes
+      - build-macos-aarch64
+      - build-macos-x86_64
+      - build-linux
+      - build-windows
     if: ${{ always() && !cancelled() && needs.release-notes.result == 'success' }}
     runs-on: ubuntu-22.04
     steps:
@@ -329,7 +205,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-notes.outputs.tag }}
           REPO: ${{ github.repository }}
-          BUILD_RESULT: ${{ needs.build.result }}
+          BUILD_MAC_ARM: ${{ needs.build-macos-aarch64.result }}
+          BUILD_MAC_INTEL: ${{ needs.build-macos-x86_64.result }}
+          BUILD_LINUX: ${{ needs.build-linux.result }}
+          BUILD_WINDOWS: ${{ needs.build-windows.result }}
         run: |
           set -euo pipefail
           mkdir -p dist-assets
@@ -341,27 +220,47 @@ jobs:
             node scripts/generate-update-manifest.mjs
           gh release upload "$TAG" manifests/version.json --repo "$REPO" --clobber
 
-          # Apps fetch https://github.com/$REPO/releases/latest/download/version.json
-          # which only resolves for published (non-draft) releases. Undraft when we
-          # have at least one hashed installer and the matrix build did not fail.
+          # Treat skipped (workflow_dispatch single-platform) as ok for publish gate.
+          all_ok=true
+          for result in "$BUILD_MAC_ARM" "$BUILD_MAC_INTEL" "$BUILD_LINUX" "$BUILD_WINDOWS"; do
+            case "$result" in
+              success|skipped) ;;
+              *) all_ok=false ;;
+            esac
+          done
+
           HASHED="$(node -e "const m=require('./manifests/version.json'); console.log(Object.values(m.platforms).filter(p=>p.sha256).length)")"
-          if [[ "$BUILD_RESULT" == "success" && "$HASHED" -gt 0 ]]; then
+          if [[ "$all_ok" == "true" && "$HASHED" -eq 4 ]]; then
             gh release edit "$TAG" --repo "$REPO" --draft=false
             echo "Published $TAG ($HASHED platform hash(es)) for auto-update"
           else
-            echo "Leaving $TAG as draft (build=$BUILD_RESULT hashed=$HASHED)"
+            echo "Leaving $TAG as draft (hashed=$HASHED mac_arm=$BUILD_MAC_ARM mac_intel=$BUILD_MAC_INTEL linux=$BUILD_LINUX windows=$BUILD_WINDOWS)"
           fi
 
       - name: Mirror release to yangyang R2 CDN
-        if: ${{ needs.build.result == 'success' }}
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: yangyang-org-public
           TAG: ${{ needs.release-notes.outputs.tag }}
+          BUILD_MAC_ARM: ${{ needs.build-macos-aarch64.result }}
+          BUILD_MAC_INTEL: ${{ needs.build-macos-x86_64.result }}
+          BUILD_LINUX: ${{ needs.build-linux.result }}
+          BUILD_WINDOWS: ${{ needs.build-windows.result }}
         run: |
           set -euo pipefail
+          all_ok=true
+          for result in "$BUILD_MAC_ARM" "$BUILD_MAC_INTEL" "$BUILD_LINUX" "$BUILD_WINDOWS"; do
+            case "$result" in
+              success|skipped) ;;
+              *) all_ok=false ;;
+            esac
+          done
+          if [[ "$all_ok" != "true" ]]; then
+            echo "Skipping R2 mirror (not all platform jobs ok)"
+            exit 0
+          fi
           if [[ -z "${R2_ACCOUNT_ID:-}" || -z "${R2_ACCESS_KEY_ID:-}" || -z "${R2_SECRET_ACCESS_KEY:-}" ]]; then
             echo "Skipping R2 mirror (R2_* secrets not configured)"
             exit 0
@@ -371,4 +270,3 @@ jobs:
           VERSION="$VERSION" TAG="$TAG" ASSET_DIR=./dist-assets \
             MANIFEST=./manifests/version.json \
             scripts/publish-r2-release.sh
-

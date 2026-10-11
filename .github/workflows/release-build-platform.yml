@@ -1,0 +1,206 @@
+# Reusable single-platform installer build for Release.
+# Called once per OS so Actions → Re-run failed jobs targets only that platform.
+
+name: Release build platform
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: Runner label
+        required: true
+        type: string
+      os_name:
+        description: Human-readable OS name
+        required: true
+        type: string
+      args:
+        description: Extra cargo/tauri args (e.g. --target …)
+        required: false
+        type: string
+        default: ""
+      rust_target:
+        description: Rust target triple
+        required: true
+        type: string
+      macos_deployment_target:
+        description: MACOSX_DEPLOYMENT_TARGET (empty on non-macOS)
+        required: false
+        type: string
+        default: ""
+      tag:
+        description: GitHub release tag (e.g. v0.1.1)
+        required: true
+        type: string
+      release_name:
+        description: GitHub release title
+        required: true
+        type: string
+      release_body:
+        description: Release notes body
+        required: false
+        type: string
+        default: ""
+    secrets:
+      WINDOWS_CODESIGN_PASSWORD:
+        required: false
+      APPLE_CERTIFICATE:
+        required: false
+      APPLE_CERTIFICATE_PASSWORD:
+        required: false
+      APPLE_SIGNING_IDENTITY:
+        required: false
+      APPLE_ID:
+        required: false
+      APPLE_PASSWORD:
+        required: false
+      APPLE_TEAM_ID:
+        required: false
+
+jobs:
+  build:
+    name: ${{ inputs.os_name }}
+    runs-on: ${{ inputs.platform }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: ${{ inputs.macos_deployment_target }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ inputs.rust_target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            src-tauri -> target
+          prefix-key: release-${{ inputs.rust_target }}
+
+      - name: Linux Tauri deps
+        if: inputs.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            build-essential \
+            libssl-dev \
+            libxdo-dev \
+            patchelf \
+            libfuse2
+
+      - name: Install JS deps
+        run: npm ci
+
+      - name: Create Windows self-signed cert (secret-gated)
+        id: win_sign
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PASSWORD)) {
+            Write-Host 'WINDOWS_CODESIGN_PASSWORD not set; skipping Windows signing'
+            exit 0
+          }
+
+          $hmac = [System.Security.Cryptography.HMACSHA256]::new(
+            [Text.Encoding]::UTF8.GetBytes($env:WINDOWS_CODESIGN_PASSWORD)
+          )
+          $token = [BitConverter]::ToString(
+            $hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes('PromptLab-codesign-v1'))
+          ).Replace('-', '').Substring(0, 16).ToLowerInvariant()
+          $subject = "CN=YangYang Research, O=YangYang Research, OU=CI $token"
+
+          Write-Host "Creating self-signed code signing cert..."
+          $cert = New-SelfSignedCertificate `
+            -Type CodeSigningCert `
+            -Subject $subject `
+            -CertStoreLocation 'Cert:\CurrentUser\My' `
+            -KeyExportPolicy Exportable `
+            -KeySpec Signature `
+            -KeyLength 2048 `
+            -HashAlgorithm SHA256 `
+            -NotAfter (Get-Date).AddYears(1)
+
+          $securePass = ConvertTo-SecureString -String $env:WINDOWS_CODESIGN_PASSWORD -Force -AsPlainText
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'windows-codesign.pfx'
+          Export-PfxCertificate -Cert $cert -FilePath $pfxPath -Password $securePass | Out-Null
+          Import-PfxCertificate `
+            -FilePath $pfxPath `
+            -CertStoreLocation 'Cert:\CurrentUser\My' `
+            -Password $securePass `
+            | Out-Null
+
+          $thumbprint = $cert.Thumbprint
+          Write-Host "Windows self-signed thumbprint=$thumbprint subject=$subject"
+
+          $signConfig = @{
+            bundle = @{
+              windows = @{
+                certificateThumbprint = $thumbprint
+                digestAlgorithm       = 'sha256'
+              }
+            }
+          } | ConvertTo-Json -Depth 6 -Compress
+          $configPath = Join-Path $env:GITHUB_WORKSPACE 'src-tauri/signing.windows.json'
+          Set-Content -Path $configPath -Value $signConfig -Encoding utf8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "config=--config src-tauri/signing.windows.json"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "enabled=true"
+
+      - name: Configure macOS signing env
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "${APPLE_CERTIFICATE}" ]; then
+            echo "No APPLE_CERTIFICATE secret; building macOS unsigned (ad-hoc)."
+            exit 0
+          fi
+          {
+            echo "APPLE_CERTIFICATE<<EOF"
+            echo "$APPLE_CERTIFICATE"
+            echo "EOF"
+            echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
+            echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY"
+            echo "APPLE_ID=$APPLE_ID"
+            echo "APPLE_PASSWORD=$APPLE_PASSWORD"
+            echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
+          } >> "$GITHUB_ENV"
+
+      - name: Build installers
+        uses: tauri-apps/tauri-action@action-v0.6.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: .
+          args: ${{ inputs.args }} ${{ steps.win_sign.outputs.config }}
+          tagName: ${{ inputs.tag }}
+          releaseName: ${{ inputs.release_name }}
+          assetNamePattern: '[name]-[version]-[platform]-[arch][setup][ext]'
+          generateReleaseNotes: false
+          releaseBody: ${{ inputs.release_body }}
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: false
