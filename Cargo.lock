@@ -3821,7 +3821,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-agent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "promptlab-agenttrace",
@@ -3841,7 +3841,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-agenttrace"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3856,7 +3856,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-attack"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3877,7 +3877,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-auth"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -3903,7 +3903,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
@@ -3919,7 +3919,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3961,7 +3961,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-discovery"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "dashmap",
@@ -3983,7 +3983,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-endpoint-metadata"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "promptlab-core",
  "promptlab-fingerprint",
@@ -3999,7 +3999,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-fingerprint"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "promptlab-core",
  "regex",
@@ -4012,7 +4012,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-generator"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "promptlab-attack",
@@ -4030,7 +4030,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-harness"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4054,7 +4054,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-inference"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "hex",
@@ -4076,7 +4076,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-integration-tests"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "promptlab-attack",
  "promptlab-auth",
@@ -4096,7 +4096,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-judge"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "hex",
@@ -4119,7 +4119,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-models"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "promptlab-core",
@@ -4137,7 +4137,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-payload"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "promptlab-core",
@@ -4151,7 +4151,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-planner"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "promptlab-attack",
@@ -4162,7 +4162,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-plugin-host"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "promptlab-core",
@@ -4180,7 +4180,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-report"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "lopdf",
@@ -4199,7 +4199,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-runtime"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "libc",
@@ -4218,7 +4218,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-storage"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "promptlab-core",
@@ -4234,7 +4234,7 @@ dependencies = [
 
 [[package]]
 name = "promptlab-target-profile"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "promptlab-attack",
