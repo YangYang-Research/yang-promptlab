@@ -61,18 +61,27 @@ const CDN_BASE = (process.env.CDN_BASE || "https://cdn.yyng.icu").replace(/\/$/,
 const GH_BASE = `https://github.com/${REPO}/releases/download/${TAG}`;
 const CDN_RELEASE_BASE = `${CDN_BASE}/products/yang-promptlab/releases/v${VERSION}`;
 
+// Filenames must cover tauri-action assetNamePattern output
+// ([platform]-[arch] → darwin-x64, linux-amd64) plus older aliases.
 const PLATFORMS = [
   {
     key: "darwin-aarch64",
-    filenames: [`PromptLab-${VERSION}-darwin-aarch64.dmg`],
+    filenames: [
+      `PromptLab-${VERSION}-darwin-aarch64.dmg`,
+      `PromptLab-${VERSION}-darwin-arm64.dmg`,
+    ],
   },
   {
     key: "darwin-x86_64",
-    filenames: [`PromptLab-${VERSION}-darwin-x86_64.dmg`],
+    filenames: [
+      `PromptLab-${VERSION}-darwin-x86_64.dmg`,
+      `PromptLab-${VERSION}-darwin-x64.dmg`,
+    ],
   },
   {
     key: "linux-x86_64",
     filenames: [
+      `PromptLab-${VERSION}-linux-amd64.AppImage`,
       `PromptLab-${VERSION}-linux-x86_64.AppImage`,
       `PromptLab_${VERSION}_amd64.AppImage`,
     ],
