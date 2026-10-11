@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Generate PromptLab release notes from commits since merge-base with main
-# (or since the latest v* tag / root commit as fallback).
+# Generate PromptLab release notes from commits since the previous release tag.
+#
+# Range priority:
+#   1. Previous v* tag (exclude current v${VERSION}) — full changelog vs last release
+#   2. merge-base with origin/main
+#   3. Root commit
 #
 # Usage:
 #   ./scripts/generate-release-notes.sh [out.md]
 # Env (optional):
-#   PR_NUMBER, HEAD_SHA, VERSION
+#   PR_NUMBER, HEAD_SHA, VERSION, BASE (force range start)
 
 set -euo pipefail
 
@@ -13,30 +17,45 @@ OUT="${1:-release-notes.md}"
 PR_NUMBER="${PR_NUMBER:-}"
 HEAD_SHA="${HEAD_SHA:-$(git rev-parse --short HEAD)}"
 VERSION="${VERSION:-}"
+BASE="${BASE:-}"
 
 if [[ -z "$VERSION" && -f src-tauri/tauri.conf.json ]]; then
   VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version" 2>/dev/null || true)"
 fi
 VERSION="${VERSION:-0.0.0}"
+CURRENT_TAG="v${VERSION}"
 
 git fetch origin main --depth=200 2>/dev/null || true
+git fetch --tags --force 2>/dev/null || true
 
-BASE=""
-if git rev-parse --verify origin/main >/dev/null 2>&1; then
-  BASE="$(git merge-base HEAD origin/main 2>/dev/null || true)"
-fi
 if [[ -z "$BASE" ]]; then
-  BASE="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+  # Prefer previous published tag so notes cover everything since last release,
+  # not only commits after the last merge to main (which drops already-merged feats).
+  BASE="$(
+    git tag -l 'v*' --sort=-v:refname \
+      | grep -Ev "^${CURRENT_TAG}$" \
+      | head -n1 \
+      || true
+  )"
+fi
+if [[ -z "$BASE" ]] && git rev-parse --verify origin/main >/dev/null 2>&1; then
+  BASE="$(git merge-base HEAD origin/main 2>/dev/null || true)"
 fi
 if [[ -z "$BASE" ]]; then
   BASE="$(git rev-list --max-parents=0 HEAD | tail -n1)"
 fi
 
-mapfile -t COMMITS < <(git log --no-merges --pretty=format:'%s' "${BASE}..HEAD" 2>/dev/null || true)
+COMMITS_FILE="$(mktemp)"
+trap 'rm -f "$COMMITS_FILE"' EXIT
+git log --no-merges --pretty=format:'%s' "${BASE}..HEAD" 2>/dev/null >"$COMMITS_FILE" || true
 
-features=()
-fixes=()
-changes=()
+features_file="$(mktemp)"
+fixes_file="$(mktemp)"
+changes_file="$(mktemp)"
+trap 'rm -f "$COMMITS_FILE" "$features_file" "$fixes_file" "$changes_file"' EXIT
+: >"$features_file"
+: >"$fixes_file"
+: >"$changes_file"
 
 strip_prefix() {
   local s="$1"
@@ -44,34 +63,67 @@ strip_prefix() {
   echo "$s" | sed -E 's/^[a-zA-Z]+(\([^)]*\))?\!?:[[:space:]]*//'
 }
 
-for msg in "${COMMITS[@]+"${COMMITS[@]}"}"; do
-  [[ -z "$msg" ]] && continue
-  # skip pure chore(ci) noise that only touches release plumbing if desired — keep all for transparency
-  lower="$(echo "$msg" | tr '[:upper:]' '[:lower:]')"
-  bullet="- $(strip_prefix "$msg")"
-  if [[ "$lower" =~ ^(fix|bugfix|hotfix)(\(|:|!) ]]; then
-    fixes+=("$bullet")
-  elif [[ "$lower" =~ ^(feat|feature)(\(|:|!) ]]; then
-    features+=("$bullet")
-  else
-    changes+=("$bullet")
-  fi
-done
+# Collapse noisy CI-only release plumbing into a short summary bullet.
+is_release_plumbing() {
+  local lower="$1"
+  case "$lower" in
+    ci\(*|chore\(release\)*|chore\(ci\)*|ci:*|chore:*)
+      case "$lower" in
+        *release*|*workflow*|*r2*|*manifest*|*apple_certificate*|*tauri-action*|*platform*|*rerun*|*retry*)
+          return 0
+          ;;
+      esac
+      ;;
+  esac
+  return 1
+}
 
-count="${#COMMITS[@]}"
+plumbing_count=0
+count=0
+
+while IFS= read -r msg || [[ -n "$msg" ]]; do
+  [[ -z "$msg" ]] && continue
+  count=$((count + 1))
+  lower="$(echo "$msg" | tr '[:upper:]' '[:lower:]')"
+  if is_release_plumbing "$lower"; then
+    plumbing_count=$((plumbing_count + 1))
+    continue
+  fi
+  # skip bare version-bump chore
+  case "$lower" in
+    chore:[\ ]release[\ ]v[0-9]*|chore:[\ ]release[\ ][0-9]*) continue ;;
+  esac
+  bullet="- $(strip_prefix "$msg")"
+  case "$lower" in
+    fix\(*|fix:*|bugfix\(*|bugfix:*|hotfix\(*|hotfix:*)
+      echo "$bullet" >>"$fixes_file"
+      ;;
+    feat\(*|feat:*|feature\(*|feature:*)
+      echo "$bullet" >>"$features_file"
+      ;;
+    *)
+      echo "$bullet" >>"$changes_file"
+      ;;
+  esac
+done <"$COMMITS_FILE"
+
+if [[ "$plumbing_count" -gt 0 ]]; then
+  echo "- release CI: platform job stages, manifest/R2 publish gate, macOS signing hardening (${plumbing_count} commits)" >>"$changes_file"
+fi
+
 overview="PromptLab **v${VERSION}**"
 if [[ -n "$PR_NUMBER" ]]; then
   overview+=" draft from PR #${PR_NUMBER}"
 fi
 overview+=" (\`${HEAD_SHA}\`)."
-overview+=" Auto-generated from **${count}** commit(s) since \`${BASE:0:12}\`."
+overview+=" Changes since **${BASE}** (**${count}** commit(s))."
 
 render_list() {
-  local -n arr=$1
-  if ((${#arr[@]} == 0)); then
+  local file="$1"
+  if [[ ! -s "$file" ]]; then
     echo "_None in this range._"
   else
-    printf '%s\n' "${arr[@]}"
+    cat "$file"
   fi
 }
 
@@ -80,24 +132,24 @@ render_list() {
   echo "$overview"
   echo
   echo "## New Features / What's Changed"
-  if ((${#features[@]})); then
+  if [[ -s "$features_file" ]]; then
     echo
     echo "### Features"
-    render_list features
+    render_list "$features_file"
   fi
-  if ((${#changes[@]})); then
+  if [[ -s "$changes_file" ]]; then
     echo
     echo "### Other changes"
-    render_list changes
+    render_list "$changes_file"
   fi
-  if ((${#features[@]} == 0 && ${#changes[@]} == 0)); then
+  if [[ ! -s "$features_file" && ! -s "$changes_file" ]]; then
     echo
     echo "_None in this range._"
   fi
   echo
   echo "## Bug Fixes"
   echo
-  render_list fixes
+  render_list "$fixes_file"
 } >"$OUT"
 
 echo "Wrote $OUT ($count commits since $BASE)"
