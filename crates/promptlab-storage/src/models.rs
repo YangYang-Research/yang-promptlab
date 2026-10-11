@@ -460,6 +460,21 @@ pub struct UpdateJudgeRoleWeights {
     pub default_llm: f64,
 }
 
+/// Prompt Lab expand history entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct PromptLabHistory {
+    pub id: String,
+    pub seed_prompt: String,
+    pub variants_json: String,
+    pub created_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreatePromptLabHistory {
+    pub seed_prompt: String,
+    pub variants_json: String,
+}
+
 /// App-wide attack mutator allowlist (Advanced → Mutators).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct MutatorSettingsRow {

@@ -31,6 +31,13 @@ export const navItems: NavItem[] = [
     section: "advanced",
   },
   {
+    id: "prompt-lab",
+    label: "Prompt Lab",
+    path: "/prompt-lab",
+    icon: "prompt-lab",
+    section: "advanced",
+  },
+  {
     id: "agent-trace",
     label: "Agent Trace",
     path: "/agent-trace",

@@ -146,6 +146,14 @@ pub trait MutatorSettingsRepository: Send + Sync {
 }
 
 #[async_trait]
+pub trait PromptLabHistoryRepository: Send + Sync {
+    async fn create(&self, input: CreatePromptLabHistory) -> PromptLabResult<PromptLabHistory>;
+    async fn get(&self, id: &str) -> PromptLabResult<PromptLabHistory>;
+    async fn list(&self, limit: i64) -> PromptLabResult<Vec<PromptLabHistory>>;
+    async fn delete(&self, id: &str) -> PromptLabResult<()>;
+}
+
+#[async_trait]
 pub trait HardwareProfileRepository: Send + Sync {
     async fn get(&self) -> PromptLabResult<Option<HardwareProfileRecord>>;
     async fn upsert(&self, profile_json: &str) -> PromptLabResult<HardwareProfileRecord>;

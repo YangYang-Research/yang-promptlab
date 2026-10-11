@@ -14,6 +14,7 @@
  *   NOTES       release notes (optional)
  *   PUB_DATE    RFC 3339 (default: now UTC)
  *   OUT         output path (default: manifests/version.json)
+ *   CDN_BASE    public CDN origin (default: https://cdn.yyng.icu)
  */
 
 import { createHash } from "node:crypto";
@@ -56,7 +57,9 @@ const ASSET_DIR = process.env.ASSET_DIR ? resolve(process.env.ASSET_DIR) : "";
 const NOTES = process.env.NOTES || "Current release.";
 const PUB_DATE = process.env.PUB_DATE || new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 const OUT = resolve(process.env.OUT || join(ROOT, "manifests/version.json"));
-const BASE = `https://github.com/${REPO}/releases/download/${TAG}`;
+const CDN_BASE = (process.env.CDN_BASE || "https://cdn.yyng.icu").replace(/\/$/, "");
+const GH_BASE = `https://github.com/${REPO}/releases/download/${TAG}`;
+const CDN_RELEASE_BASE = `${CDN_BASE}/products/yang-promptlab/releases/v${VERSION}`;
 
 const PLATFORMS = [
   {
@@ -88,16 +91,18 @@ const platforms = {};
 for (const spec of PLATFORMS) {
   const filename = spec.filenames[0];
   const local = findAsset(ASSET_DIR, spec.filenames);
+  const resolvedName = local ? local.split(/[/\\]/).pop() : filename;
   const entry = {
-    url: `${BASE}/${local ? local.split(/[/\\]/).pop() : filename}`,
-    filename: local ? local.split(/[/\\]/).pop() : filename,
+    // GH primary — CDN backup when GitHub download fails
+    url: `${GH_BASE}/${resolvedName}`,
+    backupUrl: `${CDN_RELEASE_BASE}/${resolvedName}`,
+    filename: resolvedName,
     sha256: "",
     size: 0,
   };
   if (local) {
     entry.sha256 = sha256File(local);
     entry.size = statSync(local).size;
-    entry.url = `${BASE}/${entry.filename}`;
   }
   platforms[spec.key] = entry;
 }

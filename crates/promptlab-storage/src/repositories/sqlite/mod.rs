@@ -13,6 +13,7 @@ mod judge_role_weights;
 mod json_documents;
 mod model;
 mod mutator_settings;
+mod prompt_lab_history;
 mod payload;
 mod plugin;
 mod project;
@@ -41,6 +42,7 @@ pub use json_documents::{
 };
 pub use model::SqliteModelRepository;
 pub use mutator_settings::SqliteMutatorSettingsRepository;
+pub use prompt_lab_history::SqlitePromptLabHistoryRepository;
 pub use payload::SqlitePayloadRepository;
 pub use plugin::SqlitePluginRepository;
 pub use project::SqliteProjectRepository;
@@ -126,6 +128,10 @@ impl Repositories {
 
     pub fn mutator_settings(&self) -> SqliteMutatorSettingsRepository {
         SqliteMutatorSettingsRepository::new(self.pool.clone())
+    }
+
+    pub fn prompt_lab_history(&self) -> SqlitePromptLabHistoryRepository {
+        SqlitePromptLabHistoryRepository::new(self.pool.clone())
     }
 
     pub fn hardware_profile(&self) -> SqliteHardwareProfileRepository {

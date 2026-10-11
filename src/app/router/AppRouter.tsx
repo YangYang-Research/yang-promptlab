@@ -49,6 +49,9 @@ const AttackCategoriesPage = lazy(() =>
 const MutatorsPage = lazy(() =>
   import("@/features/mutators/MutatorsPage").then((m) => ({ default: m.MutatorsPage })),
 );
+const PromptLabPage = lazy(() =>
+  import("@/features/prompt-lab/PromptLabPage").then((m) => ({ default: m.PromptLabPage })),
+);
 const AgentTracePage = lazy(() =>
   import("@/features/agent-trace/AgentTracePage").then((m) => ({
     default: m.AgentTracePage,
@@ -225,6 +228,14 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <MutatorsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="prompt-lab"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <PromptLabPage />
               </Suspense>
             }
           />

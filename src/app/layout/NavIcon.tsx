@@ -46,6 +46,25 @@ export function NavIcon({ name }: NavIconProps) {
     );
   }
 
+  if (name === "prompt-lab") {
+    return (
+      <svg
+        className="nav-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M9 3h6" />
+        <path d="M10 3v6.2L5.2 17a2.4 2.4 0 002.1 3.6h9.4a2.4 2.4 0 002.1-3.6L14 9.2V3" />
+        <path d="M8.2 14h7.6" />
+      </svg>
+    );
+  }
+
   const paths: Record<string, string> = {
     dashboard:
       "M3 10.5L10 4l7 6.5V18a1 1 0 01-1 1h-5v-5H9v5H4a1 1 0 01-1-1v-7.5z",
