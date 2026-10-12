@@ -1,36 +1,36 @@
 {
   "schemaVersion": 1,
   "name": "PromptLab",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "notes": "Current release.",
-  "pubDate": "2026-10-11T10:48:26Z",
+  "pubDate": "2026-10-11T10:59:39Z",
   "mandatory": false,
   "platforms": {
     "darwin-aarch64": {
-      "url": "https://github.com/YangYang-Research/yang-promptlab/releases/download/v0.1.0/PromptLab-0.1.0-darwin-aarch64.dmg",
-      "backupUrl": "https://cdn.yyng.icu/products/yang-promptlab/releases/v0.1.0/PromptLab-0.1.0-darwin-aarch64.dmg",
-      "filename": "PromptLab-0.1.0-darwin-aarch64.dmg",
+      "url": "https://github.com/YangYang-Research/yang-promptlab/releases/download/v0.1.1/PromptLab-0.1.1-darwin-aarch64.dmg",
+      "backupUrl": "https://cdn.yyng.icu/products/yang-promptlab/releases/v0.1.1/PromptLab-0.1.1-darwin-aarch64.dmg",
+      "filename": "PromptLab-0.1.1-darwin-aarch64.dmg",
       "sha256": "",
       "size": 0
     },
     "darwin-x86_64": {
-      "url": "https://github.com/YangYang-Research/yang-promptlab/releases/download/v0.1.0/PromptLab-0.1.0-darwin-x86_64.dmg",
-      "backupUrl": "https://cdn.yyng.icu/products/yang-promptlab/releases/v0.1.0/PromptLab-0.1.0-darwin-x86_64.dmg",
-      "filename": "PromptLab-0.1.0-darwin-x86_64.dmg",
+      "url": "https://github.com/YangYang-Research/yang-promptlab/releases/download/v0.1.1/PromptLab-0.1.1-darwin-x86_64.dmg",
+      "backupUrl": "https://cdn.yyng.icu/products/yang-promptlab/releases/v0.1.1/PromptLab-0.1.1-darwin-x86_64.dmg",
+      "filename": "PromptLab-0.1.1-darwin-x86_64.dmg",
       "sha256": "",
       "size": 0
     },
     "linux-x86_64": {
-      "url": "https://github.com/YangYang-Research/yang-promptlab/releases/download/v0.1.0/PromptLab-0.1.0-linux-x86_64.AppImage",
-      "backupUrl": "https://cdn.yyng.icu/products/yang-promptlab/releases/v0.1.0/PromptLab-0.1.0-linux-x86_64.AppImage",
-      "filename": "PromptLab-0.1.0-linux-x86_64.AppImage",
+      "url": "https://github.com/YangYang-Research/yang-promptlab/releases/download/v0.1.1/PromptLab-0.1.1-linux-x86_64.AppImage",
+      "backupUrl": "https://cdn.yyng.icu/products/yang-promptlab/releases/v0.1.1/PromptLab-0.1.1-linux-x86_64.AppImage",
+      "filename": "PromptLab-0.1.1-linux-x86_64.AppImage",
       "sha256": "",
       "size": 0
     },
     "windows-x86_64": {
-      "url": "https://github.com/YangYang-Research/yang-promptlab/releases/download/v0.1.0/PromptLab-0.1.0-windows-x64-setup.exe",
-      "backupUrl": "https://cdn.yyng.icu/products/yang-promptlab/releases/v0.1.0/PromptLab-0.1.0-windows-x64-setup.exe",
-      "filename": "PromptLab-0.1.0-windows-x64-setup.exe",
+      "url": "https://github.com/YangYang-Research/yang-promptlab/releases/download/v0.1.1/PromptLab-0.1.1-windows-x64-setup.exe",
+      "backupUrl": "https://cdn.yyng.icu/products/yang-promptlab/releases/v0.1.1/PromptLab-0.1.1-windows-x64-setup.exe",
+      "filename": "PromptLab-0.1.1-windows-x64-setup.exe",
       "sha256": "",
       "size": 0
     }

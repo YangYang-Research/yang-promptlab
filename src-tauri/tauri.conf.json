@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "PromptLab",
   "mainBinaryName": "PromptLab",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.promptlab.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",

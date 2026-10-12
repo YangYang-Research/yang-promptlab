@@ -1,0 +1,224 @@
+name: Release build
+description: Build PromptLab installers for one platform and upload to a draft GitHub Release
+inputs:
+  args:
+    description: Extra tauri-action args (e.g. --target …)
+    required: false
+    default: ""
+  rust_target:
+    description: Rust target triple
+    required: true
+  tag:
+    description: Release tag
+    required: true
+  release_name:
+    description: Release title
+    required: true
+  release_body:
+    description: Release notes body
+    required: false
+    default: ""
+  # Optional macOS signing — omit / leave empty for ad-hoc (signingIdentity "-").
+  # Must be action inputs (not job env): empty job env vars still make Tauri call
+  # `security import` and fail.
+  apple_certificate:
+    description: Base64 .p12 (optional)
+    required: false
+    default: ""
+  apple_certificate_password:
+    required: false
+    default: ""
+  apple_signing_identity:
+    required: false
+    default: ""
+  apple_id:
+    required: false
+    default: ""
+  apple_password:
+    required: false
+    default: ""
+  apple_team_id:
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v5
+      with:
+        node-version: 22
+        cache: npm
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ inputs.rust_target }}
+
+    - name: Rust cache
+      uses: swatinem/rust-cache@v2
+      with:
+        workspaces: |
+          . -> target
+          src-tauri -> target
+        prefix-key: release-${{ inputs.rust_target }}
+
+    - name: Linux Tauri deps
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libwebkit2gtk-4.1-dev \
+          libgtk-3-dev \
+          libayatana-appindicator3-dev \
+          librsvg2-dev \
+          libsoup-3.0-dev \
+          libjavascriptcoregtk-4.1-dev \
+          build-essential \
+          libssl-dev \
+          libxdo-dev \
+          patchelf \
+          libfuse2
+
+    - name: Install JS deps
+      shell: bash
+      run: npm ci
+
+    - name: Create Windows self-signed cert (secret-gated)
+      id: win_sign
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        WINDOWS_CODESIGN_PASSWORD: ${{ env.WINDOWS_CODESIGN_PASSWORD }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PASSWORD)) {
+          Write-Host 'WINDOWS_CODESIGN_PASSWORD not set; skipping Windows signing'
+          exit 0
+        }
+
+        $hmac = [System.Security.Cryptography.HMACSHA256]::new(
+          [Text.Encoding]::UTF8.GetBytes($env:WINDOWS_CODESIGN_PASSWORD)
+        )
+        $token = [BitConverter]::ToString(
+          $hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes('PromptLab-codesign-v1'))
+        ).Replace('-', '').Substring(0, 16).ToLowerInvariant()
+        $subject = "CN=YangYang Research, O=YangYang Research, OU=CI $token"
+
+        Write-Host "Creating self-signed code signing cert..."
+        $cert = New-SelfSignedCertificate `
+          -Type CodeSigningCert `
+          -Subject $subject `
+          -CertStoreLocation 'Cert:\CurrentUser\My' `
+          -KeyExportPolicy Exportable `
+          -KeySpec Signature `
+          -KeyLength 2048 `
+          -HashAlgorithm SHA256 `
+          -NotAfter (Get-Date).AddYears(1)
+
+        $securePass = ConvertTo-SecureString -String $env:WINDOWS_CODESIGN_PASSWORD -Force -AsPlainText
+        $pfxPath = Join-Path $env:RUNNER_TEMP 'windows-codesign.pfx'
+        Export-PfxCertificate -Cert $cert -FilePath $pfxPath -Password $securePass | Out-Null
+        Import-PfxCertificate `
+          -FilePath $pfxPath `
+          -CertStoreLocation 'Cert:\CurrentUser\My' `
+          -Password $securePass `
+          | Out-Null
+
+        $thumbprint = $cert.Thumbprint
+        Write-Host "Windows self-signed thumbprint=$thumbprint subject=$subject"
+
+        $signConfig = @{
+          bundle = @{
+            windows = @{
+              certificateThumbprint = $thumbprint
+              digestAlgorithm       = 'sha256'
+            }
+          }
+        } | ConvertTo-Json -Depth 6 -Compress
+        $configPath = Join-Path $env:GITHUB_WORKSPACE 'src-tauri/signing.windows.json'
+        Set-Content -Path $configPath -Value $signConfig -Encoding utf8
+        Add-Content -Path $env:GITHUB_OUTPUT -Value "config=--config src-tauri/signing.windows.json"
+
+    - name: Configure macOS signing env
+      id: macos_sign
+      if: runner.os == 'macOS'
+      shell: bash
+      env:
+        APPLE_CERTIFICATE: ${{ inputs.apple_certificate }}
+        APPLE_CERTIFICATE_PASSWORD: ${{ inputs.apple_certificate_password }}
+        APPLE_SIGNING_IDENTITY: ${{ inputs.apple_signing_identity }}
+        APPLE_ID: ${{ inputs.apple_id }}
+        APPLE_PASSWORD: ${{ inputs.apple_password }}
+        APPLE_TEAM_ID: ${{ inputs.apple_team_id }}
+      run: |
+        set -euo pipefail
+        # Default: ad-hoc (tauri.conf.json signingIdentity "-"). Do not export
+        # empty APPLE_* — Tauri treats a set-but-empty APPLE_CERTIFICATE as
+        # "import this cert" and fails with SecKeychainItemImport.
+        if [[ -z "${APPLE_CERTIFICATE// }" ]]; then
+          echo "No APPLE_CERTIFICATE; building macOS unsigned (ad-hoc)."
+          echo "signed=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        if [[ -z "${APPLE_CERTIFICATE_PASSWORD}" ]]; then
+          echo "APPLE_CERTIFICATE set but APPLE_CERTIFICATE_PASSWORD missing; unsigned."
+          echo "signed=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        CERT_PATH="${RUNNER_TEMP}/apple-certificate.p12"
+        KEYCHAIN_PATH="${RUNNER_TEMP}/app-signing.keychain-db"
+        KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+
+        echo "${APPLE_CERTIFICATE}" | base64 --decode > "${CERT_PATH}"
+        if ! file "${CERT_PATH}" | grep -qiE 'data|Certificate|PKCS'; then
+          echo "APPLE_CERTIFICATE did not decode to a usable .p12; unsigned."
+          echo "signed=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+        security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+        security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+        if ! security import "${CERT_PATH}" \
+          -P "${APPLE_CERTIFICATE_PASSWORD}" \
+          -A \
+          -t cert \
+          -f pkcs12 \
+          -k "${KEYCHAIN_PATH}"; then
+          echo "security import failed; building macOS unsigned (ad-hoc)."
+          echo "signed=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        security list-keychain -d user -s "${KEYCHAIN_PATH}"
+
+        # Do not re-export APPLE_CERTIFICATE — tauri would import twice. Identity
+        # + notarization vars are enough once the cert is in the keychain.
+        {
+          echo "APPLE_SIGNING_IDENTITY=${APPLE_SIGNING_IDENTITY:--}"
+          echo "APPLE_ID=$APPLE_ID"
+          echo "APPLE_PASSWORD=$APPLE_PASSWORD"
+          echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
+        } >> "$GITHUB_ENV"
+        echo "signed=true" >> "$GITHUB_OUTPUT"
+        echo "macOS signing keychain ready."
+
+    - name: Build installers
+      uses: tauri-apps/tauri-action@action-v0.6.2
+      env:
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+        # Only present when Configure macOS signing exported them to GITHUB_ENV.
+        # Never inherit empty job-level APPLE_* placeholders.
+      with:
+        projectPath: .
+        args: ${{ inputs.args }} ${{ steps.win_sign.outputs.config }}
+        tagName: ${{ inputs.tag }}
+        releaseName: ${{ inputs.release_name }}
+        assetNamePattern: '[name]-[version]-[platform]-[arch][setup][ext]'
+        generateReleaseNotes: false
+        releaseBody: ${{ inputs.release_body }}
+        releaseDraft: true
+        prerelease: false
+        includeUpdaterJson: false

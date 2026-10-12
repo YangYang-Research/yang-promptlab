@@ -1,18 +1,24 @@
 name: Release
 
+# One workflow. Stages = jobs:
+#   notes → 4× build → Publish update manifest → Upload to R2 CDN
+# Fail one platform → Re-run failed jobs (that job only). Manifest + R2 only
+# run after all 4 builds succeed. Push code fix → synchronize rebuilds all.
+#
 # Code signing (optional — unsigned if secrets missing):
-#   Windows: WINDOWS_CODESIGN_PASSWORD — CI generates self-signed cert when set
-#   macOS:   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD,
-#            APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD (app-specific),
-#            APPLE_TEAM_ID
+#   Windows: WINDOWS_CODESIGN_PASSWORD
+#   macOS:   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD,
+#            APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
 
 on:
   pull_request:
-    types: [reopened, synchronize, labeled]
+    types: [labeled, reopened, synchronize]
 
 concurrency:
   group: release-pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  # Cancel in-flight only when code changes (new push). Re-run failed jobs is
+  # the same run — does not hit this gate.
+  cancel-in-progress: ${{ github.event.action == 'synchronize' }}
 
 permissions:
   contents: write
@@ -53,11 +59,11 @@ jobs:
           scripts/generate-release-notes.sh release-notes.md
 
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            # Refresh notes/title only — do not force --draft (would unpublish a live release).
             gh release edit "$TAG" \
               --repo "${{ github.repository }}" \
               --title "$TITLE" \
-              --notes-file release-notes.md \
-              --draft
+              --notes-file release-notes.md
           else
             gh release create "$TAG" \
               --repo "${{ github.repository }}" \
@@ -78,187 +84,93 @@ jobs:
           echo "----- release notes ($TAG) -----"
           cat release-notes.md
 
-  build:
-    name: build
+  build-macos-aarch64:
+    name: build macOS Apple Silicon
     needs: release-notes
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-latest
-            os_name: macOS Apple Silicon
-            args: --target aarch64-apple-darwin
-            rust_target: aarch64-apple-darwin
-            macos_deployment_target: "11.0"
-          - platform: macos-15-intel
-            os_name: macOS Intel
-            args: --target x86_64-apple-darwin
-            rust_target: x86_64-apple-darwin
-            macos_deployment_target: "11.0"
-          - platform: ubuntu-22.04
-            os_name: Linux
-            args: ""
-            rust_target: x86_64-unknown-linux-gnu
-            macos_deployment_target: ""
-          - platform: windows-latest
-            os_name: Windows
-            args: ""
-            rust_target: x86_64-pc-windows-msvc
-            macos_deployment_target: ""
-    runs-on: ${{ matrix.platform }}
+    runs-on: macos-latest
     env:
-      # Keep macOS deployment target aligned with Tauri / Apple Silicon CI.
-      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_deployment_target }}
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+      # Do not put APPLE_* here — empty secret → empty env var → Tauri security import fails.
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node
-        uses: actions/setup-node@v5
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/release-build
         with:
-          node-version: 22
-          cache: npm
+          args: --target aarch64-apple-darwin
+          rust_target: aarch64-apple-darwin
+          tag: ${{ needs.release-notes.outputs.tag }}
+          release_name: ${{ needs.release-notes.outputs.title }}
+          release_body: ${{ needs.release-notes.outputs.body }}
+          apple_certificate: ${{ secrets.APPLE_CERTIFICATE }}
+          apple_certificate_password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          apple_signing_identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          apple_id: ${{ secrets.APPLE_ID }}
+          apple_password: ${{ secrets.APPLE_PASSWORD }}
+          apple_team_id: ${{ secrets.APPLE_TEAM_ID }}
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+  build-macos-x86_64:
+    name: build macOS Intel
+    needs: release-notes
+    runs-on: macos-15-intel
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/release-build
         with:
-          targets: ${{ matrix.rust_target }}
+          args: --target x86_64-apple-darwin
+          rust_target: x86_64-apple-darwin
+          tag: ${{ needs.release-notes.outputs.tag }}
+          release_name: ${{ needs.release-notes.outputs.title }}
+          release_body: ${{ needs.release-notes.outputs.body }}
+          apple_certificate: ${{ secrets.APPLE_CERTIFICATE }}
+          apple_certificate_password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          apple_signing_identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          apple_id: ${{ secrets.APPLE_ID }}
+          apple_password: ${{ secrets.APPLE_PASSWORD }}
+          apple_team_id: ${{ secrets.APPLE_TEAM_ID }}
 
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
+  build-linux:
+    name: build Linux
+    needs: release-notes
+    runs-on: ubuntu-22.04
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/release-build
         with:
-          workspaces: |
-            . -> target
-            src-tauri -> target
+          rust_target: x86_64-unknown-linux-gnu
+          tag: ${{ needs.release-notes.outputs.tag }}
+          release_name: ${{ needs.release-notes.outputs.title }}
+          release_body: ${{ needs.release-notes.outputs.body }}
 
-      - name: Linux Tauri deps
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev \
-            build-essential \
-            libssl-dev \
-            libxdo-dev \
-            patchelf \
-            libfuse2
-
-      - name: Install JS deps
-        run: npm ci
-
-      - name: Create Windows self-signed cert (secret-gated)
-        id: win_sign
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          WINDOWS_CODESIGN_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PASSWORD)) {
-            Write-Host 'WINDOWS_CODESIGN_PASSWORD not set; skipping Windows signing'
-            exit 0
-          }
-
-          # Bind Subject to the secret so forks without it cannot mint the same OU token.
-          $hmac = [System.Security.Cryptography.HMACSHA256]::new(
-            [Text.Encoding]::UTF8.GetBytes($env:WINDOWS_CODESIGN_PASSWORD)
-          )
-          $token = [BitConverter]::ToString(
-            $hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes('PromptLab-codesign-v1'))
-          ).Replace('-', '').Substring(0, 16).ToLowerInvariant()
-          $subject = "CN=YangYang Research, O=YangYang Research, OU=CI $token"
-
-          Write-Host "Creating self-signed code signing cert..."
-          $cert = New-SelfSignedCertificate `
-            -Type CodeSigningCert `
-            -Subject $subject `
-            -CertStoreLocation 'Cert:\CurrentUser\My' `
-            -KeyExportPolicy Exportable `
-            -KeySpec Signature `
-            -KeyLength 2048 `
-            -HashAlgorithm SHA256 `
-            -NotAfter (Get-Date).AddYears(1)
-
-          $securePass = ConvertTo-SecureString -String $env:WINDOWS_CODESIGN_PASSWORD -Force -AsPlainText
-          $pfxPath = Join-Path $env:RUNNER_TEMP 'windows-codesign.pfx'
-          Export-PfxCertificate -Cert $cert -FilePath $pfxPath -Password $securePass | Out-Null
-          Import-PfxCertificate `
-            -FilePath $pfxPath `
-            -CertStoreLocation 'Cert:\CurrentUser\My' `
-            -Password $securePass `
-            | Out-Null
-
-          $thumbprint = $cert.Thumbprint
-          Write-Host "Windows self-signed thumbprint=$thumbprint subject=$subject"
-
-          $signConfig = @{
-            bundle = @{
-              windows = @{
-                certificateThumbprint = $thumbprint
-                digestAlgorithm       = 'sha256'
-              }
-            }
-          } | ConvertTo-Json -Depth 6 -Compress
-          $configPath = Join-Path $env:GITHUB_WORKSPACE 'src-tauri/signing.windows.json'
-          Set-Content -Path $configPath -Value $signConfig -Encoding utf8
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "config=--config src-tauri/signing.windows.json"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "enabled=true"
-
-      - name: Configure macOS signing env
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          # Empty APPLE_* env vars make Tauri attempt `security import` and fail.
-          # Only export them when secrets are actually configured.
-          if [ -z "${APPLE_CERTIFICATE}" ]; then
-            echo "No APPLE_CERTIFICATE secret; building macOS unsigned (ad-hoc)."
-            exit 0
-          fi
-          {
-            echo "APPLE_CERTIFICATE<<EOF"
-            echo "$APPLE_CERTIFICATE"
-            echo "EOF"
-            echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
-            echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY"
-            echo "APPLE_ID=$APPLE_ID"
-            echo "APPLE_PASSWORD=$APPLE_PASSWORD"
-            echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
-          } >> "$GITHUB_ENV"
-
-      # Pin action-v0.6.2: floating @v0 uses assetNamePattern (not releaseAssetNamePattern).
-      - name: Build installers
-        uses: tauri-apps/tauri-action@action-v0.6.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  build-windows:
+    name: build Windows
+    needs: release-notes
+    runs-on: windows-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      WINDOWS_CODESIGN_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/release-build
         with:
-          projectPath: .
-          args: ${{ matrix.args }} ${{ steps.win_sign.outputs.config }}
-          tagName: ${{ needs.release-notes.outputs.tag }}
-          releaseName: ${{ needs.release-notes.outputs.title }}
-          # → PromptLab-0.1.0-darwin-aarch64.dmg, PromptLab-0.1.0-windows-x64-setup.exe, …
-          assetNamePattern: '[name]-[version]-[platform]-[arch][setup][ext]'
-          generateReleaseNotes: false
-          releaseBody: ${{ needs.release-notes.outputs.body }}
-          releaseDraft: true
-          prerelease: false
-          includeUpdaterJson: false
+          rust_target: x86_64-pc-windows-msvc
+          tag: ${{ needs.release-notes.outputs.tag }}
+          release_name: ${{ needs.release-notes.outputs.title }}
+          release_body: ${{ needs.release-notes.outputs.body }}
 
-  update-manifest:
+  # Gate: only after all 4 platform builds succeed (no always()).
+  publish-manifest:
     name: Publish update manifest
-    needs: [release-notes, build]
-    if: ${{ always() && !cancelled() && needs.release-notes.result == 'success' }}
+    needs:
+      - release-notes
+      - build-macos-aarch64
+      - build-macos-x86_64
+      - build-linux
+      - build-windows
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
@@ -274,46 +186,70 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-notes.outputs.tag }}
           REPO: ${{ github.repository }}
-          BUILD_RESULT: ${{ needs.build.result }}
         run: |
           set -euo pipefail
           mkdir -p dist-assets
-          gh release download "$TAG" --repo "$REPO" --dir dist-assets --pattern 'PromptLab-*' || true
+          gh release download "$TAG" --repo "$REPO" --dir dist-assets --pattern 'PromptLab-*'
           VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
           NOTES="$(gh release view "$TAG" --repo "$REPO" --json body --jq .body 2>/dev/null | head -c 2000 || true)"
           VERSION="$VERSION" TAG="$TAG" REPO="$REPO" ASSET_DIR=./dist-assets \
             NOTES="${NOTES:-Current release.}" \
             node scripts/generate-update-manifest.mjs
-          gh release upload "$TAG" manifests/version.json --repo "$REPO" --clobber
 
-          # Apps fetch https://github.com/$REPO/releases/latest/download/version.json
-          # which only resolves for published (non-draft) releases. Undraft when we
-          # have at least one hashed installer and the matrix build did not fail.
           HASHED="$(node -e "const m=require('./manifests/version.json'); console.log(Object.values(m.platforms).filter(p=>p.sha256).length)")"
-          if [[ "$BUILD_RESULT" == "success" && "$HASHED" -gt 0 ]]; then
-            gh release edit "$TAG" --repo "$REPO" --draft=false
-            echo "Published $TAG ($HASHED platform hash(es)) for auto-update"
-          else
-            echo "Leaving $TAG as draft (build=$BUILD_RESULT hashed=$HASHED)"
+          if [[ "$HASHED" -lt 4 ]]; then
+            echo "error: expected 4 platform hashes in version.json, got $HASHED" >&2
+            node -e "console.log(JSON.stringify(require('./manifests/version.json').platforms,null,2))"
+            exit 1
           fi
 
-      - name: Mirror release to yangyang R2 CDN
-        if: ${{ needs.build.result == 'success' }}
+          gh release upload "$TAG" manifests/version.json --repo "$REPO" --clobber
+          gh release edit "$TAG" --repo "$REPO" --draft=false
+          echo "Published $TAG ($HASHED platform hash(es)) for auto-update"
+
+  upload-r2:
+    name: Upload to R2 CDN
+    needs:
+      - release-notes
+      - publish-manifest
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Download release assets + publish to R2
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-notes.outputs.tag }}
+          REPO: ${{ github.repository }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: yangyang-org-public
-          TAG: ${{ needs.release-notes.outputs.tag }}
         run: |
           set -euo pipefail
-          if [[ -z "${R2_ACCOUNT_ID:-}" || -z "${R2_ACCESS_KEY_ID:-}" || -z "${R2_SECRET_ACCESS_KEY:-}" ]]; then
-            echo "Skipping R2 mirror (R2_* secrets not configured)"
-            exit 0
+          for var in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY; do
+            if [[ -z "${!var:-}" ]]; then
+              echo "error: secret ${var} is required for R2 upload" >&2
+              exit 1
+            fi
+          done
+
+          mkdir -p dist-assets
+          gh release download "$TAG" --repo "$REPO" --dir dist-assets --pattern 'PromptLab-*'
+          gh release download "$TAG" --repo "$REPO" --dir dist-assets --pattern 'version.json'
+          # Prefer freshly downloaded version.json as the R2 manifest source
+          if [[ -f dist-assets/version.json ]]; then
+            cp dist-assets/version.json manifests/version.json
           fi
+
           VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
           chmod +x scripts/publish-r2-release.sh
           VERSION="$VERSION" TAG="$TAG" ASSET_DIR=./dist-assets \
             MANIFEST=./manifests/version.json \
             scripts/publish-r2-release.sh
-
