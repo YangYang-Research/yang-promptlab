@@ -736,8 +736,16 @@ export function AttackCategoriesPage() {
                           onClick={() => void handleGeneratePrompt()}
                         >
                           <span className="btn__content">
-                            <IconAi className="btn__icon" aria-hidden />
-                            {generating ? "Yazg is generating…" : "Generate new prompt"}
+                            <IconAi
+                              className={[
+                                "btn__icon",
+                                generating ? "btn__icon--working" : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" ")}
+                              aria-hidden
+                            />
+                            {generating ? "Generating…" : "Generate new prompt"}
                           </span>
                         </Button>
                       </div>

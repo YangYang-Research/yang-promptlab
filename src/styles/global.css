@@ -1989,6 +1989,17 @@ a.setup-checklist__item:hover {
   }
 }
 
+/* Same breathing pulse as Planning IconAi while Generate / Upgrade runs */
+.btn__icon--working {
+  animation: wizard-attack-planning-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn__icon--working {
+    animation: none;
+  }
+}
+
 .yazg-badge__icon {
   width: 0.95rem;
   height: 0.95rem;
@@ -13296,6 +13307,12 @@ a.setup-checklist__item:hover {
   gap: 0.5rem;
 }
 
+.prompt-lab-page__composer-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .prompt-lab-page__label {
   font-size: 0.75rem;
   font-weight: 650;
@@ -13403,6 +13420,36 @@ a.setup-checklist__item:hover {
   color: var(--danger, #c0392b);
 }
 
+.prompt-lab-page__loading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  animation: wizard-attack-planning-fade-in 0.28s ease-out;
+}
+
+.prompt-lab-page__loading-head {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.prompt-lab-page__loading-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.prompt-lab-page__loading-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+  color: var(--accent);
+  animation: wizard-attack-planning-pulse 1.6s ease-in-out infinite;
+}
+
 .prompt-lab-page__results {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
@@ -13417,6 +13464,21 @@ a.setup-checklist__item:hover {
   border: 1px solid var(--border-subtle);
   border-radius: 0.65rem;
   background: var(--bg-elevated);
+}
+
+.prompt-lab-page__variant--skeleton {
+  gap: 0.45rem;
+  min-height: 8.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prompt-lab-page__loading {
+    animation: none;
+  }
+
+  .prompt-lab-page__loading-icon {
+    animation: none;
+  }
 }
 
 .prompt-lab-page__variant-head {
