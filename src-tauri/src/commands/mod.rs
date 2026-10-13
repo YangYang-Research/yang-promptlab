@@ -48,6 +48,11 @@ pub struct AppInfoResponse {
     pub version: &'static str,
     pub identifier: &'static str,
     pub platform: String,
+    /// Set once after a successful in-app update relaunch (consumed from disk).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub just_updated_from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub just_updated_to: Option<String>,
 }
 
 /// Bootstrap health check command for IPC wiring verification.
@@ -71,11 +76,14 @@ pub fn health(app: AppHandle) -> CommandResult<HealthResponse> {
 /// Returns static application metadata.
 #[tauri::command]
 pub fn app_info() -> CommandResult<AppInfoResponse> {
+    let updated = crate::updater::consume_update_success();
     Ok(AppInfoResponse {
         name: "PromptLab",
         version: env!("CARGO_PKG_VERSION"),
         identifier: "com.promptlab.desktop",
         platform: detect_host_platform(),
+        just_updated_from: updated.as_ref().map(|m| m.from_version.clone()),
+        just_updated_to: updated.as_ref().map(|m| m.to_version.clone()),
     })
 }
 

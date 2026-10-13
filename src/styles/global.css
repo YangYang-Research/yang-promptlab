@@ -13284,6 +13284,11 @@ a.setup-checklist__item:hover {
   background: var(--bg-elevated);
 }
 
+.settings-update-progress {
+  margin: 0.65rem 0 0.25rem;
+  max-width: 22rem;
+}
+
 .prompt-lab-page__composer-head {
   display: flex;
   align-items: center;
