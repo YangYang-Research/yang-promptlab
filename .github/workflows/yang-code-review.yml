@@ -1,0 +1,25 @@
+name: YangYang Code Review (YCR)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  code-review:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      security-events: write # SARIF → Security / Code scanning
+      actions: write # upload Actions artifacts
+    steps:
+      - name: yang-code-review
+        uses: YangYang-Research/yang-code-review@v1.0.26
+        with:
+          PROVIDER: yangyang
+          API_KEY: ${{ secrets.YANG_API_TOKEN }}
+          MODEL_NAME: auto
+          GITHUB_TOKEN: ${{ github.token }}
