@@ -27,7 +27,11 @@ permissions:
 jobs:
   release-notes:
     name: Generate release notes
-    if: contains(github.event.pull_request.labels.*.name, 'release')
+    # PR already has `release` → other labels (e.g. ai-review) must not start a 2nd run.
+    # Only the moment `release` is applied, or reopen/synchronize with that label, may run.
+    if: >
+      contains(github.event.pull_request.labels.*.name, 'release') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'release')
     runs-on: ubuntu-22.04
     outputs:
       body: ${{ steps.gen.outputs.body }}
