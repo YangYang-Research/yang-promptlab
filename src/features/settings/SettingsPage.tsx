@@ -1,13 +1,27 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ask } from "@tauri-apps/plugin-dialog";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Button, Card, PageHeader, RefreshButton, Select, Badge } from "@/shared/components";
+import { Button, Card, PageHeader, ProgressBar, RefreshButton, Select, Badge } from "@/shared/components";
 import type { AppSettings } from "@/app/store/types";
 import { toAppError } from "@/shared/errors";
 import { clearAllAppData } from "@/shared/ipc/app";
-import { applyUpdateIfAvailable, checkForUpdate, getAppInfo } from "@/shared/ipc";
+import {
+  APP_UPDATE_PROGRESS_EVENT,
+  applyUpdateIfAvailable,
+  checkForUpdate,
+  getAppInfo,
+  updateDownloadPercent,
+  type UpdateProgressDto,
+} from "@/shared/ipc";
+import { useToast } from "@/shared/notifications";
+import {
+  getUpdateUiState,
+  patchUpdateUiState,
+  subscribeUpdateUiState,
+} from "@/shared/runtime/updateUiState";
 
 import { EnvironmentsPanel } from "./EnvironmentsPanel";
 import { JudgeRoleWeightsPanel } from "./JudgeRoleWeightsPanel";
@@ -107,12 +121,9 @@ function AboutPanel({
   backendConnected: boolean;
   backendVersion: string;
 }) {
+  const { notify } = useToast();
   const [platform, setPlatform] = useState(() => detectClientPlatform());
-  const [updateBusy, setUpdateBusy] = useState<"check" | "install" | null>(null);
-  const [updateError, setUpdateError] = useState<string | null>(null);
-  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
-  const [latestVersion, setLatestVersion] = useState<string | null>(null);
-  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const updateUi = useSyncExternalStore(subscribeUpdateUiState, getUpdateUiState, getUpdateUiState);
   const version = backendVersion || "0.1.0";
 
   useEffect(() => {
@@ -129,48 +140,104 @@ function AboutPanel({
     };
   }, []);
 
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
+    void listen<UpdateProgressDto>(APP_UPDATE_PROGRESS_EVENT, (event) => {
+      if (cancelled) return;
+      const { phase, message } = event.payload;
+      if (phase === "downloading") {
+        patchUpdateUiState({
+          status: message,
+          downloadPct: updateDownloadPercent(event.payload),
+          error: null,
+        });
+        return;
+      }
+      if (phase === "error") {
+        // Toast comes from check/install handlers only — avoid duplicate toasts.
+        patchUpdateUiState({
+          status: null,
+          downloadPct: null,
+          error: null,
+          busy: null,
+        });
+        return;
+      }
+      if (phase === "verifying" || phase === "installing" || phase === "relaunching") {
+        patchUpdateUiState({ status: message, downloadPct: null });
+      }
+    }).then((fn) => {
+      if (!cancelled) unlisten = fn;
+      else fn();
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [notify]);
+
   async function handleCheckForUpdate() {
-    if (!backendConnected || updateBusy) return;
-    setUpdateBusy("check");
-    setUpdateError(null);
+    if (!backendConnected || updateUi.busy) return;
+    patchUpdateUiState({ busy: "check", error: null, status: null });
     try {
       const result = await checkForUpdate();
-      setLatestVersion(result.latestVersion ?? null);
-      setUpdateAvailable(result.updateAvailable);
+      patchUpdateUiState({
+        latestVersion: result.latestVersion ?? null,
+        updateAvailable: result.updateAvailable,
+      });
       if (result.updateAvailable) {
-        setUpdateStatus(
-          result.latestVersion
-            ? `Version ${result.latestVersion} is available.`
-            : "A newer version is available.",
-        );
+        const msg = result.latestVersion
+          ? `Version ${result.latestVersion} is available.`
+          : "A newer version is available.";
+        notify(msg, "success");
+        // Toast only — keep Install button via updateAvailable, no status text.
+        patchUpdateUiState({ status: null, error: null });
       } else {
-        setUpdateStatus(result.skippedReason || "PromptLab is up to date.");
+        const reason = result.skippedReason || "PromptLab is up to date.";
+        const upToDate = /already on latest|up to date/i.test(reason);
+        notify(reason, upToDate ? "success" : "error");
+        patchUpdateUiState({ status: null, error: null });
       }
     } catch (err) {
-      setUpdateError(toAppError(err).message);
+      const message = toAppError(err).message;
+      patchUpdateUiState({ error: null, status: null });
+      notify(message, "error");
     } finally {
-      setUpdateBusy(null);
+      patchUpdateUiState({ busy: null });
     }
   }
 
   async function handleInstallUpdate() {
-    if (!backendConnected || updateBusy) return;
-    setUpdateBusy("install");
-    setUpdateError(null);
-    setUpdateStatus("Downloading and installing the new version…");
+    if (!backendConnected || updateUi.busy) return;
+    patchUpdateUiState({
+      busy: "install",
+      error: null,
+      status: "Downloading and installing the new version…",
+      downloadPct: 0,
+    });
     try {
       const result = await applyUpdateIfAvailable();
-      setLatestVersion(result.latestVersion ?? null);
-      setUpdateAvailable(result.updateAvailable && !result.applied);
+      patchUpdateUiState({
+        latestVersion: result.latestVersion ?? null,
+        updateAvailable: result.updateAvailable && !result.applied,
+      });
       if (result.applied) {
-        setUpdateStatus("Restarting the new version…");
+        patchUpdateUiState({ status: "Restarting the new version…", downloadPct: null });
         return;
       }
-      setUpdateStatus(result.skippedReason || "No update was installed.");
+      const skipped = result.skippedReason || "No update was installed.";
+      patchUpdateUiState({ status: skipped, downloadPct: null });
+      if (!result.updateAvailable) {
+        notify(skipped, "success");
+        patchUpdateUiState({ status: null });
+      }
     } catch (err) {
-      setUpdateError(toAppError(err).message);
+      const message = toAppError(err).message;
+      patchUpdateUiState({ error: null, downloadPct: null, status: null });
+      notify(message, "error");
     } finally {
-      setUpdateBusy(null);
+      patchUpdateUiState({ busy: null });
     }
   }
 
@@ -190,7 +257,7 @@ function AboutPanel({
         </div>
         <div>
           <dt>Latest</dt>
-          <dd>{latestVersion ? `v${latestVersion}` : "Not checked"}</dd>
+          <dd>{updateUi.latestVersion ? `v${updateUi.latestVersion}` : "Not checked"}</dd>
         </div>
         <div>
           <dt>Backend</dt>
@@ -205,22 +272,31 @@ function AboutPanel({
           <dd>{platform}</dd>
         </div>
       </dl>
-      {updateStatus ? <p className="text-muted text-sm">{updateStatus}</p> : null}
-      {updateError ? <p className="text-danger text-sm">{updateError}</p> : null}
+      {updateUi.status ? <p className="text-muted text-sm">{updateUi.status}</p> : null}
+      {updateUi.error ? <p className="text-danger text-sm">{updateUi.error}</p> : null}
+      {updateUi.downloadPct !== null ? (
+        <div className="settings-update-progress">
+          <ProgressBar
+            value={updateUi.downloadPct}
+            size="sm"
+            label="Downloading update"
+          />
+        </div>
+      ) : null}
       <div className="settings-section__actions">
         <Button
-          disabled={!backendConnected || updateBusy !== null}
+          disabled={!backendConnected || updateUi.busy !== null}
           onClick={() => void handleCheckForUpdate()}
         >
-          {updateBusy === "check" ? "Checking…" : "Check for updates"}
+          {updateUi.busy === "check" ? "Checking…" : "Check for updates"}
         </Button>
-        {updateAvailable ? (
+        {updateUi.updateAvailable ? (
           <Button
             variant="primary"
-            disabled={!backendConnected || updateBusy !== null}
+            disabled={!backendConnected || updateUi.busy !== null}
             onClick={() => void handleInstallUpdate()}
           >
-            {updateBusy === "install" ? "Installing…" : "Install and restart"}
+            {updateUi.busy === "install" ? "Installing…" : "Install and restart"}
           </Button>
         ) : null}
       </div>

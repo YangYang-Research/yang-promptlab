@@ -13,6 +13,8 @@ use tracing::warn;
 const MANIFEST_TIMEOUT: Duration = Duration::from_secs(15);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Abort stalled streams when the link drops mid-download (no bytes for this long).
+const CHUNK_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_INSTALLER_BYTES: u64 = 512 * 1024 * 1024;
 
 /// Fetch manifest from the first working URL (GitHub primary, CDN backup).
@@ -135,10 +137,22 @@ async fn download_installer_once(
     let mut last_emit = 0u64;
 
     loop {
-        let chunk = response
-            .chunk()
-            .await
-            .map_err(|err| UpdateError::Network(format!("download stream failed: {err}")))?;
+        let chunk = match tokio::time::timeout(CHUNK_IDLE_TIMEOUT, response.chunk()).await {
+            Ok(Ok(chunk)) => chunk,
+            Ok(Err(err)) => {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(UpdateError::Network(format!(
+                    "download stream failed: {err}"
+                )));
+            }
+            Err(_) => {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(UpdateError::Network(format!(
+                    "download stalled (no data for {}s) — check network and retry",
+                    CHUNK_IDLE_TIMEOUT.as_secs()
+                )));
+            }
+        };
         let Some(bytes) = chunk else {
             break;
         };

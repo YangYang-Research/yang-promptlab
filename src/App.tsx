@@ -16,6 +16,7 @@ import {
 } from "@/shared/ipc";
 import { createLogger } from "@/shared/logging";
 import { toAppError } from "@/shared/errors";
+import { useToast } from "@/shared/notifications";
 
 const log = createLogger("App");
 
@@ -31,6 +32,7 @@ function AppBootstrap() {
   const [bootMessage, setBootMessage] = useState("Starting security workspace…");
   const [downloadPct, setDownloadPct] = useState<number | null>(null);
   const [bootFailure, setBootFailure] = useState<BootFailure | null>(null);
+  const [updateSuccessToast, setUpdateSuccessToast] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,7 +46,13 @@ function AppBootstrap() {
           try {
             unlisten = await listen<UpdateProgressDto>(APP_UPDATE_PROGRESS_EVENT, (event) => {
               if (cancelled) return;
-              setBootMessage(event.payload.message);
+              const { phase, message } = event.payload;
+              if (phase === "error") {
+                setBootMessage(message);
+                setDownloadPct(null);
+                return;
+              }
+              setBootMessage(message);
               setDownloadPct(updateDownloadPercent(event.payload));
             });
           } catch {
@@ -64,6 +72,7 @@ function AppBootstrap() {
           setDownloadPct(null);
           setBootMessage("Starting security workspace…");
         } catch (updateError) {
+          // Network drop mid-download must not leave the boot screen stuck.
           log.warn("startup update check skipped", {
             error: toAppError(updateError),
           });
@@ -101,6 +110,9 @@ function AppBootstrap() {
         if (cancelled) return;
 
         log.info("backend health", { health, info });
+        if (info.justUpdatedTo) {
+          setUpdateSuccessToast(`Updated successfully to v${info.justUpdatedTo}.`);
+        }
         dispatch({
           type: "SET_BACKEND",
           version: info.version,
@@ -166,7 +178,20 @@ function AppBootstrap() {
     );
   }
 
-  return <AppRouter />;
+  return (
+    <>
+      <UpdateSuccessToast message={updateSuccessToast} />
+      <AppRouter />
+    </>
+  );
+}
+
+function UpdateSuccessToast({ message }: { message: string | null }) {
+  const { notify } = useToast();
+  useEffect(() => {
+    if (message) notify(message, "success");
+  }, [message, notify]);
+  return null;
 }
 
 export function App() {

@@ -5,9 +5,10 @@ mod install;
 mod manifest;
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tracing::{info, warn};
 
@@ -128,6 +129,71 @@ fn cache_dir() -> PathBuf {
         .join("updates")
 }
 
+fn pending_success_path() -> PathBuf {
+    cache_dir().join("pending-success.json")
+}
+
+/// Written just before relaunch; consumed once on the next boot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSuccessMarker {
+    pub from_version: String,
+    pub to_version: String,
+}
+
+pub fn mark_update_pending(from_version: &str, to_version: &str) {
+    let dir = cache_dir();
+    if let Err(err) = std::fs::create_dir_all(&dir) {
+        warn!(error = %err, "failed to create update cache for success marker");
+        return;
+    }
+    let marker = UpdateSuccessMarker {
+        from_version: from_version.to_string(),
+        to_version: to_version.to_string(),
+    };
+    match serde_json::to_vec_pretty(&marker) {
+        Ok(bytes) => {
+            if let Err(err) = std::fs::write(pending_success_path(), bytes) {
+                warn!(error = %err, "failed to write update success marker");
+            }
+        }
+        Err(err) => warn!(error = %err, "failed to serialize update success marker"),
+    }
+}
+
+/// Returns marker when `to_version` matches this binary; deletes file either way if present.
+/// Cached per process so StrictMode / double `app_info` still sees the toast once.
+pub fn consume_update_success() -> Option<UpdateSuccessMarker> {
+    static CONSUMED: OnceLock<Option<UpdateSuccessMarker>> = OnceLock::new();
+    CONSUMED
+        .get_or_init(|| {
+            let path = pending_success_path();
+            let raw = match std::fs::read_to_string(&path) {
+                Ok(raw) => raw,
+                Err(_) => return None,
+            };
+            let _ = std::fs::remove_file(&path);
+            let marker: UpdateSuccessMarker = match serde_json::from_str(&raw) {
+                Ok(m) => m,
+                Err(err) => {
+                    warn!(error = %err, "invalid update success marker");
+                    return None;
+                }
+            };
+            if marker.to_version.trim() == CURRENT_VERSION {
+                Some(marker)
+            } else {
+                warn!(
+                    marker_to = %marker.to_version,
+                    current = CURRENT_VERSION,
+                    "ignoring update success marker for different version"
+                );
+                None
+            }
+        })
+        .clone()
+}
+
 fn progress(
     phase: &str,
     message: impl Into<String>,
@@ -161,7 +227,8 @@ pub async fn check_for_update(app: Option<&AppHandle>) -> CommandResult<UpdateCh
         Ok(manifest) => manifest,
         Err(err) => {
             warn!(error = %err, "update manifest fetch failed on all sources");
-            dto.skipped_reason = Some(err.to_string());
+            // Keep technical detail in logs; UI toast uses skipped_reason (once).
+            dto.skipped_reason = Some(err.user_message());
             if let Some(app) = app {
                 emit_progress(
                     app,
@@ -180,7 +247,7 @@ pub async fn check_for_update(app: Option<&AppHandle>) -> CommandResult<UpdateCh
     };
 
     if !is_newer_version(&manifest.version, CURRENT_VERSION) {
-        dto.skipped_reason = Some("already on latest version".into());
+        dto.skipped_reason = Some("Already on latest version".into());
         if let Some(app) = app {
             emit_progress(
                 app,
@@ -260,9 +327,24 @@ pub async fn apply_if_available(app: &AppHandle) -> CommandResult<UpdateCheckDto
         ),
     );
 
-    let downloaded = download::download_installer(app, &asset, &dest_dir, &manifest.version)
+    let downloaded = match download::download_installer(app, &asset, &dest_dir, &manifest.version)
         .await
-        .map_err(map_err)?;
+    {
+        Ok(path) => path,
+        Err(err) => {
+            emit_progress(
+                app,
+                progress(
+                    "error",
+                    err.user_message(),
+                    Some(&manifest.version),
+                    None,
+                    None,
+                ),
+            );
+            return Err(map_err(err));
+        }
+    };
 
     emit_progress(
         app,
@@ -274,7 +356,19 @@ pub async fn apply_if_available(app: &AppHandle) -> CommandResult<UpdateCheckDto
             None,
         ),
     );
-    download::verify_sha256(&downloaded, &asset.sha256).map_err(map_err)?;
+    if let Err(err) = download::verify_sha256(&downloaded, &asset.sha256) {
+        emit_progress(
+            app,
+            progress(
+                "error",
+                err.user_message(),
+                Some(&manifest.version),
+                None,
+                None,
+            ),
+        );
+        return Err(map_err(err));
+    }
 
     emit_progress(
         app,
@@ -303,6 +397,8 @@ pub async fn apply_if_available(app: &AppHandle) -> CommandResult<UpdateCheckDto
     let pid = std::process::id();
     install::spawn_after_exit(pid, &launch).map_err(map_err)?;
 
+    mark_update_pending(CURRENT_VERSION, &manifest.version);
+
     info!(
         version = %manifest.version,
         platform = %platform,
@@ -323,7 +419,7 @@ pub async fn apply_if_available(app: &AppHandle) -> CommandResult<UpdateCheckDto
 }
 
 fn map_err(err: UpdateError) -> CommandError {
-    CommandError::internal(err.to_string())
+    CommandError::internal(err.user_message())
 }
 
 #[derive(Debug)]
@@ -333,6 +429,23 @@ pub enum UpdateError {
     Checksum { expected: String, actual: String },
     Install(String),
     UnsafeUrl(String),
+}
+
+impl UpdateError {
+    /// Short UI copy — never leak URLs or reqwest internals for network faults.
+    pub fn user_message(&self) -> String {
+        match self {
+            Self::Network(_) => {
+                "Update failed due to a network error. Check your connection and try again.".into()
+            }
+            Self::InvalidManifest(_) => "Update manifest is invalid. Try again later.".into(),
+            Self::Checksum { .. } => {
+                "Update file failed verification. Try downloading again.".into()
+            }
+            Self::Install(msg) => format!("Update install failed: {msg}"),
+            Self::UnsafeUrl(_) => "Update source was rejected.".into(),
+        }
+    }
 }
 
 impl std::fmt::Display for UpdateError {
@@ -370,5 +483,15 @@ mod tests {
         assert_eq!(urls.len(), 2);
         assert_eq!(urls[0], DEFAULT_MANIFEST_URL);
         assert_eq!(urls[1], DEFAULT_MANIFEST_BACKUP_URL);
+    }
+
+    #[test]
+    fn network_user_message_hides_url() {
+        let err = UpdateError::Network(
+            "manifest request failed: error sending request for url (https://cdn.yyng.icu/x)".into(),
+        );
+        let msg = err.user_message();
+        assert!(!msg.contains("http"));
+        assert!(msg.to_ascii_lowercase().contains("network"));
     }
 }

@@ -10,6 +10,9 @@ export type AppInfoResponse = {
   version: string;
   identifier: string;
   platform: string;
+  /** Present once after a successful in-app update relaunch. */
+  justUpdatedFrom?: string | null;
+  justUpdatedTo?: string | null;
 };
 
 export function healthCheck(): Promise<HealthResponse> {

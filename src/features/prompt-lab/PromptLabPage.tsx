@@ -1,8 +1,8 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 
 import { useAppStore } from "@/app/store/AppStore";
 import { ATTACK_MUTATORS } from "@/features/scans/payloadStrategy";
-import { Button, IconButton, Modal, PageHeader } from "@/shared/components";
+import { Button, IconButton, Modal, PageHeader, Skeleton } from "@/shared/components";
 import { IconAi, IconCheck, IconCopy, IconHistory, IconTrash } from "@/shared/components/Icons";
 import { toAppError } from "@/shared/errors";
 import {
@@ -11,9 +11,13 @@ import {
   listPromptLabHistory,
   upgradePromptLab,
   type PromptLabHistoryDto,
-  type PromptLabVariantDto,
 } from "@/shared/ipc/mutators";
 import { useToast } from "@/shared/notifications";
+import {
+  getPromptLabUiState,
+  patchPromptLabUiState,
+  subscribePromptLabUiState,
+} from "@/shared/runtime/promptLabUiState";
 import { assertYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
 
 function downloadPromptLabJson(payload: unknown, filename: string): void {
@@ -86,13 +90,16 @@ function VariantCard({
 export function PromptLabPage() {
   const { backendConnected } = useAppStore();
   const { notify } = useToast();
-  const [prompt, setPrompt] = useState("");
-  const [busy, setBusy] = useState<"upgrade" | "expand" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [variants, setVariants] = useState<PromptLabVariantDto[]>([]);
+  const ui = useSyncExternalStore(
+    subscribePromptLabUiState,
+    getPromptLabUiState,
+    getPromptLabUiState,
+  );
+  const { prompt, busy, error, variants } = ui;
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyRows, setHistoryRows] = useState<PromptLabHistoryDto[]>([]);
+  const [seedCopied, setSeedCopied] = useState(false);
 
   const labelById = useMemo(() => {
     const map = new Map<string, string>();
@@ -105,7 +112,7 @@ export function PromptLabPage() {
   async function requireLiveAgent(): Promise<boolean> {
     const yazg = await assertYazgAgentLive(backendConnected);
     if (!yazg.live) {
-      setError(yazg.message);
+      patchPromptLabUiState({ error: yazg.message, busy: null });
       notify(yazg.message, "error");
       return false;
     }
@@ -132,11 +139,29 @@ export function PromptLabPage() {
     await loadHistory();
   }
 
+  async function handleCopySeed() {
+    const seed = prompt.trim();
+    if (!seed) {
+      notify("Enter a prompt first.", "error");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(seed);
+      setSeedCopied(true);
+      notify("Seed prompt copied", "success");
+      window.setTimeout(() => setSeedCopied(false), 1600);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Failed to copy seed prompt", "error");
+    }
+  }
+
   function handleRestoreHistory(row: PromptLabHistoryDto) {
-    setPrompt(row.seedPrompt);
-    setVariants(row.variants);
+    patchPromptLabUiState({
+      prompt: row.seedPrompt,
+      variants: row.variants,
+      error: null,
+    });
     setHistoryOpen(false);
-    setError(null);
     notify("Restored Prompt Lab history", "success");
   }
 
@@ -153,52 +178,51 @@ export function PromptLabPage() {
   async function handleUpgrade() {
     const seed = prompt.trim();
     if (!seed) {
-      setError("Enter a prompt first.");
+      patchPromptLabUiState({ error: "Enter a prompt first." });
       return;
     }
-    setBusy("upgrade");
-    setError(null);
+    if (busy) return;
+    patchPromptLabUiState({ busy: "upgrade", error: null });
     try {
       if (!(await requireLiveAgent())) return;
       const upgraded = await upgradePromptLab(seed);
-      setPrompt(upgraded.content);
+      patchPromptLabUiState({ prompt: upgraded.content });
       notify("Prompt upgraded via Attack Factory", "success");
     } catch (err) {
       const message = toAppError(err).message;
-      setError(message);
+      patchPromptLabUiState({ error: message });
       notify(message, "error");
     } finally {
-      setBusy(null);
+      patchPromptLabUiState({ busy: null });
     }
   }
 
   async function handleGenerate() {
     const seed = prompt.trim();
     if (!seed) {
-      setError("Enter a prompt first.");
+      patchPromptLabUiState({ error: "Enter a prompt first." });
       return;
     }
-    setBusy("expand");
-    setError(null);
+    if (busy) return;
+    patchPromptLabUiState({ busy: "expand", error: null });
     try {
       if (!(await requireLiveAgent())) return;
       const next = await expandPromptLab(seed);
-      setVariants(next.variants);
+      patchPromptLabUiState({ variants: next.variants });
       notify(`Generated ${next.variants.length} variants`, "success");
     } catch (err) {
       const message = toAppError(err).message;
-      setError(message);
-      setVariants([]);
+      patchPromptLabUiState({ error: message, variants: [] });
       notify(message, "error");
     } finally {
-      setBusy(null);
+      patchPromptLabUiState({ busy: null });
     }
   }
 
   function handleExportJson() {
     const seed = prompt.trim();
     if (!seed || variants.length === 0) {
-      setError("Generate variants before exporting.");
+      patchPromptLabUiState({ error: "Generate variants before exporting." });
       return;
     }
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -216,7 +240,7 @@ export function PromptLabPage() {
       notify("Exported Prompt Lab JSON", "success");
     } catch (err) {
       const message = toAppError(err).message;
-      setError(message);
+      patchPromptLabUiState({ error: message });
       notify(message, "error");
     }
   }
@@ -235,21 +259,32 @@ export function PromptLabPage() {
           <label className="prompt-lab-page__label" htmlFor="prompt-lab-input">
             Seed prompt
           </label>
-          <IconButton
-            ariaLabel="Prompt Lab history"
-            size="sm"
-            disabled={!backendConnected || busy !== null}
-            onClick={() => void handleOpenHistory()}
-          >
-            <IconHistory />
-          </IconButton>
+          <div className="prompt-lab-page__composer-tools">
+            <IconButton
+              ariaLabel={seedCopied ? "Seed prompt copied" : "Copy seed prompt"}
+              size="sm"
+              active={seedCopied}
+              disabled={!prompt.trim() || busy !== null}
+              onClick={() => void handleCopySeed()}
+            >
+              {seedCopied ? <IconCheck /> : <IconCopy />}
+            </IconButton>
+            <IconButton
+              ariaLabel="Prompt Lab history"
+              size="sm"
+              disabled={!backendConnected || busy !== null}
+              onClick={() => void handleOpenHistory()}
+            >
+              <IconHistory />
+            </IconButton>
+          </div>
         </div>
         <textarea
           id="prompt-lab-input"
           className="prompt-lab-page__textarea"
           rows={6}
           value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
+          onChange={(event) => patchPromptLabUiState({ prompt: event.target.value })}
           placeholder="Paste or type a prompt…"
           disabled={busy !== null}
         />
@@ -260,7 +295,12 @@ export function PromptLabPage() {
               disabled={actionsDisabled}
               onClick={() => void handleUpgrade()}
             >
-              <IconAi className="btn__icon" aria-hidden />
+              <IconAi
+                className={["btn__icon", busy === "upgrade" ? "btn__icon--working" : ""]
+                  .filter(Boolean)
+                  .join(" ")}
+                aria-hidden
+              />
               {busy === "upgrade" ? "Upgrading…" : "Upgrade prompt"}
             </Button>
             <Button
@@ -268,7 +308,12 @@ export function PromptLabPage() {
               disabled={actionsDisabled}
               onClick={() => void handleGenerate()}
             >
-              <IconAi className="btn__icon" aria-hidden />
+              <IconAi
+                className={["btn__icon", busy === "expand" ? "btn__icon--working" : ""]
+                  .filter(Boolean)
+                  .join(" ")}
+                aria-hidden
+              />
               {busy === "expand" ? "Generating…" : "Generate variants"}
             </Button>
             {variants.length > 0 ? (
@@ -290,7 +335,31 @@ export function PromptLabPage() {
         ) : null}
       </section>
 
-      {variants.length > 0 ? (
+      {busy === "expand" ? (
+        <section
+          className="prompt-lab-page__loading"
+          aria-busy="true"
+          aria-live="polite"
+          aria-label="Generating variants"
+        >
+          <div className="prompt-lab-page__loading-head">
+            <span className="page-loader__spinner" aria-hidden />
+            <p className="prompt-lab-page__loading-title">
+              <IconAi className="prompt-lab-page__loading-icon" aria-hidden />
+              Generating
+            </p>
+          </div>
+          <div className="prompt-lab-page__results" aria-hidden>
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div key={index} className="prompt-lab-page__variant prompt-lab-page__variant--skeleton">
+                <Skeleton width="42%" height="0.85rem" />
+                <Skeleton width="28%" height="0.65rem" />
+                <Skeleton width="100%" height="4.5rem" />
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : variants.length > 0 ? (
         <section className="prompt-lab-page__results" aria-label="Mutator variants">
           {variants.map((variant) => (
             <VariantCard
