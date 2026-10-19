@@ -20,6 +20,10 @@ import {
 } from "@/shared/runtime/promptLabUiState";
 import { assertYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
 
+import { ScenarioAgentPanel } from "./ScenarioAgentPanel";
+
+type PromptLabTab = "variants" | "scenario";
+
 function downloadPromptLabJson(payload: unknown, filename: string): void {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -96,6 +100,7 @@ export function PromptLabPage() {
     getPromptLabUiState,
   );
   const { prompt, busy, error, variants } = ui;
+  const [tab, setTab] = useState<PromptLabTab>("variants");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyRows, setHistoryRows] = useState<PromptLabHistoryDto[]>([]);
@@ -251,9 +256,42 @@ export function PromptLabPage() {
     <div className="page prompt-lab-page">
       <PageHeader
         title="Prompt Lab"
-        description="An experimental for creating mutator variants from a seed prompt."
+        description="Mutator variants and Scenario Agent for authorized AI red-team / CTF goals."
       />
 
+      <div className="prompt-lab-page__tabs" role="tablist" aria-label="Prompt Lab sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "variants"}
+          className={
+            tab === "variants"
+              ? "filter-chip filter-chip--active"
+              : "filter-chip"
+          }
+          onClick={() => setTab("variants")}
+        >
+          Variants
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "scenario"}
+          className={
+            tab === "scenario"
+              ? "filter-chip filter-chip--active"
+              : "filter-chip"
+          }
+          onClick={() => setTab("scenario")}
+        >
+          Scenario Agent
+        </button>
+      </div>
+
+      {tab === "scenario" ? <ScenarioAgentPanel /> : null}
+
+      {tab === "variants" ? (
+      <>
       <section className="prompt-lab-page__composer" aria-label="Prompt input">
         <div className="prompt-lab-page__composer-head">
           <label className="prompt-lab-page__label" htmlFor="prompt-lab-input">
@@ -412,6 +450,8 @@ export function PromptLabPage() {
           </ul>
         )}
       </Modal>
+      </>
+      ) : null}
     </div>
   );
 }

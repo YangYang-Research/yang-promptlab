@@ -70,4 +70,11 @@ export const RUNTIME_INFERENCE_SITES: RuntimeInferenceSite[] = [
     description:
       "Yazg ReActs then delegates to GeneratePromptAgent: invents a novel adversarial probe for the selected technique from its metadata and current factory prompt. Review and save before it replaces the catalog entry.",
   },
+  {
+    id: "scenario-agent",
+    title: "Scenario Agent",
+    location: "Advanced · Prompt Lab · Scenario Agent",
+    description:
+      "ScenarioAgent (system prompt includes Huntr Blind Trust, Gandalf, HackAPrompt Agent Dojo, OWASP AIVP, MCP CTF playbooks) plans seeds and follow-ups from freeform scenario+goal. Auto POSTs via harness; Manual copies probes and pastes replies.",
+  },
 ];

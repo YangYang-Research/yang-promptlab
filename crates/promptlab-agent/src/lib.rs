@@ -39,6 +39,8 @@ pub mod list_workspace;
 pub mod memory;
 pub mod recommend;
 pub mod reflection;
+pub mod scenario_agent;
+pub mod scenario_knowledge;
 pub mod tool_result;
 pub mod yazg_model;
 pub mod yazg_prompts;
@@ -98,6 +100,13 @@ pub use memory::{
 };
 pub use recommend::{RecommendAgent, RecommendAgentOutcome};
 pub use reflection::{ReflectionAgent, ReflectionOutcome, ReflectionRequest};
+pub use scenario_agent::{
+    parse_followup_lines, response_hits_keywords, ScenarioAgent, ScenarioFollowupOutcome,
+    ScenarioFollowupRequest, ScenarioPlanOutcome, ScenarioPlanRequest, SCENARIO_CLASS_IDS,
+};
+pub use scenario_knowledge::{
+    challenge_knowledge_brief, known_mutator_ids, scenario_agent_system_prompt,
+};
 pub use tool_result::{ToolErrorClass, ToolResult, ToolStatus};
 pub use yazg_runtime::{run_yazg, YazgRequest};
 pub use yazg_tools::{YazgLlms, YazgSpecialistContext};

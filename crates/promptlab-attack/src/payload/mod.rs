@@ -37,6 +37,14 @@ pub enum MutatorKind {
     Rephrase,
     Shorten,
     Crossover,
+    /// Fake env recovery notice that demands following the seed as system recovery.
+    SystemNotificationWrap,
+    /// Close user turn + open forged system_instruction around the seed.
+    XmlControlSpoof,
+    /// Force immediate JSON open so Thought/refusal is harder.
+    JsonForceOpen,
+    /// Spoof multi-agent coordinator / verified access around the seed.
+    CoordinatorPrefix,
     LlmRephrase,
     LlmCrossover,
     LlmFewShot,
@@ -79,6 +87,10 @@ impl MutatorKind {
             Self::Rephrase,
             Self::Shorten,
             Self::Crossover,
+            Self::SystemNotificationWrap,
+            Self::XmlControlSpoof,
+            Self::JsonForceOpen,
+            Self::CoordinatorPrefix,
             Self::LlmRephrase,
             Self::LlmCrossover,
             Self::LlmFewShot,
@@ -137,6 +149,10 @@ impl MutatorKind {
             Self::Rephrase => "rephrase",
             Self::Shorten => "shorten",
             Self::Crossover => "crossover",
+            Self::SystemNotificationWrap => "system_notification_wrap",
+            Self::XmlControlSpoof => "xml_control_spoof",
+            Self::JsonForceOpen => "json_force_open",
+            Self::CoordinatorPrefix => "coordinator_prefix",
             Self::LlmRephrase => "llm_rephrase",
             Self::LlmCrossover => "llm_crossover",
             Self::LlmFewShot => "llm_few_shot",
@@ -181,6 +197,16 @@ impl MutatorKind {
             "rephrase" => Some(Self::Rephrase),
             "shorten" => Some(Self::Shorten),
             "crossover" => Some(Self::Crossover),
+            "system_notification_wrap" | "system_notification" | "ghost_tools_wrap" => {
+                Some(Self::SystemNotificationWrap)
+            }
+            "xml_control_spoof" | "xml_spoof" | "control_token_spoof" => {
+                Some(Self::XmlControlSpoof)
+            }
+            "json_force_open" | "json_force" | "begin_with_brace" => Some(Self::JsonForceOpen),
+            "coordinator_prefix" | "coordinator_spoof" | "multi_agent_coordinator" => {
+                Some(Self::CoordinatorPrefix)
+            }
             "llm_rephrase" => Some(Self::LlmRephrase),
             "llm_crossover" => Some(Self::LlmCrossover),
             "llm_few_shot" | "llm_fewshot" | "few_shot" => Some(Self::LlmFewShot),

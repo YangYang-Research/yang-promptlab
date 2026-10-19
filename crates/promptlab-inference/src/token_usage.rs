@@ -206,6 +206,7 @@ pub fn humanize_agent_id(agent_id: &str) -> String {
         "agentic_attack_execution" => "AgenticAttackExecutionAgent".into(),
         "sequential_attack_execution" => "SequentialAttackExecutionAgent".into(),
         "reflection" => "ReflectionAgent".into(),
+        "scenario_agent" => "ScenarioAgent".into(),
         "create_project" => "CreateProjectTool".into(),
         RUNTIME_SYSTEM_AGENT | "unknown" => "Runtime system".into(),
         other => other
@@ -240,6 +241,10 @@ fn agent_note(agent_id: &str) -> Option<String> {
             "Counts when an agentic scan has reflection enabled."
                 .into(),
         ),
+        "scenario_agent" => Some(
+            "Prompt Lab Scenario Agent: plan seed prompts and follow-ups for CTF-style goals."
+                .into(),
+        ),
         "summary" => Some(
             "Counts when you generate a project or scan summary (Project details or Yazg)."
                 .into(),
@@ -264,6 +269,7 @@ pub fn known_agent_ids() -> &'static [&'static str] {
         "agentic_attack_execution",
         "sequential_attack_execution",
         "reflection",
+        "scenario_agent",
         RUNTIME_SYSTEM_AGENT,
     ]
 }

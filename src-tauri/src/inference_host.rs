@@ -811,6 +811,53 @@ impl PlannerLlm for HostGeneratePromptLlm {
     }
 }
 
+/// Prompt Lab ScenarioAgent LLM — plan seeds + follow-ups for CTF-style goals.
+pub struct HostScenarioAgentLlm {
+    data_dir: PathBuf,
+    inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
+    model_manager: Arc<AsyncMutex<LocalModelManager>>,
+    model_provider: SharedModelProvider,
+    #[allow(dead_code)]
+    runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+}
+
+impl HostScenarioAgentLlm {
+    pub fn new(
+        data_dir: PathBuf,
+        inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
+        model_manager: Arc<AsyncMutex<LocalModelManager>>,
+        model_provider: SharedModelProvider,
+        runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
+    ) -> Self {
+        Self {
+            data_dir,
+            inference,
+            model_manager,
+            model_provider,
+            runtime_manager,
+        }
+    }
+}
+
+#[async_trait]
+impl PlannerLlm for HostScenarioAgentLlm {
+    async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
+        detached_complete_as(
+            &self.data_dir,
+            &self.inference,
+            &self.model_manager,
+            self.model_provider.clone(),
+            "scenario_agent",
+            Some(promptlab_agent::scenario_agent_system_prompt()),
+            prompt,
+            1536,
+            0.4,
+        )
+        .await
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
+    }
+}
+
 /// Attack results recommendation LLM — remediation guidance from scan findings.
 pub struct HostAttackRecommendLlm {
     data_dir: PathBuf,

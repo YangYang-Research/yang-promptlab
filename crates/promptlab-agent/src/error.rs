@@ -18,6 +18,8 @@ pub enum AgentError {
     Judge(String),
     #[error("reflection failed: {0}")]
     Reflection(String),
+    #[error("scenario agent failed: {0}")]
+    ScenarioAgent(String),
     #[error("attack execution failed: {0}")]
     AttackExecution(String),
     #[error("supervisor: {0}")]
