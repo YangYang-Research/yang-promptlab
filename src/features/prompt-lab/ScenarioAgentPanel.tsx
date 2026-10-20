@@ -6,8 +6,8 @@ import {
   ATTACK_MUTATORS,
   type AttackMutatorId,
 } from "@/features/scans/payloadStrategy";
-import { Button, IconButton, Select } from "@/shared/components";
-import { IconAi, IconCheck, IconCopy } from "@/shared/components/Icons";
+import { Button, IconButton, Modal, Select } from "@/shared/components";
+import { IconAi, IconCheck, IconCopy, IconHistory, IconTrash } from "@/shared/components/Icons";
 import { toAppError } from "@/shared/errors";
 import {
   scenarioAgentExpand,
@@ -19,6 +19,20 @@ import {
 } from "@/shared/ipc/scenarioAgent";
 import { useToast } from "@/shared/notifications";
 import { assertYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
+
+import { AttackChainGraph } from "./AttackChainGraph";
+import {
+  clearScenarioHistory,
+  deleteScenarioHistory,
+  loadScenarioHistory,
+  newChainNodeId,
+  newHistoryId,
+  previewText,
+  saveScenarioHistory,
+  upsertScenarioHistory,
+  type ScenarioChainNode,
+  type ScenarioHistoryEntry,
+} from "./scenarioChain";
 
 type AgentMode = "auto" | "manual";
 
@@ -37,10 +51,13 @@ function CopyableBlock({
   label,
   content,
   meta,
+  onCopied,
 }: {
   label: string;
   content: string;
   meta?: string;
+  /** After successful clipboard copy — e.g. load into Seed prompt. */
+  onCopied?: (content: string) => void;
 }) {
   const { notify } = useToast();
   const [copied, setCopied] = useState(false);
@@ -48,6 +65,7 @@ function CopyableBlock({
   async function handleCopy() {
     try {
       await navigator.clipboard.writeText(content);
+      onCopied?.(content);
       setCopied(true);
       notify(`${label} copied`, "success");
       window.setTimeout(() => setCopied(false), 1600);
@@ -105,6 +123,12 @@ export function ScenarioAgentPanel() {
   const [maxRounds, setMaxRounds] = useState(3);
   const [maxVariants, setMaxVariants] = useState(5);
 
+  const [chain, setChain] = useState<ScenarioChainNode[]>([]);
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+  const [historyId, setHistoryId] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyRows, setHistoryRows] = useState<ScenarioHistoryEntry[]>([]);
+
   const allTargets = useMemo(() => {
     const projectName = new Map(projects.map((p) => [p.id, p.name]));
     return targets.map((t) => ({
@@ -140,6 +164,62 @@ export function ScenarioAgentPanel() {
     setSelectedMutators([]);
   }
 
+  const persistChain = useCallback(
+    (nodes: ScenarioChainNode[], histId: string | null) => {
+      if (nodes.length === 0) return histId;
+      const id = histId ?? newHistoryId();
+      const entry: ScenarioHistoryEntry = {
+        id,
+        createdAt: new Date().toISOString(),
+        scenario: scenario.trim(),
+        goal: goal.trim(),
+        nodes,
+      };
+      const next = upsertScenarioHistory(entry, loadScenarioHistory());
+      saveScenarioHistory(next);
+      setHistoryId(id);
+      return id;
+    },
+    [scenario, goal],
+  );
+
+  function selectChainNode(node: ScenarioChainNode) {
+    setActiveNodeId(node.id);
+    setSeed(node.seed);
+    setPastedReply(node.reply ?? "");
+  }
+
+  function openHistory() {
+    setHistoryRows(loadScenarioHistory());
+    setHistoryOpen(true);
+  }
+
+  function restoreHistory(entry: ScenarioHistoryEntry) {
+    setScenario(entry.scenario);
+    setGoal(entry.goal);
+    setChain(entry.nodes);
+    setHistoryId(entry.id);
+    // Prefer a leaf (no children); else last node.
+    const leaf =
+      [...entry.nodes].reverse().find((n) => !entry.nodes.some((c) => c.parentId === n.id)) ??
+      entry.nodes[entry.nodes.length - 1];
+    if (leaf) {
+      setActiveNodeId(leaf.id);
+      setSeed(leaf.seed);
+      setPastedReply(leaf.reply ?? "");
+    }
+    setHistoryOpen(false);
+    notify("Restored Scenario history", "success");
+  }
+
+  function removeHistory(id: string) {
+    const next = deleteScenarioHistory(id, loadScenarioHistory());
+    saveScenarioHistory(next);
+    setHistoryRows(next);
+    if (historyId === id) setHistoryId(null);
+    notify("Scenario history entry deleted", "success");
+  }
+
   async function requireLiveAgent(): Promise<boolean> {
     const yazg = await assertYazgAgentLive(backendConnected);
     if (!yazg.live) {
@@ -173,6 +253,18 @@ export function ScenarioAgentPanel() {
         setSuccessKeywords(plan.successKeywords);
       }
       setAttackHints(plan.attackHints);
+      const node: ScenarioChainNode = {
+        id: newChainNodeId(),
+        parentId: null,
+        seed: plan.seedPrompt,
+        reply: null,
+      };
+      const nodes = [node];
+      setChain(nodes);
+      setActiveNodeId(node.id);
+      setPastedReply("");
+      setFollowups([]);
+      persistChain(nodes, null);
       notify("Seed planned", "success");
     } catch (err) {
       const message = toAppError(err).message;
@@ -227,9 +319,45 @@ export function ScenarioAgentPanel() {
       successKeywords,
     });
     setFollowups(result.prompts);
-    if (result.prompts[0]) {
-      setSeed(result.prompts[0]);
-    }
+
+    const nextSeed = result.prompts[0]?.trim() ?? "";
+    setChain((prev) => {
+      // Branch from the *active* node — never append after an unrelated leaf.
+      let nodes =
+        prev.length > 0
+          ? [...prev]
+          : [
+              {
+                id: newChainNodeId(),
+                parentId: null,
+                seed: lastPrompt,
+                reply: null,
+              },
+            ];
+      const found = nodes.findIndex((n) => n.id === activeNodeId);
+      const idx = found >= 0 ? found : nodes.length - 1;
+      const parent = nodes[idx];
+      nodes[idx] = {
+        ...parent,
+        seed: parent.seed || lastPrompt,
+        reply: lastResponse,
+      };
+      if (nextSeed) {
+        const nextNode: ScenarioChainNode = {
+          id: newChainNodeId(),
+          parentId: parent.id,
+          seed: nextSeed,
+          reply: null,
+        };
+        nodes = [...nodes, nextNode];
+        setActiveNodeId(nextNode.id);
+        setSeed(nextSeed);
+        setPastedReply("");
+      }
+      persistChain(nodes, historyId);
+      return nodes;
+    });
+
     notify(result.rationale || "Follow-ups ready", "success");
     return result.prompts;
   }
@@ -339,13 +467,92 @@ export function ScenarioAgentPanel() {
     cancelRef.current = true;
   }
 
+  /** Copy a variant / follow-up option into the Seed prompt field (and active chain node). */
+  function applyCopiedSeed(content: string) {
+    const next = content.trim();
+    if (!next) return;
+    setSeed(next);
+    if (!activeNodeId) return;
+    setChain((prev) =>
+      prev.map((n) => (n.id === activeNodeId ? { ...n, seed: next } : n)),
+    );
+  }
+
+  function handleClearWorkspace() {
+    if (busy) return;
+    const hasContent = Boolean(
+      scenario.trim() ||
+        goal.trim() ||
+        seed.trim() ||
+        pastedReply.trim() ||
+        selectedMutators.length ||
+        variants.length ||
+        followups.length ||
+        chain.length ||
+        runLog.length ||
+        error,
+    );
+    if (!hasContent) return;
+    if (!window.confirm("Clear scenario workspace (seed, chain, variants, mutators, reply)?")) return;
+    cancelRef.current = true;
+    setScenario("");
+    setGoal("");
+    setSeed("");
+    setPastedReply("");
+    setSelectedMutators([]);
+    setSuccessKeywords([]);
+    setAttackHints([]);
+    setVariants([]);
+    setFollowups([]);
+    setRunLog([]);
+    setChain([]);
+    setActiveNodeId(null);
+    setHistoryId(null);
+    setError(null);
+    notify("Scenario cleared", "success");
+  }
+
+  function handleClearAllHistory() {
+    if (historyRows.length === 0) return;
+    if (!window.confirm(`Clear all ${historyRows.length} Scenario history entries?`)) return;
+    clearScenarioHistory();
+    setHistoryRows([]);
+    notify("Scenario history cleared", "success");
+  }
+
   const actionsDisabled = busy !== null;
+  const clearDisabled =
+    actionsDisabled ||
+    !(
+      scenario.trim() ||
+      goal.trim() ||
+      seed.trim() ||
+      pastedReply.trim() ||
+      selectedMutators.length ||
+      variants.length ||
+      followups.length ||
+      chain.length ||
+      runLog.length ||
+      error
+    );
 
   return (
     <div className="scenario-agent">
       <section className="prompt-lab-page__composer" aria-label="Scenario">
-        <div className="field" role="group" aria-label="Attack model">
-          <span className="field__label">Attack model</span>
+        <div className="prompt-lab-page__composer-head">
+          <span className="prompt-lab-page__label">Scenario</span>
+          <IconButton
+            ariaLabel="Scenario history"
+            size="sm"
+            disabled={actionsDisabled}
+            onClick={openHistory}
+          >
+            <IconHistory />
+          </IconButton>
+        </div>
+
+        <div className="field" role="group" aria-label="Mode">
+          <span className="field__label">Mode</span>
           <div className="wizard-attack-profiles">
             <button
               type="button"
@@ -482,7 +689,7 @@ export function ScenarioAgentPanel() {
 
         <div className="scenario-agent__mutators" aria-label="Mutators">
           <p className="field__label">
-            Mutators ({selectedMutators.length}/{ALL_ATTACK_MUTATOR_IDS.length} — Plan picks bypass set from scenario/goal)
+            Mutators ({selectedMutators.length}/{ALL_ATTACK_MUTATOR_IDS.length} — Plan ordered try-queue; Expand one wrap at a time)
           </p>
           <div className="scenario-agent__mutator-chips">
             <button
@@ -557,6 +764,9 @@ export function ScenarioAgentPanel() {
               )
             ) : null}
           </div>
+          <Button variant="secondary" disabled={clearDisabled} onClick={handleClearWorkspace}>
+            Clear
+          </Button>
         </div>
 
         {error ? (
@@ -574,9 +784,90 @@ export function ScenarioAgentPanel() {
         ) : null}
       </section>
 
-      {seed.trim() ? (
-        <section aria-label="Seed prompt">
-          <CopyableBlock label="Seed prompt" content={seed} />
+      {chain.length > 0 ? (
+        <section className="scenario-chain" aria-label="Graph Chain">
+          <div className="scenario-chain__head">
+            <h3 className="scenario-chain__title">Graph Chain</h3>
+            <span className="scenario-chain__meta">{chain.length} seeds</span>
+          </div>
+          <AttackChainGraph
+            chain={chain}
+            activeNodeId={activeNodeId}
+            onSelect={selectChainNode}
+          />
+        </section>
+      ) : null}
+
+      <section className="scenario-agent__io-row" aria-label="Seed and target reply">
+        <div className="scenario-agent__io-col">
+          <label className="prompt-lab-page__label" htmlFor="scenario-seed">
+            Seed prompt
+          </label>
+          <textarea
+            id="scenario-seed"
+            className="prompt-lab-page__textarea"
+            rows={6}
+            value={seed}
+            disabled={actionsDisabled}
+            placeholder="Plan a seed, or click a chain node to restore…"
+            onChange={(e) => {
+              const value = e.target.value;
+              setSeed(value);
+              if (!activeNodeId) return;
+              setChain((prev) =>
+                prev.map((n) => (n.id === activeNodeId ? { ...n, seed: value } : n)),
+              );
+            }}
+          />
+        </div>
+        <div className="scenario-agent__io-col">
+          <label className="prompt-lab-page__label" htmlFor="scenario-reply">
+            Paste target reply
+          </label>
+          <textarea
+            id="scenario-reply"
+            className="prompt-lab-page__textarea"
+            rows={6}
+            value={pastedReply}
+            disabled={actionsDisabled}
+            onChange={(e) => {
+              const value = e.target.value;
+              setPastedReply(value);
+              if (!activeNodeId) return;
+              setChain((prev) =>
+                prev.map((n) =>
+                  n.id === activeNodeId ? { ...n, reply: value.trim() ? value : null } : n,
+                ),
+              );
+            }}
+            placeholder="Paste the assistant response here…"
+          />
+          {mode === "manual" ? (
+            <Button
+              variant="secondary"
+              disabled={
+                actionsDisabled || !pastedReply.trim() || !(seed.trim() || variants[0]?.content)
+              }
+              onClick={() =>
+                void handleFollowup(variants[0]?.content ?? seed, pastedReply)
+              }
+            >
+              {busy === "followup" ? "Thinking…" : "Follow-up prompts"}
+            </Button>
+          ) : null}
+        </div>
+      </section>
+
+      {followups.length > 0 ? (
+        <section className="prompt-lab-page__results" aria-label="Follow-ups">
+          {followups.map((prompt, index) => (
+            <CopyableBlock
+              key={`fu-${index}`}
+              label={`Follow-up option #${index + 1}`}
+              content={prompt}
+              onCopied={applyCopiedSeed}
+            />
+          ))}
         </section>
       ) : null}
 
@@ -588,49 +879,7 @@ export function ScenarioAgentPanel() {
               label={labelById.get(variant.mutatorId) ?? variant.mutatorId}
               meta={variant.mutatorId}
               content={variant.content}
-            />
-          ))}
-        </section>
-      ) : null}
-
-      {mode === "manual" ? (
-        <section className="prompt-lab-page__composer" aria-label="Manual follow-up">
-          <label className="prompt-lab-page__label" htmlFor="scenario-reply">
-            Paste target reply
-          </label>
-          <textarea
-            id="scenario-reply"
-            className="prompt-lab-page__textarea"
-            rows={4}
-            value={pastedReply}
-            disabled={actionsDisabled}
-            onChange={(e) => setPastedReply(e.target.value)}
-            placeholder="Paste the assistant response here…"
-          />
-          <Button
-            variant="secondary"
-            disabled={
-              actionsDisabled || !pastedReply.trim() || !(seed.trim() || variants[0]?.content)
-            }
-            onClick={() =>
-              void handleFollowup(
-                variants[0]?.content ?? seed,
-                pastedReply,
-              )
-            }
-          >
-            {busy === "followup" ? "Thinking…" : "Follow-up prompts"}
-          </Button>
-        </section>
-      ) : null}
-
-      {followups.length > 0 ? (
-        <section className="prompt-lab-page__results" aria-label="Follow-ups">
-          {followups.map((prompt, index) => (
-            <CopyableBlock
-              key={`fu-${index}`}
-              label={`Follow-up ${index + 1}`}
-              content={prompt}
+              onCopied={applyCopiedSeed}
             />
           ))}
         </section>
@@ -665,6 +914,56 @@ export function ScenarioAgentPanel() {
           ))}
         </section>
       ) : null}
+
+      <Modal
+        open={historyOpen}
+        title="Scenario history"
+        onClose={() => setHistoryOpen(false)}
+        size="medium"
+        footer={
+          historyRows.length > 0 ? (
+            <Button variant="danger" onClick={handleClearAllHistory}>
+              Clear all
+            </Button>
+          ) : null
+        }
+      >
+        {historyRows.length === 0 ? (
+          <p className="text-muted text-sm">
+            No Scenario history yet. Plan a seed to save a chain.
+          </p>
+        ) : (
+          <ul className="prompt-lab-page__history-list">
+            {historyRows.map((row) => (
+              <li key={row.id} className="prompt-lab-page__history-item">
+                <button
+                  type="button"
+                  className="prompt-lab-page__history-main"
+                  onClick={() => restoreHistory(row)}
+                >
+                  <span className="prompt-lab-page__history-time">
+                    {new Date(row.createdAt).toLocaleString()}
+                  </span>
+                  <span className="prompt-lab-page__history-seed">
+                    {previewText(row.goal || row.scenario || row.nodes[0]?.seed || "(empty)")}
+                  </span>
+                  <span className="prompt-lab-page__history-meta">
+                    {row.nodes.length} seed{row.nodes.length === 1 ? "" : "s"}
+                  </span>
+                </button>
+                <IconButton
+                  ariaLabel="Delete Scenario history entry"
+                  size="sm"
+                  variant="danger"
+                  onClick={() => removeHistory(row.id)}
+                >
+                  <IconTrash />
+                </IconButton>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
     </div>
   );
 }

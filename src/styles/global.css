@@ -13402,6 +13402,13 @@ a.setup-checklist__item:hover {
   gap: 0.75rem;
 }
 
+.prompt-lab-page__actions-right {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
 .prompt-lab-page__actions-left {
   display: flex;
   flex-wrap: wrap;
@@ -13709,4 +13716,154 @@ a.setup-checklist__item:hover {
   justify-content: space-between;
   gap: 0.35rem;
   font-size: 0.78rem;
+}
+
+.scenario-agent__io-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+  align-items: stretch;
+}
+
+.scenario-agent__io-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.scenario-agent__io-col .prompt-lab-page__textarea {
+  flex: 1;
+  min-height: 8rem;
+}
+
+@media (max-width: 840px) {
+  .scenario-agent__io-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.scenario-chain {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.75rem 0;
+}
+
+.scenario-chain__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.scenario-chain__title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.scenario-chain__meta {
+  font-size: 0.75rem;
+  color: var(--text-subtle);
+}
+
+.scenario-flow {
+  height: 280px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.55rem;
+  overflow: hidden;
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.scenario-flow .react-flow__attribution {
+  display: none;
+}
+
+.scenario-flow .react-flow__node {
+  color: var(--text);
+}
+
+.scenario-flow .react-flow__edge-path {
+  stroke: var(--text-muted);
+}
+
+.scenario-flow .react-flow__controls {
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.4rem;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.scenario-flow .react-flow__controls-button {
+  background: var(--bg-surface) !important;
+  border-bottom-color: var(--border-subtle) !important;
+  color: var(--text) !important;
+}
+
+.scenario-flow .react-flow__controls-button:hover {
+  background: var(--bg-hover) !important;
+  color: var(--text) !important;
+}
+
+.scenario-flow .react-flow__controls-button svg {
+  fill: currentColor !important;
+}
+
+.scenario-flow-node {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  width: 100px;
+  padding: 0.28rem 0.32rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0.28rem;
+  background: var(--bg-surface);
+  color: var(--text);
+  font-size: 0.62rem;
+  line-height: 1.25;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 4%);
+}
+
+.scenario-flow-node--active {
+  border-color: var(--accent, #3b82f6);
+  box-shadow: 0 0 0 1px var(--accent, #3b82f6);
+}
+
+.scenario-flow-node__badge {
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.scenario-flow-node__seed {
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.scenario-flow-node__reply {
+  font-size: 0.52rem;
+  color: var(--text-subtle);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.scenario-flow-node__reply--empty {
+  font-style: italic;
+  opacity: 0.75;
+}
+
+.scenario-flow-handle {
+  width: 4px !important;
+  height: 4px !important;
+  background: var(--accent, #3b82f6) !important;
+  border: none !important;
 }

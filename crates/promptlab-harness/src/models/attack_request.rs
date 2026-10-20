@@ -69,7 +69,9 @@ impl HarnessPurpose {
             "agentic_attack_execution"
             | "sequential_attack_execution"
             | "reflection"
-            | "judge_coordinator" => Self::planner(),
+            | "judge_coordinator"
+            // Scenario plan/followup is product inference — retry empty CF completions.
+            | "scenario_agent" => Self::planner(),
             other if other.is_empty() => Self::assistant(),
             other => Self::named(other),
         }
@@ -617,6 +619,10 @@ mod tests {
         );
         assert_eq!(
             HarnessPurpose::from_agent_id("judge_coordinator"),
+            HarnessPurpose::planner()
+        );
+        assert_eq!(
+            HarnessPurpose::from_agent_id("scenario_agent"),
             HarnessPurpose::planner()
         );
         assert!(HarnessPurpose::assistant().is_product_inference());

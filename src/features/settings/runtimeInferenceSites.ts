@@ -72,9 +72,9 @@ export const RUNTIME_INFERENCE_SITES: RuntimeInferenceSite[] = [
   },
   {
     id: "scenario-agent",
-    title: "Scenario Agent",
-    location: "Advanced · Prompt Lab · Scenario Agent",
+    title: "Scenario",
+    location: "Advanced · Prompt Lab · Scenario",
     description:
-      "ScenarioAgent (system prompt includes Huntr Blind Trust, Gandalf, HackAPrompt Agent Dojo, OWASP AIVP, MCP CTF playbooks) plans seeds and follow-ups from freeform scenario+goal. Auto POSTs via harness; Manual copies probes and pastes replies.",
+      "Scenario (system prompt includes Huntr Blind Trust, Gandalf, HackAPrompt Agent Dojo, OWASP AIVP, MCP CTF playbooks) plans seeds and follow-ups from freeform scenario+goal. Auto POSTs via harness; Manual copies probes and pastes replies.",
   },
 ];
