@@ -28,6 +28,7 @@ import {
   newChainNodeId,
   newHistoryId,
   previewText,
+  priorTurnsForFollowup,
   saveScenarioHistory,
   upsertScenarioHistory,
   type ScenarioChainNode,
@@ -113,6 +114,10 @@ export function ScenarioAgentPanel() {
   const [runLog, setRunLog] = useState<RunLogEntry[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [seedCopied, setSeedCopied] = useState(false);
+  const [replyCopied, setReplyCopied] = useState(false);
+  const [scenarioCopied, setScenarioCopied] = useState(false);
+  const [goalCopied, setGoalCopied] = useState(false);
 
   // Auto target
   const [targetId, setTargetId] = useState("");
@@ -306,6 +311,7 @@ export function ScenarioAgentPanel() {
   async function requestFollowups(
     lastPrompt: string,
     lastResponse: string,
+    extraTurns: { seed: string; reply: string }[] = [],
   ): Promise<string[]> {
     if (!(await requireLiveAgent())) return [];
     const result = await scenarioAgentFollowup({
@@ -313,9 +319,7 @@ export function ScenarioAgentPanel() {
       goal,
       lastPrompt,
       lastResponse,
-      transcript: runLog
-        .map((e) => `[${e.mutatorId}] status=${e.status} hit=${e.goalHit}`)
-        .join("\n"),
+      transcript: priorTurnsForFollowup(chain, lastPrompt, lastResponse, extraTurns),
       successKeywords,
     });
     setFollowups(result.prompts);
@@ -412,6 +416,7 @@ export function ScenarioAgentPanel() {
     let queue = variants.slice(0, Math.max(1, maxVariants));
     let round = 0;
     let hit = false;
+    const fired: { seed: string; reply: string }[] = [];
 
     try {
       while (round < maxRounds && !hit && !cancelRef.current) {
@@ -423,6 +428,7 @@ export function ScenarioAgentPanel() {
           const result = await fireOne(variant.content);
           lastPrompt = variant.content;
           lastBody = result.body;
+          fired.push({ seed: variant.content, reply: result.body });
           const entry: RunLogEntry = {
             id: `${Date.now()}-${variant.mutatorId}`,
             mutatorId: variant.mutatorId,
@@ -442,7 +448,7 @@ export function ScenarioAgentPanel() {
         }
         if (hit || cancelRef.current || round >= maxRounds) break;
         if (!(await requireLiveAgent())) break;
-        const nextPrompts = await requestFollowups(lastPrompt, lastBody);
+        const nextPrompts = await requestFollowups(lastPrompt, lastBody, fired);
         if (nextPrompts.length === 0) break;
         queue = nextPrompts.map((content, index) => ({
           mutatorId: `followup_${index + 1}`,
@@ -521,6 +527,26 @@ export function ScenarioAgentPanel() {
   }
 
   const actionsDisabled = busy !== null;
+
+  async function copyField(
+    text: string,
+    label: string,
+    markCopied: (copied: boolean) => void,
+  ) {
+    const value = text.trim();
+    if (!value) {
+      notify(`${label} is empty.`, "error");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      markCopied(true);
+      notify(`${label} copied`, "success");
+      window.setTimeout(() => markCopied(false), 1600);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : `Failed to copy ${label}`, "error");
+    }
+  }
   const clearDisabled =
     actionsDisabled ||
     !(
@@ -568,11 +594,12 @@ export function ScenarioAgentPanel() {
             </button>
             <button
               type="button"
-              className={`wizard-attack-profile${mode === "auto" ? " wizard-attack-profile--selected" : ""}`}
-              disabled={actionsDisabled}
-              aria-pressed={mode === "auto"}
-              onClick={() => setMode("auto")}
+              className="wizard-attack-profile wizard-attack-profile--recommended"
+              disabled
+              aria-disabled="true"
+              title="Coming Soon"
             >
+              <span className="wizard-attack-profile__yazg-badge">Coming Soon</span>
               <span className="wizard-attack-profile__label">Auto</span>
               <span className="wizard-attack-profile__description text-sm">
                 POST variants through harness, adapt until goal or budget.
@@ -581,8 +608,21 @@ export function ScenarioAgentPanel() {
           </div>
         </div>
 
-        <label className="field">
-          <span className="field__label">Scenario</span>
+        <div className="field">
+          <div className="prompt-lab-page__composer-head">
+            <label className="field__label" htmlFor="scenario-text">
+              Scenario
+            </label>
+            <IconButton
+              ariaLabel={scenarioCopied ? "Scenario copied" : "Copy scenario"}
+              size="sm"
+              active={scenarioCopied}
+              disabled={!scenario.trim()}
+              onClick={() => void copyField(scenario, "Scenario", setScenarioCopied)}
+            >
+              {scenarioCopied ? <IconCheck /> : <IconCopy />}
+            </IconButton>
+          </div>
           <textarea
             id="scenario-text"
             className="input textarea"
@@ -592,10 +632,23 @@ export function ScenarioAgentPanel() {
             placeholder="Describe the target assistant, tools, trust boundary, and any constraints…"
             onChange={(e) => setScenario(e.target.value)}
           />
-        </label>
+        </div>
 
-        <label className="field">
-          <span className="field__label">Goal</span>
+        <div className="field">
+          <div className="prompt-lab-page__composer-head">
+            <label className="field__label" htmlFor="scenario-goal">
+              Goal
+            </label>
+            <IconButton
+              ariaLabel={goalCopied ? "Goal copied" : "Copy goal"}
+              size="sm"
+              active={goalCopied}
+              disabled={!goal.trim()}
+              onClick={() => void copyField(goal, "Goal", setGoalCopied)}
+            >
+              {goalCopied ? <IconCheck /> : <IconCopy />}
+            </IconButton>
+          </div>
           <textarea
             id="scenario-goal"
             className="input textarea"
@@ -605,7 +658,7 @@ export function ScenarioAgentPanel() {
             placeholder="What should the probe achieve?"
             onChange={(e) => setGoal(e.target.value)}
           />
-        </label>
+        </div>
 
         {successKeywords.length > 0 ? (
           <div className="scenario-agent__keywords" aria-label="Success keywords">
@@ -800,9 +853,20 @@ export function ScenarioAgentPanel() {
 
       <section className="scenario-agent__io-row" aria-label="Seed and target reply">
         <div className="scenario-agent__io-col">
-          <label className="prompt-lab-page__label" htmlFor="scenario-seed">
-            Seed prompt
-          </label>
+          <div className="prompt-lab-page__composer-head">
+            <label className="prompt-lab-page__label" htmlFor="scenario-seed">
+              Seed prompt
+            </label>
+            <IconButton
+              ariaLabel={seedCopied ? "Seed prompt copied" : "Copy seed prompt"}
+              size="sm"
+              active={seedCopied}
+              disabled={!seed.trim()}
+              onClick={() => void copyField(seed, "Seed prompt", setSeedCopied)}
+            >
+              {seedCopied ? <IconCheck /> : <IconCopy />}
+            </IconButton>
+          </div>
           <textarea
             id="scenario-seed"
             className="prompt-lab-page__textarea"
@@ -821,9 +885,20 @@ export function ScenarioAgentPanel() {
           />
         </div>
         <div className="scenario-agent__io-col">
-          <label className="prompt-lab-page__label" htmlFor="scenario-reply">
-            Paste target reply
-          </label>
+          <div className="prompt-lab-page__composer-head">
+            <label className="prompt-lab-page__label" htmlFor="scenario-reply">
+              Paste target reply
+            </label>
+            <IconButton
+              ariaLabel={replyCopied ? "Target reply copied" : "Copy target reply"}
+              size="sm"
+              active={replyCopied}
+              disabled={!pastedReply.trim()}
+              onClick={() => void copyField(pastedReply, "Target reply", setReplyCopied)}
+            >
+              {replyCopied ? <IconCheck /> : <IconCopy />}
+            </IconButton>
+          </div>
           <textarea
             id="scenario-reply"
             className="prompt-lab-page__textarea"

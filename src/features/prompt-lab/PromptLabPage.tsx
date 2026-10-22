@@ -280,7 +280,7 @@ export function PromptLabPage() {
     <div className="page prompt-lab-page">
       <PageHeader
         title="Prompt Lab"
-        description="Mutator variants and Scenario for authorized AI red-team / CTF goals."
+        description="A place to experiment with prompts."
       />
 
       <div className="prompt-lab-page__tabs" role="tablist" aria-label="Prompt Lab sections">
@@ -290,12 +290,13 @@ export function PromptLabPage() {
           aria-selected={tab === "variants"}
           className={
             tab === "variants"
-              ? "filter-chip filter-chip--active"
-              : "filter-chip"
+              ? "prompt-lab-page__tab prompt-lab-page__tab--active"
+              : "prompt-lab-page__tab"
           }
           onClick={() => setTab("variants")}
         >
-          Variants
+          <span className="prompt-lab-page__tab-label">Variants</span>
+          <span className="prompt-lab-page__tab-desc">Make several versions of one prompt.</span>
         </button>
         <button
           type="button"
@@ -303,12 +304,13 @@ export function PromptLabPage() {
           aria-selected={tab === "scenario"}
           className={
             tab === "scenario"
-              ? "filter-chip filter-chip--active"
-              : "filter-chip"
+              ? "prompt-lab-page__tab prompt-lab-page__tab--active"
+              : "prompt-lab-page__tab"
           }
           onClick={() => setTab("scenario")}
         >
-          Scenario
+          <span className="prompt-lab-page__tab-label">Scenario</span>
+          <span className="prompt-lab-page__tab-desc">Shape a prompt from a situation and a goal.</span>
         </button>
       </div>
 

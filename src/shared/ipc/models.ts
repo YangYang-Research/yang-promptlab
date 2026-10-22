@@ -46,6 +46,8 @@ export type ThirdPartyModelSaveRequest = {
   /** Apply a successful Test Connection as Verified on save. */
   markVerified?: boolean;
   testLatencyMs?: number | null;
+  temperature?: number;
+  contextWindow?: number;
 };
 
 export function saveThirdPartyModel(

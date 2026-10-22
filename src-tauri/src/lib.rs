@@ -365,6 +365,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::models::models_save_third_party,
             commands::models::models_third_party_edit_form,
             commands::models::models_test_third_party,
+            commands::models::models_list_provider_models,
             commands::models::models_test_connection,
             commands::models::models_remove,
             commands::models::models_verify,

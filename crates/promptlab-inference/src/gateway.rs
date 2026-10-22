@@ -230,7 +230,12 @@ impl InferenceClient {
         &self,
         request: CompleteRequest,
     ) -> InferenceResult<CompletionOutcome> {
-        let max_tokens = request.max_tokens.unwrap_or(self.default_max_tokens);
+        // scenario_agent omits max_tokens so the provider is not capped at a host default.
+        let max_tokens = if request.purpose.as_deref() == Some("scenario_agent") {
+            request.max_tokens
+        } else {
+            Some(request.max_tokens.unwrap_or(self.default_max_tokens))
+        };
         let temperature = request.temperature.unwrap_or(self.default_temperature);
         let purpose = request
             .purpose
@@ -261,7 +266,7 @@ impl InferenceClient {
         harness_request.auth = self.descriptor.auth.clone();
         harness_request.headers = self.descriptor.headers.clone();
         harness_request.model = Some(self.model_id.clone());
-        harness_request.max_tokens = Some(max_tokens);
+        harness_request.max_tokens = max_tokens;
         harness_request.temperature = Some(temperature);
         harness_request.timeout_ms = self.timeout_ms;
         harness_request.cancel = self.cancel.clone();

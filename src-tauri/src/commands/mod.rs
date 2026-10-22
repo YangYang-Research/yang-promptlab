@@ -17,6 +17,7 @@ pub mod domain;
 pub mod environment;
 pub mod generator;
 pub mod models;
+pub mod provider_catalog;
 pub mod mutators;
 pub mod scenario_agent;
 pub mod planner;

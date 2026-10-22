@@ -119,6 +119,53 @@ pub struct ThirdPartyModelSaveRequest {
     pub mark_verified: bool,
     #[serde(default)]
     pub test_latency_ms: Option<u64>,
+    /// Sampling temperature for this model. Default 0.7.
+    #[serde(default = "default_model_temperature")]
+    pub temperature: f32,
+    /// Context window in tokens. Default 128000.
+    #[serde(default = "default_context_window")]
+    pub context_window: u32,
+}
+
+fn default_model_temperature() -> f32 {
+    DEFAULT_MODEL_TEMPERATURE
+}
+
+fn default_context_window() -> u32 {
+    DEFAULT_CONTEXT_WINDOW
+}
+
+pub(crate) const DEFAULT_MODEL_TEMPERATURE: f32 = 0.7;
+pub(crate) const DEFAULT_CONTEXT_WINDOW: u32 = 128_000;
+
+pub(crate) fn sampling_from_metadata(metadata: &serde_json::Value) -> (f32, u32) {
+    let temperature = metadata
+        .get("temperature")
+        .and_then(|value| value.as_f64())
+        .map(|value| value as f32)
+        .filter(|value| value.is_finite() && (0.0..=2.0).contains(value))
+        .unwrap_or(DEFAULT_MODEL_TEMPERATURE);
+    let context_window = metadata
+        .get("contextWindow")
+        .and_then(|value| value.as_u64())
+        .and_then(|value| u32::try_from(value).ok())
+        .filter(|value| *value >= 1)
+        .unwrap_or(DEFAULT_CONTEXT_WINDOW);
+    (temperature, context_window)
+}
+
+fn validate_sampling(temperature: f32, context_window: u32) -> Result<(), CommandError> {
+    if !temperature.is_finite() || !(0.0..=2.0).contains(&temperature) {
+        return Err(CommandError::invalid_input(
+            "temperature must be between 0 and 2",
+        ));
+    }
+    if context_window < 1 {
+        return Err(CommandError::invalid_input(
+            "context window size must be a positive integer",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -132,6 +179,8 @@ pub struct ThirdPartyModelEditDto {
     pub api_key_configured: bool,
     pub aws_secret_access_key_configured: bool,
     pub aws_session_token_configured: bool,
+    pub temperature: f32,
+    pub context_window: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -179,6 +228,8 @@ fn third_party_edit_dto_from_entry(entry: &ModelEntry) -> Result<ThirdPartyModel
                 AWS_SESSION_CREDENTIAL_ID,
             )
             .is_some(),
+            temperature: sampling_from_metadata(&entry.metadata).0,
+            context_window: sampling_from_metadata(&entry.metadata).1,
         }),
     }
 }
@@ -204,6 +255,8 @@ fn third_party_request_from_entry(
             existing_model_id: None,
             mark_verified: false,
             test_latency_ms: None,
+            temperature: sampling_from_metadata(&entry.metadata).0,
+            context_window: sampling_from_metadata(&entry.metadata).1,
         }),
     }
 }
@@ -592,6 +645,7 @@ pub async fn models_save_third_party(
     if request.provider.trim().is_empty() {
         return Err(CommandError::invalid_input("provider is required"));
     }
+    validate_sampling(request.temperature, request.context_window)?;
     let provider = normalize_third_party_provider(
         request.provider.trim(),
         request.base_url.as_deref(),
@@ -633,6 +687,8 @@ pub async fn models_save_third_party(
         let vault = open_model_credential_vault(state.data_dir())?;
         let creds = credential_fields_from_request(&request);
         let mut metadata = serde_json::json!({ "remoteProvider": provider });
+        metadata["temperature"] = serde_json::json!(request.temperature);
+        metadata["contextWindow"] = serde_json::json!(request.context_window);
         let credential_input_changed = has_new_credential_input(&creds);
 
         if credential_input_changed {
@@ -761,6 +817,86 @@ pub async fn models_test_third_party(
         );
         error
     })
+}
+
+#[tauri::command]
+pub async fn models_list_provider_models(
+    state: State<'_, AppState>,
+    request: ThirdPartyModelSaveRequest,
+) -> CommandResult<crate::commands::provider_catalog::ProviderModelCatalogDto> {
+    with_model_operation_timeout(list_provider_models_op(state.inner(), request)).await
+}
+
+async fn list_provider_models_op(
+    state: &AppState,
+    mut request: ThirdPartyModelSaveRequest,
+) -> CommandResult<crate::commands::provider_catalog::ProviderModelCatalogDto> {
+    use crate::commands::provider_catalog::{fetch_provider_models, ProviderModelCatalogDto};
+
+    if request.provider.trim().is_empty() {
+        return Ok(ProviderModelCatalogDto::from_models(Vec::new()));
+    }
+
+    let model_hint = request.model.trim().to_string();
+    let model_hint = Some(model_hint.as_str()).filter(|value| !value.is_empty());
+    request.provider = normalize_third_party_provider(
+        &request.provider,
+        request.base_url.as_deref(),
+        model_hint,
+    );
+    request.base_url =
+        resolve_third_party_base_url(&request.provider, request.base_url.clone(), model_hint);
+
+    let existing_id = request
+        .existing_model_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let metadata = {
+        let manager = state.model_manager().lock().await;
+        existing_id
+            .as_deref()
+            .and_then(|id| manager.get_model(id).map(|entry| entry.metadata.clone()))
+    };
+
+    let mut credentials = credential_fields_from_request(&request);
+    let vault = match open_model_credential_vault(state.data_dir()) {
+        Ok(vault) => vault,
+        Err(_) => return Ok(ProviderModelCatalogDto::from_models(Vec::new())),
+    };
+    let secrets = match SecretStore::new() {
+        Ok(secrets) => secrets,
+        Err(_) => return Ok(ProviderModelCatalogDto::from_models(Vec::new())),
+    };
+    if resolve_third_party_credentials(&mut credentials, metadata.as_ref(), &vault, &secrets)
+        .is_err()
+    {
+        return Ok(ProviderModelCatalogDto::from_models(Vec::new()));
+    }
+    if credentials.api_key.trim().is_empty() {
+        if let Some(name) = credentials
+            .api_key_env
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            if let Ok(value) = std::env::var(name) {
+                credentials.api_key = value;
+            }
+        }
+    }
+
+    let models = fetch_provider_models(
+        &request.provider,
+        request.base_url.as_deref(),
+        request.region.as_deref(),
+        &credentials.api_key,
+        &credentials.aws_secret_access_key,
+        &credentials.aws_session_token,
+    )
+    .await;
+    Ok(ProviderModelCatalogDto::from_models(models))
 }
 
 #[tauri::command]
@@ -923,4 +1059,26 @@ pub async fn models_vault_stats_op(state: &AppState) -> CommandResult<ModelVault
         installed_bytes: stats.installed_bytes,
         installed_gb: stats.installed_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sampling_defaults_when_metadata_omits_them() {
+        let (temperature, context_window) = sampling_from_metadata(&serde_json::json!({}));
+        assert_eq!(temperature, DEFAULT_MODEL_TEMPERATURE);
+        assert_eq!(context_window, DEFAULT_CONTEXT_WINDOW);
+    }
+
+    #[test]
+    fn sampling_reads_saved_values() {
+        let (temperature, context_window) = sampling_from_metadata(&serde_json::json!({
+            "temperature": 0.2,
+            "contextWindow": 32000
+        }));
+        assert_eq!(temperature, 0.2);
+        assert_eq!(context_window, 32000);
+    }
 }

@@ -100,6 +100,23 @@ fn model_entry<'a>(
     })
 }
 
+/// `None` omits `max_tokens` on the provider body.
+/// Anthropic and Bedrock reject a body that lacks the field, so those send the saved context window.
+fn scenario_output_limit(entry: &ModelEntry) -> Option<u32> {
+    let provider = entry
+        .metadata
+        .get("remoteProvider")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if provider == "anthropic" || provider == "bedrock" {
+        Some(crate::commands::models::sampling_from_metadata(&entry.metadata).1)
+    } else {
+        None
+    }
+}
+
 pub async fn open_gateway_session<'a>(
     data_dir: &Path,
     inference: &'a InferenceRuntimeManager,
@@ -370,7 +387,7 @@ async fn detached_complete_outcome_messages_as(
     model_provider: SharedModelProvider,
     agent_id: &str,
     messages: Vec<serde_json::Value>,
-    max_tokens: u32,
+    max_tokens: Option<u32>,
     temperature: f32,
     tools: &[promptlab_inference::ToolDefinition],
     tool_choice: Option<serde_json::Value>,
@@ -396,7 +413,7 @@ async fn detached_complete_outcome_messages_as(
             .complete_outcome(CompleteRequest {
                 prompt: String::new(),
                 system: None,
-                max_tokens: Some(max_tokens),
+                max_tokens,
                 temperature: Some(temperature),
                 tools,
                 tool_choice,
@@ -417,7 +434,7 @@ async fn detached_complete_outcome_as(
     agent_id: &str,
     system: Option<&str>,
     prompt: &str,
-    max_tokens: u32,
+    max_tokens: Option<u32>,
     temperature: f32,
     tools: &[promptlab_inference::ToolDefinition],
     tool_choice: Option<serde_json::Value>,
@@ -467,7 +484,7 @@ pub async fn detached_complete_as(
         agent_id,
         system,
         prompt,
-        max_tokens,
+        Some(max_tokens),
         temperature,
         &[],
         None,
@@ -697,7 +714,7 @@ impl PlannerLlm for HostYazgReactLlm {
             &self.agent_id,
             Some(system),
             prompt,
-            1024,
+            Some(1024),
             0.2,
             &wire_tools,
             Some(serde_json::json!("auto")),
@@ -740,7 +757,7 @@ impl PlannerLlm for HostYazgReactLlm {
             self.model_provider.clone(),
             &self.agent_id,
             messages.to_vec(),
-            1024,
+            Some(1024),
             0.2,
             &wire_tools,
             Some(serde_json::json!("auto")),
@@ -842,7 +859,19 @@ impl HostScenarioAgentLlm {
 #[async_trait]
 impl PlannerLlm for HostScenarioAgentLlm {
     async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
-        detached_complete_as(
+        let (temperature, max_tokens) = {
+            let inference = self.inference.lock().await;
+            let manager = self.model_manager.lock().await;
+            match model_entry(&manager, &inference) {
+                Ok(entry) => {
+                    let (temperature, _) =
+                        crate::commands::models::sampling_from_metadata(&entry.metadata);
+                    (temperature, scenario_output_limit(entry))
+                }
+                Err(_) => (crate::commands::models::DEFAULT_MODEL_TEMPERATURE, None),
+            }
+        };
+        let outcome = detached_complete_outcome_as(
             &self.data_dir,
             &self.inference,
             &self.model_manager,
@@ -850,11 +879,18 @@ impl PlannerLlm for HostScenarioAgentLlm {
             "scenario_agent",
             Some(promptlab_agent::scenario_agent_system_prompt()),
             prompt,
-            1536,
-            0.4,
+            max_tokens,
+            temperature,
+            &[],
+            None,
         )
         .await
-        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))?;
+        outcome
+            .content
+            .ok_or_else(|| promptlab_planner::PlannerError::Llm(
+                "model returned tool_calls without text content".into(),
+            ))
     }
 }
 

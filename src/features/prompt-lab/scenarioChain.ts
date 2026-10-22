@@ -84,6 +84,32 @@ export function layoutColumns(nodes: ScenarioChainNode[]): ScenarioChainNode[][]
   return cols;
 }
 
+/** Every completed seed→reply, oldest first, plus the turn being followed up. */
+export function priorTurnsForFollowup(
+  nodes: ScenarioChainNode[],
+  lastPrompt: string,
+  lastResponse: string,
+  extra: { seed: string; reply: string }[] = [],
+): string {
+  const turns: { seed: string; reply: string }[] = [];
+  const push = (seed: string, reply: string) => {
+    const s = seed.trim();
+    const r = reply.trim();
+    if (!s || !r) return;
+    if (turns.some((t) => t.seed === s && t.reply === r)) return;
+    turns.push({ seed: s, reply: r });
+  };
+  for (const turn of extra) push(turn.seed, turn.reply);
+  for (const node of nodes) push(node.seed, node.reply ?? "");
+  push(lastPrompt, lastResponse);
+  return turns
+    .map(
+      (turn, index) =>
+        `Turn ${index + 1}\nSeed: ${turn.seed}\nReply: ${turn.reply}`,
+    )
+    .join("\n\n");
+}
+
 export function loadScenarioHistory(): ScenarioHistoryEntry[] {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
