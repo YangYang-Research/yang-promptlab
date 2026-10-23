@@ -309,8 +309,8 @@ export function PromptLabPage() {
           }
           onClick={() => setTab("scenario")}
         >
-          <span className="prompt-lab-page__tab-label">Scenario</span>
-          <span className="prompt-lab-page__tab-desc">Shape a prompt from a situation and a goal.</span>
+          <span className="prompt-lab-page__tab-label">Jailbreak</span>
+          <span className="prompt-lab-page__tab-desc">Prompts for one goal on a guarded model.</span>
         </button>
       </div>
 

@@ -105,14 +105,13 @@ export function UsagePanel({
             <h3 className="card__title">By agent</h3>
             <Badge variant="muted">{agents.length} agents</Badge>
           </div>
+          <ContentToolbar
+            pageSize={pageSize}
+            onPageSizeChange={setPageSize}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+          />
         </div>
-
-        <ContentToolbar
-          pageSize={pageSize}
-          onPageSizeChange={setPageSize}
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
-        />
 
         {viewMode === "table" ? (
           <div className="settings-usage__table-wrap">

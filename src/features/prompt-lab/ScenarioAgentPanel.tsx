@@ -499,7 +499,7 @@ export function ScenarioAgentPanel() {
         error,
     );
     if (!hasContent) return;
-    if (!window.confirm("Clear scenario workspace (seed, chain, variants, mutators, reply)?")) return;
+    if (!window.confirm("Clear jailbreak workspace (seed, chain, variants, mutators, reply)?")) return;
     cancelRef.current = true;
     setScenario("");
     setGoal("");
@@ -515,7 +515,7 @@ export function ScenarioAgentPanel() {
     setActiveNodeId(null);
     setHistoryId(null);
     setError(null);
-    notify("Scenario cleared", "success");
+    notify("Jailbreak cleared", "success");
   }
 
   function handleClearAllHistory() {
@@ -563,10 +563,10 @@ export function ScenarioAgentPanel() {
     );
 
   return (
-    <div className="scenario-agent">
-      <section className="prompt-lab-page__composer" aria-label="Scenario">
+    <div className="jailbreak-agent">
+      <section className="prompt-lab-page__composer" aria-label="Jailbreak">
         <div className="prompt-lab-page__composer-head">
-          <span className="prompt-lab-page__label">Scenario</span>
+          <span className="prompt-lab-page__label">Jailbreak</span>
           <IconButton
             ariaLabel="Scenario history"
             size="sm"
@@ -661,11 +661,11 @@ export function ScenarioAgentPanel() {
         </div>
 
         {successKeywords.length > 0 ? (
-          <div className="scenario-agent__keywords" aria-label="Success keywords">
+          <div className="jailbreak-agent__keywords" aria-label="Success keywords">
             <span className="field__label">Success keywords (from plan)</span>
-            <div className="scenario-agent__keyword-chips">
+            <div className="jailbreak-agent__keyword-chips">
               {successKeywords.map((kw) => (
-                <span key={kw} className="scenario-agent__meta-pill">
+                <span key={kw} className="jailbreak-agent__meta-pill">
                   {kw}
                 </span>
               ))}
@@ -674,7 +674,7 @@ export function ScenarioAgentPanel() {
         ) : null}
 
         {mode === "auto" ? (
-          <div className="scenario-agent__auto-target">
+          <div className="jailbreak-agent__auto-target">
             <label className="field">
               <span className="field__label">Saved target (optional)</span>
               <Select
@@ -713,7 +713,7 @@ export function ScenarioAgentPanel() {
                 onChange={(e) => setBodyTemplate(e.target.value)}
               />
             </label>
-            <div className="scenario-agent__budget">
+            <div className="jailbreak-agent__budget">
               <label>
                 Max variants
                 <input
@@ -740,11 +740,11 @@ export function ScenarioAgentPanel() {
           </div>
         ) : null}
 
-        <div className="scenario-agent__mutators" aria-label="Mutators">
+        <div className="jailbreak-agent__mutators" aria-label="Mutators">
           <p className="field__label">
             Mutators ({selectedMutators.length}/{ALL_ATTACK_MUTATOR_IDS.length} — Plan ordered try-queue; Expand one wrap at a time)
           </p>
-          <div className="scenario-agent__mutator-chips">
+          <div className="jailbreak-agent__mutator-chips">
             <button
               type="button"
               className={
@@ -829,7 +829,7 @@ export function ScenarioAgentPanel() {
         ) : null}
 
         {attackHints.length > 0 ? (
-          <ul className="scenario-agent__hints">
+          <ul className="jailbreak-agent__hints">
             {attackHints.map((hint) => (
               <li key={hint}>{hint}</li>
             ))}
@@ -851,8 +851,8 @@ export function ScenarioAgentPanel() {
         </section>
       ) : null}
 
-      <section className="scenario-agent__io-row" aria-label="Seed and target reply">
-        <div className="scenario-agent__io-col">
+      <section className="jailbreak-agent__io-row" aria-label="Seed and target reply">
+        <div className="jailbreak-agent__io-col">
           <div className="prompt-lab-page__composer-head">
             <label className="prompt-lab-page__label" htmlFor="scenario-seed">
               Seed prompt
@@ -884,7 +884,7 @@ export function ScenarioAgentPanel() {
             }}
           />
         </div>
-        <div className="scenario-agent__io-col">
+        <div className="jailbreak-agent__io-col">
           <div className="prompt-lab-page__composer-head">
             <label className="prompt-lab-page__label" htmlFor="scenario-reply">
               Paste target reply
@@ -961,15 +961,15 @@ export function ScenarioAgentPanel() {
       ) : null}
 
       {runLog.length > 0 ? (
-        <section className="scenario-agent__log" aria-label="Auto run log">
-          <h3 className="scenario-agent__log-title">Run log</h3>
+        <section className="jailbreak-agent__log" aria-label="Auto run log">
+          <h3 className="jailbreak-agent__log-title">Run log</h3>
           {runLog.map((entry) => (
             <article
               key={entry.id}
               className={
                 entry.goalHit
-                  ? "scenario-agent__log-item scenario-agent__log-item--hit"
-                  : "scenario-agent__log-item"
+                  ? "jailbreak-agent__log-item jailbreak-agent__log-item--hit"
+                  : "jailbreak-agent__log-item"
               }
             >
               <header>
@@ -980,7 +980,7 @@ export function ScenarioAgentPanel() {
                 </span>
               </header>
               {entry.matchedKeywords.length > 0 ? (
-                <p className="scenario-agent__hint">
+                <p className="jailbreak-agent__hint">
                   Matched: {entry.matchedKeywords.join(", ")}
                 </p>
               ) : null}

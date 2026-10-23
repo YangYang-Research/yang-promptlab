@@ -8,6 +8,8 @@ import { Button, Card, PageHeader, ProgressBar, RefreshButton, Select, Badge } f
 import type { AppSettings } from "@/app/store/types";
 import { toAppError } from "@/shared/errors";
 import { clearAllAppData } from "@/shared/ipc/app";
+import { clearLogs, listLogFiles, type LogFileInfoDto } from "@/shared/ipc/environment";
+import { formatBytes } from "@/shared/utils/format";
 import {
   APP_UPDATE_PROGRESS_EVENT,
   applyUpdateIfAvailable,
@@ -304,6 +306,122 @@ function AboutPanel({
   );
 }
 
+function ClearLogCard({ backendConnected }: { backendConnected: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [logFiles, setLogFiles] = useState<LogFileInfoDto[] | null>(null);
+  const [filesLoading, setFilesLoading] = useState(true);
+  const [filesError, setFilesError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const { notify } = useToast();
+
+  useEffect(() => {
+    let cancelled = false;
+    setLogFiles(null);
+    setFilesError(null);
+    if (!backendConnected) {
+      setFilesLoading(false);
+      return;
+    }
+    setFilesLoading(true);
+    void listLogFiles()
+      .then((files) => {
+        if (!cancelled) setLogFiles(files);
+      })
+      .catch((err) => {
+        if (!cancelled) setFilesError(toAppError(err).message);
+      })
+      .finally(() => {
+        if (!cancelled) setFilesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [backendConnected, refreshKey]);
+
+  async function handleClearLogs() {
+    if (!backendConnected || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const confirmed = await ask(
+        "This permanently clears application and scan console log files, including recent diagnostic events. Projects, scans, reports, models, and settings are kept.\n\nNew logs will continue to be recorded. This cannot be undone.",
+        {
+          title: "Clear Log",
+          kind: "warning",
+          okLabel: "Clear Log",
+          cancelLabel: "Cancel",
+        },
+      );
+      if (!confirmed) return;
+      try {
+        await clearLogs();
+      } finally {
+        // Reload even after a partial failure: some files may already be cleared.
+        setRefreshKey((key) => key + 1);
+      }
+      notify("Logs cleared successfully.", "success");
+    } catch (err) {
+      setError(toAppError(err).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="settings-danger-card">
+      <p className="text-muted text-sm">
+        Clear application logs, scan console logs, and recent diagnostic events without removing
+        projects, scans, reports, models, or settings. New logs continue to be recorded; no restart is needed.
+      </p>
+      <div className="card__header-row">
+        <h3 className="card__title">Log files</h3>
+        {logFiles ? (
+          <span className="text-muted text-sm" aria-live="polite">
+            {logFiles.length} {logFiles.length === 1 ? "file" : "files"} · Total:{" "}
+            {formatBytes(logFiles.reduce((total, file) => total + file.sizeBytes, 0))}
+          </span>
+        ) : null}
+      </div>
+      {!backendConnected ? (
+        <p className="text-muted text-sm">Connect to the Tauri backend to view log files.</p>
+      ) : filesLoading ? (
+        <p className="text-muted text-sm" role="status">Loading log files…</p>
+      ) : filesError ? (
+        <p className="text-danger text-sm" role="alert">{filesError}</p>
+      ) : logFiles ? (
+        logFiles.length === 0 ? (
+          <p className="text-muted text-sm">No log files found.</p>
+        ) : (
+          <div className="settings-usage__table-wrap settings-log-files">
+            <table className="settings-usage__table" aria-label="Log files and sizes">
+              <thead>
+                <tr><th scope="col">File</th><th scope="col">Size</th></tr>
+              </thead>
+              <tbody>
+                {logFiles.map((file) => (
+                  <tr key={file.path}>
+                    <td title={file.path}>{file.name}</td>
+                    <td className="mono">{formatBytes(file.sizeBytes)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      ) : null}
+      {error ? <p className="text-danger text-sm" role="alert">{error}</p> : null}
+      <div className="settings-section__actions">
+        <Button
+          variant="danger"
+          disabled={!backendConnected || busy || filesLoading}
+          onClick={() => void handleClearLogs()}
+        >
+          {busy ? "Clearing…" : "Clear Log"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function ClearAllDataCard({ backendConnected }: { backendConnected: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -501,6 +619,13 @@ export function SettingsPage() {
                 description="All projects, models, logs, and runtime state live under this root directory."
               >
                 <EnvironmentsPanel backendConnected={backendConnected} />
+              </SettingsSection>
+
+              <SettingsSection
+                title="Clear Log"
+                description="Free up log storage while keeping your workspace data. This cannot be undone."
+              >
+                <ClearLogCard backendConnected={backendConnected} />
               </SettingsSection>
 
               <SettingsSection

@@ -3401,6 +3401,10 @@ a.setup-checklist__item:hover {
   min-width: 0;
 }
 
+.settings-usage .card__header-row .content-toolbar {
+  margin-bottom: 0;
+}
+
 .settings-usage__list {
   margin-top: 0.25rem;
 }
@@ -3829,6 +3833,20 @@ a.setup-checklist__item:hover {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.settings-log-files {
+  overflow: visible;
+}
+
+.settings-log-files td:first-child {
+  overflow-wrap: anywhere;
+}
+
+.settings-log-files th:last-child,
+.settings-log-files td:last-child {
+  text-align: right;
+  width: 7rem;
 }
 
 .card__subtitle {
@@ -13648,32 +13666,32 @@ a.setup-checklist__item:hover {
   }
 }
 
-.scenario-agent {
+.jailbreak-agent {
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
 
-.scenario-agent__row {
+.jailbreak-agent__row {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
 }
 
-.scenario-agent__template-head {
+.jailbreak-agent__template-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
 }
 
-.scenario-agent__template-chips {
+.jailbreak-agent__template-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
 }
 
-.scenario-agent__reset {
+.jailbreak-agent__reset {
   border: 1px solid var(--border-subtle);
   border-radius: 0.4rem;
   background: transparent;
@@ -13683,30 +13701,30 @@ a.setup-checklist__item:hover {
   cursor: pointer;
 }
 
-.scenario-agent__reset:hover {
+.jailbreak-agent__reset:hover {
   background: var(--bg-hover);
 }
 
-.scenario-agent__synced {
+.jailbreak-agent__synced {
   font-size: 0.72rem;
   color: var(--success, #2f9e44);
   font-weight: 600;
 }
 
-.scenario-agent__meta,
-.scenario-agent__keyword-chips {
+.jailbreak-agent__meta,
+.jailbreak-agent__keyword-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
 }
 
-.scenario-agent__keywords {
+.jailbreak-agent__keywords {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
 }
 
-.scenario-agent__meta-pill {
+.jailbreak-agent__meta-pill {
   display: inline-flex;
   align-items: center;
   padding: 0.15rem 0.45rem;
@@ -13718,11 +13736,11 @@ a.setup-checklist__item:hover {
   color: var(--text);
 }
 
-.scenario-agent__meta-pill--muted {
+.jailbreak-agent__meta-pill--muted {
   color: var(--text-subtle);
 }
 
-.scenario-agent__hint {
+.jailbreak-agent__hint {
   margin: 0;
   font-size: 0.75rem;
   color: var(--text-subtle);
@@ -13730,7 +13748,7 @@ a.setup-checklist__item:hover {
 }
 
 /* Match shared `.input` inside elevated Prompt Lab composer */
-.scenario-agent .select {
+.jailbreak-agent .select {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background-color: var(--bg-elevated);
@@ -13741,20 +13759,20 @@ a.setup-checklist__item:hover {
   font-size: 0.875rem;
 }
 
-.scenario-agent__auto-target {
+.jailbreak-agent__auto-target {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
   padding-top: 0.25rem;
 }
 
-.scenario-agent__budget {
+.jailbreak-agent__budget {
   display: flex;
   flex-wrap: wrap;
   gap: 1rem;
 }
 
-.scenario-agent__budget label {
+.jailbreak-agent__budget label {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -13762,7 +13780,7 @@ a.setup-checklist__item:hover {
   color: var(--text-subtle);
 }
 
-.scenario-agent__budget input {
+.jailbreak-agent__budget input {
   width: 5rem;
   padding: 0.35rem 0.45rem;
   border: 1px solid var(--border-subtle);
@@ -13771,13 +13789,13 @@ a.setup-checklist__item:hover {
   color: var(--text);
 }
 
-.scenario-agent__mutators {
+.jailbreak-agent__mutators {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
 }
 
-.scenario-agent__mutator-chips {
+.jailbreak-agent__mutator-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
@@ -13785,11 +13803,11 @@ a.setup-checklist__item:hover {
   overflow: auto;
 }
 
-.scenario-agent__mutator--default:not(.filter-chip--active) {
+.jailbreak-agent__mutator--default:not(.filter-chip--active) {
   border-style: dashed;
 }
 
-.scenario-agent__hints {
+.jailbreak-agent__hints {
   margin: 0;
   padding-left: 1.1rem;
   font-size: 0.78rem;
@@ -13797,19 +13815,19 @@ a.setup-checklist__item:hover {
   line-height: 1.45;
 }
 
-.scenario-agent__log {
+.jailbreak-agent__log {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
 }
 
-.scenario-agent__log-title {
+.jailbreak-agent__log-title {
   margin: 0;
   font-size: 0.9rem;
   font-weight: 650;
 }
 
-.scenario-agent__log-item {
+.jailbreak-agent__log-item {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -13819,11 +13837,11 @@ a.setup-checklist__item:hover {
   background: var(--bg-elevated);
 }
 
-.scenario-agent__log-item--hit {
+.jailbreak-agent__log-item--hit {
   border-color: var(--success, #2f9e44);
 }
 
-.scenario-agent__log-item header {
+.jailbreak-agent__log-item header {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
@@ -13831,27 +13849,27 @@ a.setup-checklist__item:hover {
   font-size: 0.78rem;
 }
 
-.scenario-agent__io-row {
+.jailbreak-agent__io-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.85rem;
   align-items: stretch;
 }
 
-.scenario-agent__io-col {
+.jailbreak-agent__io-col {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
   min-width: 0;
 }
 
-.scenario-agent__io-col .prompt-lab-page__textarea {
+.jailbreak-agent__io-col .prompt-lab-page__textarea {
   flex: 1;
   min-height: 8rem;
 }
 
 @media (max-width: 840px) {
-  .scenario-agent__io-row {
+  .jailbreak-agent__io-row {
     grid-template-columns: 1fr;
   }
 }
