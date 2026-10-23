@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 promptlab-core = { workspace = true }
+promptlab-registry = { workspace = true }
 promptlab-models = { workspace = true }
 promptlab-runtime = { workspace = true }
 promptlab-harness = { workspace = true }

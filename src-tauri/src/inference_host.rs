@@ -10,7 +10,7 @@ use promptlab_core::PromptLabError;
 use promptlab_inference::{
     CompleteRequest, ConnectivityTestResult, GatewaySession,
     InferenceMode, InferenceRuntimeManager, InferenceSession,
-    PromptRegistry, RemoteAdapterSettings,
+    RemoteAdapterSettings,
 };
 use promptlab_judge::{build_judge_engine_with_client, JudgeEngine, JudgeMode, JudgeProviderConfig};
 use promptlab_models::{LocalModelManager, ModelEntry, ModelProvider};
@@ -24,6 +24,13 @@ use crate::error::{CommandError, CommandResult};
 use crate::third_party_credentials::{
     open_model_credential_vault, resolve_third_party_credentials, ThirdPartyCredentialFields,
 };
+
+fn registered_prompt(agent_id: &str, prompt_id: &str) -> &'static str {
+    promptlab_registry::agent_registry::load(agent_id)
+        .and_then(|agent| agent.prompt(prompt_id))
+        .unwrap_or_else(|err| panic!("promptlab-registry: {err}"))
+        .system
+}
 
 pub fn models_vault_path(data_dir: &Path) -> PathBuf {
     data_dir.join("models")
@@ -534,7 +541,10 @@ impl PlannerLlm for HostWizardPlannerLlm {
             &self.model_manager,
             self.model_provider.clone(),
             promptlab_agent::AgentId::AttackPlan.as_str(),
-            Some(PromptRegistry::wizard_profile_system()),
+            Some(registered_prompt(
+                promptlab_agent::AgentId::AttackPlan.as_str(),
+                "wizard_profile_system",
+            )),
             prompt,
             8192,
             0.1,
@@ -581,7 +591,10 @@ impl PlannerLlm for HostEndpointVerifyLlm {
             &self.model_manager,
             self.model_provider.clone(),
             promptlab_agent::AgentId::AnalyzeEndpoint.as_str(),
-            Some(PromptRegistry::endpoint_verify_system()),
+            Some(registered_prompt(
+                promptlab_agent::AgentId::AnalyzeEndpoint.as_str(),
+                "endpoint_verify_system",
+            )),
             prompt,
             1024,
             0.1,
@@ -647,7 +660,7 @@ impl HostYazgReactLlm {
 #[async_trait]
 impl PlannerLlm for HostYazgReactLlm {
     async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
-        self.complete_with_system(Some(PromptRegistry::yazg_react_system()), prompt)
+        self.complete_with_system(Some(registered_prompt(promptlab_agent::AgentId::Yazg.as_str(), "yazg_system")), prompt)
             .await
     }
 
@@ -659,7 +672,7 @@ impl PlannerLlm for HostYazgReactLlm {
         let system = system
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| PromptRegistry::yazg_react_system());
+            .unwrap_or_else(|| registered_prompt(promptlab_agent::AgentId::Yazg.as_str(), "yazg_system"));
         detached_complete_as(
             &self.data_dir,
             &self.inference,
@@ -681,7 +694,7 @@ impl PlannerLlm for HostYazgReactLlm {
         tools: &[promptlab_planner::ToolSpec],
     ) -> promptlab_planner::PlannerResult<promptlab_planner::LlmCompletion> {
         self.complete_with_tools_and_system(
-            Some(PromptRegistry::yazg_react_system()),
+            Some(registered_prompt(promptlab_agent::AgentId::Yazg.as_str(), "yazg_system")),
             prompt,
             tools,
         )
@@ -705,7 +718,7 @@ impl PlannerLlm for HostYazgReactLlm {
         let system = system
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| PromptRegistry::yazg_react_system());
+            .unwrap_or_else(|| registered_prompt(promptlab_agent::AgentId::Yazg.as_str(), "yazg_system"));
         let outcome = detached_complete_outcome_as(
             &self.data_dir,
             &self.inference,
@@ -818,7 +831,10 @@ impl PlannerLlm for HostGeneratePromptLlm {
             &self.model_manager,
             self.model_provider.clone(),
             promptlab_agent::AgentId::GeneratePrompt.as_str(),
-            Some(PromptRegistry::attack_catalog_prompt_system()),
+            Some(registered_prompt(
+                promptlab_agent::AgentId::GeneratePrompt.as_str(),
+                "attack_catalog_prompt_system",
+            )),
             prompt,
             1024,
             0.35,
@@ -828,7 +844,7 @@ impl PlannerLlm for HostGeneratePromptLlm {
     }
 }
 
-/// Prompt Lab ScenarioAgent LLM — plan seeds + follow-ups for CTF-style goals.
+/// Prompt Lab JailbreakAgent LLM — prompts for one goal on a guarded model.
 pub struct HostJailbreakAgentLlm {
     data_dir: PathBuf,
     inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
@@ -931,7 +947,10 @@ impl PlannerLlm for HostAttackRecommendLlm {
             &self.model_manager,
             self.model_provider.clone(),
             promptlab_agent::AgentId::Recommend.as_str(),
-            Some(PromptRegistry::attack_results_recommend_system()),
+            Some(registered_prompt(
+                promptlab_agent::AgentId::Recommend.as_str(),
+                "attack_results_recommend_system",
+            )),
             prompt,
             2048,
             0.15,
@@ -978,7 +997,10 @@ impl PlannerLlm for HostFindingRecommendLlm {
             &self.model_manager,
             self.model_provider.clone(),
             promptlab_agent::AgentId::Recommend.as_str(),
-            Some(PromptRegistry::finding_remediation_recommend_system()),
+            Some(registered_prompt(
+                promptlab_agent::AgentId::Recommend.as_str(),
+                "finding_remediation_recommend_system",
+            )),
             prompt,
             3072,
             0.15,
@@ -1025,7 +1047,10 @@ impl PlannerLlm for HostProjectSummaryLlm {
             &self.model_manager,
             self.model_provider.clone(),
             promptlab_agent::AgentId::Summary.as_str(),
-            Some(PromptRegistry::project_summary_system()),
+            Some(registered_prompt(
+                promptlab_agent::AgentId::Summary.as_str(),
+                "project_summary_system",
+            )),
             prompt,
             2048,
             0.15,
@@ -1072,7 +1097,10 @@ impl PlannerLlm for HostScanSummaryLlm {
             &self.model_manager,
             self.model_provider.clone(),
             promptlab_agent::AgentId::Summary.as_str(),
-            Some(PromptRegistry::scan_summary_system()),
+            Some(registered_prompt(
+                promptlab_agent::AgentId::Summary.as_str(),
+                "scan_summary_system",
+            )),
             prompt,
             2048,
             0.15,
@@ -1147,7 +1175,10 @@ impl YazgHostLlms {
     }
 
     pub fn into_yazg_llms(self) -> promptlab_agent::YazgLlms {
-        let judge = self.supervisor.clone().with_agent_id(promptlab_agent::AgentId::JudgeCoordinator.as_str());
+        let judge = self
+            .supervisor
+            .clone()
+            .with_agent_id(promptlab_agent::AgentId::JudgeCoordinator.as_str());
         promptlab_agent::YazgLlms {
             supervisor: Arc::new(self.supervisor),
             analyze: Arc::new(self.analyze),
@@ -1225,7 +1256,10 @@ impl YazgHostLlmsScanSummary {
     }
 
     pub fn into_yazg_llms(self) -> promptlab_agent::YazgLlms {
-        let judge = self.supervisor.clone().with_agent_id(promptlab_agent::AgentId::JudgeCoordinator.as_str());
+        let judge = self
+            .supervisor
+            .clone()
+            .with_agent_id(promptlab_agent::AgentId::JudgeCoordinator.as_str());
         promptlab_agent::YazgLlms {
             supervisor: Arc::new(self.supervisor),
             analyze: Arc::new(self.analyze),
@@ -1275,7 +1309,10 @@ impl GeneratorLlm for HostGeneratorLlm {
             &self.model_manager,
             self.model_provider.clone(),
             promptlab_agent::AgentId::GeneratePrompt.as_str(),
-            Some(PromptRegistry::generator_system()),
+            Some(registered_prompt(
+                promptlab_agent::AgentId::GeneratePrompt.as_str(),
+                "generator_system",
+            )),
             prompt,
             1536,
             0.2,
