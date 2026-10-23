@@ -90,6 +90,14 @@ fn current_agent_id() -> Option<String> {
     CURRENT_AGENT.try_with(|value| value.clone()).ok()
 }
 
+/// Agent id from `with_agent`, when the caller is a real agent.
+pub(crate) fn scoped_agent_id() -> Option<String> {
+    current_agent_id().filter(|id| {
+        let id = id.trim();
+        !id.is_empty() && id != UNKNOWN_AGENT && id != RUNTIME_SYSTEM_AGENT
+    })
+}
+
 fn resolve_record_agent_id() -> String {
     match current_agent_id() {
         Some(agent) if !agent.trim().is_empty() && agent != UNKNOWN_AGENT => agent,
