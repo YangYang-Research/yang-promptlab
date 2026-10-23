@@ -14104,12 +14104,6 @@ a.setup-checklist__item:hover {
   letter-spacing: -0.02em;
 }
 
-.agents-detail__identity-description {
-  margin: 0.25rem 0 0;
-  color: var(--text-muted);
-  font-size: 0.875rem;
-}
-
 .agents-detail__metrics {
   display: flex;
   flex-direction: column;

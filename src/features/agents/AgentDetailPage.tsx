@@ -299,9 +299,8 @@ export function AgentDetailPage() {
       {agent ? (
         <>
           <section className="agents-detail__identity">
-            <code className="mono agents-detail__identity-id">{agent.id}</code>
             <h1 className="agents-detail__identity-name">{agent.displayName}</h1>
-            <p className="agents-detail__identity-description">{agent.description}</p>
+            <code className="mono agents-detail__identity-id">{agent.id}</code>
           </section>
           <Card>
             <div className="agents-detail__metrics">
