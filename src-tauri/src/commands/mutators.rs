@@ -204,7 +204,7 @@ async fn prompt_lab_factory_upgrade(
                 | YazgDelegation::GeneratedPrompt { turn, .. } => turn.reply,
             };
             Err(CommandError::invalid_input(if message.trim().is_empty() {
-                "Yazg ReAct finished without GeneratePromptAgent output".into()
+                "GeneratePromptAgent returned no prompt".into()
             } else {
                 message
             }))

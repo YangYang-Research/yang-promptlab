@@ -567,7 +567,7 @@ pub async fn target_profile_verify_ai_classify_op(
                 | YazgDelegation::AnalyzedEndpoint { turn, .. } => turn.reply.clone(),
             };
             let message = if message.trim().is_empty() {
-                "Yazg ReAct finished without AnalyzeEndpointAgent confirmation".into()
+                "AnalyzeEndpointAgent returned no confirmation".into()
             } else {
                 message
             };
@@ -758,7 +758,7 @@ pub async fn planner_generate_from_profile_op(
                 "wizard attack plan: ReAct finished without AttackPlanAgent"
             );
             return Err(CommandError::invalid_input(if message.trim().is_empty() {
-                "Yazg ReAct did not produce an attack plan".into()
+                "AttackPlanAgent did not produce an attack plan".into()
             } else {
                 message
             }));

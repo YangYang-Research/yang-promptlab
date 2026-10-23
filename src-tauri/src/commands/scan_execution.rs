@@ -9,7 +9,6 @@ use promptlab_agent::{
     AttackAttemptObservation, AttackExecutionLlms, AttackExecutionRequest, AttackExecutionTools,
     AdaptPlanOutcome, EndpointPacing, MemoryContext, SequentialAttackExecutionRequest,
     YazgSupervisor, batch_needs_degraded_pacing, degrade_pacing_for_next_category,
-    pick_scan_execution_agent, resolve_scan_execution_pick, ScanExecutionAgentPick,
 };
 use promptlab_attack::{AttackCategory, AttackPayload};
 use promptlab_inference::InferenceRuntimeManager;
@@ -35,7 +34,7 @@ use crate::commands::generator::{
     parse_generator_mode_optional, prompt_payloads_map, validate_payload_map_budget,
 };
 use crate::events::ScanProgressEmitter;
-use crate::inference_host::{is_inference_ready, HostYazgReactLlm, YazgHostLlms};
+use crate::inference_host::{is_inference_ready, YazgHostLlms};
 use crate::jobs::{bump_scan_progress, ScanBatchCheckpoint, ScanProgress};
 use crate::scan_playbook::{
     generated_payloads_from_playbook, persist_generated_payloads, persist_playbook_pacing,
@@ -651,127 +650,9 @@ async fn wait_pipeline_warmup(
     bump_scan_progress(progress, 1);
 }
 
-async fn yazg_pick_scan_execution_agent(
-    ctx: &TargetProfileScanContext<'_>,
-    config: &mut ScanExecutionConfig,
-) {
-    let recommended_pick = match config.execution {
-        ExecutionStrategy::Agentic => ScanExecutionAgentPick::Agentic,
-        ExecutionStrategy::Sequential => ScanExecutionAgentPick::Sequential,
-    };
-    let recommended = recommended_pick.as_str();
-    let llm_ready = {
-        let inference = ctx.inference_manager.lock().await;
-        is_inference_ready(&inference)
-    };
-    if !llm_ready {
-        ctx.emitter.info(format!(
-            "Yazg offline — using attack plan execution strategy ({recommended})"
-        ));
-        return;
-    }
-
-    let categories = ctx
-        .categories
-        .iter()
-        .map(|category| category.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let plan_brief = format!(
-        "Attack plan for scan {}:\n\
-         - recommended_strategy: {recommended}\n\
-         - categories: {categories}\n\
-         - max_attempts: {}\n\
-         - reflection_enabled: {}\n\
-         - adaptive_planning: {}\n\
-         - profile: {}",
-        ctx.scan_id,
-        config.max_attempts,
-        config.reflection_enabled,
-        config.adaptive_planning,
-        ctx.profile_id,
-    );
-
-    let llm: Arc<dyn PlannerLlm> = Arc::new(HostYazgReactLlm::new(
-        ctx.data_dir.to_path_buf(),
-        Arc::clone(&ctx.inference_manager),
-        Arc::clone(&ctx.model_manager),
-        ctx.model_provider.clone(),
-        Arc::clone(&ctx.runtime_manager),
-    ));
-
-    match pick_scan_execution_agent(
-        llm,
-        &plan_brief,
-        recommended_pick,
-        config.reflection_enabled,
-        config.adaptive_planning,
-        config.max_attempts,
-    )
-    .await
-    {
-        Ok((thought, pick)) => {
-            let applied = resolve_scan_execution_pick(
-                recommended_pick,
-                pick,
-                config.reflection_enabled,
-                config.adaptive_planning,
-                config.max_attempts,
-            );
-            let picked = match applied {
-                ScanExecutionAgentPick::Agentic => ExecutionStrategy::Agentic,
-                ScanExecutionAgentPick::Sequential => ExecutionStrategy::Sequential,
-            };
-            if applied != pick {
-                ctx.emitter.info(format!(
-                    "Yazg ReAct ({thought}) picked {} — following plan {recommended} → {}",
-                    pick.as_str(),
-                    applied.agent_name(),
-                ));
-            } else {
-                ctx.emitter.info(format!(
-                    "Yazg ReAct ({thought}) → {} (plan recommended {recommended})",
-                    applied.agent_name(),
-                ));
-            }
-            apply_picked_execution(ctx, config, picked);
-        }
-        Err(err) => {
-            ctx.emitter.info(format!(
-                "Yazg execution pick failed ({err}) — using attack plan ({recommended})"
-            ));
-        }
-    }
-}
-
-fn apply_picked_execution(
-    ctx: &TargetProfileScanContext<'_>,
-    config: &mut ScanExecutionConfig,
-    picked: ExecutionStrategy,
-) {
-    if config.execution == picked {
-        if let Ok(mut state) = ctx.progress.lock() {
-            state.agent_mode = matches!(picked, ExecutionStrategy::Agentic);
-        }
-        return;
-    }
-    config.execution = picked;
-    if picked == ExecutionStrategy::Sequential {
-        config.reflection_enabled = false;
-        config.adaptive_planning = false;
-    }
-    let total = scan_progress_total(ctx.categories, ctx.disabled_tests, config);
-    let attacks_total = scan_attack_requests_total(ctx.categories, ctx.disabled_tests, config);
-    if let Ok(mut state) = ctx.progress.lock() {
-        state.total = total.max(1).max(state.completed);
-        state.attacks_total = attacks_total.max(state.attacks_completed);
-        state.agent_mode = matches!(picked, ExecutionStrategy::Agentic);
-    }
-}
-
 pub async fn run_target_profile_attack_scan(
     ctx: TargetProfileScanContext<'_>,
-    mut config: ScanExecutionConfig,
+    config: ScanExecutionConfig,
 ) -> TargetProfileScanOutcome {
     wait_pipeline_warmup(
         config.pipeline_warmup_secs,
@@ -789,8 +670,6 @@ pub async fn run_target_profile_attack_scan(
             had_error: false,
         };
     }
-
-    yazg_pick_scan_execution_agent(&ctx, &mut config).await;
 
     let plan = attack_plan_from_scan(
         ctx.profile_id.to_string(),
@@ -1309,11 +1188,11 @@ async fn run_sequential_category(
         hosts
             .supervisor
             .clone()
-            .with_agent_id("sequential_attack_execution"),
+            .with_agent_id(promptlab_agent::AgentId::SequentialAttackExecution.as_str()),
     ));
 
     ctx.emitter.info(format!(
-        "Yazg → SequentialAttackExecutionAgent for {} (endpoint recovery)",
+        "SequentialAttackExecutionAgent for {} (endpoint recovery)",
         category.display_name()
     ));
 
@@ -1580,10 +1459,15 @@ async fn run_agentic_category(
         hosts
             .supervisor
             .clone()
-            .with_agent_id("agentic_attack_execution"),
+            .with_agent_id(promptlab_agent::AgentId::AgenticAttackExecution.as_str()),
     );
     let reflection: Arc<dyn PlannerLlm> =
-        Arc::new(hosts.supervisor.clone().with_agent_id("reflection"));
+        Arc::new(
+            hosts
+                .supervisor
+                .clone()
+                .with_agent_id(promptlab_agent::AgentId::Reflection.as_str()),
+        );
     let llms = hosts.into_yazg_llms();
     let exec_llms = AttackExecutionLlms {
         orchestrator,
@@ -1613,7 +1497,7 @@ async fn run_agentic_category(
     };
 
     ctx.emitter.info(format!(
-        "Yazg → AgenticAttackExecutionAgent for {} (agentic)",
+        "AgenticAttackExecutionAgent for {} (agentic)",
         category.display_name()
     ));
 

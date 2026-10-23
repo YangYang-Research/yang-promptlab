@@ -7,7 +7,7 @@ use promptlab_judge::{JudgeEngine, JudgeRequest};
 use promptlab_planner::PlannerLlm;
 use promptlab_target_profile::{AttackResultsSummary, TargetProfile, VerificationResult, WizardAttackPlan};
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::analyze_endpoint::{AnalyzeEndpointAgent, AnalyzeEndpointAgentOutcome};
 use crate::attack_execution::{
@@ -20,7 +20,7 @@ use crate::error::AgentResult;
 use crate::generate_prompt::{
     GeneratePromptAgent, GeneratePromptAgentOutcome, TechniquePromptContext,
 };
-use crate::judge_coordinator::JudgeCoordinatorAgentOutcome;
+use crate::judge_coordinator::{JudgeCoordinatorAgent, JudgeCoordinatorAgentOutcome};
 use crate::list_workspace::WorkspaceTools;
 use crate::memory::{AgentMemoryStore, MemoryContext, remember_stm, StmRole, StmWrite};
 use crate::assistant::AssistantCapability;
@@ -318,46 +318,17 @@ impl YazgSupervisor {
         Ok(turn)
     }
 
-    /// Wizard Verification AI step: probe already captured.
+    /// Scan wizard verification calls AnalyzeEndpointAgent directly.
     pub async fn react_classify_probe(
         profile: &TargetProfile,
         http: &promptlab_target_profile::VerifyHttpSuccess,
         llms: &YazgLlms,
-        memory: Option<Arc<dyn AgentMemoryStore>>,
-        memory_ctx: MemoryContext,
+        _memory: Option<Arc<dyn AgentMemoryStore>>,
+        _memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
-        let message = format!(
-            "Scan wizard Verification / endpoint analysis: a capability HTTP response was already \
-             captured for {} (HTTP {}). Call analyze_endpoint to classify whether this is a live \
-             generative AI API, then finish with a concise UI result. This is NOT Attack Factory — \
-             do not call generate_prompt and do not ask for a technique.",
-            profile.full_url(),
-            http.status_code
-        );
-        let goal = Self::build_goal(&message, SupervisorIntent::AnalyzeEndpoint);
-        let specialist = YazgSpecialistContext::default()
-            .with_profile(profile.clone())
-            .with_capability_probe(http.clone());
-        let request = YazgRequest::new(goal, llms.clone())
-            .with_memory(memory, memory_ctx)
-            .with_specialist(specialist)
-            .with_max_turns(4);
-        let delegation = Self::run_yazg_turn(request).await?;
-        if matches!(delegation, YazgDelegation::AnalyzedEndpoint { .. }) {
-            return Ok(delegation);
-        }
-
-        warn!(
-            endpoint = %profile.full_url(),
-            "Yazg missed AnalyzeEndpointAgent during Verification; forcing classify_probe"
-        );
         let outcome =
             AnalyzeEndpointAgent::classify_probe(profile, http, llms.analyze.as_ref()).await?;
-        let mut events = vec![AgentEvent::info(
-            AgentId::Yazg,
-            "Yazg recovery: forced AnalyzeEndpointAgent after misrouted Verification turn",
-        )];
-        events.extend(outcome.events.clone());
+        let events = outcome.events.clone();
         Ok(YazgDelegation::AnalyzedEndpoint {
             turn: YazgTurn {
                 reply: format_analyze_success(&outcome.verification),
@@ -374,42 +345,15 @@ impl YazgSupervisor {
         })
     }
 
-    /// Wizard attack-plan step.
+    /// Scan wizard Attack Plan calls AttackPlanAgent directly.
     pub async fn react_plan(
         profile: &TargetProfile,
         llms: &YazgLlms,
-        memory: Option<Arc<dyn AgentMemoryStore>>,
-        memory_ctx: MemoryContext,
+        _memory: Option<Arc<dyn AgentMemoryStore>>,
+        _memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
-        let message = format!(
-            "Scan wizard Attack Plan: generate a FRESH attack plan for the verified target {}.\n\
-             You MUST call action \"attack_plan\" in this turn even if short-term or long-term memory \
-             mentions a prior plan — memory is historical context only, not a substitute for regenerating.\n\
-             After AttackPlanAgent succeeds, finish with a short summary for the UI.\n\
-             Do not finish early claiming a plan already exists.",
-            profile.full_url()
-        );
-        let goal = Self::build_goal(&message, SupervisorIntent::AttackPlan);
-        let specialist = YazgSpecialistContext::default().with_profile(profile.clone());
-        let request = YazgRequest::new(goal, llms.clone())
-            .with_memory(memory, memory_ctx)
-            .with_specialist(specialist)
-            .with_max_turns(4);
-        let delegation = Self::run_yazg_turn(request).await?;
-        if matches!(delegation, YazgDelegation::Planned { .. }) {
-            return Ok(delegation);
-        }
-
-        warn!(
-            endpoint = %profile.full_url(),
-            "Yazg missed AttackPlanAgent during Attack Plan; forcing AttackPlanAgent::run"
-        );
         let outcome = AttackPlanAgent::run(profile, llms.plan.as_ref()).await?;
-        let mut events = vec![AgentEvent::info(
-            AgentId::Yazg,
-            "Yazg recovery: forced AttackPlanAgent after misrouted Attack Plan turn",
-        )];
-        events.extend(outcome.events.clone());
+        let events = outcome.events.clone();
         let plan_summary = format_plan_summary(&outcome.plan);
         Ok(YazgDelegation::Planned {
             turn: YazgTurn {
@@ -427,76 +371,15 @@ impl YazgSupervisor {
         })
     }
 
-    /// Attack Factory: invent a novel technique probe.
+    /// Attack Factory and Prompt Lab call GeneratePromptAgent directly.
     pub async fn react_generate_prompt(
         technique: &TechniquePromptContext,
         llms: &YazgLlms,
-        memory: Option<Arc<dyn AgentMemoryStore>>,
-        memory_ctx: MemoryContext,
+        _memory: Option<Arc<dyn AgentMemoryStore>>,
+        _memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
-        let message = format!(
-            "Attack Factory: invent an improved adversarial factory prompt for technique \
-             `{}` (id={}, category={}). No scan target is required — technique context is enough.\n\
-             You MUST call action \"generate_prompt\" exactly once in this turn.\n\
-             After GeneratePromptAgent succeeds, finish with a short UI summary.\n\
-             Do not invent a probe yourself — only use the worker result.",
-            technique.name, technique.id, technique.category_id
-        );
-        let goal = Self::build_goal(&message, SupervisorIntent::GeneratePrompt);
-        let specialist = YazgSpecialistContext::default().with_technique(technique.clone());
-        let request = YazgRequest::new(goal, llms.clone())
-            .with_memory(memory, memory_ctx)
-            .with_specialist(specialist)
-            .with_max_turns(6);
-
-        let delegation = match Self::run_yazg_turn(request).await {
-            Ok(d) => d,
-            Err(err) => {
-                warn!(
-                    technique = %technique.id,
-                    error = %err,
-                    "Yazg generate_prompt missed specialist; forcing GeneratePromptAgent::run"
-                );
-                let outcome = GeneratePromptAgent::run(technique, llms.prompt.as_ref()).await?;
-                let mut events = vec![AgentEvent::info(
-                    AgentId::Yazg,
-                    format!("Yazg recovery after error: {err}"),
-                )];
-                events.extend(outcome.events.clone());
-                return Ok(YazgDelegation::GeneratedPrompt {
-                    turn: YazgTurn {
-                        reply: format!(
-                            "Factory prompt generated for {} ({} chars).",
-                            outcome.technique_id,
-                            outcome.content.chars().count()
-                        ),
-                        intent: SupervisorIntent::GeneratePrompt,
-                action: Some("generate_prompt".into()),
-                        events,
-                        verified: None,
-                        plan_summary: None,
-                        raw_output: None,
-                        pending_action: None,
-                        trace_id: None,
-                    },
-                    outcome,
-                });
-            }
-        };
-        if matches!(delegation, YazgDelegation::GeneratedPrompt { .. }) {
-            return Ok(delegation);
-        }
-
-        warn!(
-            technique = %technique.id,
-            "Yazg missed GeneratePromptAgent; forcing GeneratePromptAgent::run"
-        );
         let outcome = GeneratePromptAgent::run(technique, llms.prompt.as_ref()).await?;
-        let mut events = vec![AgentEvent::info(
-            AgentId::Yazg,
-            "Yazg recovery: forced GeneratePromptAgent after misrouted factory turn",
-        )];
-        events.extend(outcome.events.clone());
+        let events = outcome.events.clone();
         Ok(YazgDelegation::GeneratedPrompt {
             turn: YazgTurn {
                 reply: format!(
@@ -517,43 +400,15 @@ impl YazgSupervisor {
         })
     }
 
-    /// Post-scan recommendations.
+    /// Scan results call RecommendAgent directly.
     pub async fn react_recommend(
         results: &AttackResultsSummary,
         llms: &YazgLlms,
-        memory: Option<Arc<dyn AgentMemoryStore>>,
-        memory_ctx: MemoryContext,
+        _memory: Option<Arc<dyn AgentMemoryStore>>,
+        _memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
-        let message = format!(
-            "Scan results: produce FRESH prioritized remediation recommendations for this completed \
-             attack scan (status={}, findings={}).\n\
-             You MUST call action \"recommend\" in this turn even if memory mentions prior recommendations \
-             — memory is historical context only.\n\
-             After RecommendAgent succeeds, finish with a short UI summary.\n\
-             Do not finish early claiming recommendations already exist.",
-            results.scan_status, results.total_findings
-        );
-        let goal = Self::build_goal(&message, SupervisorIntent::Recommend);
-        let specialist = YazgSpecialistContext::default().with_attack_results(results.clone());
-        let request = YazgRequest::new(goal, llms.clone())
-            .with_memory(memory, memory_ctx)
-            .with_specialist(specialist)
-            .with_max_turns(4);
-        let delegation = Self::run_yazg_turn(request).await?;
-        if matches!(delegation, YazgDelegation::Recommended { .. }) {
-            return Ok(delegation);
-        }
-
-        warn!(
-            findings = results.total_findings,
-            "Yazg missed RecommendAgent; forcing RecommendAgent::run"
-        );
         let outcome = RecommendAgent::run(results, llms.recommend.as_ref()).await?;
-        let mut events = vec![AgentEvent::info(
-            AgentId::Yazg,
-            "Yazg recovery: forced RecommendAgent after misrouted recommendations turn",
-        )];
-        events.extend(outcome.events.clone());
+        let events = outcome.events.clone();
         Ok(YazgDelegation::Recommended {
             turn: YazgTurn {
                 reply: format!(
@@ -573,85 +428,15 @@ impl YazgSupervisor {
         })
     }
 
-    /// Project or scan posture summary.
+    /// Project details call SummaryAgent directly.
     pub async fn react_summarize(
         summary_request: &SummaryRequest,
         llms: &YazgLlms,
-        memory: Option<Arc<dyn AgentMemoryStore>>,
-        memory_ctx: MemoryContext,
+        _memory: Option<Arc<dyn AgentMemoryStore>>,
+        _memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
-        let message = match summary_request {
-            SummaryRequest::Project { project_name, .. } => format!(
-                "Project Summary: produce a FRESH security-posture summary for project `{project_name}`.\n\
-                 You MUST call action \"summary\" in this turn even if short-term or long-term memory \
-                 mentions a prior summary — memory is historical context only, not a substitute.\n\
-                 After SummaryAgent succeeds, finish with a short UI summary.\n\
-                 Do not finish early claiming a summary already exists."
-            ),
-            SummaryRequest::Scan { summary } => format!(
-                "Scan Summary: produce a FRESH summary for this attack scan (status={}, findings={}).\n\
-                 You MUST call action \"summary\" in this turn even if memory mentions a prior summary \
-                 — memory is historical context only.\n\
-                 After SummaryAgent succeeds, finish with a short UI summary.\n\
-                 Do not finish early claiming a summary already exists.",
-                summary.scan_status, summary.total_findings
-            ),
-        };
-        let goal = Self::build_goal(&message, SupervisorIntent::Summary);
-        let specialist =
-            YazgSpecialistContext::default().with_summary_request(summary_request.clone());
-        let request = YazgRequest::new(goal, llms.clone())
-            .with_memory(memory, memory_ctx)
-            .with_specialist(specialist)
-            .with_max_turns(6);
-        let delegation = match Self::run_yazg_turn(request).await {
-            Ok(d) => d,
-            Err(err) => {
-                warn!(
-                    kind = %summary_request.kind_label(),
-                    error = %err,
-                    "Yazg summary missed specialist; forcing SummaryAgent::run"
-                );
-                let outcome = SummaryAgent::run(summary_request, llms.summary.as_ref()).await?;
-                let mut events = vec![AgentEvent::info(
-                    AgentId::Yazg,
-                    format!("Yazg recovery after error: {err}"),
-                )];
-                events.extend(outcome.events.clone());
-                return Ok(YazgDelegation::Summarized {
-                    turn: YazgTurn {
-                        reply: format!(
-                            "{} summary ready ({} highlights).",
-                            outcome.kind,
-                            outcome.bundle.highlights.len()
-                        ),
-                        intent: SupervisorIntent::Summary,
-                action: Some("summary".into()),
-                        events,
-                        verified: None,
-                        plan_summary: None,
-                        raw_output: None,
-                        pending_action: None,
-                        trace_id: None,
-                    },
-                    outcome,
-                });
-            }
-        };
-        if matches!(delegation, YazgDelegation::Summarized { .. }) {
-            return Ok(delegation);
-        }
-
-        warn!(
-            kind = %summary_request.kind_label(),
-            "Yazg missed SummaryAgent; forcing SummaryAgent::run"
-        );
         let outcome = SummaryAgent::run(summary_request, llms.summary.as_ref()).await?;
-        let mut events = vec![AgentEvent::info(
-            AgentId::Yazg,
-            "Yazg recovery: forced SummaryAgent after misrouted summary turn",
-        )];
-        events.extend(outcome.events.clone());
+        let events = outcome.events.clone();
         Ok(YazgDelegation::Summarized {
             turn: YazgTurn {
                 reply: format!(
@@ -672,32 +457,40 @@ impl YazgSupervisor {
         })
     }
 
-    /// Consensus judge a single probe via JudgeCoordinatorAgent ReAct → workers.
+    /// Judge a probe by calling JudgeCoordinatorAgent directly.
     pub async fn react_judge(
         judge_request: &JudgeRequest,
         judge_engine: Arc<JudgeEngine>,
-        llms: &YazgLlms,
-        memory: Option<Arc<dyn AgentMemoryStore>>,
-        memory_ctx: MemoryContext,
+        _llms: &YazgLlms,
+        _memory: Option<Arc<dyn AgentMemoryStore>>,
+        _memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
-        let message = format!(
-            "Judge probe `{}` (category={}): run JudgeCoordinatorAgent so JudgeWorker, \
-             ClassifierWorker, and AttackerWorker vote, then finish with the consensus verdict \
-             for the UI. Probe response context is enough — no live target probe required.",
-            judge_request.probe_id, judge_request.attack_category
+        let outcome = JudgeCoordinatorAgent::run(judge_request, judge_engine.as_ref()).await?;
+        let events = outcome.events.clone();
+        let reply = format!(
+            "Judge consensus: {} (confidence={:.0}%, votes={}).",
+            outcome.verdict.verdict,
+            outcome.verdict.confidence * 100.0,
+            outcome.worker_results.len()
         );
-        let goal = Self::build_goal(&message, SupervisorIntent::Judge);
-        let specialist =
-            YazgSpecialistContext::default().with_judge(judge_request.clone(), judge_engine);
-        let request = YazgRequest::new(goal, llms.clone())
-            .with_memory(memory, memory_ctx)
-            .with_specialist(specialist)
-            .with_max_turns(4);
-        Self::run_yazg_turn(request).await
+        Ok(YazgDelegation::Judged {
+            turn: YazgTurn {
+                reply,
+                intent: SupervisorIntent::Judge,
+                action: Some("judge".into()),
+                events,
+                verified: None,
+                plan_summary: None,
+                raw_output: None,
+                pending_action: None,
+                trace_id: None,
+            },
+            outcome,
+        })
     }
 
-    /// Hard-gate agentic scan execution: Yazg delegates to AgenticAttackExecutionAgent.
-    /// Host supplies HTTP/generate tools; ReflectionAgent + AttackPlanAgent::adapt run inside.
+    /// Scan execution Agentic calls AgenticAttackExecutionAgent directly.
+    /// ReflectionAgent and AttackPlanAgent::adapt run inside that agent.
     pub async fn execute_attack(
         request: &AttackExecutionRequest,
         tools: &dyn AttackExecutionTools,
@@ -708,24 +501,12 @@ impl YazgSupervisor {
         info!(
             category = %request.category,
             max_attempts = request.max_attempts,
-            "Yazg delegating to AgenticAttackExecutionAgent"
+            "AgenticAttackExecutionAgent run"
         );
-        let mut events = vec![AgentEvent::info(
-            AgentId::Yazg,
-            format!(
-                "ExecuteAttack → AgenticAttackExecutionAgent ({})",
-                request.category
-            ),
-        )];
-        let mut outcome =
-            AgenticAttackExecutionAgent::run(request, tools, llms, memory, memory_ctx).await?;
-        events.append(&mut outcome.events);
-        outcome.events = events;
-        Ok(outcome)
+        AgenticAttackExecutionAgent::run(request, tools, llms, memory, memory_ctx).await
     }
 
-    /// Hard-gate sequential scan execution: Yazg delegates to SequentialAttackExecutionAgent.
-    /// Generate → attack(+judge); ReAct recover on endpoint failures (no reflection/adapt).
+    /// Scan execution Sequential calls SequentialAttackExecutionAgent directly.
     pub async fn execute_sequential_attack(
         request: &SequentialAttackExecutionRequest,
         tools: &dyn AttackExecutionTools,
@@ -736,16 +517,9 @@ impl YazgSupervisor {
     ) -> AgentResult<AttackExecutionOutcome> {
         info!(
             category = %request.category,
-            "Yazg delegating to SequentialAttackExecutionAgent"
+            "SequentialAttackExecutionAgent run"
         );
-        let mut events = vec![AgentEvent::info(
-            AgentId::Yazg,
-            format!(
-                "ExecuteSequentialAttack → SequentialAttackExecutionAgent ({})",
-                request.category
-            ),
-        )];
-        let mut outcome = SequentialAttackExecutionAgent::run(
+        SequentialAttackExecutionAgent::run(
             request,
             tools,
             orchestrator,
@@ -753,10 +527,7 @@ impl YazgSupervisor {
             memory,
             memory_ctx,
         )
-        .await?;
-        events.append(&mut outcome.events);
-        outcome.events = events;
-        Ok(outcome)
+        .await
     }
 
     /// Offline fallback when AI Runtime is unavailable (no Yazg loop).
