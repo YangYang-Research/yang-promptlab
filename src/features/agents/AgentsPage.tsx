@@ -2,9 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Card, EmptyState, PageHeader } from "@/shared/components";
+import { Card, EmptyState, PageHeader, RefreshButton } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
 import { listAgents, type AgentSummaryDto } from "@/shared/ipc/agents";
+
+function formatTemperature(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return value.toFixed(1);
+}
 
 export function AgentsPage() {
   const { backendConnected, ui } = useAppStore();
@@ -12,6 +17,7 @@ export function AgentsPage() {
   const [agents, setAgents] = useState<AgentSummaryDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!backendConnected) return;
@@ -31,7 +37,7 @@ export function AgentsPage() {
     return () => {
       cancelled = true;
     };
-  }, [backendConnected]);
+  }, [backendConnected, reloadKey]);
 
   const filtered = useMemo(() => {
     const q = ui.searchQuery.toLowerCase().trim();
@@ -49,6 +55,14 @@ export function AgentsPage() {
       <PageHeader
         title="Agents"
         description="Registered agents, their prompts, tools, attempt budgets, and temperatures."
+        actions={
+          <RefreshButton
+            loading={loading}
+            error={error}
+            disabled={!backendConnected}
+            onClick={() => setReloadKey((key) => key + 1)}
+          />
+        }
       />
 
       {!backendConnected ? (
@@ -87,7 +101,26 @@ export function AgentsPage() {
                 className="agents-card"
                 onClick={() => navigate(`/agents/${encodeURIComponent(agent.id)}`)}
               >
-                <span className="agents-card__name">{agent.displayName}</span>
+                <span className="agents-card__head">
+                  <span className="agents-card__name">{agent.displayName}</span>
+                  <span
+                    className="agents-card__metrics"
+                    aria-label={`Attempt ${agent.attempt ?? "none"}, Temperature ${formatTemperature(agent.temperature)}`}
+                  >
+                    <span className="agents-card__metric">
+                      <span className="agents-card__metric-label">A</span>
+                      <span className="mono agents-card__metric-value">
+                        {agent.attempt ?? "—"}
+                      </span>
+                    </span>
+                    <span className="agents-card__metric">
+                      <span className="agents-card__metric-label">T</span>
+                      <span className="mono agents-card__metric-value">
+                        {formatTemperature(agent.temperature)}
+                      </span>
+                    </span>
+                  </span>
+                </span>
                 <code className="mono agents-card__id">{agent.id}</code>
                 <p className="agents-card__description">{agent.description}</p>
               </button>

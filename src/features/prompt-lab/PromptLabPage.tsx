@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 
 import { useAppStore } from "@/app/store/AppStore";
 import { ATTACK_MUTATORS } from "@/features/scans/payloadStrategy";
-import { Button, IconButton, Modal, PageHeader, Skeleton } from "@/shared/components";
+import { Button, IconButton, Modal, PageHeader, RefreshButton, Skeleton } from "@/shared/components";
 import { IconAi, IconCheck, IconCopy, IconHistory, IconTrash } from "@/shared/components/Icons";
 import { toAppError } from "@/shared/errors";
 import {
@@ -92,7 +92,7 @@ function VariantCard({
 }
 
 export function PromptLabPage() {
-  const { backendConnected } = useAppStore();
+  const { backendConnected, loading, error: storeError, actions } = useAppStore();
   const { notify } = useToast();
   const ui = useSyncExternalStore(
     subscribePromptLabUiState,
@@ -142,6 +142,11 @@ export function PromptLabPage() {
   async function handleOpenHistory() {
     setHistoryOpen(true);
     await loadHistory();
+  }
+
+  async function handleRefresh() {
+    await actions.refresh();
+    if (historyOpen) await loadHistory();
   }
 
   async function handleCopySeed() {
@@ -281,6 +286,14 @@ export function PromptLabPage() {
       <PageHeader
         title="Prompt Lab"
         description="A place to experiment with prompts."
+        actions={
+          <RefreshButton
+            loading={loading || historyLoading}
+            error={storeError}
+            disabled={!backendConnected}
+            onClick={() => void handleRefresh()}
+          />
+        }
       />
 
       <div className="prompt-lab-page__tabs" role="tablist" aria-label="Prompt Lab sections">

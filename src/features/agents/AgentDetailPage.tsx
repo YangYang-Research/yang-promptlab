@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Button, Card, EmptyState, IconButton, PageHeader } from "@/shared/components";
+import { Button, Card, EmptyState, IconButton, PageHeader, RefreshButton } from "@/shared/components";
 import { IconCheck, IconCopy } from "@/shared/components/Icons";
 import { toAppError } from "@/shared/errors";
 import {
@@ -109,33 +109,40 @@ export function AgentDetailPage() {
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
   const attemptSaveToken = useRef(0);
   const temperatureSaveToken = useRef(0);
+  const loadGen = useRef(0);
 
-  useEffect(() => {
-    if (!backendConnected || !agentId) return;
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setAttemptDraft(null);
-    setTemperatureDraft(null);
-    getAgent(agentId)
-      .then((detail) => {
-        if (cancelled) return;
+  const loadAgent = useCallback(
+    async (resetDrafts: boolean) => {
+      if (!backendConnected || !agentId) return;
+      const gen = ++loadGen.current;
+      attemptSaveToken.current += 1;
+      temperatureSaveToken.current += 1;
+      setLoading(true);
+      setError(null);
+      if (resetDrafts) {
+        setAttemptDraft(null);
+        setTemperatureDraft(null);
+      }
+      try {
+        const detail = await getAgent(agentId);
+        if (gen !== loadGen.current) return;
         setAgent(detail);
         setAttemptDraft(detail.attempt == null ? null : clampAttempt(detail.attempt));
         setTemperatureDraft(
           detail.temperature == null ? null : roundTemperature(detail.temperature),
         );
-      })
-      .catch((err) => {
-        if (!cancelled) setError(toAppError(err).message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [agentId, backendConnected]);
+      } catch (err) {
+        if (gen === loadGen.current) setError(toAppError(err).message);
+      } finally {
+        if (gen === loadGen.current) setLoading(false);
+      }
+    },
+    [agentId, backendConnected],
+  );
+
+  useEffect(() => {
+    void loadAgent(true);
+  }, [loadAgent]);
 
   useEffect(() => {
     if (loading || !agent || agent.attempt == null || attemptDraft == null) return;
@@ -239,7 +246,18 @@ export function AgentDetailPage() {
   if (!backendConnected) {
     return (
       <div className="page agents-page">
-        <PageHeader title="Agent" backTo="/agents" />
+        <PageHeader
+          title="Agent"
+          backTo="/agents"
+          actions={
+            <RefreshButton
+              loading={loading}
+              error={error}
+              disabled={!backendConnected}
+              onClick={() => void loadAgent(false)}
+            />
+          }
+        />
         <Card>
           <EmptyState
             title="Backend offline"
@@ -252,7 +270,19 @@ export function AgentDetailPage() {
 
   return (
     <div className="page agents-page">
-      <PageHeader title="Agent" backTo="/agents" backOnly />
+      <PageHeader
+        title="Agent"
+        backTo="/agents"
+        backOnly
+        actions={
+          <RefreshButton
+            loading={loading}
+            error={error}
+            disabled={!backendConnected}
+            onClick={() => void loadAgent(false)}
+          />
+        }
+      />
 
       {error ? (
         <Card>

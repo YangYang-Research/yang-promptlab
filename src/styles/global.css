@@ -14036,10 +14036,42 @@ a.setup-checklist__item:hover {
   box-shadow: var(--focus-ring);
 }
 
+.agents-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+}
+
 .agents-card__name {
   font-size: 1rem;
   font-weight: 600;
   letter-spacing: -0.02em;
+}
+
+.agents-card__metrics {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.agents-card__metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+.agents-card__metric-label {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.agents-card__metric-value {
+  color: var(--text);
+  font-size: 0.8125rem;
 }
 
 .agents-card__description {
