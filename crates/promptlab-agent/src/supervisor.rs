@@ -461,11 +461,16 @@ impl YazgSupervisor {
     pub async fn react_judge(
         judge_request: &JudgeRequest,
         judge_engine: Arc<JudgeEngine>,
-        _llms: &YazgLlms,
+        llms: &YazgLlms,
         _memory: Option<Arc<dyn AgentMemoryStore>>,
         _memory_ctx: MemoryContext,
     ) -> AgentResult<YazgDelegation> {
-        let outcome = JudgeCoordinatorAgent::run(judge_request, judge_engine.as_ref()).await?;
+        let outcome = JudgeCoordinatorAgent::run(
+            judge_request,
+            judge_engine.as_ref(),
+            Some(llms.judge.as_ref()),
+        )
+        .await?;
         let events = outcome.events.clone();
         let reply = format!(
             "Judge consensus: {} (confidence={:.0}%, votes={}).",

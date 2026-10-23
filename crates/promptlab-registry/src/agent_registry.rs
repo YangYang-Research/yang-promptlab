@@ -117,7 +117,10 @@ const AGENTS: &[AgentRecord] = &[
     AgentRecord {
         id: "reflection_agent",
         display_name: "ReflectionAgent",
-        prompt_ids: &["reflection_system"],
+        prompt_ids: &[
+            "reflection_system_prompt",
+            "agent_output_reflection_system_prompt",
+        ],
         tool_ids: &[],
     },
     AgentRecord {

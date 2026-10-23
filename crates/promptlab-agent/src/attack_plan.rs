@@ -82,7 +82,8 @@ impl AttackPlanAgent {
 
         info!(endpoint = %profile.full_url(), "AttackPlanAgent started");
 
-        match build_wizard_attack_plan_with_llm(profile, llm).await {
+        let attempts = crate::agent_attempts::agent_attempts(AgentId::AttackPlan);
+        match build_wizard_attack_plan_with_llm(profile, llm, attempts).await {
             Ok(plan) => {
                 events.push(AgentEvent::completed(
                     AgentId::AttackPlan,
@@ -169,6 +170,8 @@ Last result summary:
             summary = request.last_result_summary,
         );
 
+        let reflecting = crate::agent_reflection::ReflectingLlm::new(AgentId::AttackPlan, llm);
+        let llm: &dyn PlannerLlm = &reflecting;
         match llm.complete(&prompt).await {
             Ok(raw) => match parse_adapt(&raw) {
                 Ok(parsed) => {

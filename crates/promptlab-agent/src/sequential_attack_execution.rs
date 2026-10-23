@@ -664,6 +664,16 @@ impl SequentialAttackExecutionAgent {
             return Err(AgentError::AttackExecution(reason));
         }
 
+        if let Some(llm) = orchestrator.as_ref() {
+            crate::agent_reflection::reflect_output(
+                AgentId::SequentialAttackExecution,
+                &request.category,
+                &format!("{stopped_reason}\n{}", last_obs.health_line()),
+                llm.as_ref(),
+            )
+            .await;
+        }
+
         emit_and_record(
             tools,
             &mut events,

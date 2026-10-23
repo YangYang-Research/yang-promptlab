@@ -1,6 +1,7 @@
 //! PromptLab desktop application library.
 
 pub mod agent_memory;
+pub mod attempt_persist;
 pub mod attack_catalog;
 pub mod commands;
 pub mod db;
@@ -160,6 +161,16 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                     return Ok(());
                 }
             };
+
+            if let Err(err) = tauri::async_runtime::block_on(
+                attempt_persist::hydrate_agent_attempts(&database),
+            ) {
+                tracing::warn!(
+                    error = %err,
+                    "failed to load agent attempt settings; using minimum 3"
+                );
+                promptlab_agent::set_agent_attempts(promptlab_agent::default_agent_attempts());
+            }
 
             let environment = match tauri::async_runtime::block_on(
                 environment_persist::hydrate_environment_paths(&database, &bootstrap),

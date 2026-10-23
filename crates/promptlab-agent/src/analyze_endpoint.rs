@@ -38,6 +38,9 @@ impl AnalyzeEndpointAgent {
         )];
 
         info!(endpoint = %profile.full_url(), "AnalyzeEndpointAgent started");
+        let reflecting =
+            crate::agent_reflection::ReflectingLlm::new(AgentId::AnalyzeEndpoint, llm);
+        let llm: &dyn PlannerLlm = &reflecting;
         let attempt = verify_target_profile_with_llm(profile, auth_headers, llm).await;
         map_attempt(attempt, &mut events)
     }
@@ -53,6 +56,9 @@ impl AnalyzeEndpointAgent {
             "Classifying capability probe with Yazg",
         )];
 
+        let reflecting =
+            crate::agent_reflection::ReflectingLlm::new(AgentId::AnalyzeEndpoint, llm);
+        let llm: &dyn PlannerLlm = &reflecting;
         let attempt = validate_http_response_with_llm(profile, http, llm).await;
         map_attempt(attempt, &mut events)
     }

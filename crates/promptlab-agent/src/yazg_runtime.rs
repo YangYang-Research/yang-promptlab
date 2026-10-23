@@ -1034,6 +1034,14 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         normalized_reply
     };
 
+    artifacts.final_reply = crate::agent_reflection::revise_text(
+        AgentId::Yazg,
+        &request.goal,
+        artifacts.final_reply,
+        request.llms.supervisor.as_ref(),
+    )
+    .await;
+
     remember_stm(
         request.memory.as_deref(),
         &request.memory_ctx,

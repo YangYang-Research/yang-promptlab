@@ -25,7 +25,7 @@ mod target;
 pub use agent_long_term_memory::SqliteAgentLongTermMemoryRepository;
 pub use agent_short_term_memory::SqliteAgentShortTermMemoryRepository;
 pub use app_settings::{
-    SqliteAppSettingsRepository, SETTING_AI_RUNTIME_CONFIG, SETTING_ENVIRONMENT,
+    SqliteAppSettingsRepository, SETTING_AI_RUNTIME_CONFIG, SETTING_ATTEMPT, SETTING_ENVIRONMENT,
 };
 pub use attack_catalog::SqliteAttackCatalogRepository;
 pub use attack_result::SqliteAttackResultRepository;

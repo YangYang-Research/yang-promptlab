@@ -58,6 +58,8 @@ impl SummaryAgent {
 
         info!(kind = %kind, "SummaryAgent started");
 
+        let reflecting = crate::agent_reflection::ReflectingLlm::new(AgentId::Summary, llm);
+        let llm: &dyn PlannerLlm = &reflecting;
         let result = match request {
             SummaryRequest::Project { input_json, .. } => {
                 generate_project_summary_with_llm(input_json, llm).await

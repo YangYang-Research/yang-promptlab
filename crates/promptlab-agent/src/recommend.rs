@@ -42,6 +42,8 @@ impl RecommendAgent {
             "RecommendAgent started"
         );
 
+        let reflecting = crate::agent_reflection::ReflectingLlm::new(AgentId::Recommend, llm);
+        let llm: &dyn PlannerLlm = &reflecting;
         match generate_attack_recommendations_with_llm(summary, llm).await {
             Ok(bundle) => {
                 let bundle = ensure_rescan_action_recommendation(summary, bundle);

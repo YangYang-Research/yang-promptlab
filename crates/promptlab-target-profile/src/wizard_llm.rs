@@ -22,7 +22,6 @@ use crate::wizard_plan::{
 
 const MAX_PROMPT_CHARS: usize = 6_000;
 const MAX_REPAIR_JSON_CHARS: usize = 3_000;
-const MAX_LLM_ATTEMPTS: u32 = 3;
 const PRESET_PROFILE_IDS: [&str; 3] = ["quick", "standard", "deep"];
 
 mod flex {
@@ -258,6 +257,7 @@ fn default_priority() -> u8 {
 pub async fn build_wizard_attack_plan_with_llm(
     profile: &TargetProfile,
     llm: &dyn PlannerLlm,
+    max_attempts: u32,
 ) -> PlannerResult<WizardAttackPlan> {
     if !profile.is_verified() {
         return Err(PlannerError::Llm(
@@ -312,7 +312,8 @@ pub async fn build_wizard_attack_plan_with_llm(
     let mut last_raw = String::new();
     let mut last_errors = String::new();
 
-    for attempt in 0..MAX_LLM_ATTEMPTS {
+    let max_attempts = max_attempts.max(3);
+    for attempt in 0..max_attempts {
         let prompt = if attempt == 0 {
             initial_prompt.clone()
         } else {
@@ -331,7 +332,7 @@ pub async fn build_wizard_attack_plan_with_llm(
                 last_errors = err.to_string();
                 warn!(
                     attempt = attempt + 1,
-                    max_attempts = MAX_LLM_ATTEMPTS,
+                    max_attempts = max_attempts,
                     error = %last_errors,
                     response_chars = raw.len(),
                     "wizard attack plan: LLM response is not valid JSON"
@@ -350,7 +351,7 @@ pub async fn build_wizard_attack_plan_with_llm(
                 last_errors = enrich_validation_error(&last_raw, &err);
                 warn!(
                     attempt = attempt + 1,
-                    max_attempts = MAX_LLM_ATTEMPTS,
+                    max_attempts = max_attempts,
                     error = %last_errors,
                     json_chars = last_raw.len(),
                     "wizard attack plan: LLM JSON failed validation"
@@ -360,13 +361,13 @@ pub async fn build_wizard_attack_plan_with_llm(
     }
 
     warn!(
-        max_attempts = MAX_LLM_ATTEMPTS,
+        max_attempts,
         last_error = %last_errors,
         "wizard attack plan: all LLM attempts exhausted"
     );
 
     Err(PlannerError::Llm(format!(
-        "Yazg failed to produce a valid attack plan after {MAX_LLM_ATTEMPTS} attempts: {last_errors}"
+        "Yazg failed to produce a valid attack plan after {max_attempts} attempts: {last_errors}"
     )))
 }
 
@@ -1161,7 +1162,7 @@ mod tests {
     #[tokio::test]
     async fn llm_refines_modes_when_runtime_available() {
         let llm = MockLlm::new(vec![valid_modes_json().as_str()]);
-        let plan = build_wizard_attack_plan_with_llm(&sample_profile(), &llm)
+        let plan = build_wizard_attack_plan_with_llm(&sample_profile(), &llm, 3)
             .await
             .expect("valid AI plan");
         assert_eq!(plan.profile_modes.len(), 3);
@@ -1186,7 +1187,7 @@ mod tests {
     async fn harness_retries_until_modes_are_complete() {
         let incomplete = r#"{"recommendedProfileId":"standard","modes":{"quick":{"categories":["prompt_injection"],"executionStrategy":"sequential","payloadStrategy":{"strategy":"deterministic","mutationLevel":"low","variantsPerTest":2,"maxTotalPayloads":10}}}}"#.to_string();
         let llm = MockLlm::new(vec![incomplete.as_str(), valid_modes_json().as_str()]);
-        let plan = build_wizard_attack_plan_with_llm(&sample_profile(), &llm)
+        let plan = build_wizard_attack_plan_with_llm(&sample_profile(), &llm, 3)
             .await
             .expect("repaired AI plan");
         assert_eq!(plan.planner_source, "ai_runtime");
@@ -1197,7 +1198,7 @@ mod tests {
     async fn harness_retries_when_mutation_level_missing() {
         let missing_mutation = r#"{"recommendedProfileId":"standard","modes":{"quick":{"categories":["prompt_injection"],"executionStrategy":"sequential","payloadStrategy":{"strategy":"deterministic"}},"standard":{"categories":["prompt_injection"],"executionStrategy":"sequential","payloadStrategy":{"strategy":"mutation","mutationLevel":"medium"}},"deep":{"categories":["prompt_injection"],"executionStrategy":"agentic","payloadStrategy":{"strategy":"adaptive","mutationLevel":"extreme"}}}}"#.to_string();
         let llm = MockLlm::new(vec![missing_mutation.as_str(), valid_modes_json().as_str()]);
-        let plan = build_wizard_attack_plan_with_llm(&sample_profile(), &llm)
+        let plan = build_wizard_attack_plan_with_llm(&sample_profile(), &llm, 3)
             .await
             .expect("repaired mutation level");
         let quick = find_profile_mode(&plan.profile_modes, "quick").expect("quick mode");
@@ -1208,7 +1209,7 @@ mod tests {
     async fn harness_retries_when_agentic_options_missing() {
         let missing_agentic = r#"{"recommendedProfileId":"standard","modes":{"quick":{"categories":["prompt_injection"],"executionStrategy":"sequential","payloadStrategy":{"strategy":"deterministic","mutationLevel":"low"}},"standard":{"categories":["prompt_injection"],"executionStrategy":"sequential","payloadStrategy":{"strategy":"mutation","mutationLevel":"medium"}},"deep":{"categories":["prompt_injection"],"executionStrategy":"agentic","maxAttempts":5,"payloadStrategy":{"strategy":"adaptive","mutationLevel":"extreme"}}}}"#.to_string();
         let llm = MockLlm::new(vec![missing_agentic.as_str(), valid_modes_json().as_str()]);
-        let plan = build_wizard_attack_plan_with_llm(&sample_profile(), &llm)
+        let plan = build_wizard_attack_plan_with_llm(&sample_profile(), &llm, 3)
             .await
             .expect("repaired agentic options");
         let deep = find_profile_mode(&plan.profile_modes, "deep").expect("deep mode");

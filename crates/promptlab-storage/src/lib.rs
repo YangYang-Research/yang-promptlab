@@ -26,7 +26,8 @@ pub use repositories::{
 };
 
 pub use repositories::sqlite::{
-    JsonDocumentRecord, JsonDocumentRepository, SETTING_AI_RUNTIME_CONFIG, SETTING_ENVIRONMENT,
+    JsonDocumentRecord, JsonDocumentRepository, SETTING_AI_RUNTIME_CONFIG, SETTING_ATTEMPT,
+    SETTING_ENVIRONMENT,
 };
 
 #[cfg(test)]

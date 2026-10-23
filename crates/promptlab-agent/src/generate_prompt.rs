@@ -79,6 +79,9 @@ impl GeneratePromptAgent {
             "GeneratePromptAgent started"
         );
 
+        let reflecting =
+            crate::agent_reflection::ReflectingLlm::new(AgentId::GeneratePrompt, llm);
+        let llm: &dyn PlannerLlm = &reflecting;
         let raw = llm
             .complete(&technique.user_prompt())
             .await

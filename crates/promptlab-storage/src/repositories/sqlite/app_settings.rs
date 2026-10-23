@@ -12,6 +12,8 @@ use crate::util::now;
 pub const SETTING_ENVIRONMENT: &str = "environment";
 /// Key for AI runtime / inference configuration JSON.
 pub const SETTING_AI_RUNTIME_CONFIG: &str = "ai_runtime_config";
+/// Key for per-agent attempt counts. Agentic scan does not read this row.
+pub const SETTING_ATTEMPT: &str = "attempt";
 
 #[derive(Clone)]
 pub struct SqliteAppSettingsRepository {

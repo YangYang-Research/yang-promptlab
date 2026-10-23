@@ -472,6 +472,14 @@ async fn detached_complete_outcome_as(
     .await
 }
 
+fn system_agent_id<'a>(system: &str, owner: &'a str) -> &'a str {
+    if system.starts_with("You are ReflectionAgent") {
+        promptlab_agent::AgentId::Reflection.as_str()
+    } else {
+        owner
+    }
+}
+
 pub async fn detached_complete_as(
     data_dir: &Path,
     inference: &AsyncMutex<InferenceRuntimeManager>,
@@ -552,6 +560,29 @@ impl PlannerLlm for HostWizardPlannerLlm {
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
     }
+
+    async fn complete_with_system(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+    ) -> promptlab_planner::PlannerResult<String> {
+        let Some(system) = system.map(str::trim).filter(|value| !value.is_empty()) else {
+            return self.complete(prompt).await;
+        };
+        detached_complete_as(
+            &self.data_dir,
+            &self.inference,
+            &self.model_manager,
+            self.model_provider.clone(),
+            system_agent_id(system, promptlab_agent::AgentId::AttackPlan.as_str()),
+            Some(system),
+            prompt,
+            8192,
+            0.1,
+        )
+        .await
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
+    }
 }
 
 /// Endpoint verify LLM — classifies whether a probe response is from an AI API.
@@ -595,6 +626,32 @@ impl PlannerLlm for HostEndpointVerifyLlm {
                 promptlab_agent::AgentId::AnalyzeEndpoint.as_str(),
                 "endpoint_verify_system",
             )),
+            prompt,
+            1024,
+            0.1,
+        )
+        .await
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
+    }
+
+    async fn complete_with_system(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+    ) -> promptlab_planner::PlannerResult<String> {
+        let Some(system) = system.map(str::trim).filter(|value| !value.is_empty()) else {
+            return self.complete(prompt).await;
+        };
+        detached_complete_as(
+            &self.data_dir,
+            &self.inference,
+            &self.model_manager,
+            self.model_provider.clone(),
+            system_agent_id(
+                system,
+                promptlab_agent::AgentId::AnalyzeEndpoint.as_str(),
+            ),
+            Some(system),
             prompt,
             1024,
             0.1,
@@ -673,12 +730,13 @@ impl PlannerLlm for HostYazgReactLlm {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| registered_prompt(promptlab_agent::AgentId::Yazg.as_str(), "yazg_system"));
+        let agent_id = system_agent_id(system, &self.agent_id);
         detached_complete_as(
             &self.data_dir,
             &self.inference,
             &self.model_manager,
             self.model_provider.clone(),
-            &self.agent_id,
+            agent_id,
             Some(system),
             prompt,
             1024,
@@ -842,6 +900,32 @@ impl PlannerLlm for HostGeneratePromptLlm {
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
     }
+
+    async fn complete_with_system(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+    ) -> promptlab_planner::PlannerResult<String> {
+        let Some(system) = system.map(str::trim).filter(|value| !value.is_empty()) else {
+            return self.complete(prompt).await;
+        };
+        detached_complete_as(
+            &self.data_dir,
+            &self.inference,
+            &self.model_manager,
+            self.model_provider.clone(),
+            system_agent_id(
+                system,
+                promptlab_agent::AgentId::GeneratePrompt.as_str(),
+            ),
+            Some(system),
+            prompt,
+            1024,
+            0.35,
+        )
+        .await
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
+    }
 }
 
 /// Prompt Lab JailbreakAgent LLM — prompts for one goal on a guarded model.
@@ -875,6 +959,14 @@ impl HostJailbreakAgentLlm {
 #[async_trait]
 impl PlannerLlm for HostJailbreakAgentLlm {
     async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
+        self.complete_with_system(None, prompt).await
+    }
+
+    async fn complete_with_system(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+    ) -> promptlab_planner::PlannerResult<String> {
         let (temperature, max_tokens) = {
             let inference = self.inference.lock().await;
             let manager = self.model_manager.lock().await;
@@ -887,13 +979,17 @@ impl PlannerLlm for HostJailbreakAgentLlm {
                 Err(_) => (crate::commands::models::DEFAULT_MODEL_TEMPERATURE, None),
             }
         };
+        let system = system
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| promptlab_agent::jailbreak_agent_system_prompt());
         let outcome = detached_complete_outcome_as(
             &self.data_dir,
             &self.inference,
             &self.model_manager,
             self.model_provider.clone(),
-            "jailbreak_agent",
-            Some(promptlab_agent::jailbreak_agent_system_prompt()),
+            system_agent_id(system, promptlab_agent::AgentId::JailbreakAgent.as_str()),
+            Some(system),
             prompt,
             max_tokens,
             temperature,
@@ -902,11 +998,11 @@ impl PlannerLlm for HostJailbreakAgentLlm {
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))?;
-        outcome
-            .content
-            .ok_or_else(|| promptlab_planner::PlannerError::Llm(
+        outcome.content.ok_or_else(|| {
+            promptlab_planner::PlannerError::Llm(
                 "model returned tool_calls without text content".into(),
-            ))
+            )
+        })
     }
 }
 
@@ -951,6 +1047,29 @@ impl PlannerLlm for HostAttackRecommendLlm {
                 promptlab_agent::AgentId::Recommend.as_str(),
                 "attack_results_recommend_system",
             )),
+            prompt,
+            2048,
+            0.15,
+        )
+        .await
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
+    }
+
+    async fn complete_with_system(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+    ) -> promptlab_planner::PlannerResult<String> {
+        let Some(system) = system.map(str::trim).filter(|value| !value.is_empty()) else {
+            return self.complete(prompt).await;
+        };
+        detached_complete_as(
+            &self.data_dir,
+            &self.inference,
+            &self.model_manager,
+            self.model_provider.clone(),
+            system_agent_id(system, promptlab_agent::AgentId::Recommend.as_str()),
+            Some(system),
             prompt,
             2048,
             0.15,
@@ -1008,6 +1127,29 @@ impl PlannerLlm for HostFindingRecommendLlm {
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
     }
+
+    async fn complete_with_system(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+    ) -> promptlab_planner::PlannerResult<String> {
+        let Some(system) = system.map(str::trim).filter(|value| !value.is_empty()) else {
+            return self.complete(prompt).await;
+        };
+        detached_complete_as(
+            &self.data_dir,
+            &self.inference,
+            &self.model_manager,
+            self.model_provider.clone(),
+            system_agent_id(system, promptlab_agent::AgentId::Recommend.as_str()),
+            Some(system),
+            prompt,
+            3072,
+            0.15,
+        )
+        .await
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
+    }
 }
 
 /// Project-level summary LLM — posture overview across targets, scans, and findings.
@@ -1058,6 +1200,29 @@ impl PlannerLlm for HostProjectSummaryLlm {
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
     }
+
+    async fn complete_with_system(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+    ) -> promptlab_planner::PlannerResult<String> {
+        let Some(system) = system.map(str::trim).filter(|value| !value.is_empty()) else {
+            return self.complete(prompt).await;
+        };
+        detached_complete_as(
+            &self.data_dir,
+            &self.inference,
+            &self.model_manager,
+            self.model_provider.clone(),
+            system_agent_id(system, promptlab_agent::AgentId::Summary.as_str()),
+            Some(system),
+            prompt,
+            2048,
+            0.15,
+        )
+        .await
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
+    }
 }
 
 /// Scan-level summary LLM — posture overview for a single attack scan.
@@ -1101,6 +1266,29 @@ impl PlannerLlm for HostScanSummaryLlm {
                 promptlab_agent::AgentId::Summary.as_str(),
                 "scan_summary_system",
             )),
+            prompt,
+            2048,
+            0.15,
+        )
+        .await
+        .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
+    }
+
+    async fn complete_with_system(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+    ) -> promptlab_planner::PlannerResult<String> {
+        let Some(system) = system.map(str::trim).filter(|value| !value.is_empty()) else {
+            return self.complete(prompt).await;
+        };
+        detached_complete_as(
+            &self.data_dir,
+            &self.inference,
+            &self.model_manager,
+            self.model_provider.clone(),
+            system_agent_id(system, promptlab_agent::AgentId::Summary.as_str()),
+            Some(system),
             prompt,
             2048,
             0.15,

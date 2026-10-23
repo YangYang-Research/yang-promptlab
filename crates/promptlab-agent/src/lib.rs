@@ -23,7 +23,9 @@
 //! ├── Attack specialists       — attack_plan, generate_prompt, recommend, summary, judge
 //! ```
 
+pub mod agent_attempts;
 pub mod agent_log;
+pub mod agent_reflection;
 pub mod analyze_endpoint;
 pub mod artifacts;
 pub mod assistant;
@@ -53,6 +55,10 @@ pub mod summary;
 pub mod supervisor;
 pub mod types;
 
+pub use agent_attempts::{
+    agent_attempts, default_agent_attempts, parse_agent_attempts, serialize_agent_attempts,
+    set_agent_attempts, ATTEMPT_SETTING_KEY, MIN_AGENT_ATTEMPTS,
+};
 pub use agent_log::{log_agent_event, log_llm_call, log_react, log_tool_call, AgentLogContext};
 pub use analyze_endpoint::{AnalyzeEndpointAgent, AnalyzeEndpointAgentOutcome};
 pub use artifacts::{persist_artifacts_ltm, YazgActionKind, YazgArtifacts};

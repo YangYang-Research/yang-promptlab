@@ -50,6 +50,7 @@ macro_rules! role_vote_tool {
             request: JudgeRequest,
             engine: Arc<JudgeEngine>,
             state: SharedJudgeState,
+            reflector: Arc<dyn PlannerLlm>,
         }
 
         impl Tool for $struct_name {
@@ -87,6 +88,18 @@ macro_rules! role_vote_tool {
                             "{role} OK — vulnerable={} confidence={:.2}",
                             out.result.vulnerable, out.result.confidence
                         );
+                        let agent = match role {
+                            ModelRole::Judge => AgentId::JudgeWorker,
+                            ModelRole::Classifier => AgentId::ClassifierWorker,
+                            ModelRole::Attacker => AgentId::AttackerWorker,
+                        };
+                        crate::agent_reflection::reflect_output(
+                            agent,
+                            &self.request.probe_id,
+                            &msg,
+                            self.reflector.as_ref(),
+                        )
+                        .await;
                         let mut guard = self.state.lock().await;
                         guard.events.extend(out.events);
                         guard.worker_results.push(out.result);
@@ -126,6 +139,32 @@ role_vote_tool!(
     "Run AttackerWorker — adversarial compliance vote for this probe."
 );
 
+async fn reflect_votes(
+    agent: AgentId,
+    request: &JudgeRequest,
+    votes: &[EvaluatorResult],
+    reflector: Option<&dyn PlannerLlm>,
+) {
+    let Some(llm) = reflector else {
+        return;
+    };
+    let summary = votes
+        .iter()
+        .map(|vote| format!("vulnerable={} confidence={:.2}", vote.vulnerable, vote.confidence))
+        .collect::<Vec<_>>()
+        .join("\n");
+    crate::agent_reflection::reflect_output(
+        agent,
+        &format!(
+            "probe {} category {}",
+            request.probe_id, request.attack_category
+        ),
+        &summary,
+        llm,
+    )
+    .await;
+}
+
 /// Coordinates JudgeWorker / ClassifierWorker / AttackerWorker under Yazg.
 pub struct JudgeCoordinatorAgent;
 
@@ -134,6 +173,7 @@ impl JudgeCoordinatorAgent {
     pub async fn run(
         request: &JudgeRequest,
         engine: &JudgeEngine,
+        reflector: Option<&dyn PlannerLlm>,
     ) -> AgentResult<JudgeCoordinatorAgentOutcome> {
         let events = vec![AgentEvent::started(
             AgentId::JudgeCoordinator,
@@ -142,7 +182,7 @@ impl JudgeCoordinatorAgent {
                 request.probe_id, request.attack_category
             ),
         )];
-        Self::run_workers_direct(request, engine, events).await
+        Self::run_workers_direct(request, engine, reflector, events).await
     }
 
     /// Tool-calling orchestration: role votes are domain tools (no nested worker LLMs).
@@ -184,16 +224,19 @@ impl JudgeCoordinatorAgent {
                     request: request.clone(),
                     engine: engine.clone(),
                     state: state.clone(),
+                    reflector: orchestrator.clone(),
                 })),
                 ModelRole::Classifier => boxed_tools.push(Box::new(ClassifierVoteTool {
                     request: request.clone(),
                     engine: engine.clone(),
                     state: state.clone(),
+                    reflector: orchestrator.clone(),
                 })),
                 ModelRole::Attacker => boxed_tools.push(Box::new(AttackerVoteTool {
                     request: request.clone(),
                     engine: engine.clone(),
                     state: state.clone(),
+                    reflector: orchestrator.clone(),
                 })),
             }
         }
@@ -209,7 +252,7 @@ impl JudgeCoordinatorAgent {
         let _attacker = loaded
             .tool("run_attacker_worker")
             .expect("run_attacker_worker");
-        let model = YazgModel::new(orchestrator);
+        let model = YazgModel::new(orchestrator.clone());
         let preamble = loaded
             .system_prompt()
             .expect("judge coordinator prompt")
@@ -258,12 +301,20 @@ impl JudgeCoordinatorAgent {
             return Err(AgentError::Judge(message));
         }
 
+        reflect_votes(
+            AgentId::JudgeCoordinator,
+            request,
+            &worker_results,
+            Some(orchestrator.as_ref()),
+        )
+        .await;
         Self::finalize(request, engine.as_ref(), worker_results, events)
     }
 
     async fn run_workers_direct(
         request: &JudgeRequest,
         engine: &JudgeEngine,
+        reflector: Option<&dyn PlannerLlm>,
         mut events: Vec<AgentEvent>,
     ) -> AgentResult<JudgeCoordinatorAgentOutcome> {
         let configured = engine.role_pool().configured_roles();
@@ -283,6 +334,23 @@ impl JudgeCoordinatorAgent {
             };
             match worker_outcome {
                 Ok(out) => {
+                    if let Some(llm) = reflector {
+                        let agent = match role {
+                            ModelRole::Judge => AgentId::JudgeWorker,
+                            ModelRole::Classifier => AgentId::ClassifierWorker,
+                            ModelRole::Attacker => AgentId::AttackerWorker,
+                        };
+                        crate::agent_reflection::reflect_output(
+                            agent,
+                            &request.probe_id,
+                            &format!(
+                                "{role} vulnerable={} confidence={:.2}",
+                                out.result.vulnerable, out.result.confidence
+                            ),
+                            llm,
+                        )
+                        .await;
+                    }
                     events.extend(out.events);
                     worker_results.push(out.result);
                 }
@@ -304,6 +372,13 @@ impl JudgeCoordinatorAgent {
             ));
             return Err(AgentError::Judge(message));
         }
+        reflect_votes(
+            AgentId::JudgeCoordinator,
+            request,
+            &worker_results,
+            reflector,
+        )
+        .await;
         Self::finalize(request, engine, worker_results, events)
     }
 
@@ -376,7 +451,7 @@ mod tests {
             context: serde_json::json!({}),
         };
 
-        let outcome = JudgeCoordinatorAgent::run(&request, &engine)
+        let outcome = JudgeCoordinatorAgent::run(&request, &engine, None)
             .await
             .expect("coordinator");
 
