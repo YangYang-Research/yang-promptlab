@@ -23,6 +23,13 @@ type TroubleshootingPanelProps = {
   backendConnected: boolean;
 };
 
+function formatLogTime(timestamp: string): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return timestamp;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 function parseLogLines(content: string): OcsfEventDto[] {
   return content
     .split("\n")
@@ -259,12 +266,16 @@ export function TroubleshootingPanel({ backendConnected }: TroubleshootingPanelP
               <tbody>
                 {filteredEvents.slice(-200).map((event) => (
                   <tr key={`${event.timestamp}-${event.activityName}-${event.message}`}>
-                    <td className="mono text-sm">{event.timestamp}</td>
+                    <td className="mono text-sm troubleshooting-logs__time" title={event.timestamp}>
+                      <time dateTime={event.timestamp}>{formatLogTime(event.timestamp)}</time>
+                    </td>
                     <td>{event.severity}</td>
                     <td>{agentLogName(event)}</td>
                     <td>{event.category}</td>
                     <td>{event.activityName}</td>
-                    <td>{event.message}</td>
+                    <td className="troubleshooting-logs__message" title={event.message}>
+                      <span className="troubleshooting-logs__message-text">{event.message}</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -3916,6 +3916,26 @@ a.setup-checklist__item:hover {
   margin: 0;
 }
 
+.troubleshooting-logs__time {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.troubleshooting-logs__message {
+  width: 40%;
+  max-width: 0;
+  vertical-align: top;
+}
+
+.troubleshooting-logs__message-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .ai-applied-list {
   list-style: none;
   margin: 0;
