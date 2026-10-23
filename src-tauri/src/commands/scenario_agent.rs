@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use promptlab_agent::{
-    response_hits_keywords, GeneratePromptAgent, ScenarioAgent, ScenarioFollowupRequest,
+    response_hits_keywords, GeneratePromptAgent, JailbreakAgent, ScenarioFollowupRequest,
     ScenarioPlanRequest, TechniquePromptContext,
 };
 use promptlab_attack::{HarnessTransport, MutatorConfig, MutatorKind, PayloadMutator};
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::error::{CommandError, CommandResult};
-use crate::inference_host::{is_inference_ready, HostScenarioAgentLlm, YazgHostLlms};
+use crate::inference_host::{is_inference_ready, HostJailbreakAgentLlm, YazgHostLlms};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,8 +129,8 @@ async fn ensure_inference_ready(state: &AppState) -> CommandResult<()> {
     Ok(())
 }
 
-fn scenario_llm(state: &AppState) -> HostScenarioAgentLlm {
-    HostScenarioAgentLlm::new(
+fn scenario_llm(state: &AppState) -> HostJailbreakAgentLlm {
+    HostJailbreakAgentLlm::new(
         state.data_dir().to_path_buf(),
         state.inference_manager().clone(),
         state.model_manager().clone(),
@@ -259,7 +259,7 @@ pub async fn scenario_agent_plan(
 ) -> CommandResult<ScenarioAgentPlanDto> {
     ensure_inference_ready(&state).await?;
     let llm = scenario_llm(&state);
-    let outcome = ScenarioAgent::plan(
+    let outcome = JailbreakAgent::plan(
         &ScenarioPlanRequest {
             scenario: request.scenario,
             goal: request.goal,
@@ -470,7 +470,7 @@ pub async fn scenario_agent_followup(
 ) -> CommandResult<ScenarioAgentFollowupDto> {
     ensure_inference_ready(&state).await?;
     let llm = scenario_llm(&state);
-    let outcome = ScenarioAgent::followup(
+    let outcome = JailbreakAgent::followup(
         &ScenarioFollowupRequest {
             scenario: request.scenario,
             goal: request.goal,

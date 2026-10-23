@@ -533,7 +533,7 @@ impl PlannerLlm for HostWizardPlannerLlm {
             &self.inference,
             &self.model_manager,
             self.model_provider.clone(),
-            "attack_plan",
+            promptlab_agent::AgentId::AttackPlan.as_str(),
             Some(PromptRegistry::wizard_profile_system()),
             prompt,
             8192,
@@ -580,7 +580,7 @@ impl PlannerLlm for HostEndpointVerifyLlm {
             &self.inference,
             &self.model_manager,
             self.model_provider.clone(),
-            "analyze_endpoint",
+            promptlab_agent::AgentId::AnalyzeEndpoint.as_str(),
             Some(PromptRegistry::endpoint_verify_system()),
             prompt,
             1024,
@@ -817,7 +817,7 @@ impl PlannerLlm for HostGeneratePromptLlm {
             &self.inference,
             &self.model_manager,
             self.model_provider.clone(),
-            "generate_prompt",
+            promptlab_agent::AgentId::GeneratePrompt.as_str(),
             Some(PromptRegistry::attack_catalog_prompt_system()),
             prompt,
             1024,
@@ -829,7 +829,7 @@ impl PlannerLlm for HostGeneratePromptLlm {
 }
 
 /// Prompt Lab ScenarioAgent LLM — plan seeds + follow-ups for CTF-style goals.
-pub struct HostScenarioAgentLlm {
+pub struct HostJailbreakAgentLlm {
     data_dir: PathBuf,
     inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
     model_manager: Arc<AsyncMutex<LocalModelManager>>,
@@ -838,7 +838,7 @@ pub struct HostScenarioAgentLlm {
     runtime_manager: Arc<AsyncMutex<RuntimeManager>>,
 }
 
-impl HostScenarioAgentLlm {
+impl HostJailbreakAgentLlm {
     pub fn new(
         data_dir: PathBuf,
         inference: Arc<AsyncMutex<InferenceRuntimeManager>>,
@@ -857,7 +857,7 @@ impl HostScenarioAgentLlm {
 }
 
 #[async_trait]
-impl PlannerLlm for HostScenarioAgentLlm {
+impl PlannerLlm for HostJailbreakAgentLlm {
     async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
         let (temperature, max_tokens) = {
             let inference = self.inference.lock().await;
@@ -876,8 +876,8 @@ impl PlannerLlm for HostScenarioAgentLlm {
             &self.inference,
             &self.model_manager,
             self.model_provider.clone(),
-            "scenario_agent",
-            Some(promptlab_agent::scenario_agent_system_prompt()),
+            "jailbreak_agent",
+            Some(promptlab_agent::jailbreak_agent_system_prompt()),
             prompt,
             max_tokens,
             temperature,
@@ -930,7 +930,7 @@ impl PlannerLlm for HostAttackRecommendLlm {
             &self.inference,
             &self.model_manager,
             self.model_provider.clone(),
-            "recommend",
+            promptlab_agent::AgentId::Recommend.as_str(),
             Some(PromptRegistry::attack_results_recommend_system()),
             prompt,
             2048,
@@ -977,7 +977,7 @@ impl PlannerLlm for HostFindingRecommendLlm {
             &self.inference,
             &self.model_manager,
             self.model_provider.clone(),
-            "recommend",
+            promptlab_agent::AgentId::Recommend.as_str(),
             Some(PromptRegistry::finding_remediation_recommend_system()),
             prompt,
             3072,
@@ -1024,7 +1024,7 @@ impl PlannerLlm for HostProjectSummaryLlm {
             &self.inference,
             &self.model_manager,
             self.model_provider.clone(),
-            "summary",
+            promptlab_agent::AgentId::Summary.as_str(),
             Some(PromptRegistry::project_summary_system()),
             prompt,
             2048,
@@ -1071,7 +1071,7 @@ impl PlannerLlm for HostScanSummaryLlm {
             &self.inference,
             &self.model_manager,
             self.model_provider.clone(),
-            "summary",
+            promptlab_agent::AgentId::Summary.as_str(),
             Some(PromptRegistry::scan_summary_system()),
             prompt,
             2048,
@@ -1147,7 +1147,7 @@ impl YazgHostLlms {
     }
 
     pub fn into_yazg_llms(self) -> promptlab_agent::YazgLlms {
-        let judge = self.supervisor.clone().with_agent_id("judge_coordinator");
+        let judge = self.supervisor.clone().with_agent_id(promptlab_agent::AgentId::JudgeCoordinator.as_str());
         promptlab_agent::YazgLlms {
             supervisor: Arc::new(self.supervisor),
             analyze: Arc::new(self.analyze),
@@ -1225,7 +1225,7 @@ impl YazgHostLlmsScanSummary {
     }
 
     pub fn into_yazg_llms(self) -> promptlab_agent::YazgLlms {
-        let judge = self.supervisor.clone().with_agent_id("judge_coordinator");
+        let judge = self.supervisor.clone().with_agent_id(promptlab_agent::AgentId::JudgeCoordinator.as_str());
         promptlab_agent::YazgLlms {
             supervisor: Arc::new(self.supervisor),
             analyze: Arc::new(self.analyze),
@@ -1274,7 +1274,7 @@ impl GeneratorLlm for HostGeneratorLlm {
             &self.inference,
             &self.model_manager,
             self.model_provider.clone(),
-            "generate_prompt",
+            promptlab_agent::AgentId::GeneratePrompt.as_str(),
             Some(PromptRegistry::generator_system()),
             prompt,
             1536,

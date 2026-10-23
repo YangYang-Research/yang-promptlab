@@ -230,8 +230,8 @@ impl InferenceClient {
         &self,
         request: CompleteRequest,
     ) -> InferenceResult<CompletionOutcome> {
-        // scenario_agent omits max_tokens so the provider is not capped at a host default.
-        let max_tokens = if request.purpose.as_deref() == Some("scenario_agent") {
+        // jailbreak_agent omits max_tokens so the provider is not capped at a host default.
+        let max_tokens = if request.purpose.as_deref() == Some("jailbreak_agent") {
             request.max_tokens
         } else {
             Some(request.max_tokens.unwrap_or(self.default_max_tokens))

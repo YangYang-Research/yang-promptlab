@@ -197,8 +197,9 @@ fn publish_ocsf(
         event.kind.as_str(),
         MODULE,
         event.agent.as_str(),
-        &event.message,
+        message_with_agent_name(event),
     )
+    .with_agent_name(event.agent.display_name())
     .with_context(
         None,
         project_id.map(str::to_string),
@@ -216,6 +217,56 @@ fn publish_ocsf(
         ocsf = ocsf.attr("conversationId", conversation_id);
     }
     bus.publish(ocsf);
+}
+
+/// Prefix the persisted agents.log message with the agent display name.
+/// Skip when the message already starts with that name.
+fn message_with_agent_name(event: &AgentEvent) -> String {
+    let name = event.agent.display_name();
+    let message = event.message.trim();
+    if message.starts_with(name) {
+        message.to_string()
+    } else {
+        format!("{name}: {message}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::message_with_agent_name;
+    use crate::types::{AgentEvent, AgentEventKind, AgentId};
+
+    fn event(agent: AgentId, message: &str) -> AgentEvent {
+        AgentEvent {
+            agent,
+            kind: AgentEventKind::Started,
+            message: message.to_string(),
+            conversation_id: None,
+        }
+    }
+
+    #[test]
+    fn log_message_prefixes_agent_name() {
+        assert_eq!(
+            message_with_agent_name(&event(
+                AgentId::GeneratePrompt,
+                "Generating factory prompt"
+            )),
+            "GeneratePromptAgent: Generating factory prompt"
+        );
+        assert_eq!(
+            message_with_agent_name(&event(AgentId::JailbreakAgent, "Planning scenario seed")),
+            "JailbreakAgent: Planning scenario seed"
+        );
+    }
+
+    #[test]
+    fn log_message_does_not_double_prefix() {
+        assert_eq!(
+            message_with_agent_name(&event(AgentId::Yazg, "Yazg agent loop started")),
+            "Yazg agent loop started"
+        );
+    }
 }
 
 fn truncate(s: &str, max: usize) -> String {

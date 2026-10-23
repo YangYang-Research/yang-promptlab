@@ -10,15 +10,17 @@
 //! The tool-calling LLM never receives the full tool registry — only tools for the
 //! capability chosen by the classifier LLM.
 //!
-//! Hierarchy (tools owned by capabilities, not injected globally):
+//! Yazg chat is the only path that routes through the manager. Scan Wizard, Project
+//! details, Attack Factory, and Prompt Lab call the specialist agent directly.
+//!
+//! Hierarchy inside Yazg chat (tools owned by capabilities, not injected globally):
 //! ```text
-//! Yazg (Manager)
+//! Yazg (chat manager)
 //! ├── Conversation / Knowledge — zero tools
 //! ├── Workspace / Projects     — list_workspace, project_detail, create_project
 //! ├── Targets                  — list_targets, target_detail, analyze_endpoint
 //! ├── Scan / Findings/Reports  — list_scan, scan_detail, list_findings, …
 //! ├── Attack specialists       — attack_plan, generate_prompt, recommend, summary, judge
-//! ├── AgenticAttackExecutionAgent / SequentialAttackExecutionAgent / ReflectionAgent
 //! ```
 
 pub mod agent_log;
@@ -39,8 +41,8 @@ pub mod list_workspace;
 pub mod memory;
 pub mod recommend;
 pub mod reflection;
-pub mod scenario_agent;
-pub mod scenario_knowledge;
+pub mod jailbreak;
+pub mod jailbreak_knowledge;
 pub mod tool_result;
 pub mod yazg_model;
 pub mod yazg_prompts;
@@ -100,12 +102,12 @@ pub use memory::{
 };
 pub use recommend::{RecommendAgent, RecommendAgentOutcome};
 pub use reflection::{ReflectionAgent, ReflectionOutcome, ReflectionRequest};
-pub use scenario_agent::{
-    parse_followup_lines, response_hits_keywords, ScenarioAgent, ScenarioFollowupOutcome,
+pub use jailbreak::{
+    parse_followup_lines, response_hits_keywords, JailbreakAgent, ScenarioFollowupOutcome,
     ScenarioFollowupRequest, ScenarioPlanOutcome, ScenarioPlanRequest, SCENARIO_CLASS_IDS,
 };
-pub use scenario_knowledge::{
-    challenge_knowledge_brief, known_mutator_ids, scenario_agent_system_prompt,
+pub use jailbreak_knowledge::{
+    challenge_knowledge_brief, known_mutator_ids, jailbreak_agent_system_prompt,
 };
 pub use tool_result::{ToolErrorClass, ToolResult, ToolStatus};
 pub use yazg_runtime::{run_yazg, YazgRequest};
