@@ -62,8 +62,12 @@ pub fn init_logging(options: LogOptions) -> PromptLabResult<LogGuard> {
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
         file_guard = Some(guard);
 
-        let stdout_layer = fmt::layer().with_target(true).with_ansi(true);
+        let stdout_layer = fmt::layer()
+            .with_timer(LocalRfc3339)
+            .with_target(true)
+            .with_ansi(true);
         let file_layer = fmt::layer()
+            .with_timer(LocalRfc3339)
             .with_target(true)
             .with_ansi(false)
             .with_writer(non_blocking);
@@ -73,7 +77,12 @@ pub fn init_logging(options: LogOptions) -> PromptLabResult<LogGuard> {
         registry.with(stdout_layer).with(file_layer).try_init()
     } else {
         registry
-            .with(fmt::layer().with_target(true).with_ansi(true))
+            .with(
+                fmt::layer()
+                    .with_timer(LocalRfc3339)
+                    .with_target(true)
+                    .with_ansi(true),
+            )
             .try_init()
     };
 
@@ -94,6 +103,15 @@ pub fn init_logging(options: LogOptions) -> PromptLabResult<LogGuard> {
     Ok(LogGuard {
         _file_guard: file_guard,
     })
+}
+
+#[derive(Clone, Copy)]
+struct LocalRfc3339;
+
+impl tracing_subscriber::fmt::time::FormatTime for LocalRfc3339 {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        write!(w, "{}", crate::event_log::local_rfc3339_now())
+    }
 }
 
 #[cfg(test)]

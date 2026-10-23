@@ -306,6 +306,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::proxy::proxy_set,
             commands::proxy::proxy_test_connection,
             commands::environment::logs_list_files,
+            commands::environment::logs_clear,
             commands::environment::logs_tail,
             commands::environment::logs_recent_events,
             commands::environment::logs_emit,
