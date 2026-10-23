@@ -56,8 +56,9 @@ pub mod supervisor;
 pub mod types;
 
 pub use agent_attempts::{
-    agent_attempts, default_agent_attempts, parse_agent_attempts, serialize_agent_attempts,
-    set_agent_attempts, ATTEMPT_SETTING_KEY, MIN_AGENT_ATTEMPTS,
+    agent_attempts, default_agent_attempts, parse_agent_attempts, prepare_agent_attempt,
+    serialize_agent_attempts, set_agent_attempts, snapshot_agent_attempts, ATTEMPT_SETTING_KEY,
+    MIN_AGENT_ATTEMPTS,
 };
 pub use agent_log::{log_agent_event, log_llm_call, log_react, log_tool_call, AgentLogContext};
 pub use analyze_endpoint::{AnalyzeEndpointAgent, AnalyzeEndpointAgentOutcome};

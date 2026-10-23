@@ -7,6 +7,7 @@ use crate::tool_registry::{self, ToolRecord};
 pub struct AgentRecord {
     pub id: &'static str,
     pub display_name: &'static str,
+    pub description: &'static str,
     pub prompt_ids: &'static [&'static str],
     pub tool_ids: &'static [&'static str],
 }
@@ -15,11 +16,12 @@ const AGENTS: &[AgentRecord] = &[
     AgentRecord {
         id: "yazg",
         display_name: "Yazg",
+        description: "Answers workspace questions and runs studio actions.",
         prompt_ids: &[
-            "yazg_system",
-            "yazg_preamble",
-            "yazg_conversation",
-            "yazg_knowledge",
+            "yazg_system_prompt",
+            "yazg_preamble_system_prompt",
+            "yazg_conversation_system_prompt",
+            "yazg_knowledge_system_prompt",
         ],
         tool_ids: &[
             "list_workspace",
@@ -44,40 +46,46 @@ const AGENTS: &[AgentRecord] = &[
     AgentRecord {
         id: "analyze_endpoint_agent",
         display_name: "AnalyzeEndpointAgent",
-        prompt_ids: &["endpoint_verify_system"],
+        description: "Decides whether a probed target is a live AI API.",
+        prompt_ids: &["endpoint_verify_system_prompt"],
         tool_ids: &[],
     },
     AgentRecord {
         id: "attack_plan_agent",
         display_name: "AttackPlanAgent",
-        prompt_ids: &["wizard_profile_system"],
+        description: "Writes the attack plan for a verified target.",
+        prompt_ids: &["wizard_profile_system_prompt"],
         tool_ids: &[],
     },
     AgentRecord {
         id: "generate_prompt_agent",
         display_name: "GeneratePromptAgent",
-        prompt_ids: &["generator_system", "attack_catalog_prompt_system"],
+        description: "Writes a probe for one attack technique.",
+        prompt_ids: &["generator_system_prompt", "attack_catalog_prompt_system_prompt"],
         tool_ids: &[],
     },
     AgentRecord {
         id: "recommend_agent",
         display_name: "RecommendAgent",
+        description: "Writes prioritized fixes for findings.",
         prompt_ids: &[
-            "attack_results_recommend_system",
-            "finding_remediation_recommend_system",
+            "attack_results_recommend_system_prompt",
+            "finding_remediation_recommend_system_prompt",
         ],
         tool_ids: &[],
     },
     AgentRecord {
         id: "summary_agent",
         display_name: "SummaryAgent",
-        prompt_ids: &["project_summary_system", "scan_summary_system"],
+        description: "Writes the security posture of a project or scan.",
+        prompt_ids: &["project_summary_system_prompt", "scan_summary_system_prompt"],
         tool_ids: &[],
     },
     AgentRecord {
         id: "judge_coordinator_agent",
         display_name: "JudgeCoordinatorAgent",
-        prompt_ids: &["judge_coordinator_system"],
+        description: "Decides whether a target reply is a finding.",
+        prompt_ids: &["judge_coordinator_system_prompt"],
         tool_ids: &[
             "run_judge_worker",
             "run_classifier_worker",
@@ -87,36 +95,42 @@ const AGENTS: &[AgentRecord] = &[
     AgentRecord {
         id: "judge_worker",
         display_name: "JudgeWorker",
-        prompt_ids: &["judge_system"],
+        description: "Votes on whether a target reply shows a successful attack.",
+        prompt_ids: &["judge_system_prompt"],
         tool_ids: &[],
     },
     AgentRecord {
         id: "classifier_worker",
         display_name: "ClassifierWorker",
-        prompt_ids: &["classifier_system"],
+        description: "Assigns category and severity to a finding.",
+        prompt_ids: &["classifier_system_prompt"],
         tool_ids: &[],
     },
     AgentRecord {
         id: "attacker_worker",
         display_name: "AttackerWorker",
-        prompt_ids: &["attacker_system"],
+        description: "Judges whether the target complied with an attack payload.",
+        prompt_ids: &["attacker_system_prompt"],
         tool_ids: &[],
     },
     AgentRecord {
         id: "agentic_attack_execution_agent",
         display_name: "AgenticAttackExecutionAgent",
-        prompt_ids: &["agentic_attack_execution_system"],
+        description: "Pursues an attack plan across multiple attempts.",
+        prompt_ids: &["agentic_attack_execution_system_prompt"],
         tool_ids: &["generate", "attack", "recover", "reflect", "adapt"],
     },
     AgentRecord {
         id: "sequential_attack_execution_agent",
         display_name: "SequentialAttackExecutionAgent",
-        prompt_ids: &["sequential_attack_execution_system"],
+        description: "Pursues an attack plan one category at a time.",
+        prompt_ids: &["sequential_attack_execution_system_prompt"],
         tool_ids: &["generate", "attack", "recover"],
     },
     AgentRecord {
         id: "reflection_agent",
         display_name: "ReflectionAgent",
+        description: "Reviews another agent answer and accepts or rejects it.",
         prompt_ids: &[
             "reflection_system_prompt",
             "agent_output_reflection_system_prompt",
@@ -126,20 +140,9 @@ const AGENTS: &[AgentRecord] = &[
     AgentRecord {
         id: "jailbreak_agent",
         display_name: "JailbreakAgent",
-        prompt_ids: &["jailbreak_agent_system", "jailbreak_followup"],
+        description: "Writes prompts for one goal on a guarded model.",
+        prompt_ids: &["jailbreak_agent_system_prompt", "jailbreak_followup_system_prompt"],
         tool_ids: &[],
-    },
-    AgentRecord {
-        id: "create_project",
-        display_name: "CreateProjectTool",
-        prompt_ids: &[],
-        tool_ids: &["create_project"],
-    },
-    AgentRecord {
-        id: "list_workspace",
-        display_name: "ListWorkspaceTool",
-        prompt_ids: &[],
-        tool_ids: &["list_workspace"],
     },
 ];
 
@@ -156,6 +159,10 @@ impl LoadedAgent {
 
     pub fn display_name(self) -> &'static str {
         self.record.display_name
+    }
+
+    pub fn description(self) -> &'static str {
+        self.record.description
     }
 
     pub fn prompt_ids(self) -> &'static [&'static str] {

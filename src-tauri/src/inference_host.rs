@@ -109,6 +109,10 @@ fn model_entry<'a>(
 
 /// `None` omits `max_tokens` on the provider body.
 /// Anthropic and Bedrock reject a body that lacks the field, so those send the saved context window.
+fn model_temperature(entry: &ModelEntry) -> f32 {
+    crate::commands::models::sampling_from_metadata(&entry.metadata).0
+}
+
 fn scenario_output_limit(entry: &ModelEntry) -> Option<u32> {
     let provider = entry
         .metadata
@@ -178,6 +182,7 @@ pub async fn build_judge_engine_from_gateway(
         .await
         .map_err(|e| CommandError::from(PromptLabError::internal(e.to_string())))?;
     let mut config = JudgeProviderConfig::default();
+    config.llm_temperature = model_temperature(entry);
     config.mode = if entry.provider == ModelProvider::Remote {
         JudgeMode::RemoteLlm
     } else {
@@ -197,8 +202,8 @@ pub async fn gateway_complete(
     system: Option<&str>,
     prompt: &str,
     max_tokens: u32,
-    temperature: f32,
 ) -> CommandResult<String> {
+    let temperature = model_temperature(model_entry(model_manager, inference)?);
     let mut session = open_gateway_session(
         data_dir,
         inference,
@@ -232,7 +237,6 @@ pub async fn gateway_complete_as(
     system: Option<&str>,
     prompt: &str,
     max_tokens: u32,
-    temperature: f32,
 ) -> CommandResult<String> {
     let outcome = gateway_complete_outcome_as(
         data_dir,
@@ -244,7 +248,6 @@ pub async fn gateway_complete_as(
         system,
         prompt,
         max_tokens,
-        temperature,
         &[],
         None,
     )
@@ -266,7 +269,6 @@ pub async fn gateway_complete_outcome_as(
     system: Option<&str>,
     prompt: &str,
     max_tokens: u32,
-    temperature: f32,
     tools: &[promptlab_inference::ToolDefinition],
     tool_choice: Option<serde_json::Value>,
 ) -> CommandResult<promptlab_inference::CompletionOutcome> {
@@ -292,7 +294,6 @@ pub async fn gateway_complete_outcome_as(
             messages
         },
         max_tokens,
-        temperature,
         tools,
         tool_choice,
     )
@@ -309,10 +310,10 @@ pub async fn gateway_complete_outcome_messages_as(
     agent_id: &str,
     messages: Vec<serde_json::Value>,
     max_tokens: u32,
-    temperature: f32,
     tools: &[promptlab_inference::ToolDefinition],
     tool_choice: Option<serde_json::Value>,
 ) -> CommandResult<promptlab_inference::CompletionOutcome> {
+    let temperature = model_temperature(model_entry(model_manager, inference)?);
     let data_dir = data_dir.to_path_buf();
     let agent_id = agent_id.to_string();
     let tools = tools.to_vec();
@@ -395,7 +396,6 @@ async fn detached_complete_outcome_messages_as(
     agent_id: &str,
     messages: Vec<serde_json::Value>,
     max_tokens: Option<u32>,
-    temperature: f32,
     tools: &[promptlab_inference::ToolDefinition],
     tool_choice: Option<serde_json::Value>,
 ) -> CommandResult<promptlab_inference::CompletionOutcome> {
@@ -403,6 +403,7 @@ async fn detached_complete_outcome_messages_as(
     let agent_id = agent_id.to_string();
     let tools = tools.to_vec();
     let (entry, remote) = snapshot_selected_model(&data_dir, inference, model_manager).await?;
+    let temperature = model_temperature(&entry);
     promptlab_inference::with_agent(&agent_id.clone(), move || async move {
         let mut scratch = InferenceRuntimeManager::new(&data_dir);
         let mut runtime_mgr = RuntimeManager::new(&data_dir, None);
@@ -442,7 +443,6 @@ async fn detached_complete_outcome_as(
     system: Option<&str>,
     prompt: &str,
     max_tokens: Option<u32>,
-    temperature: f32,
     tools: &[promptlab_inference::ToolDefinition],
     tool_choice: Option<serde_json::Value>,
 ) -> CommandResult<promptlab_inference::CompletionOutcome> {
@@ -465,7 +465,6 @@ async fn detached_complete_outcome_as(
         agent_id,
         messages,
         max_tokens,
-        temperature,
         tools,
         tool_choice,
     )
@@ -489,7 +488,6 @@ pub async fn detached_complete_as(
     system: Option<&str>,
     prompt: &str,
     max_tokens: u32,
-    temperature: f32,
 ) -> CommandResult<String> {
     let outcome = detached_complete_outcome_as(
         data_dir,
@@ -500,7 +498,6 @@ pub async fn detached_complete_as(
         system,
         prompt,
         Some(max_tokens),
-        temperature,
         &[],
         None,
     )
@@ -551,11 +548,10 @@ impl PlannerLlm for HostWizardPlannerLlm {
             promptlab_agent::AgentId::AttackPlan.as_str(),
             Some(registered_prompt(
                 promptlab_agent::AgentId::AttackPlan.as_str(),
-                "wizard_profile_system",
+                "wizard_profile_system_prompt",
             )),
             prompt,
             8192,
-            0.1,
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
@@ -578,7 +574,6 @@ impl PlannerLlm for HostWizardPlannerLlm {
             Some(system),
             prompt,
             8192,
-            0.1,
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
@@ -624,11 +619,10 @@ impl PlannerLlm for HostEndpointVerifyLlm {
             promptlab_agent::AgentId::AnalyzeEndpoint.as_str(),
             Some(registered_prompt(
                 promptlab_agent::AgentId::AnalyzeEndpoint.as_str(),
-                "endpoint_verify_system",
+                "endpoint_verify_system_prompt",
             )),
             prompt,
             1024,
-            0.1,
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
@@ -654,7 +648,6 @@ impl PlannerLlm for HostEndpointVerifyLlm {
             Some(system),
             prompt,
             1024,
-            0.1,
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
@@ -717,7 +710,7 @@ impl HostYazgReactLlm {
 #[async_trait]
 impl PlannerLlm for HostYazgReactLlm {
     async fn complete(&self, prompt: &str) -> promptlab_planner::PlannerResult<String> {
-        self.complete_with_system(Some(registered_prompt(promptlab_agent::AgentId::Yazg.as_str(), "yazg_system")), prompt)
+        self.complete_with_system(Some(registered_prompt(promptlab_agent::AgentId::Yazg.as_str(), "yazg_system_prompt")), prompt)
             .await
     }
 
@@ -729,7 +722,7 @@ impl PlannerLlm for HostYazgReactLlm {
         let system = system
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| registered_prompt(promptlab_agent::AgentId::Yazg.as_str(), "yazg_system"));
+            .unwrap_or_else(|| registered_prompt(promptlab_agent::AgentId::Yazg.as_str(), "yazg_system_prompt"));
         let agent_id = system_agent_id(system, &self.agent_id);
         detached_complete_as(
             &self.data_dir,
@@ -740,7 +733,6 @@ impl PlannerLlm for HostYazgReactLlm {
             Some(system),
             prompt,
             1024,
-            0.2,
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
@@ -752,7 +744,7 @@ impl PlannerLlm for HostYazgReactLlm {
         tools: &[promptlab_planner::ToolSpec],
     ) -> promptlab_planner::PlannerResult<promptlab_planner::LlmCompletion> {
         self.complete_with_tools_and_system(
-            Some(registered_prompt(promptlab_agent::AgentId::Yazg.as_str(), "yazg_system")),
+            Some(registered_prompt(promptlab_agent::AgentId::Yazg.as_str(), "yazg_system_prompt")),
             prompt,
             tools,
         )
@@ -776,7 +768,7 @@ impl PlannerLlm for HostYazgReactLlm {
         let system = system
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| registered_prompt(promptlab_agent::AgentId::Yazg.as_str(), "yazg_system"));
+            .unwrap_or_else(|| registered_prompt(promptlab_agent::AgentId::Yazg.as_str(), "yazg_system_prompt"));
         let outcome = detached_complete_outcome_as(
             &self.data_dir,
             &self.inference,
@@ -786,7 +778,6 @@ impl PlannerLlm for HostYazgReactLlm {
             Some(system),
             prompt,
             Some(1024),
-            0.2,
             &wire_tools,
             Some(serde_json::json!("auto")),
         )
@@ -829,7 +820,6 @@ impl PlannerLlm for HostYazgReactLlm {
             &self.agent_id,
             messages.to_vec(),
             Some(1024),
-            0.2,
             &wire_tools,
             Some(serde_json::json!("auto")),
         )
@@ -891,11 +881,10 @@ impl PlannerLlm for HostGeneratePromptLlm {
             promptlab_agent::AgentId::GeneratePrompt.as_str(),
             Some(registered_prompt(
                 promptlab_agent::AgentId::GeneratePrompt.as_str(),
-                "attack_catalog_prompt_system",
+                "attack_catalog_prompt_system_prompt",
             )),
             prompt,
             1024,
-            0.35,
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
@@ -921,7 +910,6 @@ impl PlannerLlm for HostGeneratePromptLlm {
             Some(system),
             prompt,
             1024,
-            0.35,
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
@@ -967,16 +955,12 @@ impl PlannerLlm for HostJailbreakAgentLlm {
         system: Option<&str>,
         prompt: &str,
     ) -> promptlab_planner::PlannerResult<String> {
-        let (temperature, max_tokens) = {
+        let max_tokens = {
             let inference = self.inference.lock().await;
             let manager = self.model_manager.lock().await;
             match model_entry(&manager, &inference) {
-                Ok(entry) => {
-                    let (temperature, _) =
-                        crate::commands::models::sampling_from_metadata(&entry.metadata);
-                    (temperature, scenario_output_limit(entry))
-                }
-                Err(_) => (crate::commands::models::DEFAULT_MODEL_TEMPERATURE, None),
+                Ok(entry) => scenario_output_limit(entry),
+                Err(_) => None,
             }
         };
         let system = system
@@ -992,7 +976,6 @@ impl PlannerLlm for HostJailbreakAgentLlm {
             Some(system),
             prompt,
             max_tokens,
-            temperature,
             &[],
             None,
         )
@@ -1045,11 +1028,10 @@ impl PlannerLlm for HostAttackRecommendLlm {
             promptlab_agent::AgentId::Recommend.as_str(),
             Some(registered_prompt(
                 promptlab_agent::AgentId::Recommend.as_str(),
-                "attack_results_recommend_system",
+                "attack_results_recommend_system_prompt",
             )),
             prompt,
             2048,
-            0.15,
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
@@ -1072,7 +1054,6 @@ impl PlannerLlm for HostAttackRecommendLlm {
             Some(system),
             prompt,
             2048,
-            0.15,
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
@@ -1118,11 +1099,10 @@ impl PlannerLlm for HostFindingRecommendLlm {
             promptlab_agent::AgentId::Recommend.as_str(),
             Some(registered_prompt(
                 promptlab_agent::AgentId::Recommend.as_str(),
-                "finding_remediation_recommend_system",
+                "finding_remediation_recommend_system_prompt",
             )),
             prompt,
             3072,
-            0.15,
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
@@ -1145,7 +1125,6 @@ impl PlannerLlm for HostFindingRecommendLlm {
             Some(system),
             prompt,
             3072,
-            0.15,
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
@@ -1191,11 +1170,10 @@ impl PlannerLlm for HostProjectSummaryLlm {
             promptlab_agent::AgentId::Summary.as_str(),
             Some(registered_prompt(
                 promptlab_agent::AgentId::Summary.as_str(),
-                "project_summary_system",
+                "project_summary_system_prompt",
             )),
             prompt,
             2048,
-            0.15,
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
@@ -1218,7 +1196,6 @@ impl PlannerLlm for HostProjectSummaryLlm {
             Some(system),
             prompt,
             2048,
-            0.15,
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
@@ -1264,11 +1241,10 @@ impl PlannerLlm for HostScanSummaryLlm {
             promptlab_agent::AgentId::Summary.as_str(),
             Some(registered_prompt(
                 promptlab_agent::AgentId::Summary.as_str(),
-                "scan_summary_system",
+                "scan_summary_system_prompt",
             )),
             prompt,
             2048,
-            0.15,
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
@@ -1291,7 +1267,6 @@ impl PlannerLlm for HostScanSummaryLlm {
             Some(system),
             prompt,
             2048,
-            0.15,
         )
         .await
         .map_err(|e| promptlab_planner::PlannerError::Llm(e.to_string()))
@@ -1499,11 +1474,10 @@ impl GeneratorLlm for HostGeneratorLlm {
             promptlab_agent::AgentId::GeneratePrompt.as_str(),
             Some(registered_prompt(
                 promptlab_agent::AgentId::GeneratePrompt.as_str(),
-                "generator_system",
+                "generator_system_prompt",
             )),
             prompt,
             1536,
-            0.2,
         )
         .await
         .map_err(|e| promptlab_generator::GeneratorError::Llm(e.to_string()))
@@ -1520,6 +1494,7 @@ fn configure_scratch_for_entry(
     remote: Option<&RemoteAdapterSettings>,
 ) -> CommandResult<()> {
     let config = scratch.config_mut();
+    config.temperature = model_temperature(entry);
     config.selected_model_id = Some(entry.id.clone());
     config.model = entry.display_model_name();
     config.initialized = true;

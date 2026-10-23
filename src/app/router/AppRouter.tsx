@@ -52,6 +52,16 @@ const MutatorsPage = lazy(() =>
 const PromptLabPage = lazy(() =>
   import("@/features/prompt-lab/PromptLabPage").then((m) => ({ default: m.PromptLabPage })),
 );
+const AgentsPage = lazy(() =>
+  import("@/features/agents/AgentsPage").then((m) => ({
+    default: m.AgentsPage,
+  })),
+);
+const AgentDetailPage = lazy(() =>
+  import("@/features/agents/AgentDetailPage").then((m) => ({
+    default: m.AgentDetailPage,
+  })),
+);
 const AgentTracePage = lazy(() =>
   import("@/features/agent-trace/AgentTracePage").then((m) => ({
     default: m.AgentTracePage,
@@ -236,6 +246,22 @@ export function AppRouter() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <PromptLabPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="agents"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <AgentsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="agents/:agentId"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <AgentDetailPage />
               </Suspense>
             }
           />

@@ -236,7 +236,12 @@ impl InferenceClient {
         } else {
             Some(request.max_tokens.unwrap_or(self.default_max_tokens))
         };
-        let temperature = request.temperature.unwrap_or(self.default_temperature);
+        let temperature = crate::agent_temperature::resolve_call_temperature(
+            llm_log_agent(request.purpose.as_deref()).as_deref(),
+            request.purpose.as_deref(),
+            request.temperature,
+            self.default_temperature,
+        );
         let purpose = request
             .purpose
             .as_deref()

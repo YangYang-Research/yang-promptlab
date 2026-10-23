@@ -5,6 +5,7 @@
 //! Completions go through [`promptlab_harness::HarnessFactory::execute`].
 //! Do not call [`ProviderAdapter`] HTTP from feature crates.
 
+pub mod agent_temperature;
 pub mod capabilities;
 pub mod config;
 pub mod error;
@@ -16,6 +17,11 @@ pub mod token_usage;
 pub mod traffic;
 pub mod types;
 
+pub use agent_temperature::{
+    agent_temperature, default_agent_temperatures, merge_agent_temperatures,
+    prepare_agent_temperature, resolve_call_temperature, set_agent_temperatures,
+    snapshot_agent_temperatures,
+};
 pub use capabilities::ModelCapabilities;
 pub use config::{
     AiRuntimeConfiguration, InferenceMode, InferenceProvider, RuntimeHealth, config_path,

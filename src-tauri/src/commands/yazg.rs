@@ -1141,7 +1141,6 @@ pub async fn yazg_generate_chat_title_op(
         None,
         &prompt,
         32,
-        0.2,
     )
     .await
     {

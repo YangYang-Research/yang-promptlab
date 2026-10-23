@@ -633,54 +633,56 @@ After all workers return, reply with a short summary. Do not invent votes.";
 /// Load one system prompt by registry id.
 pub fn load(id: &str) -> Result<LoadedPrompt, RegistryError> {
     let (id, system) = match id {
-        "inference_system" => ("inference_system", PromptRegistry::inference_system()),
-        "health_check_system" => ("health_check_system", PromptRegistry::health_check_system()),
-        "judge_system" => ("judge_system", PromptRegistry::judge_system()),
-        "classifier_system" => ("classifier_system", PromptRegistry::classifier_system()),
-        "attacker_system" => ("attacker_system", PromptRegistry::attacker_system()),
-        "wizard_profile_system" => ("wizard_profile_system", PromptRegistry::wizard_profile_system()),
-        "endpoint_verify_system" => {
-            ("endpoint_verify_system", PromptRegistry::endpoint_verify_system())
+        "inference_system_prompt" => ("inference_system_prompt", PromptRegistry::inference_system()),
+        "health_check_system_prompt" => ("health_check_system_prompt", PromptRegistry::health_check_system()),
+        "judge_system_prompt" => ("judge_system_prompt", PromptRegistry::judge_system()),
+        "classifier_system_prompt" => ("classifier_system_prompt", PromptRegistry::classifier_system()),
+        "attacker_system_prompt" => ("attacker_system_prompt", PromptRegistry::attacker_system()),
+        "wizard_profile_system_prompt" => ("wizard_profile_system_prompt", PromptRegistry::wizard_profile_system()),
+        "endpoint_verify_system_prompt" => {
+            ("endpoint_verify_system_prompt", PromptRegistry::endpoint_verify_system())
         }
-        "yazg_system" => ("yazg_system", PromptRegistry::yazg_react_system()),
-        "yazg_preamble" => ("yazg_preamble", YAZG_PREAMBLE),
-        "yazg_conversation" => ("yazg_conversation", YAZG_CONVERSATION_PREAMBLE),
-        "yazg_knowledge" => ("yazg_knowledge", YAZG_KNOWLEDGE_PREAMBLE),
-        "attack_results_recommend_system" => (
-            "attack_results_recommend_system",
+        "yazg_system_prompt" => ("yazg_system_prompt", PromptRegistry::yazg_react_system()),
+        "yazg_preamble_system_prompt" => ("yazg_preamble_system_prompt", YAZG_PREAMBLE),
+        "yazg_conversation_system_prompt" => {
+            ("yazg_conversation_system_prompt", YAZG_CONVERSATION_PREAMBLE)
+        }
+        "yazg_knowledge_system_prompt" => ("yazg_knowledge_system_prompt", YAZG_KNOWLEDGE_PREAMBLE),
+        "attack_results_recommend_system_prompt" => (
+            "attack_results_recommend_system_prompt",
             PromptRegistry::attack_results_recommend_system(),
         ),
-        "finding_remediation_recommend_system" => (
-            "finding_remediation_recommend_system",
+        "finding_remediation_recommend_system_prompt" => (
+            "finding_remediation_recommend_system_prompt",
             PromptRegistry::finding_remediation_recommend_system(),
         ),
-        "project_summary_system" => {
-            ("project_summary_system", PromptRegistry::project_summary_system())
+        "project_summary_system_prompt" => {
+            ("project_summary_system_prompt", PromptRegistry::project_summary_system())
         }
-        "scan_summary_system" => ("scan_summary_system", PromptRegistry::scan_summary_system()),
-        "generator_system" => ("generator_system", PromptRegistry::generator_system()),
-        "attack_catalog_prompt_system" => (
-            "attack_catalog_prompt_system",
+        "scan_summary_system_prompt" => ("scan_summary_system_prompt", PromptRegistry::scan_summary_system()),
+        "generator_system_prompt" => ("generator_system_prompt", PromptRegistry::generator_system()),
+        "attack_catalog_prompt_system_prompt" => (
+            "attack_catalog_prompt_system_prompt",
             PromptRegistry::attack_catalog_prompt_system(),
         ),
-        "report_executive_summary_system" => (
-            "report_executive_summary_system",
+        "report_executive_summary_system_prompt" => (
+            "report_executive_summary_system_prompt",
             PromptRegistry::report_executive_summary_system(),
         ),
-        "report_risk_summary_system" => (
-            "report_risk_summary_system",
+        "report_risk_summary_system_prompt" => (
+            "report_risk_summary_system_prompt",
             PromptRegistry::report_risk_summary_system(),
         ),
-        "report_mitigation_summary_system" => (
-            "report_mitigation_summary_system",
+        "report_mitigation_summary_system_prompt" => (
+            "report_mitigation_summary_system_prompt",
             PromptRegistry::report_mitigation_summary_system(),
         ),
-        "agentic_attack_execution_system" => (
-            "agentic_attack_execution_system",
+        "agentic_attack_execution_system_prompt" => (
+            "agentic_attack_execution_system_prompt",
             AGENTIC_ATTACK_EXECUTION_SYSTEM_PROMPT,
         ),
-        "sequential_attack_execution_system" => (
-            "sequential_attack_execution_system",
+        "sequential_attack_execution_system_prompt" => (
+            "sequential_attack_execution_system_prompt",
             SEQUENTIAL_ATTACK_EXECUTION_SYSTEM_PROMPT,
         ),
         "reflection_system_prompt" => ("reflection_system_prompt", REFLECTION_SYSTEM_PROMPT),
@@ -688,9 +690,11 @@ pub fn load(id: &str) -> Result<LoadedPrompt, RegistryError> {
             "agent_output_reflection_system_prompt",
             AGENT_OUTPUT_REFLECTION_SYSTEM_PROMPT,
         ),
-        "judge_coordinator_system" => ("judge_coordinator_system", JUDGE_COORDINATOR_SYSTEM_PROMPT),
-        "jailbreak_agent_system" => ("jailbreak_agent_system", jailbreak_agent_system_prompt()),
-        "jailbreak_followup" => ("jailbreak_followup", followup_method_brief()),
+        "judge_coordinator_system_prompt" => ("judge_coordinator_system_prompt", JUDGE_COORDINATOR_SYSTEM_PROMPT),
+        "jailbreak_agent_system_prompt" => ("jailbreak_agent_system_prompt", jailbreak_agent_system_prompt()),
+        "jailbreak_followup_system_prompt" => {
+            ("jailbreak_followup_system_prompt", followup_method_brief())
+        }
         other => return Err(RegistryError::UnknownPrompt(other.to_string())),
     };
     Ok(LoadedPrompt { id, system })
@@ -698,33 +702,33 @@ pub fn load(id: &str) -> Result<LoadedPrompt, RegistryError> {
 
 pub fn all_ids() -> &'static [&'static str] {
     &[
-        "inference_system",
-        "health_check_system",
-        "judge_system",
-        "classifier_system",
-        "attacker_system",
-        "wizard_profile_system",
-        "endpoint_verify_system",
-        "yazg_system",
-        "yazg_preamble",
-        "yazg_conversation",
-        "yazg_knowledge",
-        "attack_results_recommend_system",
-        "finding_remediation_recommend_system",
-        "project_summary_system",
-        "scan_summary_system",
-        "generator_system",
-        "attack_catalog_prompt_system",
-        "report_executive_summary_system",
-        "report_risk_summary_system",
-        "report_mitigation_summary_system",
-        "agentic_attack_execution_system",
-        "sequential_attack_execution_system",
+        "inference_system_prompt",
+        "health_check_system_prompt",
+        "judge_system_prompt",
+        "classifier_system_prompt",
+        "attacker_system_prompt",
+        "wizard_profile_system_prompt",
+        "endpoint_verify_system_prompt",
+        "yazg_system_prompt",
+        "yazg_preamble_system_prompt",
+        "yazg_conversation_system_prompt",
+        "yazg_knowledge_system_prompt",
+        "attack_results_recommend_system_prompt",
+        "finding_remediation_recommend_system_prompt",
+        "project_summary_system_prompt",
+        "scan_summary_system_prompt",
+        "generator_system_prompt",
+        "attack_catalog_prompt_system_prompt",
+        "report_executive_summary_system_prompt",
+        "report_risk_summary_system_prompt",
+        "report_mitigation_summary_system_prompt",
+        "agentic_attack_execution_system_prompt",
+        "sequential_attack_execution_system_prompt",
         "reflection_system_prompt",
         "agent_output_reflection_system_prompt",
-        "judge_coordinator_system",
-        "jailbreak_agent_system",
-        "jailbreak_followup",
+        "judge_coordinator_system_prompt",
+        "jailbreak_agent_system_prompt",
+        "jailbreak_followup_system_prompt",
     ]
 }
 

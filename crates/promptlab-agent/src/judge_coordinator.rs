@@ -45,7 +45,7 @@ struct JudgeToolError(String);
 struct EmptyArgs {}
 
 macro_rules! role_vote_tool {
-    ($struct_name:ident, $const_name:expr, $role:expr, $desc:expr) => {
+    ($struct_name:ident, $const_name:expr, $role:expr) => {
         struct $struct_name {
             request: JudgeRequest,
             engine: Arc<JudgeEngine>,
@@ -60,7 +60,7 @@ macro_rules! role_vote_tool {
             type Output = String;
 
             fn description(&self) -> String {
-                $desc.into()
+                promptlab_registry::tool_registry::description($const_name).to_string()
             }
 
             fn parameters(&self) -> serde_json::Value {
@@ -120,24 +120,9 @@ macro_rules! role_vote_tool {
     };
 }
 
-role_vote_tool!(
-    JudgeVoteTool,
-    "run_judge_worker",
-    ModelRole::Judge,
-    "Run JudgeWorker — success / vulnerability decision vote for this probe."
-);
-role_vote_tool!(
-    ClassifierVoteTool,
-    "run_classifier_worker",
-    ModelRole::Classifier,
-    "Run ClassifierWorker — category + severity vote for this probe."
-);
-role_vote_tool!(
-    AttackerVoteTool,
-    "run_attacker_worker",
-    ModelRole::Attacker,
-    "Run AttackerWorker — adversarial compliance vote for this probe."
-);
+role_vote_tool!(JudgeVoteTool, "run_judge_worker", ModelRole::Judge);
+role_vote_tool!(ClassifierVoteTool, "run_classifier_worker", ModelRole::Classifier);
+role_vote_tool!(AttackerVoteTool, "run_attacker_worker", ModelRole::Attacker);
 
 async fn reflect_votes(
     agent: AgentId,

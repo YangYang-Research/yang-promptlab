@@ -76,12 +76,7 @@ export function Sidebar() {
           collapsed={collapsed}
           criticalFindings={stats.criticalFindings}
         />
-        <NavSection
-          label="Assistant"
-          items={assistantItems}
-          collapsed={collapsed}
-          criticalFindings={0}
-        />
+        <NavSection label="Assistant" items={assistantItems} collapsed={collapsed} criticalFindings={0} />
         <NavSection label="AI Security Engine" items={aiItems} collapsed={collapsed} criticalFindings={0} />
         <NavSection label="Advanced" items={advancedItems} collapsed={collapsed} criticalFindings={0} />
         <NavSection label="System" items={systemItems} collapsed={collapsed} criticalFindings={0} />

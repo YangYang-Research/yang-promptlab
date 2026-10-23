@@ -26,7 +26,8 @@ pub use repositories::{
 };
 
 pub use repositories::sqlite::{
-    JsonDocumentRecord, JsonDocumentRepository, SETTING_AI_RUNTIME_CONFIG, SETTING_ATTEMPT,
+    JsonDocumentRecord, JsonDocumentRepository, SETTING_AGENT_MAX_ATTEMPT, SETTING_AGENT_TEMPERATURE,
+    SETTING_AI_RUNTIME_CONFIG, SETTING_ATTEMPT_LEGACY,
     SETTING_ENVIRONMENT,
 };
 

@@ -10,6 +10,7 @@ use crate::state::AppState;
 pub mod app;
 pub mod activity;
 pub mod agent_memory;
+pub mod agents;
 pub mod agenttrace;
 pub mod attack;
 pub mod attack_catalog;

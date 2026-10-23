@@ -23,6 +23,7 @@ mod tests {
             let agent = agent_registry::load(record.id).expect(record.id);
             assert_eq!(agent.id(), record.id);
             assert_eq!(agent.display_name(), record.display_name);
+            assert!(!agent.description().is_empty());
             for prompt_id in agent.prompt_ids() {
                 let prompt = agent.prompt(prompt_id).expect(prompt_id);
                 assert_eq!(prompt.id, *prompt_id);
@@ -31,6 +32,7 @@ mod tests {
             for tool_id in agent.tool_ids() {
                 let tool = agent.tool(tool_id).expect(tool_id);
                 assert_eq!(tool.id, *tool_id);
+                assert!(tool.description.len() > 80, "{tool_id}");
             }
         }
     }

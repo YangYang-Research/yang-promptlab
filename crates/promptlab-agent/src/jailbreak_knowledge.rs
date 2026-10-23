@@ -4,15 +4,15 @@
 
 /// System preamble for JailbreakAgent inference (host LLM).
 pub fn jailbreak_agent_system_prompt() -> &'static str {
-    promptlab_registry::prompt_registry::load("jailbreak_agent_system")
-        .expect("jailbreak_agent_system")
+    promptlab_registry::prompt_registry::load("jailbreak_agent_system_prompt")
+        .expect("jailbreak_agent_system_prompt")
         .system
 }
 
 /// Follow-up turn only. No mutator catalog — ids were being copied as the probe.
 pub fn followup_method_brief() -> &'static str {
-    promptlab_registry::prompt_registry::load("jailbreak_followup")
-        .expect("jailbreak_followup")
+    promptlab_registry::prompt_registry::load("jailbreak_followup_system_prompt")
+        .expect("jailbreak_followup_system_prompt")
         .system
 }
 

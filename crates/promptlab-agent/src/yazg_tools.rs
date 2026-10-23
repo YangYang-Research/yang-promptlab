@@ -21,13 +21,9 @@ use crate::artifacts::YazgArtifacts;
 use crate::memory::{AgentMemoryStore, MemoryContext};
 use crate::recommend::RecommendAgent;
 use crate::summary::{SummaryAgent, SummaryRequest};
-use crate::tool_result::{ToolResult, TOOL_RESULT_CONTRACT};
+use crate::tool_result::ToolResult;
 use crate::types::{AgentEvent, AgentId};
 use promptlab_agenttrace::{SpanHandle, TraceHandle};
-
-/// Appended to workspace tool descriptions (Prompting Guide: when-to-use lives in tool defs).
-const WHEN_NOT_WORKSPACE: &str = " Do not call when the latest user message needs no live workspace \
-data (conversation, identity, general knowledge, or simple reasoning without DB rows).";
 
 /// Shared mutable run state filled by tools and consumed after `agent.prompt`.
 pub struct YazgRunState {
@@ -372,21 +368,7 @@ impl Tool for ListWorkspaceTool {
     type Output = String;
 
     fn description(&self) -> String {
-        format!(
-            "List EVERY project in the workspace with aggregate counts only \
-             (targets/scans/findings totals). Takes no arguments and cannot filter. \
-             \
-             USE ONLY WHEN: no project is named and the user wants the whole inventory — \
-             \"which projects exist\", \"list projects\", \"workspace overview\", \
-             \"có những dự án nào\". \
-             \
-             DO NOT USE WHEN: the message names a specific project — \"project AI\", \
-             \"dự án AI\", \"thông tin project X\", \"project detail X\". Call \
-             project_detail(project=<name>) instead; returning the full list for a named \
-             project is a wrong answer. \
-             Also not for targets (list_targets), findings, scans, or reports.\
-             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
-        )
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -439,18 +421,7 @@ impl Tool for ProjectDetailTool {
     type Output = String;
 
     fn description(&self) -> String {
-        format!(
-            "Return ONE project's metadata, targets, and scans (no finding rows). \
-             \
-             USE WHENEVER a project is named or implied — \"thông tin project AI\", \
-             \"project AI\", \"dự án AI\", \"chi tiết project X\", \"project detail X\". \
-             This is the correct tool for any single-project question; always prefer it \
-             over list_workspace once a name appears in the message. \
-             \
-             `project` must be a real workspace project id/name — not the assistant's name. \
-             On miss: status=error error_class=not_found with candidates[]. Do not invent.\
-             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
-        )
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -551,12 +522,7 @@ impl Tool for ListScanTool {
     type Output = String;
 
     fn description(&self) -> String {
-        format!(
-            "List scans for a project (exact id or name). Use when the user asks about scans/runs. \
-             Not for targets (list_targets) or a full project overview (project_detail). \
-             Use scan_detail for one scan. On miss: status=error error_class=not_found with candidates[].\
-             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
-        )
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -642,11 +608,7 @@ impl Tool for ScanDetailTool {
     type Output = String;
 
     fn description(&self) -> String {
-        format!(
-            "Get one scan by id, including a capped finding list for that scan. \
-             Use finding_detail for a single finding. On miss: status=error error_class=not_found.\
-             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
-        )
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -731,14 +693,7 @@ impl Tool for ListFindingsTool {
     type Output = String;
 
     fn description(&self) -> String {
-        format!(
-            "List findings for a project and/or scan (paginated, newest first). \
-             Use only when the user asks for findings / vulnerabilities. \
-             Provide project (id/name) and/or scan_id. Optional limit (default 20, max 50) and offset. \
-             For finding #N use finding_detail(project, index=N). Not for project overview or targets. \
-             On miss: status=error error_class=not_found with candidates[].\
-             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
-        )
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -840,12 +795,7 @@ impl Tool for FindingDetailTool {
     type Output = String;
 
     fn description(&self) -> String {
-        format!(
-            "Get one finding: by finding_id, or by project (id/name) + 1-based index (newest first). \
-             Use when the user asks for a specific finding by id or index. \
-             On miss: status=error error_class=not_found with candidates[].\
-             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
-        )
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -943,14 +893,7 @@ impl Tool for ListTargetsTool {
     type Output = String;
 
     fn description(&self) -> String {
-        format!(
-            "List AI targets for a project (exact id or name). \
-             Use when the user asks for targets / endpoints in a project. \
-             Prefer this over list_workspace. Reply from the JSON data; \
-             use target_detail only when the user wants one target's profile. \
-             On miss: status=error error_class=not_found with candidates[].\
-             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
-        )
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -1032,17 +975,7 @@ impl Tool for TargetDetailTool {
     type Output = String;
 
     fn description(&self) -> String {
-        format!(
-            "Get one target by target_id, or by project + name. \
-             target_id also accepts a target name or host (e.g. an IP) — it is \
-             resolved by id, then name, then host. \
-             Use when the user asks for detail of a specific target. \
-             Returns only name, endpoint, host and verified. A bare host/IP is \
-             only part of a target — always report the endpoint. Report just \
-             those fields; never invent headers, templates or capabilities. \
-             On miss: status=error error_class=not_found with candidates[].\
-             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
-        )
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -1144,12 +1077,7 @@ impl Tool for ListReportsTool {
     type Output = String;
 
     fn description(&self) -> String {
-        format!(
-            "List generated reports for a project (id/name), or all projects when project is omitted. \
-             Use when the user asks about reports. Use report_detail to read one report. \
-             On miss: status=error error_class=not_found with candidates[].\
-             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
-        )
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -1225,11 +1153,7 @@ impl Tool for ReportDetailTool {
     type Output = String;
 
     fn description(&self) -> String {
-        format!(
-            "Read one report by id (metadata + clipped content preview). \
-             On miss: status=error error_class=not_found with candidates[].\
-             {TOOL_RESULT_CONTRACT}{WHEN_NOT_WORKSPACE}"
-        )
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -1296,14 +1220,7 @@ impl Tool for CreateProjectTool {
     type Output = String;
 
     fn description(&self) -> String {
-        format!(
-            "Propose creating a workspace project. Requires name; optional description. \
-             Mutating: returns status=pending_approval — nothing is written until the user \
-             Approves in chat. Always call this tool for create requests; never infer from \
-             chat history alone. Checks list_workspace first — returns error if the name exists. \
-             After pending_approval: one short natural sentence that it is waiting for approval \
-             (match user language). One sentence only.{TOOL_RESULT_CONTRACT}"
-        )
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -1438,11 +1355,7 @@ impl Tool for AnalyzeEndpointTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Probe/classify whether a bound live scan target is a generative AI API \
-         (AnalyzeEndpointAgent). Requires a bound target or capability_probe_ready=true \
-         (Scan wizard Verification). Do NOT use for greetings, identity, general chat, \
-         or workspace inventory questions."
-            .into()
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -1530,9 +1443,7 @@ impl Tool for AttackPlanTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Build an attack plan for a verified bound target (AttackPlanAgent). \
-         Requires verified=true (or a bound verified target)."
-            .into()
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -1595,9 +1506,7 @@ impl Tool for GeneratePromptTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Attack Factory: invent a novel technique probe (GeneratePromptAgent). \
-         Use only when factory_prompt_ready=true. Does not require a scan target."
-            .into()
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -1660,9 +1569,7 @@ impl Tool for RecommendTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Post-scan remediation recommendations from completed attack results \
-         (RecommendAgent). Requires attack_results_ready=true."
-            .into()
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -1723,9 +1630,7 @@ impl Tool for SummaryTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Project or scan posture overview + highlights (SummaryAgent). \
-         Requires summary_ready=true."
-            .into()
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -1782,9 +1687,7 @@ impl Tool for JudgeTool {
     type Output = String;
 
     fn description(&self) -> String {
-        "Consensus judging via JudgeCoordinatorAgent (JudgeWorker + ClassifierWorker + \
-         AttackerWorker). Requires judge_ready=true and probe/response context."
-            .into()
+        promptlab_registry::tool_registry::description(Self::NAME).to_string()
     }
 
     fn parameters(&self) -> serde_json::Value {

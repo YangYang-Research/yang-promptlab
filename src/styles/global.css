@@ -13992,6 +13992,129 @@ a.setup-checklist__item:hover {
   opacity: 0.75;
 }
 
+.agents-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.agents-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.75rem;
+}
+
+.agents-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.375rem;
+  padding: 1.125rem;
+  text-align: left;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-surface) 96%, var(--bg-elevated));
+  box-shadow: var(--shadow);
+  color: inherit;
+  cursor: pointer;
+}
+
+.agents-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.agents-card--static {
+  cursor: default;
+}
+
+.agents-card--static:hover {
+  border-color: var(--border-subtle);
+}
+
+.agents-card:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.agents-card__name {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.agents-card__description {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.agents-detail__heading {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+}
+
+.agents-detail__identity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+
+.agents-detail__identity-id {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.agents-detail__identity-name {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.agents-detail__identity-description {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.agents-detail__metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.agents-detail__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.agents-detail__prompt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.375rem;
+}
+
+.agents-detail__id {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.agents-detail__prompt {
+  margin: 0;
+  white-space: pre-wrap;
+  max-height: 20rem;
+  overflow: auto;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
 .scenario-flow-handle {
   width: 4px !important;
   height: 4px !important;

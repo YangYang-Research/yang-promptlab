@@ -171,6 +171,15 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 );
                 promptlab_agent::set_agent_attempts(promptlab_agent::default_agent_attempts());
             }
+            if let Err(err) = tauri::async_runtime::block_on(
+                attempt_persist::hydrate_agent_temperatures(&database),
+            ) {
+                tracing::warn!(
+                    error = %err,
+                    "failed to load agent temperatures; model temperature will be used"
+                );
+                promptlab_inference::set_agent_temperatures(Default::default());
+            }
 
             let environment = match tauri::async_runtime::block_on(
                 environment_persist::hydrate_environment_paths(&database, &bootstrap),
@@ -329,6 +338,10 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::agent_memory::agent_memory_list_events,
             commands::agent_memory::agent_memory_delete_session,
             commands::agent_memory::agent_memory_list_ltm,
+            commands::agents::agents_list,
+            commands::agents::agents_get,
+            commands::agents::agents_set_attempt,
+            commands::agents::agents_set_temperature,
             commands::agenttrace::agenttrace_list_sessions,
             commands::agenttrace::agenttrace_list_traces,
             commands::agenttrace::agenttrace_get_trace,
