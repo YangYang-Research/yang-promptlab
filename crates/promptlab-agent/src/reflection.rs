@@ -51,6 +51,17 @@ impl ReflectionAgent {
         request: &ReflectionRequest,
         llm: Arc<dyn PlannerLlm>,
     ) -> AgentResult<ReflectionOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::Reflection.as_str(),
+            Self::run_traced(request, llm),
+        )
+        .await
+    }
+
+    async fn run_traced(
+        request: &ReflectionRequest,
+        llm: Arc<dyn PlannerLlm>,
+    ) -> AgentResult<ReflectionOutcome> {
         let mut events = vec![AgentEvent::started(
             AgentId::Reflection,
             format!(

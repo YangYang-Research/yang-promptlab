@@ -637,6 +637,19 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         None
     };
 
+    let tracked = run_yazg_tracked(request, active_trace.clone(), conversation_id);
+    if let Some(trace) = active_trace {
+        promptlab_agenttrace::with_bound_trace(trace, tracked).await
+    } else {
+        tracked.await
+    }
+}
+
+async fn run_yazg_tracked(
+    request: YazgRequest,
+    active_trace: Option<promptlab_agenttrace::TraceHandle>,
+    conversation_id: Option<String>,
+) -> AgentResult<(YazgArtifacts, serde_json::Value)> {
     let mut artifacts = YazgArtifacts::default();
     artifacts.trace_id = active_trace.as_ref().map(|t| t.id().to_string());
     artifacts.events.push(AgentEvent::emit_kind(

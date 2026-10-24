@@ -62,6 +62,17 @@ impl GeneratePromptAgent {
         technique: &TechniquePromptContext,
         llm: &dyn PlannerLlm,
     ) -> AgentResult<GeneratePromptAgentOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::GeneratePrompt.as_str(),
+            Self::run_traced(technique, llm),
+        )
+        .await
+    }
+
+    async fn run_traced(
+        technique: &TechniquePromptContext,
+        llm: &dyn PlannerLlm,
+    ) -> AgentResult<GeneratePromptAgentOutcome> {
         if technique.id.trim().is_empty() {
             return Err(AgentError::InvalidInput(
                 "GeneratePromptAgent requires a technique id".into(),

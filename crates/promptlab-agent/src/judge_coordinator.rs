@@ -160,6 +160,18 @@ impl JudgeCoordinatorAgent {
         engine: &JudgeEngine,
         reflector: Option<&dyn PlannerLlm>,
     ) -> AgentResult<JudgeCoordinatorAgentOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::JudgeCoordinator.as_str(),
+            Self::run_traced(request, engine, reflector),
+        )
+        .await
+    }
+
+    async fn run_traced(
+        request: &JudgeRequest,
+        engine: &JudgeEngine,
+        reflector: Option<&dyn PlannerLlm>,
+    ) -> AgentResult<JudgeCoordinatorAgentOutcome> {
         let events = vec![AgentEvent::started(
             AgentId::JudgeCoordinator,
             format!(
@@ -172,6 +184,18 @@ impl JudgeCoordinatorAgent {
 
     /// Tool-calling orchestration: role votes are domain tools (no nested worker LLMs).
     pub async fn run_with_orchestrator(
+        request: &JudgeRequest,
+        engine: Arc<JudgeEngine>,
+        orchestrator: Arc<dyn PlannerLlm>,
+    ) -> AgentResult<JudgeCoordinatorAgentOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::JudgeCoordinator.as_str(),
+            Self::run_with_orchestrator_traced(request, engine, orchestrator),
+        )
+        .await
+    }
+
+    async fn run_with_orchestrator_traced(
         request: &JudgeRequest,
         engine: Arc<JudgeEngine>,
         orchestrator: Arc<dyn PlannerLlm>,

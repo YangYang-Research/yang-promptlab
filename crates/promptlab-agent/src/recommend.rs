@@ -28,6 +28,17 @@ impl RecommendAgent {
         summary: &AttackResultsSummary,
         llm: &dyn PlannerLlm,
     ) -> AgentResult<RecommendAgentOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::Recommend.as_str(),
+            Self::run_traced(summary, llm),
+        )
+        .await
+    }
+
+    async fn run_traced(
+        summary: &AttackResultsSummary,
+        llm: &dyn PlannerLlm,
+    ) -> AgentResult<RecommendAgentOutcome> {
         let mut events = vec![AgentEvent::started(
             AgentId::Recommend,
             format!(

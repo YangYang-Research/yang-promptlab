@@ -66,6 +66,21 @@ impl SequentialAttackExecutionAgent {
         memory: Option<&dyn AgentMemoryStore>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<AttackExecutionOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::SequentialAttackExecution.as_str(),
+            Self::run_traced(request, tools, orchestrator, llm_ready, memory, memory_ctx),
+        )
+        .await
+    }
+
+    async fn run_traced(
+        request: &SequentialAttackExecutionRequest,
+        tools: &dyn AttackExecutionTools,
+        orchestrator: Option<Arc<dyn PlannerLlm>>,
+        llm_ready: bool,
+        memory: Option<&dyn AgentMemoryStore>,
+        memory_ctx: MemoryContext,
+    ) -> AgentResult<AttackExecutionOutcome> {
         if request.category.trim().is_empty() {
             return Err(AgentError::AttackExecution(
                 "SequentialAttackExecutionAgent requires a category".into(),

@@ -76,6 +76,17 @@ impl JailbreakAgent {
         request: &ScenarioPlanRequest,
         llm: &dyn PlannerLlm,
     ) -> AgentResult<ScenarioPlanOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::JailbreakAgent.as_str(),
+            Self::plan_traced(request, llm),
+        )
+        .await
+    }
+
+    async fn plan_traced(
+        request: &ScenarioPlanRequest,
+        llm: &dyn PlannerLlm,
+    ) -> AgentResult<ScenarioPlanOutcome> {
         let scenario = request.scenario.trim();
         let goal = request.goal.trim();
         if scenario.is_empty() || goal.is_empty() {
@@ -280,6 +291,17 @@ Mutator catalog (valid ids only):
     }
 
     pub async fn followup(
+        request: &ScenarioFollowupRequest,
+        llm: &dyn PlannerLlm,
+    ) -> AgentResult<ScenarioFollowupOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::JailbreakAgent.as_str(),
+            Self::followup_traced(request, llm),
+        )
+        .await
+    }
+
+    async fn followup_traced(
         request: &ScenarioFollowupRequest,
         llm: &dyn PlannerLlm,
     ) -> AgentResult<ScenarioFollowupOutcome> {

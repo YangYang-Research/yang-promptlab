@@ -32,6 +32,18 @@ impl AnalyzeEndpointAgent {
         auth_headers: HashMap<String, String>,
         llm: &dyn PlannerLlm,
     ) -> AgentResult<AnalyzeEndpointAgentOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::AnalyzeEndpoint.as_str(),
+            Self::run_traced(profile, auth_headers, llm),
+        )
+        .await
+    }
+
+    async fn run_traced(
+        profile: &TargetProfile,
+        auth_headers: HashMap<String, String>,
+        llm: &dyn PlannerLlm,
+    ) -> AgentResult<AnalyzeEndpointAgentOutcome> {
         let mut events = vec![AgentEvent::started(
             AgentId::AnalyzeEndpoint,
             format!("Analyzing endpoint {}", profile.full_url()),
@@ -47,6 +59,18 @@ impl AnalyzeEndpointAgent {
 
     /// Classify an already-successful capability probe (wizard step 2).
     pub async fn classify_probe(
+        profile: &TargetProfile,
+        http: &VerifyHttpSuccess,
+        llm: &dyn PlannerLlm,
+    ) -> AgentResult<AnalyzeEndpointAgentOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::AnalyzeEndpoint.as_str(),
+            Self::classify_probe_traced(profile, http, llm),
+        )
+        .await
+    }
+
+    async fn classify_probe_traced(
         profile: &TargetProfile,
         http: &VerifyHttpSuccess,
         llm: &dyn PlannerLlm,

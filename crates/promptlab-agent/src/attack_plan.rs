@@ -69,6 +69,17 @@ impl AttackPlanAgent {
         profile: &TargetProfile,
         llm: &dyn PlannerLlm,
     ) -> AgentResult<AttackPlanAgentOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::AttackPlan.as_str(),
+            Self::run_traced(profile, llm),
+        )
+        .await
+    }
+
+    async fn run_traced(
+        profile: &TargetProfile,
+        llm: &dyn PlannerLlm,
+    ) -> AgentResult<AttackPlanAgentOutcome> {
         if !profile.is_verified() {
             return Err(AgentError::InvalidInput(
                 "AttackPlanAgent requires a verified target profile".into(),
@@ -106,6 +117,17 @@ impl AttackPlanAgent {
 
     /// Mid-scan adapt: decide how to escalate strategy / rotate techniques for the next attempt.
     pub async fn adapt(
+        request: &AdaptPlanRequest,
+        llm: &dyn PlannerLlm,
+    ) -> AgentResult<AdaptPlanOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::AttackPlan.as_str(),
+            Self::adapt_traced(request, llm),
+        )
+        .await
+    }
+
+    async fn adapt_traced(
         request: &AdaptPlanRequest,
         llm: &dyn PlannerLlm,
     ) -> AgentResult<AdaptPlanOutcome> {

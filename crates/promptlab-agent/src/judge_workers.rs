@@ -72,7 +72,10 @@ impl JudgeWorker {
         request: &JudgeRequest,
         engine: &JudgeEngine,
     ) -> AgentResult<JudgeWorkerOutcome> {
-        run_role_worker(ModelRole::Judge, request, engine).await
+        promptlab_agenttrace::trace_agent_run(AgentId::JudgeWorker.as_str(), async move {
+            run_role_worker(ModelRole::Judge, request, engine).await
+        })
+        .await
     }
 }
 
@@ -84,7 +87,10 @@ impl ClassifierWorker {
         request: &JudgeRequest,
         engine: &JudgeEngine,
     ) -> AgentResult<JudgeWorkerOutcome> {
-        run_role_worker(ModelRole::Classifier, request, engine).await
+        promptlab_agenttrace::trace_agent_run(AgentId::ClassifierWorker.as_str(), async move {
+            run_role_worker(ModelRole::Classifier, request, engine).await
+        })
+        .await
     }
 }
 
@@ -96,6 +102,9 @@ impl AttackerWorker {
         request: &JudgeRequest,
         engine: &JudgeEngine,
     ) -> AgentResult<JudgeWorkerOutcome> {
-        run_role_worker(ModelRole::Attacker, request, engine).await
+        promptlab_agenttrace::trace_agent_run(AgentId::AttackerWorker.as_str(), async move {
+            run_role_worker(ModelRole::Attacker, request, engine).await
+        })
+        .await
     }
 }

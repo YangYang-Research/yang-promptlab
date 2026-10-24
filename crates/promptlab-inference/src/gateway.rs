@@ -306,8 +306,8 @@ impl InferenceClient {
         if let Some(agent_id) = &log_agent {
             publish_llm_exchange(agent_id, "request", request_body.clone());
         }
-        let completion_trace = if let Some(agent_id) = log_agent.as_deref() {
-            crate::agent_trace_hook::open_completion_trace(agent_id, request_body).await
+        let completion_span = if let Some(agent_id) = log_agent.as_deref() {
+            crate::agent_trace_hook::open_completion_span(agent_id, request_body).await
         } else {
             None
         };
@@ -322,8 +322,8 @@ impl InferenceClient {
                         serde_json::json!({ "error": message }),
                     );
                 }
-                crate::agent_trace_hook::close_completion_trace(
-                    completion_trace,
+                crate::agent_trace_hook::close_completion_span(
+                    completion_span,
                     false,
                     serde_json::json!({ "error": message }),
                     0,
@@ -355,8 +355,8 @@ impl InferenceClient {
             crate::token_usage::record_completion(input, output);
         }
         if response.content.trim().is_empty() && response.tool_calls.is_empty() {
-            crate::agent_trace_hook::close_completion_trace(
-                completion_trace,
+            crate::agent_trace_hook::close_completion_span(
+                completion_span,
                 false,
                 response_body,
                 input,
@@ -367,8 +367,8 @@ impl InferenceClient {
                 "model returned empty content".into(),
             ));
         }
-        crate::agent_trace_hook::close_completion_trace(
-            completion_trace,
+        crate::agent_trace_hook::close_completion_span(
+            completion_span,
             true,
             response_body,
             input,
