@@ -61,7 +61,7 @@ pub async fn agenttrace_list_traces(
     state
         .agent_trace()
         .list_traces(ListTracesFilter {
-            experiment: request.experiment.or(Some("yazg".into())),
+            experiment: request.experiment,
             session_id: request.session_id,
             limit: request.limit,
         })

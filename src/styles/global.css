@@ -14029,6 +14029,8 @@ a.setup-checklist__item:hover {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.375rem;
+  min-width: 0;
+  max-width: 100%;
   padding: 1.125rem;
   text-align: left;
   border: 1px solid var(--border-subtle);
@@ -14058,16 +14060,26 @@ a.setup-checklist__item:hover {
 
 .agents-card__head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
   width: 100%;
+  min-width: 0;
 }
 
 .agents-card__name {
+  min-width: 0;
+  flex: 1 1 auto;
   font-size: 1rem;
   font-weight: 600;
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.agents-card__id {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .agents-card__metrics {
@@ -14096,8 +14108,10 @@ a.setup-checklist__item:hover {
 
 .agents-card__description {
   margin: 0.25rem 0 0;
+  max-width: 100%;
   color: var(--text-muted);
   font-size: 0.875rem;
+  overflow-wrap: anywhere;
 }
 
 .agents-detail__heading {

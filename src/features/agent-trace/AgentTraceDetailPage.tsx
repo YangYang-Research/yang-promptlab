@@ -623,6 +623,7 @@ type BreakdownNode = {
 type TraceBreakdownMeta = {
   id: string;
   name: string;
+  agentName?: string;
   startedAt: string;
   endedAt?: string | null;
   latencyMs?: number | null;
@@ -704,6 +705,25 @@ function buildBreakdownForest(
 
   if (roots.length === 0) return [];
 
+  const agentName = trace.agentName?.trim() || "agent";
+  const timing = {
+    startedAt: trace.startedAt,
+    endedAt: trace.endedAt,
+    latencyMs: trace.latencyMs,
+  };
+  if (agentName !== "yazg") {
+    return [
+      {
+        id: "__agent_run__",
+        name: agentName,
+        kind: "agent",
+        span: null,
+        traceMeta: timing,
+        children: roots,
+      },
+    ];
+  }
+
   const yazgAgent: BreakdownNode = {
     id: "__yazg_agent__",
     name: "yazg",
@@ -718,11 +738,7 @@ function buildBreakdownForest(
       name: trace.name?.trim() || "yazg_turn",
       kind: "agent",
       span: null,
-      traceMeta: {
-        startedAt: trace.startedAt,
-        endedAt: trace.endedAt,
-        latencyMs: trace.latencyMs,
-      },
+      traceMeta: timing,
       children: [yazgAgent],
     },
   ];
@@ -1263,11 +1279,12 @@ function TraceDetailsView({
     () => ({
       id: trace.id,
       name: trace.name,
+      agentName: trace.agentName,
       startedAt: trace.startedAt,
       endedAt: trace.endedAt,
       latencyMs: trace.latencyMs,
     }),
-    [trace.id, trace.name, trace.startedAt, trace.endedAt, trace.latencyMs],
+    [trace.id, trace.name, trace.agentName, trace.startedAt, trace.endedAt, trace.latencyMs],
   );
 
   useEffect(() => {
@@ -1552,6 +1569,7 @@ export function AgentTraceDetailPage() {
               trace={{
                 id: trace.id,
                 name: trace.name,
+                agentName: trace.tags?.agent || trace.experimentName || trace.name,
                 startedAt: trace.startedAt,
                 endedAt: trace.endedAt,
                 latencyMs: trace.latencyMs,

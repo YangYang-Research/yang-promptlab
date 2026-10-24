@@ -36,6 +36,12 @@ import {
 
 type TraceRow = AgentTraceSummaryDto & { [key: string]: unknown };
 
+function agentLabel(trace: { experimentName?: string; tags?: Record<string, string>; name?: string }): string {
+  const tagged = trace.tags?.agent?.trim();
+  if (tagged) return tagged;
+  return trace.experimentName?.trim() || trace.name?.trim() || "—";
+}
+
 export function AgentTracePage() {
   const { backendConnected, ui } = useAppStore();
   const navigate = useNavigate();
@@ -77,12 +83,13 @@ export function AgentTracePage() {
       }
 
       const rows = await listAgentTraces({
-        experiment: "yazg",
+        experiment: null,
         sessionId: sessionFilter,
         limit: 200,
       });
       setTraces(
         rows.filter((row) => {
+          if (row.experimentName !== "yazg") return true;
           const sessionId = row.sessionId?.trim();
           if (!sessionId) return true;
           return liveIds.has(sessionId);
@@ -114,11 +121,13 @@ export function AgentTracePage() {
       const conv = conversationLabel(trace.sessionId);
       return (
         trace.id.toLowerCase().includes(q) ||
+        trace.experimentName.toLowerCase().includes(q) ||
+        (trace.tags?.agent ?? "").toLowerCase().includes(q) ||
+        trace.name.toLowerCase().includes(q) ||
         (trace.sessionId ?? "").toLowerCase().includes(q) ||
         conv.id.toLowerCase().includes(q) ||
         conv.title.toLowerCase().includes(q) ||
-        stateLabel(trace.status).toLowerCase().includes(q) ||
-        trace.name.toLowerCase().includes(q)
+        stateLabel(trace.status).toLowerCase().includes(q)
       );
     });
   }, [traces, ui.searchQuery]);
@@ -137,6 +146,13 @@ export function AgentTracePage() {
         header: "Trace ID",
         render: (trace: TraceRow) => (
           <code className="mono text-sm">{trace.id}</code>
+        ),
+      },
+      {
+        key: "agent",
+        header: "Agent",
+        render: (trace: TraceRow) => (
+          <code className="mono text-sm">{agentLabel(trace)}</code>
         ),
       },
       {
@@ -192,7 +208,7 @@ export function AgentTracePage() {
     <div className="page">
       <PageHeader
         title="Agent Trace"
-        description="Yazg turns recorded by agenttrace — open a row for span detail."
+        description="Every agent run recorded by agenttrace. Open a row for span detail."
         actions={
           <RefreshButton
             onClick={() => void refresh()}
@@ -221,12 +237,7 @@ export function AgentTracePage() {
       {backendConnected && traces.length === 0 && !loading ? (
         <EmptyState
           title="No traces yet"
-          description="Chat in Yazg to record turns. Deleted conversations are pruned here."
-          action={
-            <Link className="btn btn--secondary btn--sm" to="/yazg">
-              Open Yazg
-            </Link>
-          }
+          description="Run an agent to record a trace. Deleted Yazg conversations are pruned here."
         />
       ) : null}
 
@@ -284,6 +295,10 @@ export function AgentTracePage() {
                       <StatusBadge status={stateLabel(trace.status)} />
                     }
                     metadata={[
+                      {
+                        label: "Agent",
+                        value: <span className="mono">{agentLabel(trace)}</span>,
+                      },
                       {
                         label: "Conversation ID",
                         value: (

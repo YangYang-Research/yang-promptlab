@@ -2,7 +2,8 @@
 //!
 //! Text agents ([`ReflectingLlm`]) rewrite while ReflectionAgent rejects the answer, up to the attempt budget (minimum 3).
 //! Scan execution already reflects inside AgenticAttackExecutionAgent.
-//! JailbreakAgent already rewrites a rejected seed. Those two stay on their own loops.
+//! JailbreakAgent plan rewrites a rejected seed on its own loop.
+//! JailbreakAgent follow-up uses this reflector on the model output.
 //! Judge votes are reviewed and left unchanged.
 
 use promptlab_planner::{LlmCompletion, PlannerLlm, ToolSpec};

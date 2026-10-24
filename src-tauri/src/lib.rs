@@ -236,6 +236,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             ))
             .map_err(|err| crate::error::CommandError::internal(err.to_string()))?;
             let agent_trace = std::sync::Arc::new(agent_trace);
+            promptlab_inference::install_agent_trace(agent_trace.clone());
 
             app.manage(AppState::new(
                 database,

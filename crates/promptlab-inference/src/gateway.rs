@@ -296,50 +296,58 @@ impl InferenceClient {
         harness_request.tool_choice = request.tool_choice.clone();
         crate::traffic::record_sent();
         let log_agent = llm_log_agent(request.purpose.as_deref());
+        let request_body = serde_json::json!({
+            "model": self.model_id,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "messages": logged_messages,
+            "tools": request.tools.iter().map(|tool| &tool.name).collect::<Vec<_>>(),
+        });
         if let Some(agent_id) = &log_agent {
-            publish_llm_exchange(
-                agent_id,
-                "request",
-                serde_json::json!({
-                    "model": self.model_id,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "messages": logged_messages,
-                    "tools": request.tools.iter().map(|tool| &tool.name).collect::<Vec<_>>(),
-                }),
-            );
+            publish_llm_exchange(agent_id, "request", request_body.clone());
         }
+        let completion_trace = if let Some(agent_id) = log_agent.as_deref() {
+            crate::agent_trace_hook::open_completion_trace(agent_id, request_body).await
+        } else {
+            None
+        };
         let response = match self.factory.execute(&self.descriptor, harness_request).await {
             Ok(response) => response,
             Err(err) => {
+                let message = err.to_string();
                 if let Some(agent_id) = &log_agent {
                     publish_llm_exchange(
                         agent_id,
                         "response",
-                        serde_json::json!({ "error": err.to_string() }),
+                        serde_json::json!({ "error": message }),
                     );
                 }
+                crate::agent_trace_hook::close_completion_trace(
+                    completion_trace,
+                    false,
+                    serde_json::json!({ "error": message }),
+                    0,
+                    0,
+                )
+                .await;
                 return Err(err.into());
             }
         };
         crate::traffic::record_received();
+        let response_body = serde_json::json!({
+            "content": response.content,
+            "tool_calls": response
+                .tool_calls
+                .iter()
+                .map(|call| serde_json::json!({
+                    "id": call.id,
+                    "name": call.name,
+                    "arguments": call.arguments,
+                }))
+                .collect::<Vec<_>>(),
+        });
         if let Some(agent_id) = &log_agent {
-            publish_llm_exchange(
-                agent_id,
-                "response",
-                serde_json::json!({
-                    "content": response.content,
-                    "tool_calls": response
-                        .tool_calls
-                        .iter()
-                        .map(|call| serde_json::json!({
-                            "id": call.id,
-                            "name": call.name,
-                            "arguments": call.arguments,
-                        }))
-                        .collect::<Vec<_>>(),
-                }),
-            );
+            publish_llm_exchange(agent_id, "response", response_body.clone());
         }
         let input = response.usage_input_tokens.unwrap_or(0);
         let output = response.usage_output_tokens.unwrap_or(0);
@@ -347,10 +355,26 @@ impl InferenceClient {
             crate::token_usage::record_completion(input, output);
         }
         if response.content.trim().is_empty() && response.tool_calls.is_empty() {
+            crate::agent_trace_hook::close_completion_trace(
+                completion_trace,
+                false,
+                response_body,
+                input,
+                output,
+            )
+            .await;
             return Err(InferenceError::Provider(
                 "model returned empty content".into(),
             ));
         }
+        crate::agent_trace_hook::close_completion_trace(
+            completion_trace,
+            true,
+            response_body,
+            input,
+            output,
+        )
+        .await;
         Ok(CompletionOutcome {
             content: if response.content.trim().is_empty() {
                 None

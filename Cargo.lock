@@ -4061,6 +4061,7 @@ dependencies = [
  "async-trait",
  "hex",
  "hmac",
+ "promptlab-agenttrace",
  "promptlab-core",
  "promptlab-harness",
  "promptlab-models",
