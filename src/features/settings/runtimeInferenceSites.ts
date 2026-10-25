@@ -5,69 +5,76 @@ export type RuntimeInferenceSite = {
   description: string;
 };
 
-/** Workflows that invoke Yazg (AI Runtime) for inference (not display-only or config screens). */
+/** Features that call an agent for inference. */
 export const RUNTIME_INFERENCE_SITES: RuntimeInferenceSite[] = [
   {
     id: "auth-verify",
     title: "Endpoint verification",
-    location: "Scan wizard · Step 3 · AnalyzeEndpointAgent",
+    location: "Scan wizard · Step 3 · ANALYZE_ENDPOINT_AGENT",
     description:
-      "Yazg ReActs then delegates to AnalyzeEndpointAgent: after the HTTP probe succeeds, the agent classifies whether the response is from a live AI API.",
+      "AnalyzeEndpointAgent decides whether the probed target is a live AI API.",
   },
   {
     id: "attack-plan",
     title: "Attack plan generation",
-    location: "Scan wizard · Step 4 · AttackPlanAgent",
+    location: "Scan wizard · Step 4 · ATTACK_PLAN_AGENT",
     description:
-      "Yazg ReActs then delegates to AttackPlanAgent: reads the verified target profile and selects categories, techniques, execution strategy, and payload policy. Re-plan uses the same path.",
+      "AttackPlanAgent produces the categories, techniques, execution mode, and payload policy for a verified target.",
   },
   {
     id: "payload-gen",
     title: "Payload generation",
     location: "Scan execution · Generate phase",
     description:
-      "When the attack plan enables local LLM payload mode, Yazg generates context-aware payload variants before each attack batch.",
+      "Payload variants for the attack plan.",
   },
   {
     id: "agentic-execution",
     title: "Agentic scan execution",
-    location: "Scan execution · Agentic · AgenticAttackExecutionAgent",
+    location: "Scan execution · Agentic · AGENTIC_ATTACK_EXECUTION_AGENT",
     description:
-      "Yazg ReActs on the attack plan to pick this agent, then AgenticAttackExecutionAgent ReActs across generate → attack → ReflectionAgent → AttackPlanAgent adapt → retry. HTTP attack stays a host harness tool (cancel/pause safe).",
+      "AgenticAttackExecutionAgent pursues the attack plan across multiple attempts.",
   },
   {
     id: "sequential-execution",
     title: "Sequential scan execution",
-    location: "Scan execution · Sequential · SequentialAttackExecutionAgent",
+    location: "Scan execution · Sequential · SEQUENTIAL_ATTACK_EXECUTION_AGENT",
     description:
-      "Yazg ReActs on the attack plan to pick this agent, then SequentialAttackExecutionAgent ReActs generate → attack(+JudgeCoordinator) → recover. No reflection/adapt loop.",
+      "SequentialAttackExecutionAgent pursues the attack plan one category at a time.",
   },
   {
     id: "judge",
     title: "Response judging",
-    location: "Scan execution · Judge phase · JudgeCoordinatorAgent",
+    location: "Scan execution · Judge phase · JUDGE_COORDINATOR_AGENT",
     description:
-      "Yazg delegates to JudgeCoordinatorAgent, which ReActs to call JudgeWorker, ClassifierWorker, and AttackerWorker tools, then synthesizes a consensus verdict used to write findings.",
+      "JudgeCoordinatorAgent decides whether a target reply is a finding.",
   },
   {
     id: "recommendations",
     title: "Remediation recommendations",
-    location: "Scan wizard · Step 6 · Scan details · RecommendAgent",
+    location: "Scan wizard · Step 6 · Scan details · RECOMMEND_AGENT",
     description:
-      "Yazg ReActs then delegates to RecommendAgent: summarizes scan findings and produces prioritized fix guidance. Falls back to rule-based text if Yazg is unavailable.",
+      "RecommendAgent writes prioritized fixes for the findings in a scan.",
   },
   {
     id: "project-summary",
     title: "Project summary",
-    location: "Project details · Summary · SummaryAgent",
+    location: "Project details · Summary · SUMMARY_AGENT",
     description:
-      "Yazg ReActs then delegates to SummaryAgent: summarizes overall project posture across targets, scans, and findings. The result is persisted on the project and reused until regenerated.",
+      "SummaryAgent writes the security posture of a project.",
   },
   {
     id: "attack-factory-prompt",
     title: "Attack Factory prompt generation",
-    location: "Advanced · Attack Factory · GeneratePromptAgent",
+    location: "Advanced · Attack Factory · GENERATE_PROMPT_AGENT",
     description:
-      "Yazg ReActs then delegates to GeneratePromptAgent: invents a novel adversarial probe for the selected technique from its metadata and current factory prompt. Review and save before it replaces the catalog entry.",
+      "GeneratePromptAgent writes a new probe for one attack technique.",
+  },
+  {
+    id: "jailbreak-agent",
+    title: "Jailbreak",
+    location: "Advanced · Prompt Lab · Jailbreak · JAILBREAK_AGENT",
+    description:
+      "JailbreakAgent writes prompts for one goal on a guarded model.",
   },
 ];

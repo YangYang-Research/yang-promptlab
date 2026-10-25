@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button, IconButton, IconExternalLink } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
 import { recordLocalActivity } from "@/shared/activity/localActivity";
 import {
+  listProviderModels,
   saveThirdPartyModelForm,
   testThirdPartyModelConnectivity,
   thirdPartyConnectionTestFingerprint,
@@ -51,6 +52,114 @@ function ModelIdLabel({
   );
 }
 
+function catalogFingerprint(form: ThirdPartyModelForm): string {
+  return JSON.stringify({
+    provider: form.provider,
+    customProviderName: form.customProviderName.trim(),
+    baseUrl: form.baseUrl?.trim() || "",
+    apiKey: form.apiKey.trim() || (form.apiKeyConfigured ? "configured" : ""),
+    apiKeyEnv: form.apiKeyEnv?.trim() || "",
+    awsSecretAccessKey:
+      form.awsSecretAccessKey.trim() || (form.awsSecretAccessKeyConfigured ? "configured" : ""),
+    awsSessionToken:
+      form.awsSessionToken.trim() || (form.awsSessionTokenConfigured ? "configured" : ""),
+    awsRegion: form.awsRegion?.trim() || "",
+  });
+}
+
+function catalogReady(form: ThirdPartyModelForm): boolean {
+  if (form.provider === "bedrock") {
+    const key = form.apiKey.trim() || form.apiKeyConfigured;
+    const secret = form.awsSecretAccessKey.trim() || form.awsSecretAccessKeyConfigured;
+    return Boolean(key && secret);
+  }
+  if (form.provider === "custom") {
+    return Boolean(form.baseUrl?.trim());
+  }
+  return Boolean(form.apiKey.trim() || form.apiKeyConfigured || form.apiKeyEnv?.trim());
+}
+
+function ModelIdPicker({
+  id,
+  value,
+  placeholder,
+  disabled,
+  mono,
+  loading,
+  open,
+  options,
+  onChange,
+  onFocus,
+  onBlur,
+  onPick,
+}: {
+  id: string;
+  value: string;
+  placeholder: string;
+  disabled: boolean;
+  mono?: boolean;
+  loading: boolean;
+  open: boolean;
+  options: string[];
+  onChange: (value: string) => void;
+  onFocus: () => void;
+  onBlur: () => void;
+  onPick: (value: string) => void;
+}) {
+  const [filterQuery, setFilterQuery] = useState<string | null>(null);
+  const query = (filterQuery ?? "").trim().toLowerCase();
+  const shown = options
+    .filter((modelId) => !query || modelId.toLowerCase().includes(query))
+    .slice(0, 200);
+  const showList = open && (loading || shown.length > 0);
+
+  return (
+    <div className="third-party-models__picker">
+      <input
+        id={id}
+        className={mono ? "input mono" : "input"}
+        placeholder={placeholder}
+        value={value}
+        disabled={disabled}
+        role="combobox"
+        aria-expanded={showList}
+        aria-controls={`${id}-catalog`}
+        aria-autocomplete="list"
+        onChange={(event) => {
+          setFilterQuery(event.target.value);
+          onChange(event.target.value);
+        }}
+        onFocus={() => {
+          setFilterQuery(null);
+          onFocus();
+        }}
+        onBlur={onBlur}
+      />
+      {showList ? (
+        <ul id={`${id}-catalog`} className="third-party-models__catalog" role="listbox">
+          {loading && shown.length === 0 ? (
+            <li className="third-party-models__catalog-status">Loading models…</li>
+          ) : (
+            shown.map((modelId) => (
+              <li key={modelId}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={modelId === value}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => onPick(modelId)}
+                >
+                  {modelId}
+                </button>
+              </li>
+            ))
+          )}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function connectivityToast(
   result: ThirdPartyModelConnectivityResult,
 ): { message: string; type: "success" | "error" } {
@@ -86,6 +195,13 @@ export function ThirdPartyModelsPanel({
     fingerprint: string;
     latencyMs: number;
   } | null>(null);
+  const [catalog, setCatalog] = useState<string[]>([]);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const catalogKey = useRef<string | null>(null);
+  const catalogInflight = useRef<string | null>(null);
+  const catalogRequest = useRef(0);
+  const catalogWantsOpen = useRef(false);
 
   useEffect(() => {
     if (initialForm) {
@@ -93,6 +209,9 @@ export function ThirdPartyModelsPanel({
       setSaved(false);
       setError(null);
       setSuccessfulTest(null);
+      setCatalog([]);
+      setCatalogOpen(false);
+      catalogKey.current = null;
     }
   }, [initialForm]);
 
@@ -112,6 +231,17 @@ export function ThirdPartyModelsPanel({
   function patchForm(patchValue: Partial<ThirdPartyModelForm>) {
     setSaved(false);
     setSuccessfulTest(null);
+    if (
+      "apiKey" in patchValue ||
+      "baseUrl" in patchValue ||
+      "apiKeyEnv" in patchValue ||
+      "customProviderName" in patchValue ||
+      "awsSecretAccessKey" in patchValue ||
+      "awsSessionToken" in patchValue ||
+      "awsRegion" in patchValue
+    ) {
+      catalogKey.current = null;
+    }
     setForm((current) => ({ ...current, ...patchValue }));
   }
 
@@ -119,6 +249,44 @@ export function ThirdPartyModelsPanel({
     setForm(thirdPartyModelTemplate(provider));
     setSaved(false);
     setSuccessfulTest(null);
+    setCatalog([]);
+    setCatalogOpen(false);
+    catalogKey.current = null;
+  }
+
+  async function loadCatalog(openList: boolean) {
+    if (openList) catalogWantsOpen.current = true;
+    if (!backendConnected || !catalogReady(form)) {
+      setCatalogOpen(catalogWantsOpen.current && catalog.length > 0);
+      return;
+    }
+    const key = catalogFingerprint(form);
+    if (catalogKey.current === key || catalogInflight.current === key) {
+      setCatalogOpen(
+        catalogWantsOpen.current && (catalog.length > 0 || catalogInflight.current === key),
+      );
+      return;
+    }
+    const requestId = catalogRequest.current + 1;
+    catalogRequest.current = requestId;
+    catalogInflight.current = key;
+    setCatalogLoading(true);
+    if (catalogWantsOpen.current) setCatalogOpen(true);
+    try {
+      const result = await listProviderModels(form, editingModelId);
+      if (catalogRequest.current !== requestId) return;
+      catalogKey.current = key;
+      setCatalog(result.models);
+      setCatalogOpen(catalogWantsOpen.current && result.models.length > 0);
+    } catch {
+      if (catalogRequest.current !== requestId) return;
+      catalogKey.current = key;
+      setCatalog([]);
+      setCatalogOpen(false);
+    } finally {
+      if (catalogInflight.current === key) catalogInflight.current = null;
+      if (catalogRequest.current === requestId) setCatalogLoading(false);
+    }
   }
 
   async function handleSave() {
@@ -238,13 +406,29 @@ export function ThirdPartyModelsPanel({
                 providerLabel={selectedProvider.label}
                 modelsDocsUrl={selectedProvider.modelsDocsUrl}
               />
-              <input
+              <ModelIdPicker
                 id="bedrockModel"
-                className="input mono"
-                placeholder={selectedProvider.modelPlaceholder}
                 value={form.model}
+                placeholder={selectedProvider.modelPlaceholder}
                 disabled={!backendConnected}
-                onChange={(e) => patchForm({ model: e.target.value })}
+                mono
+                loading={catalogLoading}
+                open={catalogOpen}
+                options={catalog}
+                onChange={(model) => {
+                  patchForm({ model });
+                  setCatalogOpen(true);
+                }}
+                onFocus={() => void loadCatalog(true)}
+                onBlur={() => {
+                  catalogWantsOpen.current = false;
+                  window.setTimeout(() => setCatalogOpen(false), 120);
+                }}
+                onPick={(model) => {
+                  catalogWantsOpen.current = false;
+                  patchForm({ model });
+                  setCatalogOpen(false);
+                }}
               />
             </div>
 
@@ -257,6 +441,7 @@ export function ThirdPartyModelsPanel({
                 value={form.apiKey}
                 disabled={!backendConnected}
                 onChange={(e) => patchForm({ apiKey: e.target.value })}
+                onBlur={() => void loadCatalog(false)}
                 autoComplete="off"
               />
             </div>
@@ -273,6 +458,7 @@ export function ThirdPartyModelsPanel({
                 value={form.awsSecretAccessKey}
                 disabled={!backendConnected}
                 onChange={(e) => patchForm({ awsSecretAccessKey: e.target.value })}
+                onBlur={() => void loadCatalog(false)}
                 autoComplete="off"
               />
             </div>
@@ -291,9 +477,10 @@ export function ThirdPartyModelsPanel({
                   }
                   value={form.awsSessionToken}
                   disabled={!backendConnected}
-                  onChange={(e) => patchForm({ awsSessionToken: e.target.value })}
-                  autoComplete="off"
-                />
+                onChange={(e) => patchForm({ awsSessionToken: e.target.value })}
+                onBlur={() => void loadCatalog(false)}
+                autoComplete="off"
+              />
               </div>
             )}
 
@@ -308,6 +495,7 @@ export function ThirdPartyModelsPanel({
                 onChange={(e) =>
                   patchForm({ awsRegion: e.target.value.trim() || null })
                 }
+                onBlur={() => void loadCatalog(false)}
               />
             </div>
           </>
@@ -339,13 +527,28 @@ export function ThirdPartyModelsPanel({
                 providerLabel={selectedProvider.label}
                 modelsDocsUrl={selectedProvider.modelsDocsUrl}
               />
-              <input
+              <ModelIdPicker
                 id="thirdPartyModel"
-                className="input"
-                placeholder={selectedProvider.modelPlaceholder}
                 value={form.model}
+                placeholder={selectedProvider.modelPlaceholder}
                 disabled={!backendConnected}
-                onChange={(e) => patchForm({ model: e.target.value })}
+                loading={catalogLoading}
+                open={catalogOpen}
+                options={catalog}
+                onChange={(model) => {
+                  patchForm({ model });
+                  setCatalogOpen(catalog.length > 0);
+                }}
+                onFocus={() => void loadCatalog(true)}
+                onBlur={() => {
+                  catalogWantsOpen.current = false;
+                  window.setTimeout(() => setCatalogOpen(false), 120);
+                }}
+                onPick={(model) => {
+                  catalogWantsOpen.current = false;
+                  patchForm({ model });
+                  setCatalogOpen(false);
+                }}
               />
             </div>
 
@@ -366,6 +569,7 @@ export function ThirdPartyModelsPanel({
                 value={form.baseUrl ?? ""}
                 disabled={!backendConnected}
                 onChange={(e) => patchForm({ baseUrl: e.target.value.trim() || null })}
+                onBlur={() => void loadCatalog(false)}
               />
             </div>
 
@@ -379,6 +583,7 @@ export function ThirdPartyModelsPanel({
                 value={form.apiKey}
                 disabled={!backendConnected}
                 onChange={(e) => patchForm({ apiKey: e.target.value })}
+                onBlur={() => void loadCatalog(false)}
               />
             </div>
 
@@ -395,6 +600,42 @@ export function ThirdPartyModelsPanel({
             </div>
           </>
         )}
+      </div>
+
+      <div className="third-party-models__sampling">
+        <div className="settings-field">
+          <label htmlFor="modelTemperature">Temperature</label>
+          <input
+            id="modelTemperature"
+            className="input"
+            type="number"
+            min={0}
+            max={2}
+            step={0.1}
+            value={form.temperature}
+            disabled={!backendConnected}
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              if (Number.isFinite(next)) patchForm({ temperature: next });
+            }}
+          />
+        </div>
+        <div className="settings-field">
+          <label htmlFor="modelContextWindow">Context window size</label>
+          <input
+            id="modelContextWindow"
+            className="input"
+            type="number"
+            min={1}
+            step={1}
+            value={form.contextWindow}
+            disabled={!backendConnected}
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              if (Number.isFinite(next)) patchForm({ contextWindow: Math.trunc(next) });
+            }}
+          />
+        </div>
       </div>
 
       <div className="model-card__actions">

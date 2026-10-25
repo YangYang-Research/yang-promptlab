@@ -637,6 +637,19 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         None
     };
 
+    let tracked = run_yazg_tracked(request, active_trace.clone(), conversation_id);
+    if let Some(trace) = active_trace {
+        promptlab_agenttrace::with_bound_trace(trace, tracked).await
+    } else {
+        tracked.await
+    }
+}
+
+async fn run_yazg_tracked(
+    request: YazgRequest,
+    active_trace: Option<promptlab_agenttrace::TraceHandle>,
+    conversation_id: Option<String>,
+) -> AgentResult<(YazgArtifacts, serde_json::Value)> {
     let mut artifacts = YazgArtifacts::default();
     artifacts.trace_id = active_trace.as_ref().map(|t| t.id().to_string());
     artifacts.events.push(AgentEvent::emit_kind(
@@ -1034,6 +1047,14 @@ pub async fn run_yazg(request: YazgRequest) -> AgentResult<(YazgArtifacts, serde
         normalized_reply
     };
 
+    artifacts.final_reply = crate::agent_reflection::revise_text(
+        AgentId::Yazg,
+        &request.goal,
+        artifacts.final_reply,
+        request.llms.supervisor.as_ref(),
+    )
+    .await;
+
     remember_stm(
         request.memory.as_deref(),
         &request.memory_ctx,
@@ -1144,9 +1165,12 @@ fn build_capability_tools(
     }
     let allowed: std::collections::HashSet<&str> =
         loaded.tool_names.iter().copied().collect();
+    let yazg = promptlab_registry::agent_registry::load(crate::types::AgentId::Yazg.as_str())
+        .expect("yazg");
+    let allow = |name: &str| allowed.contains(name) && yazg.owns_tool(name);
     let mut out: Vec<Box<dyn ToolDyn>> = Vec::new();
 
-    if allowed.contains("analyze_endpoint") {
+    if allow("analyze_endpoint") {
         out.push(Box::new(AnalyzeEndpointTool {
             ctx: specialist.clone(),
             llm: request.llms.analyze.clone(),
@@ -1154,68 +1178,68 @@ fn build_capability_tools(
         }));
     }
     if let Some(tools) = request.workspace_tools.clone() {
-        if allowed.contains("list_workspace") {
+        if allow("list_workspace") {
             out.push(Box::new(ListWorkspaceTool {
                 tools: tools.clone(),
                 state: state.clone(),
             }));
         }
-        if allowed.contains("project_detail") {
+        if allow("project_detail") {
             out.push(Box::new(ProjectDetailTool {
                 tools: tools.clone(),
                 state: state.clone(),
             }));
         }
-        if allowed.contains("list_scan") {
+        if allow("list_scan") {
             out.push(Box::new(ListScanTool {
                 tools: tools.clone(),
                 state: state.clone(),
             }));
         }
-        if allowed.contains("scan_detail") {
+        if allow("scan_detail") {
             out.push(Box::new(ScanDetailTool {
                 tools: tools.clone(),
                 state: state.clone(),
             }));
         }
-        if allowed.contains("list_findings") {
+        if allow("list_findings") {
             out.push(Box::new(ListFindingsTool {
                 tools: tools.clone(),
                 state: state.clone(),
             }));
         }
-        if allowed.contains("finding_detail") {
+        if allow("finding_detail") {
             out.push(Box::new(FindingDetailTool {
                 tools: tools.clone(),
                 state: state.clone(),
             }));
         }
-        if allowed.contains("list_targets") {
+        if allow("list_targets") {
             out.push(Box::new(ListTargetsTool {
                 tools: tools.clone(),
                 state: state.clone(),
             }));
         }
-        if allowed.contains("target_detail") {
+        if allow("target_detail") {
             out.push(Box::new(TargetDetailTool {
                 tools: tools.clone(),
                 state: state.clone(),
             }));
         }
-        if allowed.contains("list_reports") {
+        if allow("list_reports") {
             out.push(Box::new(ListReportsTool {
                 tools: tools.clone(),
                 state: state.clone(),
             }));
         }
-        if allowed.contains("report_detail") {
+        if allow("report_detail") {
             out.push(Box::new(ReportDetailTool {
                 tools: tools.clone(),
                 state: state.clone(),
             }));
         }
     }
-    if allowed.contains("create_project") {
+    if allow("create_project") {
         if request.project_tools.is_some() {
             if let Some(tools) = request.workspace_tools.clone() {
                 out.push(Box::new(CreateProjectTool {
@@ -1225,35 +1249,35 @@ fn build_capability_tools(
             }
         }
     }
-    if allowed.contains("attack_plan") {
+    if allow("attack_plan") {
         out.push(Box::new(AttackPlanTool {
             ctx: specialist.clone(),
             llm: request.llms.plan.clone(),
             state: state.clone(),
         }));
     }
-    if allowed.contains("generate_prompt") {
+    if allow("generate_prompt") {
         out.push(Box::new(GeneratePromptTool {
             ctx: specialist.clone(),
             llm: request.llms.prompt.clone(),
             state: state.clone(),
         }));
     }
-    if allowed.contains("recommend") {
+    if allow("recommend") {
         out.push(Box::new(RecommendTool {
             ctx: specialist.clone(),
             llm: request.llms.recommend.clone(),
             state: state.clone(),
         }));
     }
-    if allowed.contains("summary") {
+    if allow("summary") {
         out.push(Box::new(SummaryTool {
             ctx: specialist.clone(),
             llm: request.llms.summary.clone(),
             state: state.clone(),
         }));
     }
-    if allowed.contains("judge") {
+    if allow("judge") {
         out.push(Box::new(JudgeTool {
             ctx: specialist,
             orchestrator: request.llms.judge.clone(),

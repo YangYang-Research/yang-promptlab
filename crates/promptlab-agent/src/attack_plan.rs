@@ -69,6 +69,17 @@ impl AttackPlanAgent {
         profile: &TargetProfile,
         llm: &dyn PlannerLlm,
     ) -> AgentResult<AttackPlanAgentOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::AttackPlan.as_str(),
+            Self::run_traced(profile, llm),
+        )
+        .await
+    }
+
+    async fn run_traced(
+        profile: &TargetProfile,
+        llm: &dyn PlannerLlm,
+    ) -> AgentResult<AttackPlanAgentOutcome> {
         if !profile.is_verified() {
             return Err(AgentError::InvalidInput(
                 "AttackPlanAgent requires a verified target profile".into(),
@@ -82,7 +93,8 @@ impl AttackPlanAgent {
 
         info!(endpoint = %profile.full_url(), "AttackPlanAgent started");
 
-        match build_wizard_attack_plan_with_llm(profile, llm).await {
+        let attempts = crate::agent_attempts::agent_attempts(AgentId::AttackPlan);
+        match build_wizard_attack_plan_with_llm(profile, llm, attempts).await {
             Ok(plan) => {
                 events.push(AgentEvent::completed(
                     AgentId::AttackPlan,
@@ -105,6 +117,17 @@ impl AttackPlanAgent {
 
     /// Mid-scan adapt: decide how to escalate strategy / rotate techniques for the next attempt.
     pub async fn adapt(
+        request: &AdaptPlanRequest,
+        llm: &dyn PlannerLlm,
+    ) -> AgentResult<AdaptPlanOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::AttackPlan.as_str(),
+            Self::adapt_traced(request, llm),
+        )
+        .await
+    }
+
+    async fn adapt_traced(
         request: &AdaptPlanRequest,
         llm: &dyn PlannerLlm,
     ) -> AgentResult<AdaptPlanOutcome> {
@@ -169,6 +192,8 @@ Last result summary:
             summary = request.last_result_summary,
         );
 
+        let reflecting = crate::agent_reflection::ReflectingLlm::new(AgentId::AttackPlan, llm);
+        let llm: &dyn PlannerLlm = &reflecting;
         match llm.complete(&prompt).await {
             Ok(raw) => match parse_adapt(&raw) {
                 Ok(parsed) => {

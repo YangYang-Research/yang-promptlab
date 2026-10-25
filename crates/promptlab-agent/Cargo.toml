@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 promptlab-planner = { workspace = true }
+promptlab-registry = { workspace = true }
 promptlab-target-profile = { workspace = true }
 promptlab-judge = { workspace = true }
 promptlab-core = { workspace = true }

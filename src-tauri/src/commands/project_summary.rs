@@ -413,7 +413,7 @@ pub async fn project_summary_generate_op(
                         Ok(_) => {
                             warn!(
                                 project_id = %project_id,
-                                "Yazg ReAct finished without SummaryAgent; using rule-based fallback"
+                                "SummaryAgent returned no summary; using rule-based fallback"
                             );
                             None
                         }

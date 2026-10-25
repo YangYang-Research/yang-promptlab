@@ -202,6 +202,20 @@ impl AgenticAttackExecutionAgent {
         memory: Option<&dyn AgentMemoryStore>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<AttackExecutionOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::AgenticAttackExecution.as_str(),
+            Self::run_traced(request, tools, llms, memory, memory_ctx),
+        )
+        .await
+    }
+
+    async fn run_traced(
+        request: &AttackExecutionRequest,
+        tools: &dyn AttackExecutionTools,
+        llms: &AttackExecutionLlms,
+        memory: Option<&dyn AgentMemoryStore>,
+        memory_ctx: MemoryContext,
+    ) -> AgentResult<AttackExecutionOutcome> {
         if request.category.trim().is_empty() {
             return Err(AgentError::InvalidInput(
                 "AgenticAttackExecutionAgent requires a category".into(),

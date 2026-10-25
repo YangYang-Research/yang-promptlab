@@ -32,12 +32,27 @@ impl AnalyzeEndpointAgent {
         auth_headers: HashMap<String, String>,
         llm: &dyn PlannerLlm,
     ) -> AgentResult<AnalyzeEndpointAgentOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::AnalyzeEndpoint.as_str(),
+            Self::run_traced(profile, auth_headers, llm),
+        )
+        .await
+    }
+
+    async fn run_traced(
+        profile: &TargetProfile,
+        auth_headers: HashMap<String, String>,
+        llm: &dyn PlannerLlm,
+    ) -> AgentResult<AnalyzeEndpointAgentOutcome> {
         let mut events = vec![AgentEvent::started(
             AgentId::AnalyzeEndpoint,
             format!("Analyzing endpoint {}", profile.full_url()),
         )];
 
         info!(endpoint = %profile.full_url(), "AnalyzeEndpointAgent started");
+        let reflecting =
+            crate::agent_reflection::ReflectingLlm::new(AgentId::AnalyzeEndpoint, llm);
+        let llm: &dyn PlannerLlm = &reflecting;
         let attempt = verify_target_profile_with_llm(profile, auth_headers, llm).await;
         map_attempt(attempt, &mut events)
     }
@@ -48,11 +63,26 @@ impl AnalyzeEndpointAgent {
         http: &VerifyHttpSuccess,
         llm: &dyn PlannerLlm,
     ) -> AgentResult<AnalyzeEndpointAgentOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::AnalyzeEndpoint.as_str(),
+            Self::classify_probe_traced(profile, http, llm),
+        )
+        .await
+    }
+
+    async fn classify_probe_traced(
+        profile: &TargetProfile,
+        http: &VerifyHttpSuccess,
+        llm: &dyn PlannerLlm,
+    ) -> AgentResult<AnalyzeEndpointAgentOutcome> {
         let mut events = vec![AgentEvent::started(
             AgentId::AnalyzeEndpoint,
             "Classifying capability probe with Yazg",
         )];
 
+        let reflecting =
+            crate::agent_reflection::ReflectingLlm::new(AgentId::AnalyzeEndpoint, llm);
+        let llm: &dyn PlannerLlm = &reflecting;
         let attempt = validate_http_response_with_llm(profile, http, llm).await;
         map_attempt(attempt, &mut events)
     }

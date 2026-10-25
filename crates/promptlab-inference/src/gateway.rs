@@ -230,8 +230,18 @@ impl InferenceClient {
         &self,
         request: CompleteRequest,
     ) -> InferenceResult<CompletionOutcome> {
-        let max_tokens = request.max_tokens.unwrap_or(self.default_max_tokens);
-        let temperature = request.temperature.unwrap_or(self.default_temperature);
+        // jailbreak_agent omits max_tokens so the provider is not capped at a host default.
+        let max_tokens = if request.purpose.as_deref() == Some("jailbreak_agent") {
+            request.max_tokens
+        } else {
+            Some(request.max_tokens.unwrap_or(self.default_max_tokens))
+        };
+        let temperature = crate::agent_temperature::resolve_call_temperature(
+            llm_log_agent(request.purpose.as_deref()).as_deref(),
+            request.purpose.as_deref(),
+            request.temperature,
+            self.default_temperature,
+        );
         let purpose = request
             .purpose
             .as_deref()
@@ -256,12 +266,21 @@ impl InferenceClient {
             messages.push(ChatMessage::text("user", request.prompt));
             messages
         };
+        let logged_messages: Vec<serde_json::Value> = messages
+            .iter()
+            .map(|message| {
+                serde_json::json!({
+                    "role": message.role,
+                    "content": message.text_content(),
+                })
+            })
+            .collect();
         let mut harness_request = AttackRequest::from_chat(self.descriptor.url.clone(), messages);
         harness_request.purpose = purpose;
         harness_request.auth = self.descriptor.auth.clone();
         harness_request.headers = self.descriptor.headers.clone();
         harness_request.model = Some(self.model_id.clone());
-        harness_request.max_tokens = Some(max_tokens);
+        harness_request.max_tokens = max_tokens;
         harness_request.temperature = Some(temperature);
         harness_request.timeout_ms = self.timeout_ms;
         harness_request.cancel = self.cancel.clone();
@@ -276,21 +295,86 @@ impl InferenceClient {
             .collect();
         harness_request.tool_choice = request.tool_choice.clone();
         crate::traffic::record_sent();
-        let response = self
-            .factory
-            .execute(&self.descriptor, harness_request)
-            .await?;
+        let log_agent = llm_log_agent(request.purpose.as_deref());
+        let request_body = serde_json::json!({
+            "model": self.model_id,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "messages": logged_messages,
+            "tools": request.tools.iter().map(|tool| &tool.name).collect::<Vec<_>>(),
+        });
+        if let Some(agent_id) = &log_agent {
+            publish_llm_exchange(agent_id, "request", request_body.clone());
+        }
+        let completion_span = if let Some(agent_id) = log_agent.as_deref() {
+            crate::agent_trace_hook::open_completion_span(agent_id, request_body).await
+        } else {
+            None
+        };
+        let response = match self.factory.execute(&self.descriptor, harness_request).await {
+            Ok(response) => response,
+            Err(err) => {
+                let message = err.to_string();
+                if let Some(agent_id) = &log_agent {
+                    publish_llm_exchange(
+                        agent_id,
+                        "response",
+                        serde_json::json!({ "error": message }),
+                    );
+                }
+                crate::agent_trace_hook::close_completion_span(
+                    completion_span,
+                    false,
+                    serde_json::json!({ "error": message }),
+                    0,
+                    0,
+                )
+                .await;
+                return Err(err.into());
+            }
+        };
         crate::traffic::record_received();
+        let response_body = serde_json::json!({
+            "content": response.content,
+            "tool_calls": response
+                .tool_calls
+                .iter()
+                .map(|call| serde_json::json!({
+                    "id": call.id,
+                    "name": call.name,
+                    "arguments": call.arguments,
+                }))
+                .collect::<Vec<_>>(),
+        });
+        if let Some(agent_id) = &log_agent {
+            publish_llm_exchange(agent_id, "response", response_body.clone());
+        }
         let input = response.usage_input_tokens.unwrap_or(0);
         let output = response.usage_output_tokens.unwrap_or(0);
         if input > 0 || output > 0 {
             crate::token_usage::record_completion(input, output);
         }
         if response.content.trim().is_empty() && response.tool_calls.is_empty() {
+            crate::agent_trace_hook::close_completion_span(
+                completion_span,
+                false,
+                response_body,
+                input,
+                output,
+            )
+            .await;
             return Err(InferenceError::Provider(
                 "model returned empty content".into(),
             ));
         }
+        crate::agent_trace_hook::close_completion_span(
+            completion_span,
+            true,
+            response_body,
+            input,
+            output,
+        )
+        .await;
         Ok(CompletionOutcome {
             content: if response.content.trim().is_empty() {
                 None
@@ -572,5 +656,63 @@ impl<'a> GatewayLlmBridge<'a> {
                 purpose: None,
             })
             .await
+    }
+}
+
+/// Agent that owns this completion. Health probes and unlabeled calls stay out of agents.log.
+fn llm_log_agent(purpose: Option<&str>) -> Option<String> {
+    if let Some(agent_id) = crate::token_usage::scoped_agent_id() {
+        return Some(agent_id);
+    }
+    let purpose = purpose.unwrap_or("").trim();
+    if purpose.is_empty()
+        || purpose == "health"
+        || purpose == crate::token_usage::RUNTIME_SYSTEM_AGENT
+    {
+        return None;
+    }
+    Some(purpose.to_string())
+}
+
+fn publish_llm_exchange(agent_id: &str, stage: &str, body: serde_json::Value) {
+    let Some(bus) = promptlab_core::global_event_bus() else {
+        return;
+    };
+    let name = crate::token_usage::humanize_agent_id(agent_id);
+    let rendered = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
+    let message = format!("{name}: llm {stage}\n{rendered}");
+    let event = promptlab_core::OcsfEvent::new(
+        promptlab_core::LogCategory::Agent,
+        promptlab_core::OcsfSeverity::Informational,
+        "llm",
+        "promptlab-inference",
+        agent_id,
+        message,
+    )
+    .with_agent_name(name.clone())
+    .attr("agent", agent_id)
+    .attr("agentDisplay", name)
+    .attr("eventKind", "llm")
+    .attr("stage", stage);
+    bus.publish(event);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::llm_log_agent;
+
+    #[test]
+    fn agent_purpose_is_logged() {
+        assert_eq!(
+            llm_log_agent(Some("generate_prompt_agent")).as_deref(),
+            Some("generate_prompt_agent")
+        );
+    }
+
+    #[test]
+    fn health_and_unlabeled_calls_are_not_agent_logs() {
+        assert!(llm_log_agent(Some("health")).is_none());
+        assert!(llm_log_agent(None).is_none());
+        assert!(llm_log_agent(Some("runtime_system")).is_none());
     }
 }

@@ -51,6 +51,17 @@ impl ReflectionAgent {
         request: &ReflectionRequest,
         llm: Arc<dyn PlannerLlm>,
     ) -> AgentResult<ReflectionOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::Reflection.as_str(),
+            Self::run_traced(request, llm),
+        )
+        .await
+    }
+
+    async fn run_traced(
+        request: &ReflectionRequest,
+        llm: Arc<dyn PlannerLlm>,
+    ) -> AgentResult<ReflectionOutcome> {
         let mut events = vec![AgentEvent::started(
             AgentId::Reflection,
             format!(
@@ -66,15 +77,12 @@ impl ReflectionAgent {
         );
 
         let model = YazgModel::new(llm);
-        let preamble = "\
-You are ReflectionAgent for an authorized AI security scan (agentic execution).\n\
-Extract a retry decision from the user text.\n\
-Rules:\n\
-- should_retry=false when a vulnerability is already confirmed with useful confidence, \
-  or remaining attempts would not change coverage meaningfully.\n\
-- should_retry=true when results are inconclusive, blocked, or no confirmed finding and attempts remain.\n\
-- focus_hints: short cues for the next generate/adapt step (may be empty).\n\
-- Do not invent findings.";
+        let preamble = promptlab_registry::agent_registry::load(
+            crate::types::AgentId::Reflection.as_str(),
+        )
+        .and_then(|agent| agent.system_prompt())
+        .expect("reflection_agent")
+        .system;
 
         let extractor = ExtractorBuilder::<_, ReflectionExtract>::new(model)
             .preamble(preamble)

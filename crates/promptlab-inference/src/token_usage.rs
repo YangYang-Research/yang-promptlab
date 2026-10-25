@@ -90,6 +90,14 @@ fn current_agent_id() -> Option<String> {
     CURRENT_AGENT.try_with(|value| value.clone()).ok()
 }
 
+/// Agent id from `with_agent`, when the caller is a real agent.
+pub(crate) fn scoped_agent_id() -> Option<String> {
+    current_agent_id().filter(|id| {
+        let id = id.trim();
+        !id.is_empty() && id != UNKNOWN_AGENT && id != RUNTIME_SYSTEM_AGENT
+    })
+}
+
 fn resolve_record_agent_id() -> String {
     match current_agent_id() {
         Some(agent) if !agent.trim().is_empty() && agent != UNKNOWN_AGENT => agent,
@@ -129,20 +137,48 @@ pub fn replace_all(by_agent: BTreeMap<String, AgentTokenUsage>) {
     let Ok(mut state) = monitor().lock() else {
         return;
     };
-    state.by_agent = migrate_legacy_buckets(by_agent);
-    state.dirty = false;
+    let mut by_agent = by_agent;
+    let changed = fold_legacy_agent_ids(&mut by_agent);
+    state.by_agent = by_agent;
+    state.dirty = changed;
 }
 
-fn migrate_legacy_buckets(
-    mut by_agent: BTreeMap<String, AgentTokenUsage>,
-) -> BTreeMap<String, AgentTokenUsage> {
+/// Ids stored before agent ids gained the `_agent` suffix.
+const LEGACY_AGENT_IDS: &[(&str, &str)] = &[
+    ("analyze_endpoint", "analyze_endpoint_agent"),
+    ("attack_plan", "attack_plan_agent"),
+    ("generate_prompt", "generate_prompt_agent"),
+    ("recommend", "recommend_agent"),
+    ("summary", "summary_agent"),
+    ("judge_coordinator", "judge_coordinator_agent"),
+    ("agentic_attack_execution", "agentic_attack_execution_agent"),
+    ("sequential_attack_execution", "sequential_attack_execution_agent"),
+    ("reflection", "reflection_agent"),
+];
+
+fn add_usage(entry: &mut AgentTokenUsage, legacy: AgentTokenUsage) {
+    entry.input_tokens = entry.input_tokens.saturating_add(legacy.input_tokens);
+    entry.output_tokens = entry.output_tokens.saturating_add(legacy.output_tokens);
+    entry.calls = entry.calls.saturating_add(legacy.calls);
+}
+
+/// Fold retired buckets into their current ids. Returns whether the map changed.
+fn fold_legacy_agent_ids(by_agent: &mut BTreeMap<String, AgentTokenUsage>) -> bool {
+    let mut changed = false;
     if let Some(legacy) = by_agent.remove(UNKNOWN_AGENT) {
-        let entry = by_agent.entry(RUNTIME_SYSTEM_AGENT.to_string()).or_default();
-        entry.input_tokens = entry.input_tokens.saturating_add(legacy.input_tokens);
-        entry.output_tokens = entry.output_tokens.saturating_add(legacy.output_tokens);
-        entry.calls = entry.calls.saturating_add(legacy.calls);
+        add_usage(
+            by_agent.entry(RUNTIME_SYSTEM_AGENT.to_string()).or_default(),
+            legacy,
+        );
+        changed = true;
     }
-    by_agent
+    for (old, new) in LEGACY_AGENT_IDS {
+        if let Some(legacy) = by_agent.remove(*old) {
+            add_usage(by_agent.entry((*new).to_string()).or_default(), legacy);
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// Clear all counters and mark dirty so persistence can wipe the file.
@@ -154,19 +190,12 @@ pub fn reset() {
     state.dirty = true;
 }
 
-/// Merge legacy `unknown` counters into [`RUNTIME_SYSTEM_AGENT`] and mark dirty.
+/// Merge retired agent ids into current ids and mark dirty when the map changes.
 pub fn migrate_unattributed() {
     let Ok(mut state) = monitor().lock() else {
         return;
     };
-    if let Some(legacy) = state.by_agent.remove(UNKNOWN_AGENT) {
-        let entry = state
-            .by_agent
-            .entry(RUNTIME_SYSTEM_AGENT.to_string())
-            .or_default();
-        entry.input_tokens = entry.input_tokens.saturating_add(legacy.input_tokens);
-        entry.output_tokens = entry.output_tokens.saturating_add(legacy.output_tokens);
-        entry.calls = entry.calls.saturating_add(legacy.calls);
+    if fold_legacy_agent_ids(&mut state.by_agent) {
         state.dirty = true;
     }
 }
@@ -194,18 +223,23 @@ pub fn export_map() -> BTreeMap<String, AgentTokenUsage> {
 pub fn humanize_agent_id(agent_id: &str) -> String {
     match agent_id {
         "yazg" => "Yazg".into(),
-        "analyze_endpoint" => "AnalyzeEndpointAgent".into(),
-        "attack_plan" => "AttackPlanAgent".into(),
-        "generate_prompt" => "GeneratePromptAgent".into(),
-        "recommend" => "RecommendAgent".into(),
-        "summary" => "SummaryAgent".into(),
-        "judge_coordinator" => "JudgeCoordinatorAgent".into(),
+        "analyze_endpoint" | "analyze_endpoint_agent" => "AnalyzeEndpointAgent".into(),
+        "attack_plan" | "attack_plan_agent" => "AttackPlanAgent".into(),
+        "generate_prompt" | "generate_prompt_agent" => "GeneratePromptAgent".into(),
+        "recommend" | "recommend_agent" => "RecommendAgent".into(),
+        "summary" | "summary_agent" => "SummaryAgent".into(),
+        "judge_coordinator" | "judge_coordinator_agent" => "JudgeCoordinatorAgent".into(),
         "judge_worker" => "JudgeWorker".into(),
         "classifier_worker" => "ClassifierWorker".into(),
         "attacker_worker" => "AttackerWorker".into(),
-        "agentic_attack_execution" => "AgenticAttackExecutionAgent".into(),
-        "sequential_attack_execution" => "SequentialAttackExecutionAgent".into(),
-        "reflection" => "ReflectionAgent".into(),
+        "agentic_attack_execution" | "agentic_attack_execution_agent" => {
+            "AgenticAttackExecutionAgent".into()
+        }
+        "sequential_attack_execution" | "sequential_attack_execution_agent" => {
+            "SequentialAttackExecutionAgent".into()
+        }
+        "reflection" | "reflection_agent" => "ReflectionAgent".into(),
+        "jailbreak_agent" => "JailbreakAgent".into(),
         "create_project" => "CreateProjectTool".into(),
         RUNTIME_SYSTEM_AGENT | "unknown" => "Runtime system".into(),
         other => other
@@ -225,22 +259,25 @@ pub fn humanize_agent_id(agent_id: &str) -> String {
 fn agent_note(agent_id: &str) -> Option<String> {
     match agent_id {
         RUNTIME_SYSTEM_AGENT => Some(RUNTIME_SYSTEM_NOTE.to_string()),
-        "judge_coordinator" => Some(
+        "judge_coordinator" | "judge_coordinator_agent" => Some(
             "ReAct turns that dispatch JudgeWorker / ClassifierWorker / AttackerWorker tools."
                 .into(),
         ),
-        "sequential_attack_execution" => Some(
+        "sequential_attack_execution" | "sequential_attack_execution_agent" => Some(
             "ReAct generate / attack / recover picks during sequential scans."
                 .into(),
         ),
-        "agentic_attack_execution" => Some(
+        "agentic_attack_execution" | "agentic_attack_execution_agent" => Some(
             "ReAct generate / attack / recover / reflect / adapt picks during agentic scans. ReflectionAgent votes are counted separately.".into(),
         ),
-        "reflection" => Some(
+        "reflection" | "reflection_agent" => Some(
             "Counts when an agentic scan has reflection enabled."
                 .into(),
         ),
-        "summary" => Some(
+        "jailbreak_agent" => Some(
+            "JailbreakAgent writes prompts for one goal on a guarded model.".into(),
+        ),
+        "summary" | "summary_agent" => Some(
             "Counts when you generate a project or scan summary (Project details or Yazg)."
                 .into(),
         ),
@@ -252,18 +289,19 @@ fn agent_note(agent_id: &str) -> Option<String> {
 pub fn known_agent_ids() -> &'static [&'static str] {
     &[
         "yazg",
-        "analyze_endpoint",
-        "attack_plan",
-        "generate_prompt",
-        "recommend",
-        "summary",
-        "judge_coordinator",
+        "analyze_endpoint_agent",
+        "attack_plan_agent",
+        "generate_prompt_agent",
+        "recommend_agent",
+        "summary_agent",
+        "judge_coordinator_agent",
         "judge_worker",
         "classifier_worker",
         "attacker_worker",
-        "agentic_attack_execution",
-        "sequential_attack_execution",
-        "reflection",
+        "agentic_attack_execution_agent",
+        "sequential_attack_execution_agent",
+        "reflection_agent",
+        "jailbreak_agent",
         RUNTIME_SYSTEM_AGENT,
     ]
 }
@@ -310,7 +348,7 @@ mod tests {
     #[tokio::test]
     async fn records_under_agent_label() {
         reset();
-        with_agent("recommend", || async {
+        with_agent("recommend_agent", || async {
             record_completion(10, 20);
             record_completion(5, 5);
         })
@@ -323,7 +361,7 @@ mod tests {
         let recommend = snap
             .agents
             .iter()
-            .find(|row| row.agent_id == "recommend")
+            .find(|row| row.agent_id == "recommend_agent")
             .expect("recommend row");
         assert_eq!(recommend.input_tokens, 15);
         assert_eq!(recommend.output_tokens, 25);
@@ -331,7 +369,7 @@ mod tests {
         let unused = snap
             .agents
             .iter()
-            .find(|row| row.agent_id == "summary")
+            .find(|row| row.agent_id == "summary_agent")
             .expect("summary row");
         assert_eq!(unused.calls, 0);
         reset();
@@ -356,9 +394,44 @@ mod tests {
         let sequential = snap
             .agents
             .iter()
-            .find(|row| row.agent_id == "sequential_attack_execution")
+            .find(|row| row.agent_id == "sequential_attack_execution_agent")
             .expect("sequential row");
         assert!(sequential.note.as_deref().unwrap_or("").contains("ReAct"));
+        reset();
+    }
+
+    #[test]
+    fn folds_legacy_agent_ids_into_agent_suffix() {
+        reset();
+        let mut map = BTreeMap::new();
+        map.insert(
+            "recommend".into(),
+            AgentTokenUsage {
+                input_tokens: 3,
+                output_tokens: 4,
+                calls: 1,
+            },
+        );
+        map.insert(
+            "recommend_agent".into(),
+            AgentTokenUsage {
+                input_tokens: 1,
+                output_tokens: 1,
+                calls: 1,
+            },
+        );
+        replace_all(map);
+        let snap = snapshot();
+        let row = snap
+            .agents
+            .iter()
+            .find(|row| row.agent_id == "recommend_agent")
+            .expect("recommend_agent row");
+        assert_eq!(row.label, "RecommendAgent");
+        assert_eq!(row.input_tokens, 4);
+        assert_eq!(row.output_tokens, 5);
+        assert_eq!(row.calls, 2);
+        assert!(!snap.agents.iter().any(|row| row.agent_id == "recommend"));
         reset();
     }
 

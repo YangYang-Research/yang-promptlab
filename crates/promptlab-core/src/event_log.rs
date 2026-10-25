@@ -10,7 +10,7 @@ use std::thread::{self, JoinHandle};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
+use time::{OffsetDateTime, UtcOffset};
 
 /// OCSF-inspired severity levels.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -143,6 +143,9 @@ pub struct OcsfEvent {
     pub activity_name: String,
     pub module: String,
     pub component: String,
+    /// Display name of the agent that performed the action. Set for agents.log.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -164,9 +167,7 @@ impl OcsfEvent {
         message: impl Into<String>,
     ) -> Self {
         let activity = activity_name.into();
-        let ts = OffsetDateTime::now_utc()
-            .format(&Rfc3339)
-            .unwrap_or_else(|_| "now".into());
+        let ts = local_rfc3339_now();
         Self {
             timestamp: ts,
             severity: severity.as_str().into(),
@@ -177,12 +178,21 @@ impl OcsfEvent {
             activity_name: activity,
             module: module.into(),
             component: component.into(),
+            agent_name: None,
             workspace_id: None,
             project_id: None,
             scan_id: None,
             message: mask_secrets(&message.into()),
             attributes: Map::new(),
         }
+    }
+
+    pub fn with_agent_name(mut self, name: impl Into<String>) -> Self {
+        let name = name.into().trim().to_string();
+        if !name.is_empty() {
+            self.agent_name = Some(name);
+        }
+        self
     }
 
     pub fn with_context(mut self, workspace_id: Option<String>, project_id: Option<String>, scan_id: Option<String>) -> Self {
@@ -198,6 +208,15 @@ impl OcsfEvent {
         }
         self
     }
+}
+
+/// RFC3339 with the machine's local offset. Falls back to UTC if the offset is unknown.
+pub(crate) fn local_rfc3339_now() -> String {
+    let utc = OffsetDateTime::now_utc();
+    let local = UtcOffset::local_offset_at(utc)
+        .map(|offset| utc.to_offset(offset))
+        .unwrap_or(utc);
+    local.format(&Rfc3339).unwrap_or_else(|_| "now".into())
 }
 
 fn category_class_uid(category: LogCategory) -> u32 {
@@ -302,12 +321,29 @@ fn mask_value(value: Value) -> Value {
 /// In-process event bus — components publish; logger thread writes files.
 #[derive(Clone)]
 pub struct EventBus {
-    tx: mpsc::Sender<OcsfEvent>,
+    tx: mpsc::Sender<LogCommand>,
+}
+
+enum LogCommand {
+    Event(OcsfEvent),
+    Clear(mpsc::Sender<std::io::Result<()>>),
 }
 
 impl EventBus {
     pub fn publish(&self, event: OcsfEvent) {
-        let _ = self.tx.send(event);
+        let _ = self.tx.send(LogCommand::Event(event));
+    }
+
+    /// Clear on the writer thread, after previously queued events have been written.
+    /// Call from a blocking task rather than an async executor thread.
+    pub fn clear_logs(&self) -> std::io::Result<()> {
+        let (tx, rx) = mpsc::channel();
+        self.tx.send(LogCommand::Clear(tx)).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "log writer unavailable")
+        })?;
+        rx.recv().map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "log writer stopped")
+        })?
     }
 
     pub fn info(
@@ -407,10 +443,25 @@ pub fn spawn_event_logger(logs_dir: PathBuf) -> (EventBus, Arc<EventRing>, Event
     (bus, ring, EventLogGuard { _writer: writer })
 }
 
-fn run_log_writer(logs_dir: &Path, rx: mpsc::Receiver<OcsfEvent>, ring: Arc<EventRing>) {
+fn run_log_writer(logs_dir: &Path, rx: mpsc::Receiver<LogCommand>, ring: Arc<EventRing>) {
     let mut handles: HashMap<String, BufWriter<File>> = HashMap::new();
 
-    for event in rx {
+    for command in rx {
+        let event = match command {
+            LogCommand::Event(event) => event,
+            LogCommand::Clear(reply) => {
+                let result = (|| {
+                    for writer in handles.values_mut() {
+                        writer.flush()?;
+                    }
+                    clear_log_directory(logs_dir)?;
+                    ring.inner.lock().expect("event ring lock").clear();
+                    Ok(())
+                })();
+                let _ = reply.send(result);
+                continue;
+            }
+        };
         ring.push(&event);
         if let Ok(line) = serde_json::to_string(&event) {
             let line = format!("{line}\n");
@@ -420,6 +471,31 @@ fn run_log_writer(logs_dir: &Path, rx: mpsc::Receiver<OcsfEvent>, ring: Arc<Even
             }
         }
     }
+}
+
+/// Truncate rather than unlink so active append-only writers keep working.
+/// Only recognized log files are touched; symlinks and unrelated files are skipped.
+fn clear_log_directory(logs_dir: &Path) -> std::io::Result<()> {
+    let entries = match std::fs::read_dir(logs_dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let path = entry.path();
+        if file_type.is_dir() {
+            clear_log_directory(&path)?;
+        } else if file_type.is_file() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.ends_with(".log") || name.contains(".log.") {
+                OpenOptions::new().write(true).open(&path)?.set_len(0)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 trait CategoryFile {
@@ -477,18 +553,28 @@ pub fn read_log_tail(path: &Path, max_bytes: usize) -> std::io::Result<String> {
     Ok(String::from_utf8_lossy(&data[data.len() - max_bytes..]).into_owned())
 }
 
-pub fn list_log_files(logs_dir: &Path) -> Vec<PathBuf> {
+pub fn list_log_files(logs_dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(logs_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("log") {
-                files.push(path);
+    let entries = match std::fs::read_dir(logs_dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(files),
+        Err(err) => return Err(err),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            files.extend(list_log_files(&entry.path())?);
+        } else if file_type.is_file() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.ends_with(".log") || name.contains(".log.") {
+                files.push(entry.path());
             }
         }
     }
     files.sort();
-    files
+    Ok(files)
 }
 
 pub fn publish_crash(
@@ -555,6 +641,156 @@ mod tests {
         let masked_secret = mask_secrets(&serde_json::to_string(&with_secret).unwrap());
         assert!(masked_secret.contains("[REDACTED]"));
         assert!(masked_secret.contains("hi"));
+    }
+
+    #[test]
+    fn log_timestamp_uses_local_offset() {
+        let event = OcsfEvent::new(
+            LogCategory::Application,
+            OcsfSeverity::Informational,
+            "started",
+            "test",
+            "test",
+            "boot",
+        );
+        let parsed = OffsetDateTime::parse(&event.timestamp, &Rfc3339).unwrap();
+        let expected = UtcOffset::local_offset_at(OffsetDateTime::now_utc()).unwrap_or(UtcOffset::UTC);
+        assert_eq!(parsed.offset(), expected);
+    }
+
+    #[test]
+    fn agent_name_is_a_top_level_field() {
+        let event = OcsfEvent::new(
+            LogCategory::Agent,
+            OcsfSeverity::Informational,
+            "started",
+            "promptlab-agent",
+            "generate_prompt",
+            "Generating factory prompt",
+        )
+        .with_agent_name("GeneratePromptAgent");
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["agentName"], "GeneratePromptAgent");
+        assert_eq!(json["component"], "generate_prompt");
+    }
+
+    #[test]
+    fn clear_logs_drains_queued_events_and_keeps_logging() {
+        let dir = tempfile::tempdir().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let bus = EventBus { tx };
+        let ring = Arc::new(EventRing::new(20));
+        let writer_ring = ring.clone();
+        let logs_dir = dir.path().to_path_buf();
+        let writer = thread::spawn(move || run_log_writer(&logs_dir, rx, writer_ring));
+        bus.info(LogCategory::Agent, "old", "test", "test", "old message");
+        bus.clear_logs().unwrap();
+        assert!(ring.recent(2000).is_empty());
+        for name in ["app.log", "agents.log"] {
+            assert_eq!(std::fs::read_to_string(dir.path().join(name)).unwrap(), "");
+        }
+
+        bus.info(LogCategory::Agent, "new", "test", "test", "new message");
+        // Repeated clearing is safe and ordered after the preceding event.
+        bus.clear_logs().unwrap();
+        bus.info(LogCategory::Agent, "final", "test", "test", "final message");
+        drop(bus);
+        writer.join().unwrap();
+        assert_eq!(ring.recent(1)[0].message, "final message");
+        for name in ["app.log", "agents.log"] {
+            let content = std::fs::read_to_string(dir.path().join(name)).unwrap();
+            assert!(content.contains("final message"));
+            assert!(!content.contains("old message"));
+            assert!(!content.contains("new message"));
+        }
+    }
+
+    #[test]
+    fn lists_nested_and_rotated_logs_with_current_sizes() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs = dir.path();
+        std::fs::create_dir(logs.join("scan-console")).unwrap();
+        for name in ["app.log", "promptlab-trace.log.2026-10-23", "scan-console/scan-1.log"] {
+            std::fs::write(logs.join(name), "12345").unwrap();
+        }
+        std::fs::write(logs.join("settings.json"), "keep").unwrap();
+        std::fs::create_dir(logs.join("not-a-file.log")).unwrap();
+
+        let files = list_log_files(logs).unwrap();
+        assert_eq!(files, vec![
+            logs.join("app.log"),
+            logs.join("promptlab-trace.log.2026-10-23"),
+            logs.join("scan-console/scan-1.log"),
+        ]);
+        assert!(files.iter().all(|path| path.metadata().unwrap().len() == 5));
+        clear_log_directory(logs).unwrap();
+        let cleared = list_log_files(logs).unwrap();
+        assert_eq!(cleared, files);
+        assert!(cleared.iter().all(|path| path.metadata().unwrap().len() == 0));
+        assert!(list_log_files(&logs.join("missing")).unwrap().is_empty());
+        assert!(list_log_files(&logs.join("settings.json")).is_err());
+    }
+
+    #[test]
+    fn clear_logs_reports_unavailable_writer() {
+        let (tx, rx) = mpsc::channel();
+        drop(rx);
+        let bus = EventBus { tx };
+        assert_eq!(
+            bus.clear_logs().unwrap_err().kind(),
+            std::io::ErrorKind::BrokenPipe
+        );
+    }
+
+    #[test]
+    fn clear_log_directory_preserves_other_data_and_open_writers() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs = dir.path();
+        std::fs::create_dir(logs.join("scan-console")).unwrap();
+        for name in [
+            "app.log",
+            "promptlab-trace.log.2026-10-23",
+            "scan-console/scan-1.log",
+        ] {
+            std::fs::write(logs.join(name), "old log").unwrap();
+        }
+        std::fs::write(logs.join("settings.json"), "keep").unwrap();
+        let mut active = OpenOptions::new()
+            .append(true)
+            .open(logs.join("app.log"))
+            .unwrap();
+        clear_log_directory(logs).unwrap();
+        for name in [
+            "app.log",
+            "promptlab-trace.log.2026-10-23",
+            "scan-console/scan-1.log",
+        ] {
+            assert_eq!(std::fs::metadata(logs.join(name)).unwrap().len(), 0);
+        }
+        assert_eq!(
+            std::fs::read_to_string(logs.join("settings.json")).unwrap(),
+            "keep"
+        );
+        active.write_all(b"new log").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(logs.join("app.log")).unwrap(),
+            "new log"
+        );
+        clear_log_directory(&logs.join("missing")).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clear_log_directory_does_not_follow_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let external_log = outside.path().join("private.log");
+        std::fs::write(&external_log, "keep").unwrap();
+        std::os::unix::fs::symlink(&external_log, dir.path().join("linked.log")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("linked-dir")).unwrap();
+        assert!(list_log_files(dir.path()).unwrap().is_empty());
+        clear_log_directory(dir.path()).unwrap();
+        assert_eq!(std::fs::read_to_string(external_log).unwrap(), "keep");
     }
 
     #[test]

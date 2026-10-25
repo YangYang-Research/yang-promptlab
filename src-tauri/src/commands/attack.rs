@@ -642,7 +642,7 @@ pub(crate) fn judge_coordinator_llm(
             model_provider,
             runtime_manager,
         )
-        .with_agent_id("judge_coordinator"),
+        .with_agent_id(promptlab_agent::AgentId::JudgeCoordinator.as_str()),
     )
 }
 

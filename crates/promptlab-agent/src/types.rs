@@ -7,18 +7,28 @@ use crate::agent_log::log_agent_event;
 #[serde(rename_all = "snake_case")]
 pub enum AgentId {
     Yazg,
+    #[serde(rename = "analyze_endpoint_agent", alias = "analyze_endpoint")]
     AnalyzeEndpoint,
+    #[serde(rename = "attack_plan_agent", alias = "attack_plan")]
     AttackPlan,
+    #[serde(rename = "generate_prompt_agent", alias = "generate_prompt")]
     GeneratePrompt,
+    #[serde(rename = "recommend_agent", alias = "recommend")]
     Recommend,
+    #[serde(rename = "summary_agent", alias = "summary")]
     Summary,
+    #[serde(rename = "judge_coordinator_agent", alias = "judge_coordinator")]
     JudgeCoordinator,
     JudgeWorker,
     ClassifierWorker,
     AttackerWorker,
+    #[serde(rename = "agentic_attack_execution_agent", alias = "agentic_attack_execution")]
     AgenticAttackExecution,
+    #[serde(rename = "sequential_attack_execution_agent", alias = "sequential_attack_execution")]
     SequentialAttackExecution,
+    #[serde(rename = "reflection_agent", alias = "reflection")]
     Reflection,
+    JailbreakAgent,
     CreateProject,
     ListWorkspace,
 }
@@ -27,18 +37,19 @@ impl AgentId {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Yazg => "yazg",
-            Self::AnalyzeEndpoint => "analyze_endpoint",
-            Self::AttackPlan => "attack_plan",
-            Self::GeneratePrompt => "generate_prompt",
-            Self::Recommend => "recommend",
-            Self::Summary => "summary",
-            Self::JudgeCoordinator => "judge_coordinator",
+            Self::AnalyzeEndpoint => "analyze_endpoint_agent",
+            Self::AttackPlan => "attack_plan_agent",
+            Self::GeneratePrompt => "generate_prompt_agent",
+            Self::Recommend => "recommend_agent",
+            Self::Summary => "summary_agent",
+            Self::JudgeCoordinator => "judge_coordinator_agent",
             Self::JudgeWorker => "judge_worker",
             Self::ClassifierWorker => "classifier_worker",
             Self::AttackerWorker => "attacker_worker",
-            Self::AgenticAttackExecution => "agentic_attack_execution",
-            Self::SequentialAttackExecution => "sequential_attack_execution",
-            Self::Reflection => "reflection",
+            Self::AgenticAttackExecution => "agentic_attack_execution_agent",
+            Self::SequentialAttackExecution => "sequential_attack_execution_agent",
+            Self::Reflection => "reflection_agent",
+            Self::JailbreakAgent => "jailbreak_agent",
             Self::CreateProject => "create_project",
             Self::ListWorkspace => "list_workspace",
         }
@@ -59,6 +70,7 @@ impl AgentId {
             Self::AgenticAttackExecution => "AgenticAttackExecutionAgent",
             Self::SequentialAttackExecution => "SequentialAttackExecutionAgent",
             Self::Reflection => "ReflectionAgent",
+            Self::JailbreakAgent => "JailbreakAgent",
             Self::CreateProject => "CreateProjectTool",
             Self::ListWorkspace => "ListWorkspaceTool",
         }

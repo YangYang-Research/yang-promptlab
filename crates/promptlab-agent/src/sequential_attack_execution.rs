@@ -66,6 +66,21 @@ impl SequentialAttackExecutionAgent {
         memory: Option<&dyn AgentMemoryStore>,
         memory_ctx: MemoryContext,
     ) -> AgentResult<AttackExecutionOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::SequentialAttackExecution.as_str(),
+            Self::run_traced(request, tools, orchestrator, llm_ready, memory, memory_ctx),
+        )
+        .await
+    }
+
+    async fn run_traced(
+        request: &SequentialAttackExecutionRequest,
+        tools: &dyn AttackExecutionTools,
+        orchestrator: Option<Arc<dyn PlannerLlm>>,
+        llm_ready: bool,
+        memory: Option<&dyn AgentMemoryStore>,
+        memory_ctx: MemoryContext,
+    ) -> AgentResult<AttackExecutionOutcome> {
         if request.category.trim().is_empty() {
             return Err(AgentError::AttackExecution(
                 "SequentialAttackExecutionAgent requires a category".into(),
@@ -662,6 +677,16 @@ impl SequentialAttackExecutionAgent {
             )
             .await;
             return Err(AgentError::AttackExecution(reason));
+        }
+
+        if let Some(llm) = orchestrator.as_ref() {
+            crate::agent_reflection::reflect_output(
+                AgentId::SequentialAttackExecution,
+                &request.category,
+                &format!("{stopped_reason}\n{}", last_obs.health_line()),
+                llm.as_ref(),
+            )
+            .await;
         }
 
         emit_and_record(

@@ -38,11 +38,18 @@ export const navItems: NavItem[] = [
     section: "advanced",
   },
   {
+    id: "agents",
+    label: "Agents",
+    path: "/agents",
+    icon: "agents",
+    section: "system",
+  },
+  {
     id: "agent-trace",
     label: "Agent Trace",
     path: "/agent-trace",
     icon: "agent-trace",
-    section: "advanced",
+    section: "system",
   },
   { id: "settings", label: "Settings", path: "/settings", icon: "settings", section: "system" },
 ];
@@ -53,4 +60,5 @@ export const routeTitles: Record<string, string> = {
   "/scans/:scanId": "Scan Details",
   "/projects/:projectId": "Project Details",
   "/targets/:targetId": "Target Details",
+  "/agents/:agentId": "Agent Details",
 };

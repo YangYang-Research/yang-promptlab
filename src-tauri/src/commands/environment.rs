@@ -147,6 +147,7 @@ pub async fn environment_update(
 pub struct LogFileInfoDto {
     pub name: String,
     pub path: String,
+    pub size_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -158,17 +159,42 @@ pub struct LogsTailResponse {
 
 #[tauri::command]
 pub async fn logs_list_files(state: State<'_, AppState>) -> CommandResult<Vec<LogFileInfoDto>> {
-    let files = list_log_files(&state.logs_dir());
-    Ok(files
+    let logs_dir = state.logs_dir();
+    let files = list_log_files(&logs_dir).map_err(|err| {
+        CommandError::from(promptlab_core::PromptLabError::internal(format!(
+            "Failed to list log files: {err}"
+        )))
+    })?;
+    files
         .into_iter()
-        .map(|path| LogFileInfoDto {
-            name: path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-            path: path.display().to_string(),
+        .map(|path| {
+            let metadata = std::fs::metadata(&path).map_err(|err| {
+                CommandError::from(promptlab_core::PromptLabError::internal(format!(
+                    "Failed to read log file size for {}: {err}", path.display()
+                )))
+            })?;
+            Ok(LogFileInfoDto {
+                name: path.strip_prefix(&logs_dir).unwrap_or(&path).display().to_string(),
+                path: path.display().to_string(),
+                size_bytes: metadata.len(),
+            })
         })
-        .collect())
+        .collect()
+}
+
+#[tauri::command]
+pub async fn logs_clear(state: State<'_, AppState>) -> CommandResult<()> {
+    let bus = state.event_bus().clone();
+    tauri::async_runtime::spawn_blocking(move || bus.clear_logs())
+        .await
+        .map_err(|err| {
+            CommandError::from(promptlab_core::PromptLabError::internal(err.to_string()))
+        })?
+        .map_err(|err| {
+            CommandError::from(promptlab_core::PromptLabError::internal(format!(
+                "Failed to clear logs; some files may already be cleared: {err}"
+            )))
+        })
 }
 
 #[tauri::command]

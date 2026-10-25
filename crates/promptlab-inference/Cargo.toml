@@ -8,7 +8,9 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+promptlab-agenttrace = { workspace = true }
 promptlab-core = { workspace = true }
+promptlab-registry = { workspace = true }
 promptlab-models = { workspace = true }
 promptlab-runtime = { workspace = true }
 promptlab-harness = { workspace = true }

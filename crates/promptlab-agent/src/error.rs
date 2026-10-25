@@ -18,6 +18,8 @@ pub enum AgentError {
     Judge(String),
     #[error("reflection failed: {0}")]
     Reflection(String),
+    #[error("jailbreak agent failed: {0}")]
+    JailbreakAgent(String),
     #[error("attack execution failed: {0}")]
     AttackExecution(String),
     #[error("supervisor: {0}")]

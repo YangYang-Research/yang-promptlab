@@ -62,7 +62,7 @@ export function listAgentTraces(input?: {
 }): Promise<AgentTraceSummaryDto[]> {
   return invokeCommand<AgentTraceSummaryDto[]>("agenttrace_list_traces", {
     request: {
-      experiment: input?.experiment ?? "yazg",
+      experiment: input?.experiment ?? null,
       sessionId: input?.sessionId ?? null,
       limit: input?.limit ?? 100,
     },

@@ -20,6 +20,8 @@ import {
  *  Order = priority: with low `variantsPerTest`, only the first N−1 run. */
 export const DEFAULT_CATEGORY_MUTATORS: Record<AttackCategoryId, AttackMutatorId[]> = {
   prompt_injection: [
+    "xml_control_spoof",
+    "json_force_open",
     "delimiter_injection",
     "language_pivot",
     "role_swap",
@@ -42,6 +44,8 @@ export const DEFAULT_CATEGORY_MUTATORS: Record<AttackCategoryId, AttackMutatorId
     "llm_few_shot",
   ],
   jailbreak: [
+    "xml_control_spoof",
+    "json_force_open",
     "role_swap",
     "language_pivot",
     "unicode_homoglyph",
@@ -73,6 +77,9 @@ export const DEFAULT_CATEGORY_MUTATORS: Record<AttackCategoryId, AttackMutatorId
     "zero_width_variants",
   ],
   system_prompt_extraction: [
+    "xml_control_spoof",
+    "json_force_open",
+    "system_notification_wrap",
     "repeat_amplify",
     "language_pivot",
     "delimiter_injection",
@@ -90,6 +97,8 @@ export const DEFAULT_CATEGORY_MUTATORS: Record<AttackCategoryId, AttackMutatorId
     "llm_transfer",
   ],
   tool_abuse: [
+    "system_notification_wrap",
+    "json_force_open",
     "json_escape",
     "html_wrap",
     "base64_wrap",
@@ -101,6 +110,8 @@ export const DEFAULT_CATEGORY_MUTATORS: Record<AttackCategoryId, AttackMutatorId
     "bidi_override",
   ],
   mcp_abuse: [
+    "system_notification_wrap",
+    "json_force_open",
     "json_escape",
     "html_wrap",
     "base64_wrap",
@@ -143,6 +154,8 @@ export const DEFAULT_CATEGORY_MUTATORS: Record<AttackCategoryId, AttackMutatorId
     "tag_char_smuggle",
   ],
   agent_goal_hijacking: [
+    "coordinator_prefix",
+    "system_notification_wrap",
     "role_swap",
     "language_pivot",
     "delimiter_injection",

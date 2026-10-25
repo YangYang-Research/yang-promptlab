@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button, Card, RefreshButton, SearchInput, Select } from "@/shared/components";
 import { toAppError } from "@/shared/errors";
@@ -17,10 +17,18 @@ import {
 } from "@/shared/ipc/environment";
 
 import { DatabaseDiagnosticsPanel } from "./DatabaseDiagnosticsPanel";
+import { agentLogName, eventBelongsToLogFile } from "./logFileView";
 
 type TroubleshootingPanelProps = {
   backendConnected: boolean;
 };
+
+function formatLogTime(timestamp: string): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return timestamp;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
 
 function parseLogLines(content: string): OcsfEventDto[] {
   return content
@@ -42,8 +50,12 @@ export function TroubleshootingPanel({ backendConnected }: TroubleshootingPanelP
   const [dbHealth, setDbHealth] = useState<DbHealthDto | null>(null);
   const [logFiles, setLogFiles] = useState<LogFileInfoDto[]>([]);
   const [selectedLog, setSelectedLog] = useState("app.log");
-  const [logContent, setLogContent] = useState("");
+  const [logTail, setLogTail] = useState<{ file: string; content: string }>({
+    file: "app.log",
+    content: "",
+  });
   const [recentEvents, setRecentEvents] = useState<OcsfEventDto[]>([]);
+  const refreshGen = useRef(0);
   const [query, setQuery] = useState("");
   const [severity, setSeverity] = useState("all");
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -52,27 +64,29 @@ export function TroubleshootingPanel({ backendConnected }: TroubleshootingPanelP
 
   async function refresh() {
     if (!backendConnected) return;
+    const gen = ++refreshGen.current;
+    const file = selectedLog;
     setLoading(true);
     setError(null);
     try {
-      const [env, health, files, events] = await Promise.all([
+      const [env, health, files, events, tail] = await Promise.all([
         getEnvironment(),
         getDbHealth(),
         listLogFiles(),
         getRecentLogEvents(300),
+        file ? tailLogFile(file, 96 * 1024) : Promise.resolve(null),
       ]);
+      if (gen !== refreshGen.current) return;
       setEnvironment(env);
       setDbHealth(health);
       setLogFiles(files);
       setRecentEvents(events);
-      if (selectedLog) {
-        const tail = await tailLogFile(selectedLog, 96 * 1024);
-        setLogContent(tail.content);
-      }
+      if (tail) setLogTail({ file, content: tail.content });
     } catch (err) {
+      if (gen !== refreshGen.current) return;
       setError(toAppError(err).message);
     } finally {
-      setLoading(false);
+      if (gen === refreshGen.current) setLoading(false);
     }
   }
 
@@ -87,14 +101,15 @@ export function TroubleshootingPanel({ backendConnected }: TroubleshootingPanelP
   }, [autoRefresh, backendConnected, selectedLog]);
 
   const mergedEvents = useMemo(() => {
-    const fromTail = parseLogLines(logContent);
+    const fromTail = logTail.file === selectedLog ? parseLogLines(logTail.content) : [];
+    const live = recentEvents.filter((event) => eventBelongsToLogFile(event.category, selectedLog));
     const map = new Map<string, OcsfEventDto>();
-    for (const event of [...recentEvents, ...fromTail]) {
+    for (const event of [...live, ...fromTail]) {
       const key = `${event.timestamp}:${event.activityName}:${event.message}`;
       map.set(key, event);
     }
     return Array.from(map.values()).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-  }, [logContent, recentEvents]);
+  }, [logTail, recentEvents, selectedLog]);
 
   const filteredEvents = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -105,7 +120,8 @@ export function TroubleshootingPanel({ backendConnected }: TroubleshootingPanelP
         event.message.toLowerCase().includes(q) ||
         event.category.toLowerCase().includes(q) ||
         event.module.toLowerCase().includes(q) ||
-        event.activityName.toLowerCase().includes(q)
+        event.activityName.toLowerCase().includes(q) ||
+        agentLogName(event).toLowerCase().includes(q)
       );
     });
   }, [mergedEvents, query, severity]);
@@ -241,6 +257,7 @@ export function TroubleshootingPanel({ backendConnected }: TroubleshootingPanelP
                 <tr>
                   <th>Time</th>
                   <th>Severity</th>
+                  <th>Agent</th>
                   <th>Category</th>
                   <th>Activity</th>
                   <th>Message</th>
@@ -249,11 +266,16 @@ export function TroubleshootingPanel({ backendConnected }: TroubleshootingPanelP
               <tbody>
                 {filteredEvents.slice(-200).map((event) => (
                   <tr key={`${event.timestamp}-${event.activityName}-${event.message}`}>
-                    <td className="mono text-sm">{event.timestamp}</td>
+                    <td className="mono text-sm troubleshooting-logs__time" title={event.timestamp}>
+                      <time dateTime={event.timestamp}>{formatLogTime(event.timestamp)}</time>
+                    </td>
                     <td>{event.severity}</td>
+                    <td>{agentLogName(event)}</td>
                     <td>{event.category}</td>
                     <td>{event.activityName}</td>
-                    <td>{event.message}</td>
+                    <td className="troubleshooting-logs__message" title={event.message}>
+                      <span className="troubleshooting-logs__message-text">{event.message}</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>

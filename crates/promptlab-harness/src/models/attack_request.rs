@@ -57,19 +57,27 @@ impl HarnessPurpose {
         match key.as_str() {
             "yazg" | "assistant" => Self::assistant(),
             "judge" | "judge_worker" | "classifier_worker" | "attacker_worker" => Self::judge(),
-            "wizard" | "analyze_endpoint" | "endpoint_verify" => Self::wizard(),
-            "planner" | "attack_plan" => Self::planner(),
-            "generator" | "generate_prompt" => Self::generator(),
-            "report" | "recommend" | "summary" => Self::report(),
+            "wizard" | "analyze_endpoint" | "analyze_endpoint_agent" | "endpoint_verify" => {
+                Self::wizard()
+            }
+            "planner" | "attack_plan" | "attack_plan_agent" => Self::planner(),
+            "generator" | "generate_prompt" | "generate_prompt_agent" => Self::generator(),
+            "report" | "recommend" | "recommend_agent" | "summary" | "summary_agent" => Self::report(),
             "discover" => Self::discover(),
             "verify" => Self::verify(),
             "fingerprint" => Self::fingerprint(),
             "health" | "test_chat" | "test_connectivity" | "test_inference" => Self::health(),
             "attack" => Self::attack(),
             "agentic_attack_execution"
+            | "agentic_attack_execution_agent"
             | "sequential_attack_execution"
+            | "sequential_attack_execution_agent"
             | "reflection"
-            | "judge_coordinator" => Self::planner(),
+            | "reflection_agent"
+            | "judge_coordinator"
+            | "judge_coordinator_agent"
+            // Jailbreak plan/followup is product inference — retry empty CF completions.
+            | "jailbreak_agent" => Self::planner(),
             other if other.is_empty() => Self::assistant(),
             other => Self::named(other),
         }
@@ -617,6 +625,10 @@ mod tests {
         );
         assert_eq!(
             HarnessPurpose::from_agent_id("judge_coordinator"),
+            HarnessPurpose::planner()
+        );
+        assert_eq!(
+            HarnessPurpose::from_agent_id("jailbreak_agent"),
             HarnessPurpose::planner()
         );
         assert!(HarnessPurpose::assistant().is_product_inference());

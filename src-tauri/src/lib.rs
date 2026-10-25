@@ -1,6 +1,7 @@
 //! PromptLab desktop application library.
 
 pub mod agent_memory;
+pub mod attempt_persist;
 pub mod attack_catalog;
 pub mod commands;
 pub mod db;
@@ -161,6 +162,25 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
                 }
             };
 
+            if let Err(err) = tauri::async_runtime::block_on(
+                attempt_persist::hydrate_agent_attempts(&database),
+            ) {
+                tracing::warn!(
+                    error = %err,
+                    "failed to load agent attempt settings; using minimum 3"
+                );
+                promptlab_agent::set_agent_attempts(promptlab_agent::default_agent_attempts());
+            }
+            if let Err(err) = tauri::async_runtime::block_on(
+                attempt_persist::hydrate_agent_temperatures(&database),
+            ) {
+                tracing::warn!(
+                    error = %err,
+                    "failed to load agent temperatures; model temperature will be used"
+                );
+                promptlab_inference::set_agent_temperatures(Default::default());
+            }
+
             let environment = match tauri::async_runtime::block_on(
                 environment_persist::hydrate_environment_paths(&database, &bootstrap),
             ) {
@@ -216,6 +236,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             ))
             .map_err(|err| crate::error::CommandError::internal(err.to_string()))?;
             let agent_trace = std::sync::Arc::new(agent_trace);
+            promptlab_inference::install_agent_trace(agent_trace.clone());
 
             app.manage(AppState::new(
                 database,
@@ -306,6 +327,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::proxy::proxy_set,
             commands::proxy::proxy_test_connection,
             commands::environment::logs_list_files,
+            commands::environment::logs_clear,
             commands::environment::logs_tail,
             commands::environment::logs_recent_events,
             commands::environment::logs_emit,
@@ -317,6 +339,10 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::agent_memory::agent_memory_list_events,
             commands::agent_memory::agent_memory_delete_session,
             commands::agent_memory::agent_memory_list_ltm,
+            commands::agents::agents_list,
+            commands::agents::agents_get,
+            commands::agents::agents_set_attempt,
+            commands::agents::agents_set_temperature,
             commands::agenttrace::agenttrace_list_sessions,
             commands::agenttrace::agenttrace_list_traces,
             commands::agenttrace::agenttrace_get_trace,
@@ -365,6 +391,7 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::models::models_save_third_party,
             commands::models::models_third_party_edit_form,
             commands::models::models_test_third_party,
+            commands::models::models_list_provider_models,
             commands::models::models_test_connection,
             commands::models::models_remove,
             commands::models::models_verify,
@@ -413,6 +440,10 @@ fn build_app() -> Result<tauri::App, Box<dyn std::error::Error>> {
             commands::mutators::prompt_lab_history_list,
             commands::mutators::prompt_lab_history_get,
             commands::mutators::prompt_lab_history_delete,
+            commands::scenario_agent::scenario_agent_plan,
+            commands::scenario_agent::scenario_agent_expand,
+            commands::scenario_agent::scenario_agent_fire,
+            commands::scenario_agent::scenario_agent_followup,
             commands::runtime::runtime_test_connectivity,
             commands::runtime::runtime_test_inference,
             commands::security::security_audit,

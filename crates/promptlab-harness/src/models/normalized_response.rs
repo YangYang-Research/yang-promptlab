@@ -285,6 +285,14 @@ fn extract_tool_calls(json: &serde_json::Value) -> Vec<NormalizedToolCall> {
 
 fn extract_display_content(body: &str) -> String {
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+        // OpenAI / CF Workers AI chat.completion: never fall back to raw envelope when
+        // choices[0].message exists but content is empty (GLM flash often returns "").
+        let openai_shaped = json.pointer("/choices/0/message").is_some()
+            || json
+                .get("object")
+                .and_then(|v| v.as_str())
+                .is_some_and(|o| o.contains("chat.completion"));
+
         let message = json.pointer("/choices/0/message");
         if let Some(content) = message
             .and_then(|msg| msg.get("content"))
@@ -322,6 +330,11 @@ fn extract_display_content(body: &str) -> String {
         if let Some(text) = text_from_content_array(json.pointer("/choices/0/message/content")) {
             return text;
         }
+        // Known chat.completion with empty assistant text → "" (not raw JSON).
+        if openai_shaped {
+            return String::new();
+        }
+
         if let Some(text) = text_from_content_array(json.get("content")) {
             return text;
         }
@@ -390,6 +403,19 @@ mod tests {
         let normalized = NormalizedResponse::from_http(200, body.into(), "openai");
         assert_eq!(normalized.content, "hello");
         assert_eq!(normalized.judge_text(), "hello");
+    }
+
+    #[test]
+    fn empty_openai_content_does_not_leak_raw_envelope() {
+        // CF Workers AI / GLM flash: finish_reason=stop, content="", completion_tokens=0
+        let body = r#"{"id":"chatcmpl-7bf5d6f2-ef58-48f4-bc1a-545ca02f1395","object":"chat.completion","model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":912,"completion_tokens":0,"total_tokens":912}}"#;
+        let normalized = NormalizedResponse::from_http(200, body.into(), "openai");
+        assert!(
+            normalized.content.is_empty(),
+            "content leaked envelope: {}",
+            normalized.content
+        );
+        assert!(!normalized.judge_text().contains("chatcmpl-"));
     }
 
     #[test]

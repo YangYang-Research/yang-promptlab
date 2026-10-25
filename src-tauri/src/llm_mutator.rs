@@ -54,7 +54,6 @@ impl LlmComplete for GatewayLlmMutator {
             Some(system),
             prompt,
             768,
-            0.85,
         )
         .await
         .map_err(|err| AttackError::payload(err.to_string()))

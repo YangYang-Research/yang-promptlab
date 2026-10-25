@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 
 import { useAppStore } from "@/app/store/AppStore";
 import { ATTACK_MUTATORS } from "@/features/scans/payloadStrategy";
-import { Button, IconButton, Modal, PageHeader, Skeleton } from "@/shared/components";
+import { Button, IconButton, Modal, PageHeader, RefreshButton, Skeleton } from "@/shared/components";
 import { IconAi, IconCheck, IconCopy, IconHistory, IconTrash } from "@/shared/components/Icons";
 import { toAppError } from "@/shared/errors";
 import {
@@ -19,6 +19,10 @@ import {
   subscribePromptLabUiState,
 } from "@/shared/runtime/promptLabUiState";
 import { assertYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
+
+import { ScenarioAgentPanel } from "./ScenarioAgentPanel";
+
+type PromptLabTab = "variants" | "scenario";
 
 function downloadPromptLabJson(payload: unknown, filename: string): void {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -88,7 +92,7 @@ function VariantCard({
 }
 
 export function PromptLabPage() {
-  const { backendConnected } = useAppStore();
+  const { backendConnected, loading, error: storeError, actions } = useAppStore();
   const { notify } = useToast();
   const ui = useSyncExternalStore(
     subscribePromptLabUiState,
@@ -96,6 +100,7 @@ export function PromptLabPage() {
     getPromptLabUiState,
   );
   const { prompt, busy, error, variants } = ui;
+  const [tab, setTab] = useState<PromptLabTab>("variants");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyRows, setHistoryRows] = useState<PromptLabHistoryDto[]>([]);
@@ -139,6 +144,11 @@ export function PromptLabPage() {
     await loadHistory();
   }
 
+  async function handleRefresh() {
+    await actions.refresh();
+    if (historyOpen) await loadHistory();
+  }
+
   async function handleCopySeed() {
     const seed = prompt.trim();
     if (!seed) {
@@ -162,7 +172,7 @@ export function PromptLabPage() {
       error: null,
     });
     setHistoryOpen(false);
-    notify("Restored Prompt Lab history", "success");
+    notify("Restored Variants history", "success");
   }
 
   async function handleDeleteHistory(id: string) {
@@ -172,6 +182,30 @@ export function PromptLabPage() {
       notify("History entry deleted", "success");
     } catch (err) {
       notify(toAppError(err).message, "error");
+    }
+  }
+
+  function handleClearWorkspace() {
+    if (busy) return;
+    const hasContent = Boolean(prompt.trim() || variants.length > 0 || error);
+    if (!hasContent) return;
+    if (!window.confirm("Clear seed prompt and variants?")) return;
+    patchPromptLabUiState({ prompt: "", variants: [], error: null, busy: null });
+    notify("Variants cleared", "success");
+  }
+
+  async function handleClearAllHistory() {
+    if (historyRows.length === 0) return;
+    if (!window.confirm(`Clear all ${historyRows.length} Variants history entries?`)) return;
+    try {
+      for (const row of historyRows) {
+        await deletePromptLabHistory(row.id);
+      }
+      setHistoryRows([]);
+      notify("Variants history cleared", "success");
+    } catch (err) {
+      notify(toAppError(err).message, "error");
+      await loadHistory();
     }
   }
 
@@ -251,9 +285,52 @@ export function PromptLabPage() {
     <div className="page prompt-lab-page">
       <PageHeader
         title="Prompt Lab"
-        description="An experimental for creating mutator variants from a seed prompt."
+        description="A place to experiment with prompts."
+        actions={
+          <RefreshButton
+            loading={loading || historyLoading}
+            error={storeError}
+            disabled={!backendConnected}
+            onClick={() => void handleRefresh()}
+          />
+        }
       />
 
+      <div className="prompt-lab-page__tabs" role="tablist" aria-label="Prompt Lab sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "variants"}
+          className={
+            tab === "variants"
+              ? "prompt-lab-page__tab prompt-lab-page__tab--active"
+              : "prompt-lab-page__tab"
+          }
+          onClick={() => setTab("variants")}
+        >
+          <span className="prompt-lab-page__tab-label">Variants</span>
+          <span className="prompt-lab-page__tab-desc">Make several versions of one prompt.</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "scenario"}
+          className={
+            tab === "scenario"
+              ? "prompt-lab-page__tab prompt-lab-page__tab--active"
+              : "prompt-lab-page__tab"
+          }
+          onClick={() => setTab("scenario")}
+        >
+          <span className="prompt-lab-page__tab-label">Jailbreak</span>
+          <span className="prompt-lab-page__tab-desc">Prompts for one goal on a guarded model.</span>
+        </button>
+      </div>
+
+      {tab === "scenario" ? <ScenarioAgentPanel /> : null}
+
+      {tab === "variants" ? (
+      <>
       <section className="prompt-lab-page__composer" aria-label="Prompt input">
         <div className="prompt-lab-page__composer-head">
           <label className="prompt-lab-page__label" htmlFor="prompt-lab-input">
@@ -270,7 +347,7 @@ export function PromptLabPage() {
               {seedCopied ? <IconCheck /> : <IconCopy />}
             </IconButton>
             <IconButton
-              ariaLabel="Prompt Lab history"
+              ariaLabel="Variants history"
               size="sm"
               disabled={!backendConnected || busy !== null}
               onClick={() => void handleOpenHistory()}
@@ -320,13 +397,22 @@ export function PromptLabPage() {
               <span className="prompt-lab-page__count">{variants.length} variants</span>
             ) : null}
           </div>
-          <Button
-            variant="secondary"
-            disabled={busy !== null || variants.length === 0}
-            onClick={handleExportJson}
-          >
-            Export Variants
-          </Button>
+          <div className="prompt-lab-page__actions-right">
+            <Button
+              variant="secondary"
+              disabled={busy !== null || (!prompt.trim() && variants.length === 0 && !error)}
+              onClick={handleClearWorkspace}
+            >
+              Clear
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={busy !== null || variants.length === 0}
+              onClick={handleExportJson}
+            >
+              Export Variants
+            </Button>
+          </div>
         </div>
         {error ? (
           <p className="prompt-lab-page__error" role="alert">
@@ -374,14 +460,27 @@ export function PromptLabPage() {
 
       <Modal
         open={historyOpen}
-        title="Prompt Lab history"
+        title="Variants history"
         onClose={() => setHistoryOpen(false)}
         size="medium"
+        footer={
+          historyRows.length > 0 ? (
+            <Button
+              variant="danger"
+              disabled={historyLoading}
+              onClick={() => void handleClearAllHistory()}
+            >
+              Clear all
+            </Button>
+          ) : null
+        }
       >
         {historyLoading ? (
           <p className="text-muted text-sm">Loading history…</p>
         ) : historyRows.length === 0 ? (
-          <p className="text-muted text-sm">No history yet. Generate variants to save an entry.</p>
+          <p className="text-muted text-sm">
+            No Variants history yet. Generate variants to save an entry.
+          </p>
         ) : (
           <ul className="prompt-lab-page__history-list">
             {historyRows.map((row) => (
@@ -412,6 +511,8 @@ export function PromptLabPage() {
           </ul>
         )}
       </Modal>
+      </>
+      ) : null}
     </div>
   );
 }

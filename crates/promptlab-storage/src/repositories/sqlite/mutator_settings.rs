@@ -17,19 +17,20 @@ const DEFAULT_ENABLED_JSON: &str = concat!(
     r#""refusal_suppression","inject_prefix","url_wrap","caesar_wrap","morse_wrap","fullwidth_ascii","#,
     r#""bidi_override","tag_char_smuggle","zero_width_variants","math_alphanumeric","disemvowel","#,
     r#""expand_before","expand_after","capitalization_shuffle","rephrase","shorten","crossover","#,
+    r#""system_notification_wrap","xml_control_spoof","json_force_open","coordinator_prefix","#,
     r#""llm_rephrase","llm_crossover","llm_few_shot","llm_transfer"]"#
 );
 
 const DEFAULT_CATEGORY_MUTATORS_JSON: &str = concat!(
-    r#"{"prompt_injection":["delimiter_injection","language_pivot","role_swap","markdown_code_fence","base64_wrap","html_wrap","hex_wrap","token_split","refusal_suppression","inject_prefix","url_wrap","expand_before","tag_char_smuggle","fullwidth_ascii","bidi_override","rephrase","crossover","llm_rephrase","llm_crossover","llm_few_shot"],"#,
-    r#""jailbreak":["role_swap","language_pivot","unicode_homoglyph","base64_wrap","html_wrap","leetspeak","chunk_split","zero_width_dense","rot13_wrap","reversed_text","refusal_suppression","inject_prefix","expand_before","expand_after","morse_wrap","caesar_wrap","math_alphanumeric","disemvowel","capitalization_shuffle","rephrase","crossover","bidi_override","tag_char_smuggle","fullwidth_ascii","zero_width_variants","llm_rephrase","llm_crossover","llm_few_shot","llm_transfer"],"#,
-    r#""system_prompt_extraction":["repeat_amplify","language_pivot","delimiter_injection","role_swap","markdown_code_fence","base64_wrap","hex_wrap","refusal_suppression","expand_before","expand_after","url_wrap","disemvowel","rephrase","llm_rephrase","llm_transfer"],"#,
-    r#""tool_abuse":["json_escape","html_wrap","base64_wrap","delimiter_injection","token_split","markdown_code_fence","url_wrap","tag_char_smuggle","bidi_override"],"#,
-    r#""mcp_abuse":["json_escape","html_wrap","base64_wrap","delimiter_injection","token_split","markdown_code_fence","url_wrap","tag_char_smuggle","bidi_override"],"#,
+    r#"{"prompt_injection":["xml_control_spoof","json_force_open","delimiter_injection","language_pivot","role_swap","markdown_code_fence","base64_wrap","html_wrap","hex_wrap","token_split","refusal_suppression","inject_prefix","url_wrap","expand_before","tag_char_smuggle","fullwidth_ascii","bidi_override","rephrase","crossover","llm_rephrase","llm_crossover","llm_few_shot"],"#,
+    r#""jailbreak":["xml_control_spoof","json_force_open","role_swap","language_pivot","unicode_homoglyph","base64_wrap","html_wrap","leetspeak","chunk_split","zero_width_dense","rot13_wrap","reversed_text","refusal_suppression","inject_prefix","expand_before","expand_after","morse_wrap","caesar_wrap","math_alphanumeric","disemvowel","capitalization_shuffle","rephrase","crossover","bidi_override","tag_char_smuggle","fullwidth_ascii","zero_width_variants","llm_rephrase","llm_crossover","llm_few_shot","llm_transfer"],"#,
+    r#""system_prompt_extraction":["xml_control_spoof","json_force_open","system_notification_wrap","repeat_amplify","language_pivot","delimiter_injection","role_swap","markdown_code_fence","base64_wrap","hex_wrap","refusal_suppression","expand_before","expand_after","url_wrap","disemvowel","rephrase","llm_rephrase","llm_transfer"],"#,
+    r#""tool_abuse":["system_notification_wrap","json_force_open","json_escape","html_wrap","base64_wrap","delimiter_injection","token_split","markdown_code_fence","url_wrap","tag_char_smuggle","bidi_override"],"#,
+    r#""mcp_abuse":["system_notification_wrap","json_force_open","json_escape","html_wrap","base64_wrap","delimiter_injection","token_split","markdown_code_fence","url_wrap","tag_char_smuggle","bidi_override"],"#,
     r#""rag_leakage":["repeat_amplify","delimiter_injection","markdown_code_fence","zero_width_dense","token_split","zero_width_variants","tag_char_smuggle","refusal_suppression"],"#,
     r#""memory_poisoning":["repeat_amplify","language_pivot","role_swap","delimiter_injection","markdown_code_fence","chunk_split","expand_before","rephrase","crossover"],"#,
-    r#""cross_user_leakage":["role_swap","delimiter_injection","repeat_amplify","markdown_code_fence","zero_width_dense","inject_prefix","bidi_override","tag_char_smuggle"],"#,
-    r#""agent_goal_hijacking":["role_swap","language_pivot","delimiter_injection","markdown_code_fence","repeat_amplify","token_split","refusal_suppression","expand_after","rephrase","crossover"]}"#
+    r#""cross_user_leakage":["coordinator_prefix","role_swap","delimiter_injection","repeat_amplify","markdown_code_fence","zero_width_dense","inject_prefix","bidi_override","tag_char_smuggle"],"#,
+    r#""agent_goal_hijacking":["coordinator_prefix","system_notification_wrap","role_swap","language_pivot","delimiter_injection","markdown_code_fence","repeat_amplify","token_split","refusal_suppression","expand_after","rephrase","crossover"]}"#
 );
 
 fn known_mutator_ids() -> &'static [&'static str] {
@@ -67,6 +68,10 @@ fn known_mutator_ids() -> &'static [&'static str] {
         "rephrase",
         "shorten",
         "crossover",
+        "system_notification_wrap",
+        "xml_control_spoof",
+        "json_force_open",
+        "coordinator_prefix",
         "llm_rephrase",
         "llm_crossover",
         "llm_few_shot",

@@ -26,6 +26,8 @@ export type ThirdPartyModelForm = {
   apiKeyConfigured: boolean;
   awsSecretAccessKeyConfigured: boolean;
   awsSessionTokenConfigured: boolean;
+  temperature: number;
+  contextWindow: number;
 };
 
 export type ThirdPartyModelConnectivityResult = {
@@ -46,6 +48,8 @@ export type ThirdPartyModelEditDto = {
   apiKeyConfigured: boolean;
   awsSecretAccessKeyConfigured: boolean;
   awsSessionTokenConfigured: boolean;
+  temperature: number;
+  contextWindow: number;
 };
 
 const KNOWN_THIRD_PARTY_PROVIDERS = new Set<ThirdPartyProvider>([
@@ -153,6 +157,9 @@ function normalizeCustomProviderSlug(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+export const DEFAULT_MODEL_TEMPERATURE = 0.7;
+export const DEFAULT_CONTEXT_WINDOW = 128_000;
+
 export function thirdPartyModelTemplate(
   provider: ThirdPartyProvider = "openai",
 ): ThirdPartyModelForm {
@@ -170,6 +177,8 @@ export function thirdPartyModelTemplate(
     apiKeyConfigured: false,
     awsSecretAccessKeyConfigured: false,
     awsSessionTokenConfigured: false,
+    temperature: DEFAULT_MODEL_TEMPERATURE,
+    contextWindow: DEFAULT_CONTEXT_WINDOW,
   };
 }
 
@@ -225,6 +234,13 @@ export function validateThirdPartyModelForm(form: ThirdPartyModelForm): string |
     return "Base URL is required for custom providers";
   }
 
+  if (!Number.isFinite(form.temperature) || form.temperature < 0 || form.temperature > 2) {
+    return "Temperature must be between 0 and 2";
+  }
+  if (!Number.isInteger(form.contextWindow) || form.contextWindow < 1) {
+    return "Context window size must be a positive integer";
+  }
+
   return null;
 }
 
@@ -249,6 +265,8 @@ export function thirdPartyModelToSaveRequest(
     existingModelId: existingModelId ?? undefined,
     markVerified: options?.markVerified ?? false,
     testLatencyMs: options?.testLatencyMs ?? null,
+    temperature: form.temperature,
+    contextWindow: form.contextWindow,
   };
 }
 
@@ -268,6 +286,23 @@ export function thirdPartyConnectionTestFingerprint(form: ThirdPartyModelForm): 
       form.awsSessionToken.trim() || (form.awsSessionTokenConfigured ? "__configured__" : ""),
     awsRegion: form.awsRegion?.trim() || null,
   });
+}
+
+export type ProviderModelCatalog = {
+  models: string[];
+  available: boolean;
+};
+
+export function listProviderModels(
+  form: ThirdPartyModelForm,
+  existingModelId?: string | null,
+): Promise<ProviderModelCatalog> {
+  return withModelOperationTimeout(
+    invokeCommand<ProviderModelCatalog>("models_list_provider_models", {
+      request: thirdPartyModelToSaveRequest(form, existingModelId),
+    }),
+    "Model catalog",
+  );
 }
 
 export function testThirdPartyModelConnectivity(
@@ -307,6 +342,8 @@ export function thirdPartyEditDtoToForm(dto: ThirdPartyModelEditDto): ThirdParty
     apiKeyConfigured: dto.apiKeyConfigured,
     awsSecretAccessKeyConfigured: dto.awsSecretAccessKeyConfigured,
     awsSessionTokenConfigured: dto.awsSessionTokenConfigured,
+    temperature: dto.temperature ?? DEFAULT_MODEL_TEMPERATURE,
+    contextWindow: dto.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
   };
 }
 

@@ -188,7 +188,7 @@ pub async fn scan_recommendations_generate_op(
                 Ok(other) => {
                     warn!(
                         scan_id = %request.scan_id,
-                        "Yazg ReAct finished without RecommendAgent; using rule-based fallback"
+                        "RecommendAgent returned no recommendations; using rule-based fallback"
                     );
                     let _ = other;
                     None

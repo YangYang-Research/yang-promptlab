@@ -8,10 +8,14 @@
 
 mod error;
 pub mod fn_name;
+mod run;
 mod store;
 mod types;
 
 pub use error::{AgentTraceError, Result};
+pub use run::{
+    current_trace, install_store, mark_run_failed, trace_agent_run, with_bound_trace,
+};
 pub use store::{
     soft_end_span, soft_end_trace, soft_start_span, AgentTrace, ExperimentHandle, SessionSummary,
     SharedAgentTrace, SpanHandle, TraceHandle,

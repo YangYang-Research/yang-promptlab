@@ -31,6 +31,7 @@ export type EnvironmentUpdateRequest = {
 export type LogFileInfoDto = {
   name: string;
   path: string;
+  sizeBytes: number;
 };
 
 export type LogsTailResponse = {
@@ -48,6 +49,7 @@ export type OcsfEventDto = {
   activityName: string;
   module: string;
   component: string;
+  agentName?: string | null;
   workspaceId?: string | null;
   projectId?: string | null;
   scanId?: string | null;
@@ -81,6 +83,8 @@ export const getRecentLogEvents = (limit?: number) =>
   invokeCommand<OcsfEventDto[]>("logs_recent_events", { limit: limit ?? null });
 
 export const openLogsFolder = () => invokeCommand<void>("logs_open_folder");
+
+export const clearLogs = () => invokeCommand<void>("logs_clear");
 
 export type LiveLogCategory =
   | "application"

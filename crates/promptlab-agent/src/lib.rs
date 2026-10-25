@@ -10,18 +10,22 @@
 //! The tool-calling LLM never receives the full tool registry — only tools for the
 //! capability chosen by the classifier LLM.
 //!
-//! Hierarchy (tools owned by capabilities, not injected globally):
+//! Yazg chat is the only path that routes through the manager. Scan Wizard, Project
+//! details, Attack Factory, and Prompt Lab call the specialist agent directly.
+//!
+//! Hierarchy inside Yazg chat (tools owned by capabilities, not injected globally):
 //! ```text
-//! Yazg (Manager)
+//! Yazg (chat manager)
 //! ├── Conversation / Knowledge — zero tools
 //! ├── Workspace / Projects     — list_workspace, project_detail, create_project
 //! ├── Targets                  — list_targets, target_detail, analyze_endpoint
 //! ├── Scan / Findings/Reports  — list_scan, scan_detail, list_findings, …
 //! ├── Attack specialists       — attack_plan, generate_prompt, recommend, summary, judge
-//! ├── AgenticAttackExecutionAgent / SequentialAttackExecutionAgent / ReflectionAgent
 //! ```
 
+pub mod agent_attempts;
 pub mod agent_log;
+pub mod agent_reflection;
 pub mod analyze_endpoint;
 pub mod artifacts;
 pub mod assistant;
@@ -39,6 +43,8 @@ pub mod list_workspace;
 pub mod memory;
 pub mod recommend;
 pub mod reflection;
+pub mod jailbreak;
+pub mod jailbreak_knowledge;
 pub mod tool_result;
 pub mod yazg_model;
 pub mod yazg_prompts;
@@ -49,6 +55,11 @@ pub mod summary;
 pub mod supervisor;
 pub mod types;
 
+pub use agent_attempts::{
+    agent_attempts, default_agent_attempts, parse_agent_attempts, prepare_agent_attempt,
+    serialize_agent_attempts, set_agent_attempts, snapshot_agent_attempts, ATTEMPT_SETTING_KEY,
+    MIN_AGENT_ATTEMPTS,
+};
 pub use agent_log::{log_agent_event, log_llm_call, log_react, log_tool_call, AgentLogContext};
 pub use analyze_endpoint::{AnalyzeEndpointAgent, AnalyzeEndpointAgentOutcome};
 pub use artifacts::{persist_artifacts_ltm, YazgActionKind, YazgArtifacts};
@@ -98,6 +109,13 @@ pub use memory::{
 };
 pub use recommend::{RecommendAgent, RecommendAgentOutcome};
 pub use reflection::{ReflectionAgent, ReflectionOutcome, ReflectionRequest};
+pub use jailbreak::{
+    parse_followup_lines, response_hits_keywords, JailbreakAgent, ScenarioFollowupOutcome,
+    ScenarioFollowupRequest, ScenarioPlanOutcome, ScenarioPlanRequest, SCENARIO_CLASS_IDS,
+};
+pub use jailbreak_knowledge::{
+    challenge_knowledge_brief, known_mutator_ids, jailbreak_agent_system_prompt,
+};
 pub use tool_result::{ToolErrorClass, ToolResult, ToolStatus};
 pub use yazg_runtime::{run_yazg, YazgRequest};
 pub use yazg_tools::{YazgLlms, YazgSpecialistContext};

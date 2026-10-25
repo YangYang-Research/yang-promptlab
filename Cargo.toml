@@ -20,13 +20,14 @@ members = [
     "crates/promptlab-harness",
     "crates/promptlab-runtime",
     "crates/promptlab-inference",
+    "crates/promptlab-registry",
     "crates/promptlab-storage",
     "src-tauri",
     "tests/integration",
 ]
 
 [workspace.package]
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 license = "MIT"
 authors = ["PromptLab"]
@@ -34,6 +35,7 @@ rust-version = "1.77"
 
 [workspace.dependencies]
 promptlab-inference = { path = "crates/promptlab-inference" }
+promptlab-registry = { path = "crates/promptlab-registry" }
 promptlab-attack = { path = "crates/promptlab-attack" }
 promptlab-payload = { path = "crates/promptlab-payload" }
 promptlab-models = { path = "crates/promptlab-models" }

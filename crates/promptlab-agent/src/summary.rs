@@ -50,6 +50,17 @@ impl SummaryAgent {
         request: &SummaryRequest,
         llm: &dyn PlannerLlm,
     ) -> AgentResult<SummaryAgentOutcome> {
+        promptlab_agenttrace::trace_agent_run(
+            AgentId::Summary.as_str(),
+            Self::run_traced(request, llm),
+        )
+        .await
+    }
+
+    async fn run_traced(
+        request: &SummaryRequest,
+        llm: &dyn PlannerLlm,
+    ) -> AgentResult<SummaryAgentOutcome> {
         let kind = request.kind_label().to_string();
         let mut events = vec![AgentEvent::started(
             AgentId::Summary,
@@ -58,6 +69,8 @@ impl SummaryAgent {
 
         info!(kind = %kind, "SummaryAgent started");
 
+        let reflecting = crate::agent_reflection::ReflectingLlm::new(AgentId::Summary, llm);
+        let llm: &dyn PlannerLlm = &reflecting;
         let result = match request {
             SummaryRequest::Project { input_json, .. } => {
                 generate_project_summary_with_llm(input_json, llm).await

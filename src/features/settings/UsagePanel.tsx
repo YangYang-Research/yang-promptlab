@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
-  Badge,
   Card,
   ContentToolbar,
   ListCard,
@@ -102,17 +101,15 @@ export function UsagePanel({
       <Card>
         <div className="card__header-row">
           <div className="settings-usage__heading">
-            <h3 className="card__title">By agent</h3>
-            <Badge variant="muted">{agents.length} agents</Badge>
+            <h3 className="card__title">Detail</h3>
           </div>
+          <ContentToolbar
+            pageSize={pageSize}
+            onPageSizeChange={setPageSize}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+          />
         </div>
-
-        <ContentToolbar
-          pageSize={pageSize}
-          onPageSizeChange={setPageSize}
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
-        />
 
         {viewMode === "table" ? (
           <div className="settings-usage__table-wrap">
