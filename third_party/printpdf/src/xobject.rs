@@ -1,6 +1,3 @@
-// clippy lints when serializing PDF strings, in this case its wrong
-#![cfg_attr(feature = "cargo-clippy", allow(clippy::string_lit_as_bytes))]
-
 use crate::OffsetDateTime;
 #[cfg(feature = "embedded_images")]
 use crate::rgba_to_rgb;
@@ -224,8 +221,6 @@ impl ImageXObject {
 
     #[cfg(feature = "embedded_images")]
     pub fn from_dynamic_image(image: &DynamicImage) -> Self {
-        use image_crate::EncodableLayout;
-
         let dim = image.dimensions();
         let color_type = image.color();
         let data = image.as_bytes().to_vec();
@@ -636,7 +631,7 @@ impl From<PostScriptXObject> for lopdf::Stream {
 #[cfg(feature = "embedded_images")]
 fn preprocess_image_with_alpha(color_type: ColorType, image_data: Vec<u8>, dim: (u32, u32)) -> (ColorType, Vec<u8>, Option<SMask>) {
     match color_type {
-        image_crate::ColorType::Rgba8 => {
+        ColorType::Rgba8 => {
             let (rgb, alpha) = rgba_to_rgb(image_data);
             let smask = Some(SMask {
                 bits_per_component: 8,

@@ -309,10 +309,6 @@ fn main() {
     unused_import_braces,
     unused_qualifications
 )]
-// Disallow `println!`. Use `debug!` for debug output
-// (which is provided by the `log` crate).
-#![cfg_attr(all(not(test), feature = "clippy"), warn(result_unwrap_used))]
-
 #[cfg(feature = "logging")]
 #[macro_use]
 pub extern crate log;

@@ -33,11 +33,11 @@ impl LinkAnnotation {
 impl Into<Object> for LinkAnnotation {
     fn into(self) -> Object {
         let mut dict = lopdf::Dictionary::new();
-        dict.set("Type", lopdf::Object::Name("Annot".as_bytes().to_vec()));
-        dict.set("Subtype", lopdf::Object::Name("Link".as_bytes().to_vec()));
+        dict.set("Type", Object::Name("Annot".as_bytes().to_vec()));
+        dict.set("Subtype", Object::Name("Link".as_bytes().to_vec()));
         dict.set(
             "Rect",
-            lopdf::Object::Array(vec![
+            Object::Array(vec![
                 self.rect.ll.x.into(),
                 self.rect.ll.y.into(),
                 self.rect.ur.x.into(),
@@ -237,11 +237,11 @@ impl From<LinkAnnotationList> for lopdf::Dictionary {
         }
         
         let mut dict = lopdf::Dictionary::new();
-        dict.set("Type", lopdf::Object::Name("Annot".as_bytes().to_vec()));
-        dict.set("Subtype", lopdf::Object::Name("Link".as_bytes().to_vec()));
+        dict.set("Type", Object::Name("Annot".as_bytes().to_vec()));
+        dict.set("Subtype", Object::Name("Link".as_bytes().to_vec()));
         dict.set(
             "Rect",
-            lopdf::Object::Array(vec![
+            Object::Array(vec![
                 _val.link_annotations["PT0"].rect.ll.x.into(),
                 _val.link_annotations["PT0"].rect.ll.y.into(),
                 _val.link_annotations["PT0"].rect.ur.x.into(),
