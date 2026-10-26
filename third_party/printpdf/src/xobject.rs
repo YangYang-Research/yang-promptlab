@@ -182,7 +182,6 @@ impl ImageXObject {
     #[cfg(feature = "embedded_images")]
     pub fn try_from<'a, T: ImageDecoder<'a>>(image: T) -> Result<Self, ImageError> {
         use image_crate::error::{LimitError, LimitErrorKind};
-        use std::usize;
 
         let dim = image.dimensions();
         let color_type = image.color_type();
