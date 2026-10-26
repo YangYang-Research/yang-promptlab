@@ -16,6 +16,7 @@ import { usePageSizePreference } from "@/shared/hooks/usePageSizePreference";
 import { usePaginatedList } from "@/shared/hooks/usePaginatedList";
 import { useViewPreference } from "@/shared/hooks/useViewPreference";
 import type { ModelEntryDto } from "@/shared/ipc/models";
+import type { TokenUsageSnapshot } from "@/shared/ipc/runtime";
 import { formatBytes } from "@/shared/utils/format";
 
 import { RegistryProviderIcon } from "./ProviderLogo";
@@ -54,8 +55,13 @@ function ModelRegistryBadges({ model }: { model: ModelEntryDto }) {
   );
 }
 
+function formatTokens(value: number): string {
+  return new Intl.NumberFormat().format(value);
+}
+
 type ModelRegistrySectionProps = {
   models: ModelEntryDto[];
+  tokenUsage: TokenUsageSnapshot | null;
   isModelBusy: (modelId: string) => boolean;
   onTest: (model: ModelEntryDto) => void;
   onEdit: (model: ModelEntryDto) => void;
@@ -64,6 +70,7 @@ type ModelRegistrySectionProps = {
 
 export function ModelRegistrySection({
   models,
+  tokenUsage,
   isModelBusy,
   onTest,
   onEdit,
@@ -74,6 +81,10 @@ export function ModelRegistrySection({
   const { page, setPage, pagination } = usePaginatedList(models, pageSize);
 
   const actionsDisabled = (modelId: string) => isModelBusy(modelId);
+  const usageByModel = new Map(
+    (tokenUsage?.models ?? []).map((row) => [row.modelId, row]),
+  );
+  const modelTokens = (modelId: string) => usageByModel.get(modelId);
 
   function renderTableActions(model: ModelEntryDto) {
     return (
@@ -179,6 +190,22 @@ export function ModelRegistrySection({
       render: (model: ModelEntryDto) => formatModelSize(model),
     },
     {
+      key: "inputTokens",
+      header: "Input",
+      width: "110px",
+      render: (model: ModelEntryDto) => (
+        <span className="mono">{formatTokens(modelTokens(model.id)?.inputTokens ?? 0)}</span>
+      ),
+    },
+    {
+      key: "outputTokens",
+      header: "Output",
+      width: "110px",
+      render: (model: ModelEntryDto) => (
+        <span className="mono">{formatTokens(modelTokens(model.id)?.outputTokens ?? 0)}</span>
+      ),
+    },
+    {
       key: "capabilities",
       header: "Capabilities",
       width: "160px",
@@ -239,6 +266,8 @@ export function ModelRegistrySection({
                 },
                 { label: "Version", value: model.version || "N/A" },
                 { label: "Size", value: formatModelSize(model) },
+                { label: "Input", value: formatTokens(modelTokens(model.id)?.inputTokens ?? 0) },
+                { label: "Output", value: formatTokens(modelTokens(model.id)?.outputTokens ?? 0) },
                 { label: "Capabilities", value: formatModelCapabilities(model) },
               ]}
               footerMeta={<span className="mono text-sm">{model.path}</span>}

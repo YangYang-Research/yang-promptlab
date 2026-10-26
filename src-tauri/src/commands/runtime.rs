@@ -13,7 +13,8 @@ use time::OffsetDateTime;
 use promptlab_inference::config::{AiRuntimeConfiguration, InferenceMode};
 use crate::inference_settings::{
     apply_third_party_health_check, config_to_dto, config_to_dto_with_connectivity_test,
-    format_health_check_timestamp, is_third_party_model, parse_route, reconcile_config,
+    display_health_check_timestamp, format_health_check_timestamp, is_third_party_model,
+    parse_route, reconcile_config,
     third_party_status_label, AiInferenceSettingsDto,
 };
 use crate::inference_host::{connectivity_to_judge, open_gateway_session};
@@ -412,7 +413,11 @@ async fn assemble_runtime_configuration(
         } else {
             Some(config.health.message.clone())
         },
-        last_health_check: config.health.checked_at.clone(),
+        last_health_check: config
+            .health
+            .checked_at
+            .as_deref()
+            .map(display_health_check_timestamp),
         model_load_in_progress: false,
         model_test_in_progress: false,
         settings: inference.clone(),
@@ -462,7 +467,11 @@ async fn assemble_runtime_configuration_busy_fallback(
         } else {
             Some(config.health.message.clone())
         },
-        last_health_check: config.health.checked_at.clone(),
+        last_health_check: config
+            .health
+            .checked_at
+            .as_deref()
+            .map(display_health_check_timestamp),
         model_load_in_progress: false,
         model_test_in_progress: false,
         settings: inference.clone(),

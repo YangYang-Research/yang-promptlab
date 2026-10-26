@@ -128,6 +128,7 @@ pub struct InferenceClient {
     purpose: HarnessPurpose,
     provider_id: String,
     model_id: String,
+    registry_model_id: Option<String>,
     capabilities: ModelCapabilities,
     default_max_tokens: u32,
     default_temperature: f32,
@@ -154,6 +155,7 @@ impl InferenceClient {
             purpose,
             provider_id: provider_id.into(),
             model_id: model_id.into(),
+            registry_model_id: None,
             capabilities,
             default_max_tokens,
             default_temperature,
@@ -212,6 +214,16 @@ impl InferenceClient {
 
     pub fn model_id(&self) -> &str {
         &self.model_id
+    }
+
+    pub fn with_registry_model_id(mut self, model_id: impl Into<String>) -> Self {
+        let model_id = model_id.into();
+        self.registry_model_id = if model_id.trim().is_empty() {
+            None
+        } else {
+            Some(model_id)
+        };
+        self
     }
 
     pub fn capabilities(&self) -> ModelCapabilities {
@@ -353,6 +365,9 @@ impl InferenceClient {
         let output = response.usage_output_tokens.unwrap_or(0);
         if input > 0 || output > 0 {
             crate::token_usage::record_completion(input, output);
+            if let Some(model_id) = self.registry_model_id.as_deref() {
+                crate::token_usage::record_model_usage(model_id, input, output);
+            }
         }
         if response.content.trim().is_empty() && response.tool_calls.is_empty() {
             crate::agent_trace_hook::close_completion_span(
@@ -469,7 +484,7 @@ impl<'a> GatewaySession<'a> {
                     InferenceError::Config("missing remote credentials".into())
                 })?;
                 let descriptor = descriptor_from_remote(&settings);
-                Ok(InferenceClient::from_harness(
+                let mut client = InferenceClient::from_harness(
                     factory,
                     descriptor,
                     HarnessPurpose::assistant(),
@@ -480,7 +495,11 @@ impl<'a> GatewaySession<'a> {
                     config.temperature,
                     config.timeout_secs.saturating_mul(1000).max(1_000),
                     cancel,
-                ))
+                );
+                if let Some(model_id) = config.selected_model_id {
+                    client = client.with_registry_model_id(model_id);
+                }
+                Ok(client)
             }
         }
     }

@@ -204,12 +204,28 @@ pub fn third_party_status_label(
     }
 }
 
+const HEALTH_CHECK_STAMP: &[time::format_description::FormatItem] =
+    time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+
 pub fn format_health_check_timestamp(timestamp: time::OffsetDateTime) -> String {
-    timestamp
-        .format(&time::macros::format_description!(
-            "[year]-[month]-[day] [hour]:[minute]:[second] UTC"
-        ))
-        .unwrap_or_else(|_| timestamp.to_string())
+    let local = time::UtcOffset::current_local_offset()
+        .map(|offset| timestamp.to_offset(offset))
+        .unwrap_or(timestamp);
+    local
+        .format(HEALTH_CHECK_STAMP)
+        .unwrap_or_else(|_| local.to_string())
+}
+
+/// Older rows were stored as UTC wall clock plus a ` UTC` suffix. Show those in local time.
+/// Strings already written without that suffix are returned unchanged.
+pub fn display_health_check_timestamp(stored: &str) -> String {
+    let Some(body) = stored.strip_suffix(" UTC") else {
+        return stored.to_string();
+    };
+    let Ok(parsed) = time::PrimitiveDateTime::parse(body, HEALTH_CHECK_STAMP) else {
+        return stored.to_string();
+    };
+    format_health_check_timestamp(parsed.assume_utc())
 }
 
 pub fn config_to_dto(config: &AiRuntimeConfiguration, models: &[ModelEntry]) -> AiInferenceSettingsDto {
@@ -286,6 +302,29 @@ mod tests {
         config.selected_model_id = Some("remote-nvidia-missing".into());
         let out = reconcile_config(config, std::slice::from_ref(&other));
         assert_eq!(out.selected_model_id, None);
+    }
+
+    #[test]
+    fn health_check_timestamp_uses_local_wall_clock() {
+        let utc = time::PrimitiveDateTime::new(
+            time::Date::from_calendar_date(2026, time::Month::October, 26).unwrap(),
+            time::Time::from_hms(14, 48, 0).unwrap(),
+        )
+        .assume_utc();
+        let formatted = format_health_check_timestamp(utc);
+        assert!(!formatted.contains("UTC"));
+        let offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
+        let expected = utc.to_offset(offset).format(HEALTH_CHECK_STAMP).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(
+            display_health_check_timestamp("2026-10-26 14:48:00 UTC"),
+            expected
+        );
+        assert_eq!(
+            display_health_check_timestamp(&expected),
+            expected,
+            "local stamps must not be shifted again"
+        );
     }
 
     #[test]

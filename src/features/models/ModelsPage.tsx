@@ -262,6 +262,7 @@ export function ModelsPage() {
       <section className="models-page__primary" aria-label="Model registry">
         <ModelRegistrySection
           models={remoteModels}
+          tokenUsage={tokenUsage}
           isModelBusy={isModelBusy}
           onTest={(model) => void handleTest(model)}
           onEdit={(model) => void handleEdit(model)}
