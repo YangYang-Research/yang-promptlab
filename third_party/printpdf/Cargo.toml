@@ -1,0 +1,52 @@
+# printpdf 0.7.0, patched so lopdf >= 0.42 (GHSA-6fj4-rcr3-r7rr).
+# crates.io 0.7 requires lopdf ^0.31. printpdf 0.11+ is a different API.
+[package]
+name = "printpdf"
+version = "0.7.0"
+authors = [
+    "Felix Schütt <felix.schuett@maps4print.com>",
+    "Julien Schminke <julien.schminke@web.de>",
+]
+edition = "2021"
+license = "MIT"
+description = "Rust library for writing PDF files"
+repository = "https://github.com/fschutt/printpdf"
+publish = false
+
+[dependencies]
+lopdf = { version = "0.46", default-features = false }
+owned_ttf_parser = { version = "0.19.0", default-features = false }
+time = { version = "0.3.25", default-features = false, features = ["std"] }
+log = { version = "0.4.8", optional = true }
+image = { version = "0.24.3", optional = true, default-features = false, features = [
+    "gif",
+    "jpeg",
+    "png",
+    "pnm",
+    "tiff",
+    "bmp",
+] }
+svg2pdf = { version = "0.8", optional = true }
+pdf-writer = { version = "0.9", optional = true }
+usvg = { version = "0.35.0", optional = true }
+allsorts = { version = "0.14", optional = true, default-features = false, features = ["flate2_rust"] }
+
+[features]
+default = ["js-sys"]
+less-optimization = []
+logging = ["log"]
+embedded_images = ["image"]
+ico = ["image/ico", "embedded_images"]
+tga = ["image/tga", "embedded_images"]
+hdr = ["image/hdr", "embedded_images"]
+jpeg_rayon = ["image/jpeg_rayon", "embedded_images"]
+dxt = ["image/dxt", "embedded_images"]
+dds = ["image/dds", "embedded_images"]
+webp = ["image/webp", "embedded_images"]
+svg = ["svg2pdf", "usvg", "pdf-writer"]
+font_subsetting = ["dep:allsorts"]
+annotations = ["pdf-writer"]
+js-sys = ["dep:js-sys"]
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+js-sys = { version = "0.3.40", optional = true }

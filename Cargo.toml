@@ -24,6 +24,7 @@ members = [
     "crates/promptlab-storage",
     "src-tauri",
     "tests/integration",
+    "third_party/printpdf",
 ]
 
 [workspace.package]
@@ -74,3 +75,6 @@ dashmap = "6"
 keyring = "3.6"
 aes-gcm = "0.10"
 rand = "0.8"
+
+[patch.crates-io]
+printpdf = { path = "third_party/printpdf" }
