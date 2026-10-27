@@ -15,7 +15,11 @@ import { toAppError } from "@/shared/errors";
 import { recordLocalActivity } from "@/shared/activity/localActivity";
 import { useAiInferenceRoute } from "@/shared/hooks/useAiInferenceRoute";
 import { isYazgAgentLive } from "@/shared/runtime/yazgAgentLive";
-import { type AiInferenceModelOptionDto } from "@/shared/ipc/runtime";
+import {
+  getRuntimeTokenUsage,
+  type AiInferenceModelOptionDto,
+  type TokenUsageSnapshot,
+} from "@/shared/ipc/runtime";
 import { useToast } from "@/shared/notifications";
 
 import { RegistryProviderIcon } from "@/features/models/ProviderLogo";
@@ -29,6 +33,7 @@ export function AIRuntimePage() {
   const [error, setError] = useState<string | null>(null);
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [tokenUsage, setTokenUsage] = useState<TokenUsageSnapshot | null>(null);
 
   const {
     configuration,
@@ -41,7 +46,11 @@ export function AIRuntimePage() {
   } = useAiInferenceRoute({ enabled: backendConnected });
 
   const refreshAll = useCallback(async () => {
-    await refreshConfiguration();
+    const [, usage] = await Promise.all([
+      refreshConfiguration(),
+      getRuntimeTokenUsage().catch(() => null),
+    ]);
+    setTokenUsage(usage);
   }, [refreshConfiguration]);
 
   useEffect(() => {
@@ -52,6 +61,16 @@ export function AIRuntimePage() {
         .finally(() => setLoading(false)),
     );
   }, []);
+
+  useEffect(() => {
+    if (!backendConnected) {
+      setTokenUsage(null);
+      return;
+    }
+    void getRuntimeTokenUsage()
+      .then(setTokenUsage)
+      .catch(() => setTokenUsage(null));
+  }, [backendConnected]);
 
   // Default unset configs to third-party route.
   useEffect(() => {
@@ -100,6 +119,11 @@ export function AIRuntimePage() {
   }
 
   const disabled = !backendConnected || loading || routeBusy;
+  const selectedUsage = tokenUsage?.models?.find(
+    (row) => row.modelId === settings?.selectedModelId,
+  );
+  const tokenText = (value: number | undefined) =>
+    settings?.selectedModelId ? new Intl.NumberFormat().format(value ?? 0) : "—";
   const thirdPartyModels = settings?.thirdPartyModels ?? [];
   const connectionDotVariant = testingModelId
     ? null
@@ -147,19 +171,9 @@ export function AIRuntimePage() {
       {backendConnected && configuration ? (
         <>
           <section className="runtime-page__overview" aria-label="Runtime overview">
-            <Card className="detail-section runtime-page__status">
-              <h2 className="detail-section__title">Status</h2>
+            <Card className="detail-section runtime-page__meta">
+              <h2 className="detail-section__title">Information</h2>
               <div className="detail-summary-grid detail-summary-grid--metrics">
-                <div className="summary-stat">
-                  <span className="summary-stat__label">Runtime status</span>
-                  <span className="summary-stat__value summary-stat__value--sm">
-                    {configuration.statusLabel ? (
-                      <ConnectivityStatus label={configuration.statusLabel} />
-                    ) : (
-                      "N/A"
-                    )}
-                  </span>
-                </div>
                 <div className="summary-stat">
                   <span className="summary-stat__label">Provider</span>
                   <span className="summary-stat__value summary-stat__value--sm">
@@ -177,6 +191,42 @@ export function AIRuntimePage() {
                   </span>
                 </div>
                 <div className="summary-stat">
+                  <span className="summary-stat__label">Input Tokens</span>
+                  <span className="summary-stat__value summary-stat__value--sm mono">
+                    {tokenText(selectedUsage?.inputTokens)}
+                  </span>
+                </div>
+                <div className="summary-stat">
+                  <span className="summary-stat__label">Output Tokens</span>
+                  <span className="summary-stat__value summary-stat__value--sm mono">
+                    {tokenText(selectedUsage?.outputTokens)}
+                  </span>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="detail-section runtime-page__status">
+              <h2 className="detail-section__title runtime-page__connection-title">
+                Status
+                {connectionDotVariant ? (
+                  <span
+                    className={`connectivity-status__dot connectivity-status__dot--${connectionDotVariant}`}
+                    aria-hidden
+                  />
+                ) : null}
+              </h2>
+              <div className="detail-summary-grid detail-summary-grid--metrics">
+                <div className="summary-stat">
+                  <span className="summary-stat__label">Runtime</span>
+                  <span className="summary-stat__value summary-stat__value--sm">
+                    {configuration.statusLabel ? (
+                      <ConnectivityStatus label={configuration.statusLabel} />
+                    ) : (
+                      "N/A"
+                    )}
+                  </span>
+                </div>
+                <div className="summary-stat">
                   <span className="summary-stat__label">Yazg Agent</span>
                   <span className="summary-stat__value summary-stat__value--sm">
                     {testingModelId ? (
@@ -188,35 +238,21 @@ export function AIRuntimePage() {
                     )}
                   </span>
                 </div>
-              </div>
-            </Card>
-
-            <Card className="detail-section runtime-page__meta">
-              <h2 className="detail-section__title runtime-page__connection-title">
-                Connection
-                {connectionDotVariant ? (
-                  <span
-                    className={`connectivity-status__dot connectivity-status__dot--${connectionDotVariant}`}
-                    aria-hidden
-                  />
-                ) : null}
-              </h2>
-              <dl className="runtime-page__meta-list">
-                <div>
-                  <dt>Connectivity</dt>
-                  <dd>
+                <div className="summary-stat">
+                  <span className="summary-stat__label">Connectivity</span>
+                  <span className="summary-stat__value summary-stat__value--sm">
                     {testingModelId ? "Testing…" : configuration.connectivity ?? "N/A"}
-                  </dd>
+                  </span>
                 </div>
-                <div>
-                  <dt>Last health check</dt>
-                  <dd>
+                <div className="summary-stat">
+                  <span className="summary-stat__label">Last health check</span>
+                  <span className="summary-stat__value summary-stat__value--sm">
                     {testingModelId
                       ? "Running connection test…"
                       : configuration.lastHealthCheck ?? "Not checked"}
-                  </dd>
+                  </span>
                 </div>
-              </dl>
+              </div>
             </Card>
           </section>
 
@@ -305,12 +341,13 @@ function ThirdPartyModelRow({
     <li
       className={`runtime-route-models__item${selected ? " runtime-route-models__item--selected" : ""}`}
     >
+      <RegistryProviderIcon
+        provider={model.provider}
+        className="runtime-route-models__icon"
+      />
       <div className="runtime-route-models__info">
         <div className="runtime-route-models__name">{model.name}</div>
-        <div className="runtime-route-models__meta">
-          <RegistryProviderIcon provider={model.provider} />
-          <span>{model.statusLabel}</span>
-        </div>
+        <div className="runtime-route-models__meta">{model.statusLabel}</div>
       </div>
       {needsEdit ? (
         <Button

@@ -38,9 +38,10 @@ pub use manager::InferenceRuntimeManager;
 pub use prompts::{PromptBuilder, PromptComposer, PromptContext, PromptId, PromptRegistry, PromptTemplate};
 pub use provider::{ProviderAdapter, RemoteAdapterSettings, RemoteProviderAdapter};
 pub use token_usage::{
-    AgentTokenUsage, AgentTokenUsageRow, TokenUsageSnapshot, estimate_tokens,
-    export_map as token_usage_export_map, humanize_agent_id, record_completion,
-    replace_all as token_usage_replace_all, reset as token_usage_reset,
+    AgentTokenUsage, AgentTokenUsageRow, ModelTokenUsageRow, TokenUsageDump, TokenUsageSnapshot,
+    estimate_tokens, export_map as token_usage_export_map, export_usage as token_usage_export_usage,
+    humanize_agent_id, record_completion, record_model_usage, replace_all as token_usage_replace_all,
+    replace_usage as token_usage_replace_usage, reset as token_usage_reset,
     migrate_unattributed as token_usage_migrate_unattributed, snapshot as token_usage_snapshot,
     take_dirty_snapshot as token_usage_take_dirty, with_agent, RUNTIME_SYSTEM_AGENT,
 };

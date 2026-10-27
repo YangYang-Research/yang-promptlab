@@ -46,6 +46,8 @@ pub struct TokenUsageSnapshot {
     pub total_output_tokens: u64,
     pub total_calls: u64,
     pub agents: Vec<AgentTokenUsageRow>,
+    #[serde(default)]
+    pub models: Vec<ModelTokenUsageRow>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -60,9 +62,25 @@ pub struct AgentTokenUsageRow {
     pub calls: u64,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct TokenUsageDump {
+    pub agents: BTreeMap<String, AgentTokenUsage>,
+    pub models: BTreeMap<String, AgentTokenUsage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelTokenUsageRow {
+    pub model_id: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub calls: u64,
+}
+
 #[derive(Debug, Default)]
 struct TokenUsageState {
     by_agent: BTreeMap<String, AgentTokenUsage>,
+    by_model: BTreeMap<String, AgentTokenUsage>,
     dirty: bool,
 }
 
@@ -132,7 +150,36 @@ pub fn record_completion(input_tokens: u64, output_tokens: u64) {
     state.dirty = true;
 }
 
+/// Attribute the same completion to a registry model id.
+pub fn record_model_usage(model_id: &str, input_tokens: u64, output_tokens: u64) {
+    let model_id = model_id.trim();
+    if model_id.is_empty() {
+        return;
+    }
+    let Ok(mut state) = monitor().lock() else {
+        return;
+    };
+    state
+        .by_model
+        .entry(model_id.to_string())
+        .or_default()
+        .add(input_tokens, output_tokens);
+    state.dirty = true;
+}
+
 /// Replace in-memory counters (hydrate from durable storage).
+pub fn replace_usage(dump: TokenUsageDump) {
+    let Ok(mut state) = monitor().lock() else {
+        return;
+    };
+    let mut agents = dump.agents;
+    let changed = fold_legacy_agent_ids(&mut agents);
+    state.by_agent = agents;
+    state.by_model = dump.models;
+    state.dirty = changed;
+}
+
+/// Replace agent counters and keep model counters.
 pub fn replace_all(by_agent: BTreeMap<String, AgentTokenUsage>) {
     let Ok(mut state) = monitor().lock() else {
         return;
@@ -187,6 +234,7 @@ pub fn reset() {
         return;
     };
     state.by_agent.clear();
+    state.by_model.clear();
     state.dirty = true;
 }
 
@@ -201,7 +249,7 @@ pub fn migrate_unattributed() {
 }
 
 /// Take a durable snapshot if dirty; clears the dirty flag when returning Some.
-pub fn take_dirty_snapshot() -> Option<BTreeMap<String, AgentTokenUsage>> {
+pub fn take_dirty_snapshot() -> Option<TokenUsageDump> {
     let Ok(mut state) = monitor().lock() else {
         return None;
     };
@@ -209,15 +257,25 @@ pub fn take_dirty_snapshot() -> Option<BTreeMap<String, AgentTokenUsage>> {
         return None;
     }
     state.dirty = false;
-    Some(state.by_agent.clone())
+    Some(TokenUsageDump {
+        agents: state.by_agent.clone(),
+        models: state.by_model.clone(),
+    })
 }
 
 /// Force a clone of current counters (for IPC / tests).
-pub fn export_map() -> BTreeMap<String, AgentTokenUsage> {
+pub fn export_usage() -> TokenUsageDump {
     let Ok(state) = monitor().lock() else {
-        return BTreeMap::new();
+        return TokenUsageDump::default();
     };
-    state.by_agent.clone()
+    TokenUsageDump {
+        agents: state.by_agent.clone(),
+        models: state.by_model.clone(),
+    }
+}
+
+pub fn export_map() -> BTreeMap<String, AgentTokenUsage> {
+    export_usage().agents
 }
 
 pub fn humanize_agent_id(agent_id: &str) -> String {
@@ -333,11 +391,24 @@ pub fn snapshot() -> TokenUsageSnapshot {
         })
         .collect();
 
+    let usage = export_usage();
+    let models = usage
+        .models
+        .into_iter()
+        .map(|(model_id, usage)| ModelTokenUsageRow {
+            model_id,
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            calls: usage.calls,
+        })
+        .collect();
+
     TokenUsageSnapshot {
         total_input_tokens: total_input,
         total_output_tokens: total_output,
         total_calls,
         agents,
+        models,
     }
 }
 
@@ -433,6 +504,21 @@ mod tests {
         assert_eq!(row.calls, 2);
         assert!(!snap.agents.iter().any(|row| row.agent_id == "recommend"));
         reset();
+    }
+
+    #[test]
+    fn records_usage_on_the_registry_model() {
+        reset();
+        record_model_usage("remote-openai-gpt", 8, 3);
+        record_model_usage("  ", 1, 1);
+        let snap = snapshot();
+        assert_eq!(snap.models.len(), 1);
+        assert_eq!(snap.models[0].model_id, "remote-openai-gpt");
+        assert_eq!(snap.models[0].input_tokens, 8);
+        assert_eq!(snap.models[0].output_tokens, 3);
+        assert_eq!(snap.models[0].calls, 1);
+        reset();
+        assert!(snapshot().models.is_empty());
     }
 
     #[test]

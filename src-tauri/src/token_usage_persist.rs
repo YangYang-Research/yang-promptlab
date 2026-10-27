@@ -3,8 +3,9 @@
 use std::collections::BTreeMap;
 
 use promptlab_inference::{
-    AgentTokenUsage, TokenUsageSnapshot, token_usage_export_map, token_usage_migrate_unattributed,
-    token_usage_replace_all, token_usage_reset, token_usage_snapshot, token_usage_take_dirty,
+    AgentTokenUsage, TokenUsageDump, TokenUsageSnapshot, token_usage_export_usage,
+    token_usage_migrate_unattributed, token_usage_replace_usage, token_usage_reset,
+    token_usage_snapshot, token_usage_take_dirty,
 };
 use promptlab_storage::{Database, JsonDocumentRepository};
 use tauri::{AppHandle, Manager};
@@ -20,25 +21,31 @@ struct StoredTokenUsage {
     version: u32,
     #[serde(default)]
     agents: BTreeMap<String, AgentTokenUsage>,
+    #[serde(default)]
+    models: BTreeMap<String, AgentTokenUsage>,
 }
 
-fn parse_stored(raw: &str) -> Result<BTreeMap<String, AgentTokenUsage>, String> {
+fn parse_stored(raw: &str) -> Result<TokenUsageDump, String> {
     if raw.trim().is_empty() {
-        return Ok(BTreeMap::new());
+        return Ok(TokenUsageDump::default());
     }
     let stored: StoredTokenUsage = serde_json::from_str(raw).map_err(|e| e.to_string())?;
-    Ok(stored.agents)
+    Ok(TokenUsageDump {
+        agents: stored.agents,
+        models: stored.models,
+    })
 }
 
-fn serialize_stored(map: &BTreeMap<String, AgentTokenUsage>) -> Result<String, String> {
+fn serialize_stored(dump: &TokenUsageDump) -> Result<String, String> {
     let stored = StoredTokenUsage {
         version: 1,
-        agents: map.clone(),
+        agents: dump.agents.clone(),
+        models: dump.models.clone(),
     };
     serde_json::to_string(&stored).map_err(|e| e.to_string())
 }
 
-async fn load_from_db(db: &Database) -> Result<Option<BTreeMap<String, AgentTokenUsage>>, String> {
+async fn load_from_db(db: &Database) -> Result<Option<TokenUsageDump>, String> {
     let record = db
         .repositories()
         .token_usage()
@@ -51,8 +58,8 @@ async fn load_from_db(db: &Database) -> Result<Option<BTreeMap<String, AgentToke
     }
 }
 
-async fn save_to_db(db: &Database, map: &BTreeMap<String, AgentTokenUsage>) -> Result<(), String> {
-    let raw = serialize_stored(map)?;
+async fn save_to_db(db: &Database, dump: &TokenUsageDump) -> Result<(), String> {
+    let raw = serialize_stored(dump)?;
     db.repositories()
         .token_usage()
         .upsert(&raw)
@@ -83,8 +90,8 @@ pub async fn bootstrap_token_usage_persistence(app: &AppHandle) {
 }
 
 async fn hydrate_from_db(db: &Database) -> Result<(), String> {
-    if let Some(map) = load_from_db(db).await? {
-        token_usage_replace_all(map);
+    if let Some(dump) = load_from_db(db).await? {
+        token_usage_replace_usage(dump);
         token_usage_migrate_unattributed();
     }
     Ok(())
@@ -104,6 +111,6 @@ pub async fn usage_snapshot(db: &Database) -> TokenUsageSnapshot {
 
 pub async fn reset_usage(db: &Database) -> Result<TokenUsageSnapshot, String> {
     token_usage_reset();
-    save_to_db(db, &token_usage_export_map()).await?;
+    save_to_db(db, &token_usage_export_usage()).await?;
     Ok(token_usage_snapshot())
 }

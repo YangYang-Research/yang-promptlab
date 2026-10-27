@@ -156,11 +156,19 @@ export type AgentTokenUsageRow = {
   calls: number;
 };
 
+export type ModelTokenUsageRow = {
+  modelId: string;
+  inputTokens: number;
+  outputTokens: number;
+  calls: number;
+};
+
 export type TokenUsageSnapshot = {
   totalInputTokens: number;
   totalOutputTokens: number;
   totalCalls: number;
   agents: AgentTokenUsageRow[];
+  models?: ModelTokenUsageRow[];
 };
 
 export function getRuntimeTokenUsage(): Promise<TokenUsageSnapshot> {

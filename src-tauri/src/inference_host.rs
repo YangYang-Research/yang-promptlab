@@ -1523,7 +1523,8 @@ pub async fn test_remote_connectivity_only(
         Arc::new(RemoteProviderAdapter::new(remote.clone())),
         32,
         0.0,
-    );
+    )
+    .with_registry_model_id(entry.id.clone());
     let started = std::time::Instant::now();
     let latency_ms = || started.elapsed().as_millis() as u64;
 

@@ -4,7 +4,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { useAppStore } from "@/app/store/AppStore";
-import { Button, Card, PageHeader, ProgressBar, RefreshButton, Select, Badge } from "@/shared/components";
+import { Button, Card, PageHeader, ProgressBar, RefreshButton, Badge } from "@/shared/components";
 import type { AppSettings } from "@/app/store/types";
 import { toAppError } from "@/shared/errors";
 import { clearAllAppData } from "@/shared/ipc/app";
@@ -53,6 +53,12 @@ const SETTINGS_SECTIONS: {
   { id: "storage", label: "Data & storage", hint: "Paths and reset" },
   { id: "diagnostics", label: "Diagnostics", hint: "Logs and health" },
   { id: "about", label: "About", hint: "Version info" },
+];
+
+const THEME_CHOICES: { value: AppSettings["theme"]; label: string }[] = [
+  { value: "dark", label: "Dark" },
+  { value: "light", label: "Light" },
+  { value: "system", label: "System" },
 ];
 
 type SettingsSectionProps = {
@@ -528,16 +534,26 @@ export function SettingsPage() {
                 description="Choose how PromptLab looks on this device."
               >
                 <div className="settings-field settings-field--last">
-                  <label htmlFor="theme">Theme</label>
-                  <Select
-                    id="theme"
-                    value={settings.theme}
-                    onChange={(e) => update("theme", e.target.value as AppSettings["theme"])}
-                  >
-                    <option value="dark">Dark</option>
-                    <option value="light">Light</option>
-                    <option value="system">System</option>
-                  </Select>
+                  <span id="theme-label" className="settings-field__label">
+                    Theme
+                  </span>
+                  <div className="theme-choice" role="radiogroup" aria-labelledby="theme-label">
+                    {THEME_CHOICES.map((choice) => {
+                      const selected = settings.theme === choice.value;
+                      return (
+                        <button
+                          key={choice.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          className={`btn btn--md theme-choice__btn ${selected ? "btn--primary" : "btn--secondary"}`}
+                          onClick={() => update("theme", choice.value)}
+                        >
+                          {choice.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </SettingsSection>
 
@@ -590,7 +606,7 @@ export function SettingsPage() {
             <div className="settings-tab-panel settings-sections">
               <SettingsSection
                 title="Token usage"
-                description="Lifetime input and output tokens consumed by AI Runtime, broken down by Yazg agent and sub-agent."
+                description="Lifetime input and output tokens consumed by AI Runtime, by agent and by model."
               >
                 <UsagePanel
                   backendConnected={backendConnected}

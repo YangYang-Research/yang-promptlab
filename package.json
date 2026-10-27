@@ -1,7 +1,7 @@
 {
   "name": "promptlab",
   "private": true,
-  "version": "0.1.3",
+  "version": "0.1.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -30,8 +30,8 @@
     "@vitejs/plugin-react": "^4.5.0",
     "postcss": "^8.5.26",
     "typescript": "^5.8.0",
-    "vite": "^6.3.0",
-    "vitest": "^4.1.11"
+    "vite": "^6.4.5",
+    "vitest": "^4.1.12"
   },
   "overrides": {
     "source-map-js": "1.2.2",
