@@ -17,7 +17,7 @@ jobs:
       actions: write # upload Actions artifacts
     steps:
       - name: yang-code-review
-        uses: YangYang-Research/yang-code-review@v1.0.27
+        uses: YangYang-Research/yang-code-review@v1.0.29
         with:
           PROVIDER: yangyang
           API_KEY: ${{ secrets.YANG_API_TOKEN }}
