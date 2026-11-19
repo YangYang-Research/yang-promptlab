@@ -323,7 +323,7 @@ fn default_base_url_for_provider(provider: &str) -> Option<String> {
     match provider {
         "openrouter" => Some("https://openrouter.ai/api/v1".into()),
         "nvidia" => Some("https://integrate.api.nvidia.com/v1".into()),
-        "yangyang" => Some("https://inference.yyng.icu/v1".into()),
+        "yangyang" => Some("https://ai.yyng.icu/v1".into()),
         _ => None,
     }
 }

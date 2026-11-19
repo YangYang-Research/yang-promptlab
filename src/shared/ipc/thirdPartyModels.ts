@@ -135,8 +135,8 @@ export const THIRD_PARTY_PROVIDERS: Array<{
     value: "yangyang",
     label: "YangYang",
     modelPlaceholder: "@cf/meta/llama-3.1-8b-instruct",
-    apiKeyEnv: "YANG_API_TOKEN",
-    baseUrlPlaceholder: "https://inference.yyng.icu/v1",
+    apiKeyEnv: "YANG_API_KEY",
+    baseUrlPlaceholder: "https://ai.yyng.icu/v1",
     modelsDocsUrl: "https://yyng.icu/docs/models",
   },
   {
