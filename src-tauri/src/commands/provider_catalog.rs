@@ -139,7 +139,7 @@ fn default_catalog_base(provider: &str) -> Option<&'static str> {
         "gemini" | "google" => Some("https://generativelanguage.googleapis.com/v1beta"),
         "openrouter" => Some("https://openrouter.ai/api/v1"),
         "nvidia" => Some("https://integrate.api.nvidia.com/v1"),
-        "yangyang" | "yang_yang" => Some("https://inference.yyng.icu/v1"),
+        "yangyang" | "yang_yang" => Some("https://ai.yyng.icu/v1"),
         _ => None,
     }
 }
@@ -230,10 +230,11 @@ async fn get_body(
             headers.insert("api-key".into(), api_key.trim().to_string());
         }
         CatalogKind::YangYang => {
-            headers.insert(
-                "x-yang-api-token".into(),
-                yang_token_header(api_key),
-            );
+            let key = api_key.trim();
+            if !key.is_empty() {
+                headers.insert("Authorization".into(), format!("Bearer {key}"));
+                headers.insert("x-yang-api-key".into(), key.to_string());
+            }
         }
         CatalogKind::Gemini => {}
         CatalogKind::Bedrock => {
@@ -383,15 +384,6 @@ fn push_model(models: &mut Vec<String>, id: &str) {
         return;
     }
     models.push(id.to_string());
-}
-
-fn yang_token_header(api_key: &str) -> String {
-    let trimmed = api_key.trim();
-    if trimmed.len() >= 6 && trimmed[..6].eq_ignore_ascii_case("basic ") {
-        format!("Basic {}", trimmed[6..].trim())
-    } else {
-        format!("Basic {trimmed}")
-    }
 }
 
 #[cfg(test)]

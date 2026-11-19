@@ -69,9 +69,10 @@ pub fn auth_from_remote(settings: &RemoteAdapterSettings) -> AuthMaterial {
             auth.api_key_header = Some("x-api-key".into());
         }
         InferenceProvider::YangYang => {
-            // YIE: x-yang-api-token: Basic <token>. User stores bare token; we add Basic.
-            auth.api_key = Some(yangyang_api_token_header_value(&settings.api_key));
-            auth.api_key_header = Some("x-yang-api-token".into());
+            // YAG personal API key sk-yyng… — Bearer + preferred x-yang-api-key.
+            auth.bearer_token = Some(settings.api_key.clone());
+            auth.api_key = Some(settings.api_key.clone());
+            auth.api_key_header = Some("x-yang-api-key".into());
         }
         InferenceProvider::Gemini => {
             auth.api_key = Some(settings.api_key.clone());
@@ -99,7 +100,8 @@ fn default_base(settings: &RemoteAdapterSettings) -> String {
         InferenceProvider::Gemini => "https://generativelanguage.googleapis.com/v1beta".into(),
         InferenceProvider::OpenRouter => "https://openrouter.ai/api/v1".into(),
         InferenceProvider::Nvidia => "https://integrate.api.nvidia.com/v1".into(),
-        InferenceProvider::YangYang => "https://inference.yyng.icu/v1".into(),
+        // Public YangYang traffic goes through YAG (YIE is binding-only, no public DNS).
+        InferenceProvider::YangYang => "https://ai.yyng.icu/v1".into(),
         InferenceProvider::Azure => String::new(),
         InferenceProvider::Bedrock => {
             let region = settings
@@ -121,18 +123,6 @@ fn join_url(base: &str, path: &str) -> String {
         return base.to_string();
     }
     format!("{}{}", base.trim_end_matches('/'), path)
-}
-
-/// Normalize vault value to `Basic <token>` for the x-yang-api-token header.
-fn yangyang_api_token_header_value(api_key: &str) -> String {
-    let trimmed = api_key.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-    if trimmed.len() >= 6 && trimmed[..6].eq_ignore_ascii_case("basic ") {
-        return format!("Basic {}", trimmed[6..].trim());
-    }
-    format!("Basic {trimmed}")
 }
 
 #[cfg(test)]
@@ -158,12 +148,12 @@ mod tests {
     }
 
     #[test]
-    fn yangyang_uses_x_yang_api_token_and_default_base() {
+    fn yangyang_uses_bearer_and_x_yang_api_key() {
         let settings = RemoteAdapterSettings {
             provider: InferenceProvider::YangYang,
             model: "@cf/meta/llama-3.1-8b-instruct".into(),
             base_url: None,
-            api_key: "test-token".into(),
+            api_key: "sk-yyngabcdefghijklmnopqrstuvwxyz012345".into(),
             aws_secret_access_key: None,
             aws_region: None,
             aws_session_token: None,
@@ -172,26 +162,19 @@ mod tests {
         assert_eq!(descriptor.surface, TargetSurface::OpenAiCompatible);
         assert_eq!(
             descriptor.url,
-            "https://inference.yyng.icu/v1/chat/completions"
+            "https://ai.yyng.icu/v1/chat/completions"
         );
-        assert_eq!(descriptor.auth.api_key.as_deref(), Some("Basic test-token"));
+        assert_eq!(
+            descriptor.auth.bearer_token.as_deref(),
+            Some("sk-yyngabcdefghijklmnopqrstuvwxyz012345")
+        );
+        assert_eq!(
+            descriptor.auth.api_key.as_deref(),
+            Some("sk-yyngabcdefghijklmnopqrstuvwxyz012345")
+        );
         assert_eq!(
             descriptor.auth.api_key_header.as_deref(),
-            Some("x-yang-api-token")
+            Some("x-yang-api-key")
         );
-        assert!(descriptor.auth.bearer_token.is_none());
-    }
-
-    #[test]
-    fn yangyang_keeps_basic_prefix_if_user_already_typed_it() {
-        assert_eq!(
-            yangyang_api_token_header_value("Basic abc123"),
-            "Basic abc123"
-        );
-        assert_eq!(
-            yangyang_api_token_header_value("basic  abc123"),
-            "Basic abc123"
-        );
-        assert_eq!(yangyang_api_token_header_value("abc123"), "Basic abc123");
     }
 }
