@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-19
+
+### Changed
+
+- YangYang provider uses AI Gateway `https://ai.yyng.icu/v1`.
+- YangYang auth uses Studio personal API key `sk-yyng…` via `Authorization: Bearer` and `x-yang-api-key` (drops legacy `x-yang-api-token` / Token-Base64 and `inference.yyng.icu`).
+
+
 ## [0.1.4] - 2026-10-26
 
 ### Added
